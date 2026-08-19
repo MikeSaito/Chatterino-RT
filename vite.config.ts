@@ -1,20 +1,25 @@
 import { defineConfig } from "vite";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vite.dev/config/
-export default defineConfig(async () => ({
+const DEV_CSP = [
+  "default-src 'self' customprotocol: asset: http://localhost:1420",
+  "connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 ws://localhost:1421 https://static-cdn.jtvnw.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.7tv.app",
+  "img-src 'self' asset: http://asset.localhost blob: data: https://static-cdn.jtvnw.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.7tv.app",
+  "frame-src https://player.twitch.tv https://embed.twitch.tv",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'",
+].join("; ");
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
+export default defineConfig(async () => ({
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
     host: host || false,
+    headers: {
+      "Content-Security-Policy": DEV_CSP,
+    },
     hmr: host
       ? {
           protocol: "ws",
@@ -23,7 +28,6 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },

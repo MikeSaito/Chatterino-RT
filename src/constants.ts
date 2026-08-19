@@ -1,0 +1,11 @@
+export const BATCH_FLUSH_MS = 40;
+export const BATCH_MAX_MESSAGES = 64;
+export const BATCH_MAX_BYTES = 64 * 1024;
+export const SCROLLBACK_LIMIT = 1000;
+export const MESSAGE_POOL_SIZE = 1000;
+export const EMOTE_SLOTS_PER_ROW = 12;
+export const TEXTURE_LRU_LIMIT = 256;
+export const LINE_HEIGHT = 22;
+export const FONT_SIZE = 15;
+export const CHAR_WIDTH = 8.4;
+export const CHAT_EVENT = "chat:batch";
