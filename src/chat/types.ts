@@ -65,3 +65,9 @@ export type ChatBatch = {
   dropped: number;
   events: ChatEvent[];
 };
+
+export type ChatStatus = {
+  state: "connecting" | "connected" | "reconnecting" | "error";
+  channel?: string;
+  message?: string;
+};

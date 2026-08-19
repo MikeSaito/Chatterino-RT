@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { CHAT_EVENT } from "../constants";
+import { CHAT_EVENT, IPC_QUEUE_MAX } from "../constants";
 import type { ChatBatch } from "./types";
 import type { MessageRing } from "./ring";
 
@@ -8,23 +8,45 @@ export type ChatIpc = {
   join: (channel: string) => Promise<string>;
   part: () => Promise<void>;
   stop: () => void;
+  active: () => string;
 };
 
 export function bindChatIpc(ring: MessageRing): ChatIpc {
   let lastSeq = 0;
   let active = "";
+  let epoch = 0;
   let unlisten: UnlistenFn | undefined;
   let joining = false;
   let handling = false;
+  let snapshotQueued = false;
+  let retryTimer: number | undefined;
   const queued: ChatBatch[] = [];
 
-  const applySnapshot = async (channel: string) => {
+  const applySnapshot = async (channel: string, expected: number): Promise<boolean> => {
     const snap = await invoke<ChatBatch>("chat_snapshot", { channel });
+    if (expected !== epoch || channel !== active) {
+      return false;
+    }
     lastSeq = snap.seq;
     ring.applySnapshot(snap.events);
+    return true;
+  };
+
+  const recoverSnapshot = async (): Promise<boolean> => {
+    if (!active) {
+      return true;
+    }
+    const expected = epoch;
+    const channel = active;
+    try {
+      return await applySnapshot(channel, expected);
+    } catch {
+      return false;
+    }
   };
 
   const handle = async (batch: ChatBatch) => {
+    const expected = epoch;
     if (batch.channelId !== active) {
       return;
     }
@@ -34,13 +56,27 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     const gapped = lastSeq !== 0 && batch.seq !== lastSeq + 1;
     if (gapped || batch.dropped > 0) {
       queued.length = 0;
-      await applySnapshot(active);
+      const ok = await applySnapshot(active, expected);
+      if (!ok && expected === epoch) {
+        snapshotQueued = true;
+      }
+      return;
+    }
+    if (expected !== epoch || batch.channelId !== active) {
       return;
     }
     lastSeq = batch.seq;
-    for (const event of batch.events) {
-      ring.push(event);
+    ring.pushMany(batch.events);
+  };
+
+  const scheduleRetry = () => {
+    if (retryTimer !== undefined) {
+      return;
     }
+    retryTimer = window.setTimeout(() => {
+      retryTimer = undefined;
+      void pump();
+    }, 250);
   };
 
   const pump = async () => {
@@ -48,7 +84,19 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       return;
     }
     handling = true;
-    while (queued.length > 0) {
+    while (queued.length > 0 || snapshotQueued) {
+      if (snapshotQueued) {
+        queued.length = 0;
+        const ok = await recoverSnapshot();
+        if (ok) {
+          snapshotQueued = false;
+          continue;
+        }
+        snapshotQueued = true;
+        handling = false;
+        scheduleRetry();
+        return;
+      }
       const next = queued.shift();
       if (!next) {
         break;
@@ -56,10 +104,24 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       try {
         await handle(next);
       } catch {
-        lastSeq = 0;
+        snapshotQueued = !(await recoverSnapshot());
       }
     }
     handling = false;
+  };
+
+  const onBatch = (ev: { payload: ChatBatch }) => {
+    if (snapshotQueued) {
+      void pump();
+      return;
+    }
+    if (queued.length >= IPC_QUEUE_MAX) {
+      queued.length = 0;
+      snapshotQueued = true;
+    } else {
+      queued.push(ev.payload);
+    }
+    void pump();
   };
 
   return {
@@ -68,36 +130,40 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
         return active;
       }
       joining = true;
-      const prev = unlisten;
       try {
         const joined = await invoke<string>("chat_join", { channel });
+        const same = joined === active && unlisten !== undefined;
+        if (same) {
+          return joined;
+        }
+        epoch += 1;
+        const expected = epoch;
         active = joined;
         lastSeq = 0;
         ring.reset();
         queued.length = 0;
-        const next = await listen<ChatBatch>(CHAT_EVENT, (ev) => {
-          queued.push(ev.payload);
-          void pump();
-        });
-        unlisten = next;
-        if (prev) {
-          prev();
+        snapshotQueued = false;
+        if (!unlisten) {
+          unlisten = await listen<ChatBatch>(CHAT_EVENT, onBatch);
         }
         try {
-          await applySnapshot(joined);
+          const applied = await applySnapshot(joined, expected);
+          if (!applied && expected === epoch) {
+            lastSeq = 0;
+          }
         } catch {
-          lastSeq = 0;
+          if (expected === epoch) {
+            lastSeq = 0;
+          }
         }
         void pump();
         return joined;
-      } catch (err) {
-        unlisten = prev;
-        throw err;
       } finally {
         joining = false;
       }
     },
     async part() {
+      epoch += 1;
       if (unlisten) {
         unlisten();
         unlisten = undefined;
@@ -105,14 +171,21 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       active = "";
       lastSeq = 0;
       queued.length = 0;
+      snapshotQueued = false;
       ring.reset();
       await invoke("chat_part");
     },
     stop() {
+      epoch += 1;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
       if (unlisten) {
         unlisten();
         unlisten = undefined;
       }
     },
+    active: () => active,
   };
 }

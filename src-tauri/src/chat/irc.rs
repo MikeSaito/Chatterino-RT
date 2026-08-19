@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{Sink, SinkExt, StreamExt};
 use tauri::{AppHandle, Emitter};
@@ -10,9 +10,12 @@ use super::emotes::attach_third_party;
 use super::fetch;
 use super::parse::{parse_line, ParsedLine};
 use super::state::Shared;
-use super::types::ChatEvent;
+use super::types::{ChatConnState, ChatEvent, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
+const CLIENT_PING: Duration = Duration::from_secs(30);
+const PONG_TIMEOUT: Duration = Duration::from_secs(10);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone)]
 pub enum IrcCmd {
@@ -36,11 +39,24 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
     fetch::load_globals(&shared.catalog).await;
     let mut wanted: Option<String> = None;
+    let mut join_blocked = false;
+    let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
     loop {
-        match connect_session(&app, &shared, &mut rx, &mut wanted, &mut backoff).await {
+        match connect_session(
+            &app,
+            &shared,
+            &mut rx,
+            &mut wanted,
+            &mut join_blocked,
+            &mut last_error,
+            &mut backoff,
+        )
+        .await
+        {
             SessionEnd::Shutdown => break,
             SessionEnd::Reconnect => {
+                emit_status(&app, ChatConnState::Reconnecting, wanted.as_deref(), None);
                 let sleep = tokio::time::sleep(backoff);
                 tokio::pin!(sleep);
                 tokio::select! {
@@ -54,10 +70,14 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                             None | Some(IrcCmd::Shutdown) => break,
                             Some(IrcCmd::Join(ch)) => {
                                 wanted = Some(ch);
+                                join_blocked = false;
+                                last_error = None;
                                 backoff = Duration::from_secs(1);
                             }
                             Some(IrcCmd::Part) => {
                                 wanted = None;
+                                join_blocked = false;
+                                last_error = None;
                             }
                         }
                     }
@@ -77,8 +97,20 @@ async fn connect_session(
     shared: &Shared,
     rx: &mut mpsc::Receiver<IrcCmd>,
     wanted: &mut Option<String>,
+    join_blocked: &mut bool,
+    last_error: &mut Option<String>,
     backoff: &mut Duration,
 ) -> SessionEnd {
+    if *join_blocked {
+        emit_status(
+            app,
+            ChatConnState::Error,
+            wanted.as_deref(),
+            last_error.as_deref(),
+        );
+    } else {
+        emit_status(app, ChatConnState::Connecting, wanted.as_deref(), None);
+    }
     let Ok(Ok((stream, _))) =
         tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::connect_async(IRC_URL)).await
     else {
@@ -97,25 +129,46 @@ async fn connect_session(
             return SessionEnd::Reconnect;
         }
     }
-    if let Some(ch) = wanted.clone() {
-        if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-            return SessionEnd::Reconnect;
+    if !*join_blocked {
+        if let Some(ch) = wanted.clone() {
+            if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
+                return SessionEnd::Reconnect;
+            }
         }
     }
 
     let mut ticker = tokio::time::interval(Duration::from_millis(BATCH_FLUSH_MS));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ping_at = tokio::time::interval_at(
+        tokio::time::Instant::now() + CLIENT_PING,
+        CLIENT_PING,
+    );
+    ping_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut pong_deadline: Option<Instant> = None;
     let mut loaded_room: Option<(String, String)> = None;
+    let mut in_room = false;
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
                 flush_emit(app, shared);
+                if pong_deadline.is_some_and(|d| Instant::now() >= d) {
+                    return SessionEnd::Reconnect;
+                }
+            }
+            _ = ping_at.tick() => {
+                if pong_deadline.is_some() {
+                    return SessionEnd::Reconnect;
+                }
+                if send_line(&mut write, "PING :webtv").await.is_err() {
+                    return SessionEnd::Reconnect;
+                }
+                pong_deadline = Some(Instant::now() + PONG_TIMEOUT);
             }
             cmd = rx.recv() => {
                 match cmd {
                     None | Some(IrcCmd::Shutdown) => {
-                        let _ = write.send(Message::Close(None)).await;
+                        let _ = send_ws(&mut write, Message::Close(None)).await;
                         return SessionEnd::Shutdown;
                     }
                     Some(IrcCmd::Part) => {
@@ -123,12 +176,29 @@ async fn connect_session(
                             let _ = send_line(&mut write, &format!("PART #{ch}")).await;
                         }
                         loaded_room = None;
+                        in_room = false;
+                        *join_blocked = false;
+                        *last_error = None;
+                        emit_status(app, ChatConnState::Connected, None, None);
                     }
                     Some(IrcCmd::Join(ch)) => {
-                        if let Some(prev) = wanted.replace(ch.clone()) {
-                            if prev != ch {
-                                let _ = send_line(&mut write, &format!("PART #{prev}")).await;
+                        *join_blocked = false;
+                        *last_error = None;
+                        if wanted.as_deref() == Some(ch.as_str()) {
+                            if in_room {
+                                emit_status(app, ChatConnState::Connected, Some(&ch), None);
+                                continue;
                             }
+                            emit_status(app, ChatConnState::Connecting, Some(&ch), None);
+                            if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
+                                return SessionEnd::Reconnect;
+                            }
+                            continue;
+                        }
+                        in_room = false;
+                        emit_status(app, ChatConnState::Connecting, Some(&ch), None);
+                        if let Some(prev) = wanted.replace(ch.clone()) {
+                            let _ = send_line(&mut write, &format!("PART #{prev}")).await;
                         }
                         loaded_room = None;
                         if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
@@ -143,19 +213,33 @@ async fn connect_session(
                     Some(Err(_)) => return SessionEnd::Reconnect,
                     Some(Ok(Message::Close(_))) => return SessionEnd::Reconnect,
                     Some(Ok(Message::Ping(p))) => {
-                        if write.send(Message::Pong(p)).await.is_err() {
+                        if send_ws(&mut write, Message::Pong(p)).await.is_err() {
                             return SessionEnd::Reconnect;
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
                         for raw in text.as_str().replace('\r', "").split('\n') {
                             if raw.is_empty() { continue; }
-                            match dispatch_line(app, shared, raw, wanted, &mut loaded_room) {
+                            match dispatch_line(app, shared, raw, wanted, &nick, &mut loaded_room) {
                                 LineAction::None => {}
                                 LineAction::Pong(pong) => {
                                     if send_line(&mut write, &pong).await.is_err() {
                                         return SessionEnd::Reconnect;
                                     }
+                                }
+                                LineAction::PongAck => {
+                                    pong_deadline = None;
+                                }
+                                LineAction::Joined => {
+                                    in_room = true;
+                                }
+                                LineAction::LeftRoom => {
+                                    in_room = false;
+                                }
+                                LineAction::JoinFailed(msg) => {
+                                    in_room = false;
+                                    *join_blocked = true;
+                                    *last_error = Some(msg);
                                 }
                                 LineAction::Reconnect => return SessionEnd::Reconnect,
                             }
@@ -172,15 +256,26 @@ async fn send_line<S>(write: &mut S, line: &str) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
 {
-    write
-        .send(Message::Text(format!("{line}\r\n").into()))
+    send_ws(write, Message::Text(format!("{line}\r\n").into())).await
+}
+
+async fn send_ws<S>(write: &mut S, msg: Message) -> Result<(), ()>
+where
+    S: Sink<Message> + Unpin,
+{
+    tokio::time::timeout(WRITE_TIMEOUT, write.send(msg))
         .await
+        .map_err(|_| ())?
         .map_err(|_| ())
 }
 
 enum LineAction {
     None,
     Pong(String),
+    PongAck,
+    Joined,
+    LeftRoom,
+    JoinFailed(String),
     Reconnect,
 }
 
@@ -189,6 +284,7 @@ fn dispatch_line(
     shared: &Shared,
     raw: &str,
     wanted: &Option<String>,
+    nick: &str,
     loaded_room: &mut Option<(String, String)>,
 ) -> LineAction {
     let now = unix_ms();
@@ -200,25 +296,59 @@ fn dispatch_line(
                 LineAction::Pong(format!("PONG :{payload}"))
             }
         }
+        ParsedLine::Pong => LineAction::PongAck,
         ParsedLine::Reconnect => LineAction::Reconnect,
+        ParsedLine::Ready => {
+            if wanted.is_none() {
+                emit_status(app, ChatConnState::Connected, None, None);
+            }
+            LineAction::None
+        }
+        ParsedLine::Membership {
+            part,
+            channel,
+            login,
+        } => {
+            if part && login == nick && wanted.as_deref() == Some(channel.as_str()) {
+                emit_status(app, ChatConnState::Connecting, Some(&channel), None);
+                LineAction::LeftRoom
+            } else {
+                LineAction::None
+            }
+        }
         ParsedLine::Event {
             channel,
             mut event,
             room_id,
         } => {
+            let joined = matches!(&event, ChatEvent::Roomstate { .. })
+                && wanted.as_deref() == Some(channel.as_str());
+            if joined {
+                emit_status(app, ChatConnState::Connected, Some(&channel), None);
+            }
+            let mut failed: Option<String> = None;
+            if let ChatEvent::Notice { id, text, .. } = &event {
+                if wanted.as_deref() == Some(channel.as_str()) && is_join_failure(id) {
+                    emit_status(app, ChatConnState::Error, Some(&channel), Some(text));
+                    failed = Some(text.clone());
+                }
+            }
             if let (Some(id), Some(login)) = (room_id.as_deref(), wanted.as_deref()) {
-                let need = loaded_room
-                    .as_ref()
-                    .map(|(c, r)| c != login || r != id)
-                    .unwrap_or(true);
-                if need {
-                    *loaded_room = Some((login.to_string(), id.to_string()));
-                    let cat = shared.catalog.clone();
-                    let login_s = login.to_string();
-                    let id_s = id.to_string();
-                    tauri::async_runtime::spawn(async move {
-                        fetch::load_channel(&cat, &login_s, &id_s).await;
-                    });
+                if login == channel {
+                    let need = loaded_room
+                        .as_ref()
+                        .map(|(c, r)| c != login || r != id)
+                        .unwrap_or(true);
+                    if need {
+                        *loaded_room = Some((login.to_string(), id.to_string()));
+                        let cat = shared.catalog.clone();
+                        let hub = shared.hub.clone();
+                        let login_s = login.to_string();
+                        let id_s = id.to_string();
+                        tauri::async_runtime::spawn(async move {
+                            fetch::load_channel(&cat, &hub, &login_s, &id_s).await;
+                        });
+                    }
                 }
             }
             if let ChatEvent::Privmsg {
@@ -241,10 +371,41 @@ fn dispatch_line(
             if let Some(batch) = batch {
                 let _ = app.emit("chat:batch", &batch);
             }
-            LineAction::None
+            if let Some(msg) = failed {
+                LineAction::JoinFailed(msg)
+            } else if joined {
+                LineAction::Joined
+            } else {
+                LineAction::None
+            }
         }
-        ParsedLine::Ready | ParsedLine::Ignore => LineAction::None,
+        ParsedLine::Ignore => LineAction::None,
     }
+}
+
+fn is_join_failure(msg_id: &str) -> bool {
+    matches!(
+        msg_id,
+        "msg_banned"
+            | "msg_channel_suspended"
+            | "msg_channel_blocked"
+            | "msg_suspended"
+            | "msg_room_not_found"
+            | "msg_requires_verified_phone_number"
+            | "tos_ban"
+            | "no_permission"
+    )
+}
+
+fn emit_status(app: &AppHandle, state: ChatConnState, channel: Option<&str>, message: Option<&str>) {
+    let _ = app.emit(
+        "chat:status",
+        ChatStatus {
+            state,
+            channel: channel.map(str::to_string),
+            message: message.map(str::to_string),
+        },
+    );
 }
 
 fn flush_emit(app: &AppHandle, shared: &Shared) {

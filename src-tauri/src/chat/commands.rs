@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::Serialize;
 
 use super::irc::IrcCmd;
@@ -20,7 +22,10 @@ impl ApiError {
 }
 
 #[tauri::command]
-pub fn chat_join(state: tauri::State<'_, Shared>, channel: String) -> Result<String, ApiError> {
+pub async fn chat_join(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<String, ApiError> {
     let normalized = normalize_channel(&channel)?;
     let tx = state
         .irc_tx
@@ -28,7 +33,9 @@ pub fn chat_join(state: tauri::State<'_, Shared>, channel: String) -> Result<Str
         .map_err(|_| ApiError::internal("lock"))?
         .clone()
         .ok_or_else(|| ApiError::internal("irc не запущен"))?;
-    tx.try_send(IrcCmd::Join(normalized.clone()))
+    tokio::time::timeout(Duration::from_secs(10), tx.send(IrcCmd::Join(normalized.clone())))
+        .await
+        .map_err(|_| ApiError::internal("таймаут очереди irc"))?
         .map_err(|_| ApiError::internal("очередь irc"))?;
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -42,14 +49,16 @@ pub fn chat_join(state: tauri::State<'_, Shared>, channel: String) -> Result<Str
 }
 
 #[tauri::command]
-pub fn chat_part(state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
+pub async fn chat_part(state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     let tx = state
         .irc_tx
         .lock()
         .map_err(|_| ApiError::internal("lock"))?
         .clone()
         .ok_or_else(|| ApiError::internal("irc не запущен"))?;
-    tx.try_send(IrcCmd::Part)
+    tokio::time::timeout(Duration::from_secs(10), tx.send(IrcCmd::Part))
+        .await
+        .map_err(|_| ApiError::internal("таймаут очереди irc"))?
         .map_err(|_| ApiError::internal("очередь irc"))?;
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;

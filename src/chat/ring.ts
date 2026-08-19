@@ -24,6 +24,8 @@ type Slot = {
   emoteKeys: string[];
   msgId: string;
   login: string;
+  bodyRaw: string;
+  spansRaw: EmoteSpan[];
 };
 
 export class MessageRing {
@@ -81,30 +83,49 @@ export class MessageRing {
       }
       root.addChild(nick, body);
       stage.addChild(root);
-      this.slots.push({ root, nick, body, emotes, emoteKeys: [], msgId: "", login: "" });
+      this.slots.push({
+        root,
+        nick,
+        body,
+        emotes,
+        emoteKeys: [],
+        msgId: "",
+        login: "",
+        bodyRaw: "",
+        spansRaw: [],
+      });
     }
     this.ready = true;
     this.app.renderer.on("resize", () => this.layout());
   }
 
   reset(): void {
+    this.resetSlots();
+    this.layout();
+  }
+
+  applySnapshot(events: ChatEvent[]): void {
+    this.resetSlots();
+    const start = Math.max(0, events.length - MESSAGE_POOL_SIZE);
+    this.pushMany(events.slice(start));
+  }
+
+  pushMany(events: ChatEvent[]): void {
+    for (const event of events) {
+      this.pushOne(event);
+    }
+    this.layout();
+  }
+
+  private resetSlots(): void {
     this.occupied = 0;
     this.head = 0;
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
-    this.layout();
   }
 
-  applySnapshot(events: ChatEvent[]): void {
-    this.reset();
-    const start = Math.max(0, events.length - MESSAGE_POOL_SIZE);
-    for (let i = start; i < events.length; i += 1) {
-      this.push(events[i]);
-    }
-  }
-
-  push(event: ChatEvent): void {
+  private pushOne(event: ChatEvent): void {
     if (event.kind === "clearmsg") {
       this.hideById(event.targetId);
       return;
@@ -114,7 +135,7 @@ export class MessageRing {
       return;
     }
     if (event.kind === "clearchat") {
-      this.reset();
+      this.resetSlots();
       return;
     }
     const slot = this.slots[this.head];
@@ -123,7 +144,6 @@ export class MessageRing {
     if (this.occupied < MESSAGE_POOL_SIZE) {
       this.occupied += 1;
     }
-    this.layout();
   }
 
   private hideById(id: string): void {
@@ -153,6 +173,8 @@ export class MessageRing {
     slot.body.text = "";
     slot.msgId = "";
     slot.login = "";
+    slot.bodyRaw = "";
+    slot.spansRaw = [];
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -166,8 +188,8 @@ export class MessageRing {
     const drawn = this.line(event);
     slot.nick.text = drawn.nick;
     slot.nick.tint = drawn.nickColor;
-    slot.body.text = drawn.body;
-    slot.body.x = Math.max(16, drawn.nick.length * CHAR_WIDTH + 16);
+    slot.bodyRaw = drawn.body;
+    slot.spansRaw = drawn.spans;
     for (const key of slot.emoteKeys) {
       this.textures.release(key);
     }
@@ -183,8 +205,6 @@ export class MessageRing {
       const key = `${span.provider}:${span.emoteId}`;
       slot.emoteKeys.push(key);
       this.textures.acquire(key);
-      spr.visible = true;
-      spr.x = slot.body.x + span.start * CHAR_WIDTH;
       void this.textures.load(key, span.url).then((tex) => {
         if (tex && slot.msgId === event.id) {
           spr.texture = tex;
@@ -235,13 +255,31 @@ export class MessageRing {
     }
   }
 
+  private paintClip(slot: Slot): void {
+    const bodyX = Math.max(16, slot.nick.text.length * CHAR_WIDTH + 16);
+    slot.body.x = bodyX;
+    const clipped = clipLine(slot.bodyRaw, maxBodyChars(this.app.screen.width, bodyX));
+    slot.body.text = clipped.text;
+    for (let i = 0; i < slot.emotes.length; i += 1) {
+      const spr = slot.emotes[i];
+      const span = slot.spansRaw[i];
+      if (!span || span.start >= clipped.visible) {
+        spr.visible = false;
+        continue;
+      }
+      spr.visible = true;
+      spr.x = bodyX + span.start * CHAR_WIDTH;
+    }
+  }
+
   private layout(): void {
-    const h = this.app.renderer.height;
+    const h = this.app.screen.height;
     const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
       slot.root.y = i * LINE_HEIGHT;
       slot.root.visible = slot.msgId.length > 0;
+      this.paintClip(slot);
     }
     const content = this.occupied * LINE_HEIGHT;
     this.app.stage.y = content > h ? h - content : 0;
@@ -254,4 +292,37 @@ function parseColor(color: string): number {
     return 0xbf94ff;
   }
   return Number.parseInt(m[1], 16);
+}
+
+function maxBodyChars(paneWidth: number, bodyX: number): number {
+  return Math.floor(Math.max(0, paneWidth - bodyX - 8) / CHAR_WIDTH);
+}
+
+function clipLine(text: string, maxChars: number): { text: string; visible: number } {
+  if (maxChars <= 0) {
+    return { text: "", visible: 0 };
+  }
+  if (text.length <= maxChars) {
+    return { text, visible: text.length };
+  }
+  const keep = maxChars <= 3 ? maxChars : maxChars - 3;
+  const visible = utf16Fit(text, keep);
+  if (maxChars <= 3) {
+    return { text: text.slice(0, visible), visible };
+  }
+  return { text: `${text.slice(0, visible)}...`, visible };
+}
+
+function utf16Fit(text: string, n: number): number {
+  if (n <= 0) {
+    return 0;
+  }
+  if (n >= text.length) {
+    return text.length;
+  }
+  const c = text.charCodeAt(n - 1);
+  if (c >= 0xd800 && c <= 0xdbff) {
+    return n - 1;
+  }
+  return n;
 }

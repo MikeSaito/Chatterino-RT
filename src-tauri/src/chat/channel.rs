@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn snapshot_flushes_pending_and_advances_seq() {
         let mut hub = crate::chat::hub::Hub::default();
-        hub.buffer("xqc");
+        hub.set_active(Some("xqc".into()));
         hub.ingest("xqc", notice("1"));
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.seq, 1);

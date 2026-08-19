@@ -3,6 +3,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::emotes::{Catalog, EmoteDef};
+use super::hub::Hub;
 
 const ATTEMPTS: u32 = 3;
 
@@ -27,6 +28,7 @@ pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
 
 pub async fn load_channel(
     catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>,
+    hub: &std::sync::Arc<std::sync::Mutex<Hub>>,
     login: &str,
     room_id: &str,
 ) {
@@ -51,6 +53,14 @@ pub async fn load_channel(
             collect_7tv_set(set, &mut map);
         }
     }
+    let still_active = hub
+        .lock()
+        .ok()
+        .and_then(|h| h.active.clone())
+        .is_some_and(|ch| ch == login);
+    if !still_active {
+        return;
+    }
     if let Ok(mut cat) = catalog.lock() {
         cat.replace_channel(login.to_string(), map);
     }
@@ -66,18 +76,28 @@ fn http_client() -> reqwest::Client {
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
     let mut delay = Duration::from_millis(200);
-    for _ in 0..ATTEMPTS {
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
         match client.get(url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(v) = resp.json::<Value>().await {
-                    return Ok(v);
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    match resp.json::<Value>().await {
+                        Ok(v) => return Ok(v),
+                        Err(e) => last = format!("json: {e}"),
+                    }
+                } else {
+                    last = format!("http {status}");
                 }
             }
-            _ => {}
+            Err(e) => last = e.to_string(),
         }
-        tokio::time::sleep(delay).await;
-        delay *= 2;
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
     }
+    eprintln!("emote fetch failed after {ATTEMPTS} attempts ({last}): {url}");
     Err(())
 }
 
