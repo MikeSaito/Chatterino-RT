@@ -1,6 +1,8 @@
 import { Texture, Assets } from "pixi.js";
 import { TEXTURE_LRU_LIMIT } from "../constants";
 
+const ATTEMPTS = 3;
+
 export class TextureLru {
   private readonly map = new Map<string, Texture>();
   private readonly urls = new Map<string, string>();
@@ -41,7 +43,7 @@ export class TextureLru {
     if (pending && this.urls.get(id) === url) {
       return pending;
     }
-    const job = Assets.load<Texture>(url)
+    const job = loadTexture(url)
       .then((tex) => {
         this.inflight.delete(id);
         this.urls.set(id, url);
@@ -85,4 +87,30 @@ export class TextureLru {
       }
     }
   }
+}
+
+async function loadTexture(url: string): Promise<Texture> {
+  let delay = 200;
+  let last: unknown = new Error("texture load failed");
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    try {
+      return await Assets.load<Texture>({
+        src: url,
+        parser: "texture",
+      });
+    } catch (err) {
+      last = err;
+      if (attempt + 1 < ATTEMPTS) {
+        await sleep(delay);
+        delay *= 2;
+      }
+    }
+  }
+  throw last;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }

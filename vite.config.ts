@@ -13,6 +13,7 @@ const DEV_CSP = [
   "frame-src https://player.twitch.tv https://embed.twitch.tv",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'",
+  "worker-src 'self' blob: http://localhost:1420",
 ].join("; ");
 
 export default defineConfig(async () => ({

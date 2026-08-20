@@ -19,7 +19,8 @@
         "img-src": "'self' asset: http://asset.localhost blob: data: https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.7tv.app",
         "frame-src": "https://player.twitch.tv https://embed.twitch.tv",
         "style-src": "'self' 'unsafe-inline'",
-        "script-src": "'self'"
+        "script-src": "'self'",
+        "worker-src": "'self' blob:"
       },
       "devCsp": {
         "default-src": "'self' customprotocol: asset: http://localhost:1420",
@@ -27,7 +28,8 @@
         "img-src": "'self' asset: http://asset.localhost blob: data: https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.7tv.app",
         "frame-src": "https://player.twitch.tv https://embed.twitch.tv",
         "style-src": "'self' 'unsafe-inline'",
-        "script-src": "'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'"
+        "script-src": "'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'",
+        "worker-src": "'self' blob: http://localhost:1420"
       }
     },
     "windows": [
