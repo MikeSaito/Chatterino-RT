@@ -5,7 +5,7 @@ use tauri::AppHandle;
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::spans::allowed_chat_url;
-use super::state::{IrcCmd, Shared};
+use super::state::{EventCmd, IrcCmd, Shared};
 use super::types::ChatBatch;
 
 const MAX_CHAT_CHARS: usize = 500;
@@ -49,10 +49,15 @@ pub async fn chat_join(
 ) -> Result<String, ApiError> {
     let normalized = normalize_channel(&channel)?;
     send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
-    {
+    let previous = {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        let prev = hub.active.clone();
         hub.set_active(Some(normalized.clone()));
         hub.buffer(&normalized);
+        prev
+    };
+    if previous.as_deref() != Some(normalized.as_str()) {
+        state.notify_event(EventCmd::ClearChannel);
     }
     if let Ok(mut cat) = state.catalog.lock() {
         cat.retain_channel(&normalized);
@@ -70,6 +75,7 @@ pub async fn chat_join(
 #[tauri::command]
 pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     send_cmd(&state, IrcCmd::Part).await?;
+    state.notify_event(EventCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.set_active(None);

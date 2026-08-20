@@ -15,7 +15,7 @@ use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
 use super::spans::decorate_text_spans;
-use super::state::{IrcCmd, Shared};
+use super::state::{EventCmd, IrcCmd, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
@@ -36,7 +36,9 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 }
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
-    fetch::load_globals(&shared.catalog).await;
+    if let Some(set_id) = fetch::load_globals(&shared.catalog).await {
+        shared.notify_event(EventCmd::SetGlobal { set_id });
+    }
     let mut wanted: Option<String> = None;
     let mut join_blocked = false;
     let mut last_error: Option<String> = None;
@@ -448,12 +450,13 @@ fn dispatch_line(
                         let badges = shared.badges.clone();
                         let cheers = shared.cheers.clone();
                         let hub = shared.hub.clone();
+                        let events = shared.clone();
                         let login_s = login.to_string();
                         let id_s = id.to_string();
                         let token = auth::oauth_token(shared);
                         let client_id = auth::resolved_client_id(shared);
                         tauri::async_runtime::spawn(async move {
-                            fetch::load_channel(
+                            if let Some((set_id, user_id)) = fetch::load_channel(
                                 &cat,
                                 &badges,
                                 &cheers,
@@ -463,7 +466,21 @@ fn dispatch_line(
                                 token.as_deref(),
                                 &client_id,
                             )
-                            .await;
+                            .await
+                            {
+                                let still = hub
+                                    .lock()
+                                    .ok()
+                                    .and_then(|h| h.active.clone())
+                                    .is_some_and(|ch| ch == login_s);
+                                if still {
+                                    events.notify_event(EventCmd::SetChannel {
+                                        login: login_s,
+                                        set_id,
+                                        user_id,
+                                    });
+                                }
+                            }
                         });
                     }
                 }

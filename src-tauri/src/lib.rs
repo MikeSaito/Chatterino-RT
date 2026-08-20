@@ -5,7 +5,7 @@ use chat::commands::{
     auth_import, auth_logout, auth_start, auth_status, chat_join, chat_part, chat_send,
     chat_snapshot, open_chat_link,
 };
-use chat::state::{IrcCmd, Shared};
+use chat::state::{EventCmd, IrcCmd, Shared};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,6 +16,7 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             chat::auth::init(app.handle(), &shared)?;
+            chat::eventapi::start(shared.clone())?;
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
@@ -41,6 +42,7 @@ pub fn run() {
                             let _ = tx.try_send(IrcCmd::Shutdown);
                         }
                     }
+                    state.notify_event(EventCmd::Shutdown);
                 }
             }
         });

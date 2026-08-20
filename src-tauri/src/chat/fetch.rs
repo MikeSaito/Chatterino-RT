@@ -1,15 +1,16 @@
 use std::time::Duration;
 
 use serde_json::Value;
+use url::Url;
 
 use super::cheers::CheerCatalog;
-use super::emotes::{Catalog, EmoteDef};
+use super::emotes::{Catalog, EmoteDef, SetScope};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
 
 const ATTEMPTS: u32 = 3;
 
-pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
+pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) -> Option<String> {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await {
@@ -18,14 +19,20 @@ pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
     if let Ok(v) = get_json(&client, "https://api.frankerfacez.com/v1/set/global").await {
         collect_ffz_sets(&v, &mut map);
     }
+    let mut global_set_id = None;
     if let Ok(v) = get_json(&client, "https://7tv.io/v3/emote-sets/global").await {
+        global_set_id = object_id(v.get("id"));
         collect_7tv_set(&v, &mut map);
     }
     if let Ok(mut cat) = catalog.lock() {
         for (k, v) in map {
             cat.insert_global(k, v);
         }
+        if let Some(id) = global_set_id.as_ref() {
+            cat.bind_set(id.clone(), SetScope::Global);
+        }
     }
+    global_set_id
 }
 
 pub async fn load_channel(
@@ -37,7 +44,7 @@ pub async fn load_channel(
     room_id: &str,
     token: Option<&str>,
     client_id: &str,
-) {
+) -> Option<(String, String)> {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
@@ -53,24 +60,55 @@ pub async fn load_channel(
     if let Ok(v) = get_json(&client, &ffz_url).await {
         collect_ffz_sets(&v, &mut map);
     }
+    let mut seventv = None;
     let stv_url = format!("https://7tv.io/v3/users/twitch/{room_id}");
     if let Ok(v) = get_json(&client, &stv_url).await {
+        let user_id = object_id(v.get("id"));
         if let Some(set) = v.get("emote_set") {
+            let set_id = object_id(set.get("id"));
             collect_7tv_set(set, &mut map);
+            if let (Some(set_id), Some(user_id)) = (set_id, user_id) {
+                seventv = Some((set_id, user_id));
+            }
         }
     }
+    {
+        let Ok(h) = hub.lock() else {
+            return None;
+        };
+        if h.active.as_deref() != Some(login) {
+            return None;
+        }
+        let Ok(mut cat) = catalog.lock() else {
+            return None;
+        };
+        cat.replace_channel(login.to_string(), map);
+        if let Some((set_id, _)) = seventv.as_ref() {
+            cat.bind_set(set_id.clone(), SetScope::Channel(login.to_string()));
+        }
+    }
+    super::helix::load_channel(badges, cheers, hub, login, room_id, token, client_id).await;
     let still_active = hub
         .lock()
         .ok()
         .and_then(|h| h.active.clone())
         .is_some_and(|ch| ch == login);
     if !still_active {
-        return;
+        return None;
     }
-    if let Ok(mut cat) = catalog.lock() {
-        cat.replace_channel(login.to_string(), map);
+    seventv
+}
+
+pub async fn load_7tv_set(set_id: &str) -> Option<std::collections::HashMap<String, EmoteDef>> {
+    if !safe_object_id(set_id) {
+        return None;
     }
-    super::helix::load_channel(badges, cheers, hub, login, room_id, token, client_id).await;
+    let client = http_client();
+    let url = format!("https://7tv.io/v3/emote-sets/{set_id}");
+    let v = get_json(&client, &url).await.ok()?;
+    let mut map = std::collections::HashMap::new();
+    collect_7tv_set(&v, &mut map);
+    Some(map)
 }
 
 fn http_client() -> reqwest::Client {
@@ -171,47 +209,93 @@ fn collect_7tv_set(value: &Value, map: &mut std::collections::HashMap<String, Em
     let emotes = value.get("emotes").and_then(Value::as_array);
     let Some(emotes) = emotes else { return };
     for item in emotes {
-        let name = item.get("name").and_then(Value::as_str).unwrap_or("");
-        let data = item.get("data").unwrap_or(item);
-        let id = data.get("id").and_then(Value::as_str).unwrap_or("");
-        if name.is_empty() || id.is_empty() {
-            continue;
+        if let Some((name, def)) = parse_active_emote(item) {
+            map.insert(name, def);
         }
-        let host = data
-            .get("host")
-            .and_then(|h| h.get("url"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let file = data
-            .get("host")
-            .and_then(|h| h.get("files"))
-            .and_then(Value::as_array)
-            .and_then(|files| {
-                files.iter().find_map(|f| {
-                    let n = f.get("name").and_then(Value::as_str)?;
-                    if n.starts_with("1x") {
-                        Some(n)
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or("1x.webp");
-        let url = if host.is_empty() {
-            format!("https://cdn.7tv.app/emote/{id}/1x.webp")
-        } else {
-            format!("{}/{file}", abs_url(host))
-        };
-        map.insert(
-            name.to_string(),
-            EmoteDef {
-                id: id.to_string(),
-                provider: "7tv".into(),
-                url,
-                zero_width: is_7tv_zero_width(item),
-            },
-        );
     }
+}
+
+pub(crate) fn parse_active_emote(item: &Value) -> Option<(String, EmoteDef)> {
+    let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+    if name.is_empty() || name.len() > 100 {
+        return None;
+    }
+    let data = item.get("data")?;
+    let id = data.get("id").and_then(Value::as_str).unwrap_or("");
+    if !safe_object_id(id) {
+        return None;
+    }
+    let host = data
+        .get("host")
+        .and_then(|h| h.get("url"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if host.is_empty() {
+        return None;
+    }
+    let file = data
+        .get("host")
+        .and_then(|h| h.get("files"))
+        .and_then(Value::as_array)
+        .and_then(|files| {
+            files.iter().find_map(|f| {
+                let n = f.get("name").and_then(Value::as_str)?;
+                if safe_7tv_file(n) {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or("1x.webp");
+    if !safe_7tv_file(file) {
+        return None;
+    }
+    let url = seventv_cdn_url(host, file)?;
+    Some((
+        name.to_string(),
+        EmoteDef {
+            id: id.to_string(),
+            provider: "7tv".into(),
+            url,
+            zero_width: is_7tv_zero_width(item),
+        },
+    ))
+}
+
+fn object_id(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|s| safe_object_id(s))
+        .map(str::to_string)
+}
+
+pub(crate) fn safe_object_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+fn safe_7tv_file(name: &str) -> bool {
+    name.starts_with("1x")
+        && name.len() <= 32
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+}
+
+fn seventv_cdn_url(host: &str, file: &str) -> Option<String> {
+    let composed = format!("{}/{file}", abs_url(host));
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    if parsed.host_str() != Some("cdn.7tv.app") {
+        return None;
+    }
+    Some(parsed.as_str().to_string())
 }
 
 // 7TV ActiveEmote flags: ZeroWidth = 1 << 0 (Chatterino SeventvEmotes.cpp).
@@ -268,5 +352,51 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         collect_7tv_set(&sample_7tv(0), &mut map);
         assert!(!map.get("cvHazmat").expect("emote").zero_width);
+    }
+
+    #[test]
+    fn seventv_rejects_foreign_host_and_bad_id() {
+        let evil = serde_json::json!({
+            "id": "abc",
+            "name": "cvHazmat",
+            "flags": 0,
+            "data": {
+                "id": "abc",
+                "host": {
+                    "url": "https://evil.example/emote/abc",
+                    "files": [{"name": "1x.webp"}]
+                }
+            }
+        });
+        assert!(parse_active_emote(&evil).is_none());
+        let js = serde_json::json!({
+            "id": "abc",
+            "name": "cvHazmat",
+            "data": {
+                "id": "abc",
+                "host": {
+                    "url": "javascript:alert(1)",
+                    "files": [{"name": "1x.webp"}]
+                }
+            }
+        });
+        assert!(parse_active_emote(&js).is_none());
+        let missing = serde_json::json!({
+            "id": "abc",
+            "name": "cvHazmat",
+            "flags": 0
+        });
+        assert!(parse_active_emote(&missing).is_none());
+        let bad_id = serde_json::json!({
+            "name": "cvHazmat",
+            "data": {
+                "id": "../x",
+                "host": {
+                    "url": "//cdn.7tv.app/emote/abc",
+                    "files": [{"name": "1x.webp"}]
+                }
+            }
+        });
+        assert!(parse_active_emote(&bad_id).is_none());
     }
 }

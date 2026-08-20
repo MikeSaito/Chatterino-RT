@@ -8,10 +8,17 @@ pub struct EmoteDef {
     pub zero_width: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetScope {
+    Global,
+    Channel(String),
+}
+
 #[derive(Debug, Default)]
 pub struct Catalog {
     global: std::collections::HashMap<String, EmoteDef>,
     channel: std::collections::HashMap<String, std::collections::HashMap<String, EmoteDef>>,
+    set_scope: std::collections::HashMap<String, SetScope>,
 }
 
 impl Catalog {
@@ -25,10 +32,16 @@ impl Catalog {
 
     pub fn retain_channel(&mut self, channel: &str) {
         self.channel.retain(|k, _| k == channel);
+        self.set_scope.retain(|_, scope| match scope {
+            SetScope::Global => true,
+            SetScope::Channel(ch) => ch == channel,
+        });
     }
 
     pub fn clear_channels(&mut self) {
         self.channel.clear();
+        self.set_scope
+            .retain(|_, scope| matches!(scope, SetScope::Global));
     }
 
     pub fn lookup(&self, channel: &str, code: &str) -> Option<&EmoteDef> {
@@ -36,6 +49,92 @@ impl Catalog {
             .get(channel)
             .and_then(|m| m.get(code))
             .or_else(|| self.global.get(code))
+    }
+
+    pub fn bind_set(&mut self, set_id: String, scope: SetScope) {
+        match &scope {
+            SetScope::Global => {
+                self.set_scope.retain(|_, s| !matches!(s, SetScope::Global));
+                if !set_id.is_empty() {
+                    self.set_scope.insert(set_id, scope);
+                }
+            }
+            SetScope::Channel(_) => {
+                self.set_scope.retain(|_, s| s != &scope);
+                if set_id.is_empty() {
+                    return;
+                }
+                if matches!(self.set_scope.get(&set_id), Some(SetScope::Global)) {
+                    return;
+                }
+                self.set_scope.insert(set_id, scope);
+            }
+        }
+    }
+
+    pub fn scope_for_set(&self, set_id: &str) -> Option<&SetScope> {
+        self.set_scope.get(set_id)
+    }
+
+    pub fn upsert_7tv(&mut self, scope: &SetScope, name: String, def: EmoteDef) {
+        match scope {
+            SetScope::Global => {
+                if self.global.get(&name).is_some_and(|d| d.provider != "7tv") {
+                    return;
+                }
+                self.global.insert(name, def);
+            }
+            SetScope::Channel(channel) => {
+                let Some(map) = self.channel.get_mut(channel) else {
+                    return;
+                };
+                if map.get(&name).is_some_and(|d| d.provider != "7tv") {
+                    return;
+                }
+                map.insert(name, def);
+            }
+        }
+    }
+
+    pub fn remove_7tv(&mut self, scope: &SetScope, name: &str) {
+        let Some(map) = self.map_mut(scope) else {
+            return;
+        };
+        if map.get(name).is_some_and(|d| d.provider == "7tv") {
+            map.remove(name);
+        }
+    }
+
+    pub fn rename_7tv(&mut self, scope: &SetScope, old: &str, new: String) {
+        if old == new {
+            return;
+        }
+        let Some(map) = self.map_mut(scope) else {
+            return;
+        };
+        let Some(def) = map.remove(old) else {
+            return;
+        };
+        if def.provider != "7tv" {
+            map.insert(old.to_string(), def);
+            return;
+        }
+        map.insert(new, def);
+    }
+
+    pub fn replace_7tv(&mut self, channel: &str, incoming: std::collections::HashMap<String, EmoteDef>) {
+        let Some(map) = self.channel.get_mut(channel) else {
+            return;
+        };
+        map.retain(|_, def| def.provider != "7tv");
+        map.extend(incoming);
+    }
+
+    fn map_mut(&mut self, scope: &SetScope) -> Option<&mut std::collections::HashMap<String, EmoteDef>> {
+        match scope {
+            SetScope::Global => Some(&mut self.global),
+            SetScope::Channel(channel) => self.channel.get_mut(channel),
+        }
     }
 }
 
@@ -187,5 +286,83 @@ mod tests {
         cat.insert_global("cvHazmat".into(), def("z", "7tv", true));
         let extra = attach_third_party("Kappa\tcvHazmat", &[], &cat, "xqc");
         assert!(extra.is_empty());
+    }
+
+    #[test]
+    fn upsert_remove_rename_7tv_on_bound_set() {
+        let mut cat = Catalog::default();
+        cat.bind_set("set1".into(), SetScope::Channel("xqc".into()));
+        cat.replace_channel("xqc".into(), std::collections::HashMap::new());
+        cat.upsert_7tv(
+            &SetScope::Channel("xqc".into()),
+            "cvHazmat".into(),
+            def("z", "7tv", true),
+        );
+        assert!(cat.lookup("xqc", "cvHazmat").is_some());
+        cat.rename_7tv(&SetScope::Channel("xqc".into()), "cvHazmat", "cvPaint".into());
+        assert!(cat.lookup("xqc", "cvHazmat").is_none());
+        assert!(cat.lookup("xqc", "cvPaint").is_some());
+        cat.remove_7tv(&SetScope::Channel("xqc".into()), "cvPaint");
+        assert!(cat.lookup("xqc", "cvPaint").is_none());
+    }
+
+    #[test]
+    fn replace_7tv_keeps_bttv() {
+        let mut cat = Catalog::default();
+        let mut map = std::collections::HashMap::new();
+        map.insert("Pog".into(), def("b", "bttv", false));
+        map.insert("cvHazmat".into(), def("z", "7tv", true));
+        cat.replace_channel("xqc".into(), map);
+        let mut incoming = std::collections::HashMap::new();
+        incoming.insert("widepeepoHappy".into(), def("n", "7tv", false));
+        cat.replace_7tv("xqc", incoming);
+        assert!(cat.lookup("xqc", "Pog").is_some());
+        assert!(cat.lookup("xqc", "cvHazmat").is_none());
+        assert!(cat.lookup("xqc", "widepeepoHappy").is_some());
+    }
+
+    #[test]
+    fn upsert_channel_without_map_is_noop() {
+        let mut cat = Catalog::default();
+        cat.bind_set("set1".into(), SetScope::Channel("xqc".into()));
+        cat.upsert_7tv(
+            &SetScope::Channel("xqc".into()),
+            "cvHazmat".into(),
+            def("z", "7tv", true),
+        );
+        assert!(cat.lookup("xqc", "cvHazmat").is_none());
+    }
+
+    #[test]
+    fn replace_7tv_without_map_is_noop() {
+        let mut cat = Catalog::default();
+        let mut incoming = std::collections::HashMap::new();
+        incoming.insert("widepeepoHappy".into(), def("n", "7tv", false));
+        cat.replace_7tv("xqc", incoming);
+        assert!(cat.lookup("xqc", "widepeepoHappy").is_none());
+    }
+
+    #[test]
+    fn bind_set_does_not_clobber_global() {
+        let mut cat = Catalog::default();
+        cat.bind_set("gid".into(), SetScope::Global);
+        cat.bind_set("gid".into(), SetScope::Channel("xqc".into()));
+        assert_eq!(cat.scope_for_set("gid"), Some(&SetScope::Global));
+        cat.clear_channels();
+        assert_eq!(cat.scope_for_set("gid"), Some(&SetScope::Global));
+    }
+
+    #[test]
+    fn upsert_does_not_overwrite_bttv() {
+        let mut cat = Catalog::default();
+        let mut map = std::collections::HashMap::new();
+        map.insert("Pog".into(), def("b", "bttv", false));
+        cat.replace_channel("xqc".into(), map);
+        cat.upsert_7tv(
+            &SetScope::Channel("xqc".into()),
+            "Pog".into(),
+            def("z", "7tv", false),
+        );
+        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("bttv"));
     }
 }
