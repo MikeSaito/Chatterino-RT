@@ -14,13 +14,17 @@ const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 const DEVICE_SCOPES: &str = "chat:read chat:write";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
+const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";
+const CHATTERINO_CLIENT_ID: &str = "g5zg0400k4vhrx2g6xi4hgveruamlv";
 const AUTH_FILE: &str = "twitch-auth.json";
 const HTTP_ATTEMPTS: u32 = 3;
+const MAX_LOGIN_BLOB: usize = 4096;
 
 #[derive(Clone)]
 pub struct StoredCreds {
     pub login: String,
     pub token: String,
+    pub client_id: String,
 }
 
 #[derive(Default)]
@@ -28,6 +32,7 @@ pub struct AuthInner {
     pub path: PathBuf,
     pub disk: Option<StoredCreds>,
     pub pending_user_code: Option<String>,
+    pub pending_paste: bool,
     pub poll_gen: u64,
     pub last_message: Option<String>,
 }
@@ -41,6 +46,7 @@ pub struct AuthInfo {
     pub from_env: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_code: Option<String>,
+    pub pending_paste: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -48,7 +54,9 @@ pub struct AuthInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStart {
-    pub user_code: String,
+    pub mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
     pub verification_uri: String,
     pub expires_in: u64,
 }
@@ -86,12 +94,15 @@ impl AuthFail {
 struct DiskFile {
     login: String,
     token: String,
+    #[serde(default)]
+    client_id: String,
 }
 
 #[derive(Serialize)]
 struct DiskFileOut<'a> {
     login: &'a str,
     token: &'a str,
+    client_id: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -127,13 +138,14 @@ pub fn emit(app: &AppHandle, shared: &Shared) {
 }
 
 pub fn snapshot(shared: &Shared) -> AuthInfo {
-    let (pending, disk, last_message) = match shared.auth.lock() {
+    let (pending, pending_paste, disk, last_message) = match shared.auth.lock() {
         Ok(inner) => (
             inner.pending_user_code.clone(),
+            inner.pending_paste,
             inner.disk.clone(),
             inner.last_message.clone(),
         ),
-        Err(_) => (None, None, None),
+        Err(_) => (None, false, None, None),
     };
     let env_pair = env_login_token();
     let from_env = env_pair.is_some();
@@ -153,6 +165,7 @@ pub fn snapshot(shared: &Shared) -> AuthInfo {
         login,
         from_env,
         user_code: pending,
+        pending_paste,
         message: last_message,
     }
 }
@@ -174,6 +187,26 @@ pub fn oauth_token(shared: &Shared) -> Option<String> {
     resolved_login_token(shared).map(|(_, token)| token)
 }
 
+pub fn resolved_client_id(shared: &Shared) -> String {
+    if let Some(id) = env_secret("TWITCH_CLIENT_ID") {
+        return id;
+    }
+    if let Some(id) = shared
+        .auth
+        .lock()
+        .ok()
+        .and_then(|inner| inner.disk.as_ref().map(|c| c.client_id.clone()))
+        .filter(|id| !id.is_empty() && id != "YOUR_API_KEY_HERE")
+    {
+        return id;
+    }
+    CHATTERINO_CLIENT_ID.to_string()
+}
+
+fn oauth_client_id() -> String {
+    env_secret("TWITCH_CLIENT_ID").unwrap_or_else(|| CHATTERINO_CLIENT_ID.to_string())
+}
+
 pub fn allowed_oauth_url(raw: &str) -> Result<String, String> {
     let parsed = Url::parse(raw.trim()).map_err(|_| "некорректный URL входа".to_string())?;
     if parsed.scheme() != "https" {
@@ -183,20 +216,158 @@ pub fn allowed_oauth_url(raw: &str) -> Result<String, String> {
         return Err("URL входа с userinfo запрещён".into());
     }
     let host = parsed.host_str().unwrap_or("");
+    if host == "chatterino.com" || host == "www.chatterino.com" {
+        if parsed.path() != "/client_login" {
+            return Err("URL входа Chatterino только /client_login".into());
+        }
+        return Ok(CHATTERINO_LOGIN.to_string());
+    }
     if !OAUTH_HOSTS.iter().any(|h| *h == host) {
         return Err("хост URL входа не из списка Twitch".into());
     }
     Ok(parsed.as_str().to_string())
 }
 
+pub async fn start_login(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
+    if oauth_client_id() == CHATTERINO_CLIENT_ID {
+        start_chatterino_page(app, shared).await
+    } else {
+        start_device(app, shared).await
+    }
+}
+
+async fn start_chatterino_page(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
+    let uri = allowed_oauth_url(CHATTERINO_LOGIN).map_err(AuthFail::invalid)?;
+    {
+        let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
+        inner.poll_gen = inner.poll_gen.wrapping_add(1);
+        inner.pending_user_code = None;
+        inner.pending_paste = true;
+        inner.last_message = None;
+    }
+    emit(&app, &shared);
+    if tauri_plugin_opener::open_url(&uri, None::<&str>).is_err() {
+        if let Ok(mut inner) = shared.auth.lock() {
+            inner.last_message = Some(format!("откройте вручную {CHATTERINO_LOGIN}"));
+        }
+        emit(&app, &shared);
+    }
+    Ok(DeviceStart {
+        mode: "paste".into(),
+        user_code: None,
+        verification_uri: uri,
+        expires_in: 0,
+    })
+}
+
+pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result<(), AuthFail> {
+    if env_login_token().is_some() {
+        return Err(AuthFail::config(
+            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
+        ));
+    }
+    let parsed = parse_chatterino_blob(&blob)?;
+    let expected = oauth_client_id();
+    if parsed.client_id != expected {
+        return Err(AuthFail::invalid(
+            "client_id в коде не совпадает с Chatterino",
+        ));
+    }
+    let gen = shared
+        .auth
+        .lock()
+        .map_err(|_| AuthFail::internal("lock"))?
+        .poll_gen;
+    let login = validate_login(&http_client(), &parsed.token)
+        .await
+        .map_err(AuthFail::internal)?;
+    if !still_current(&shared, gen) {
+        return Err(AuthFail::internal("вход отменён"));
+    }
+    if !persist_and_relogin(
+        &app,
+        &shared,
+        gen,
+        login,
+        parsed.token,
+        parsed.client_id,
+    )
+    .await
+    {
+        return Err(AuthFail::internal("не удалось сохранить вход"));
+    }
+    Ok(())
+}
+
+// SPDX-FileCopyrightText: 2017 Contributors to Chatterino <https://chatterino.com>
+// SPDX-License-Identifier: MIT
+//
+// Reimplementation of clipboard login parsing from Chatterino LoginDialog.cpp.
+// Not a copy of C++/Qt source.
+fn parse_chatterino_blob(raw: &str) -> Result<ParsedLogin, AuthFail> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err(AuthFail::invalid("вставьте код со страницы входа Chatterino"));
+    }
+    if raw.len() > MAX_LOGIN_BLOB {
+        return Err(AuthFail::invalid("код входа слишком длинный"));
+    }
+    let mut oauth_token = String::new();
+    let mut username = String::new();
+    let mut user_id = String::new();
+    let mut client_id = String::new();
+    for part in raw.split(';') {
+        let mut kv = part.splitn(2, '=');
+        let key = kv.next().unwrap_or("").trim();
+        let value = kv.next().unwrap_or("").trim();
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        match key {
+            "oauth_token" => oauth_token = value.to_string(),
+            "username" => username = value.to_string(),
+            "user_id" => user_id = value.to_string(),
+            "client_id" => client_id = value.to_string(),
+            _ => {}
+        }
+    }
+    let token = oauth_token.trim_start_matches("oauth:").to_string();
+    let login = username.trim().to_lowercase();
+    if token.is_empty() || token == "YOUR_API_KEY_HERE" {
+        return Err(AuthFail::invalid("в коде нет oauth_token"));
+    }
+    if !valid_login(&login) {
+        return Err(AuthFail::invalid("в коде нет корректного username"));
+    }
+    if user_id.is_empty() || !user_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AuthFail::invalid("в коде нет корректного user_id"));
+    }
+    if client_id.is_empty() || client_id == "YOUR_API_KEY_HERE" {
+        return Err(AuthFail::invalid("в коде нет client_id"));
+    }
+    Ok(ParsedLogin {
+        token,
+        client_id,
+    })
+}
+
+struct ParsedLogin {
+    token: String,
+    client_id: String,
+}
+
 pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
-    let client_id = env_secret("TWITCH_CLIENT_ID").ok_or_else(|| {
-        AuthFail::config("Задайте TWITCH_CLIENT_ID в окружении (не YOUR_API_KEY_HERE)")
-    })?;
+    let client_id = oauth_client_id();
+    if client_id == CHATTERINO_CLIENT_ID {
+        return Err(AuthFail::config(
+            "для Chatterino используется страница входа, не device code",
+        ));
+    }
     let gen = {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         inner.poll_gen = inner.poll_gen.wrapping_add(1);
         inner.pending_user_code = None;
+        inner.pending_paste = false;
         inner.last_message = None;
         inner.poll_gen
     };
@@ -210,6 +381,7 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
             return Err(AuthFail::internal("вход отменён"));
         }
         inner.pending_user_code = Some(device.user_code.clone());
+        inner.pending_paste = false;
         inner.last_message = None;
     }
     emit(&app, &shared);
@@ -231,7 +403,8 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
     });
 
     Ok(DeviceStart {
-        user_code: device.user_code,
+        mode: "device".into(),
+        user_code: Some(device.user_code),
         verification_uri: uri,
         expires_in,
     })
@@ -242,6 +415,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         inner.poll_gen = inner.poll_gen.wrapping_add(1);
         inner.pending_user_code = None;
+        inner.pending_paste = false;
         inner.disk = None;
         inner.last_message = None;
         (inner.path.clone(), inner.poll_gen)
@@ -275,6 +449,7 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
         };
         inner.poll_gen = inner.poll_gen.wrapping_add(1);
         inner.pending_user_code = None;
+        inner.pending_paste = false;
         inner.disk = None;
         inner.last_message = Some(message.to_string());
         (inner.path.clone(), inner.poll_gen)
@@ -331,7 +506,15 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
             TokenPoll::Ok(token) => {
                 match validate_login(&client, &token).await {
                     Ok(login) => {
-                        if persist_and_relogin(&app, &shared, job.gen, login, token).await {
+                        if persist_and_relogin(
+                            &app,
+                            &shared,
+                            job.gen,
+                            login,
+                            token,
+                            oauth_client_id(),
+                        )
+                        .await {
                             return;
                         }
                     }
@@ -353,6 +536,7 @@ async fn persist_and_relogin(
     gen: u64,
     login: String,
     token: String,
+    client_id: String,
 ) -> bool {
     let path = {
         let inner = match shared.auth.lock() {
@@ -364,7 +548,7 @@ async fn persist_and_relogin(
         }
         inner.path.clone()
     };
-    if let Err(e) = save_file(&path, &login, &token) {
+    if let Err(e) = save_file(&path, &login, &token, &client_id) {
         finish_pending(app, shared, gen, Some(&e));
         return false;
     }
@@ -384,8 +568,10 @@ async fn persist_and_relogin(
         inner.disk = Some(StoredCreds {
             login: login.clone(),
             token,
+            client_id,
         });
         inner.pending_user_code = None;
+        inner.pending_paste = false;
         inner.last_message = None;
     }
     request_relogin(shared).await;
@@ -397,14 +583,20 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
     if env_login_token().is_some() {
         return;
     }
-    let token = match shared.auth.lock().ok().and_then(|inner| {
-        inner.disk.as_ref().map(|c| c.token.clone())
-    }) {
-        Some(t) => t,
-        None => return,
+    let (token, gen) = match shared.auth.lock() {
+        Ok(inner) => match inner.disk.as_ref() {
+            Some(c) => (c.token.clone(), inner.poll_gen),
+            None => return,
+        },
+        Err(_) => return,
     };
     if validate_login(&http_client(), &token).await.is_err() {
-        reject_session(app, shared, "сохранённый вход недействителен").await;
+        let still = shared.auth.lock().ok().is_some_and(|inner| {
+            inner.poll_gen == gen && inner.disk.as_ref().is_some_and(|c| c.token == token)
+        });
+        if still {
+            reject_session(app, shared, "сохранённый вход недействителен").await;
+        }
     }
 }
 
@@ -417,6 +609,7 @@ fn finish_pending(app: &AppHandle, shared: &Shared, gen: u64, message: Option<&s
             return;
         }
         inner.pending_user_code = None;
+        inner.pending_paste = false;
         inner.last_message = message.map(str::to_string);
     }
     emit(app, shared);
@@ -635,7 +828,15 @@ fn load_file(path: &Path) -> Option<StoredCreds> {
     if !valid_login(&login) || token.is_empty() || token == "YOUR_API_KEY_HERE" {
         return None;
     }
-    Some(StoredCreds { login, token })
+    Some(StoredCreds {
+        login,
+        token,
+        client_id: if parsed.client_id.is_empty() || parsed.client_id == "YOUR_API_KEY_HERE" {
+            CHATTERINO_CLIENT_ID.to_string()
+        } else {
+            parsed.client_id.trim().to_string()
+        },
+    })
 }
 
 fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
@@ -649,14 +850,19 @@ fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
     }
 }
 
-fn save_file(path: &Path, login: &str, token: &str) -> Result<(), String> {
+fn save_file(path: &Path, login: &str, token: &str, client_id: &str) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("каталог конфигурации не задан".into());
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string(&DiskFileOut { login, token }).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&DiskFileOut {
+        login,
+        token,
+        client_id,
+    })
+    .map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -682,6 +888,9 @@ mod tests {
 
     #[test]
     fn oauth_url_allowlist() {
+        assert!(allowed_oauth_url("https://chatterino.com/client_login").is_ok());
+        assert!(allowed_oauth_url("https://www.chatterino.com/client_login").is_ok());
+        assert!(allowed_oauth_url("https://chatterino.com/other").is_err());
         assert!(allowed_oauth_url("https://www.twitch.tv/activate").is_ok());
         assert!(allowed_oauth_url("https://id.twitch.tv/oauth2/device").is_ok());
         assert!(allowed_oauth_url("http://www.twitch.tv/activate").is_err());
@@ -690,5 +899,19 @@ mod tests {
         assert!(allowed_oauth_url("https://www.twitch.tv.evil.com/activate").is_err());
         assert!(allowed_oauth_url("javascript:alert(1)").is_err());
         assert!(allowed_oauth_url("https://www.twitch.tv.attacker.com/").is_err());
+    }
+
+    #[test]
+    fn parses_chatterino_login_blob() {
+        let blob = format!(
+            "oauth_token=abc123;username=TestUser;user_id=42;client_id={CHATTERINO_CLIENT_ID}"
+        );
+        let parsed = parse_chatterino_blob(&blob).unwrap();
+        assert_eq!(parsed.token, "abc123");
+        assert_eq!(parsed.client_id, CHATTERINO_CLIENT_ID);
+        assert!(parse_chatterino_blob("oauth_token=abc;username=bad name;user_id=1;client_id=x")
+            .is_err());
+        assert!(parse_chatterino_blob("").is_err());
+        assert!(parse_chatterino_blob("javascript:alert(1)").is_err());
     }
 }

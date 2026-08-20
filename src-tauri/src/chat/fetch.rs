@@ -36,6 +36,7 @@ pub async fn load_channel(
     login: &str,
     room_id: &str,
     token: Option<&str>,
+    client_id: &str,
 ) {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
@@ -69,7 +70,7 @@ pub async fn load_channel(
     if let Ok(mut cat) = catalog.lock() {
         cat.replace_channel(login.to_string(), map);
     }
-    super::helix::load_channel(badges, cheers, hub, login, room_id, token).await;
+    super::helix::load_channel(badges, cheers, hub, login, room_id, token, client_id).await;
 }
 
 fn http_client() -> reqwest::Client {

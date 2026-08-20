@@ -71,8 +71,12 @@ pub fn resolve_badge_urls(badges: &mut [Badge], catalog: &BadgeCatalog, channel:
     }
 }
 
-pub async fn load_global_badges(catalog: &Arc<Mutex<BadgeCatalog>>, token: Option<&str>) {
-    let Some((client_id, token)) = helix_creds(token) else {
+pub async fn load_global_badges(
+    catalog: &Arc<Mutex<BadgeCatalog>>,
+    token: Option<&str>,
+    client_id: &str,
+) {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
         return;
     };
     let client = http_client();
@@ -101,8 +105,9 @@ pub async fn load_channel(
     login: &str,
     room_id: &str,
     token: Option<&str>,
+    client_id: &str,
 ) {
-    let Some((client_id, token)) = helix_creds(token) else {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
         return;
     };
     if !still_active(hub, login) {
@@ -177,8 +182,11 @@ fn commit_if_active<T>(
     write(&mut cat);
 }
 
-pub fn helix_creds(token: Option<&str>) -> Option<(String, String)> {
-    let client_id = env_secret("TWITCH_CLIENT_ID")?;
+pub fn helix_creds(token: Option<&str>, client_id: &str) -> Option<(String, String)> {
+    if client_id.is_empty() || client_id == "YOUR_API_KEY_HERE" {
+        return None;
+    }
+    let client_id = client_id.to_string();
     let token = if let Some(t) = token {
         let t = t.trim().trim_start_matches("oauth:");
         if t.is_empty() || t == "YOUR_API_KEY_HERE" {

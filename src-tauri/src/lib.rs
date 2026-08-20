@@ -2,8 +2,8 @@ mod chat;
 mod security;
 
 use chat::commands::{
-    auth_logout, auth_start, auth_status, chat_join, chat_part, chat_send, chat_snapshot,
-    open_chat_link,
+    auth_import, auth_logout, auth_start, auth_status, chat_join, chat_part, chat_send,
+    chat_snapshot, open_chat_link,
 };
 use chat::state::{IrcCmd, Shared};
 use tauri::Manager;
@@ -28,6 +28,7 @@ pub fn run() {
             open_chat_link,
             auth_start,
             auth_status,
+            auth_import,
             auth_logout
         ])
         .build(tauri::generate_context!())

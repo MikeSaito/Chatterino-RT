@@ -225,8 +225,17 @@ button:disabled {
 }
 
 #auth-signin,
-#auth-logout {
+#auth-logout,
+#auth-import {
   width: 100%;
+}
+
+#auth-paste {
+  width: 100%;
+  resize: none;
+  min-height: 64px;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .sr-only {

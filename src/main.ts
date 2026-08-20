@@ -34,6 +34,8 @@ async function boot(): Promise<void> {
   const authSignin = document.querySelector<HTMLButtonElement>("#auth-signin");
   const authLogout = document.querySelector<HTMLButtonElement>("#auth-logout");
   const authDevice = document.querySelector<HTMLElement>("#auth-device");
+  const authPaste = document.querySelector<HTMLTextAreaElement>("#auth-paste");
+  const authImport = document.querySelector<HTMLButtonElement>("#auth-import");
   if (
     !canvas ||
     !pane ||
@@ -50,7 +52,9 @@ async function boot(): Promise<void> {
     !authLogin ||
     !authSignin ||
     !authLogout ||
-    !authDevice
+    !authDevice ||
+    !authPaste ||
+    !authImport
   ) {
     return;
   }
@@ -66,6 +70,8 @@ async function boot(): Promise<void> {
   const signinBtn = authSignin;
   const logoutBtn = authLogout;
   const deviceEl = authDevice;
+  const pasteEl = authPaste;
+  const importBtn = authImport;
 
   const app = await createChatApp(canvas, pane);
   const ring = new MessageRing(app, new TextureLru());
@@ -118,6 +124,10 @@ async function boot(): Promise<void> {
     void logout();
   });
 
+  importBtn.addEventListener("click", () => {
+    void importLogin();
+  });
+
   try {
     applyAuth(await invoke<AuthInfo>("auth_status"));
   } catch (err) {
@@ -127,15 +137,22 @@ async function boot(): Promise<void> {
   function applyAuth(info: AuthInfo): void {
     lastAuth = info;
     const signed = Boolean(info.login);
-    const pending = Boolean(info.userCode);
+    const pending = Boolean(info.userCode) || Boolean(info.pendingPaste);
     loginEl.textContent = info.login ? info.login : "";
     signinBtn.hidden = signed || pending;
     signinBtn.disabled = pending;
     logoutBtn.hidden = !((signed && !info.fromEnv) || pending);
     logoutBtn.textContent = signed ? "Выйти" : "Отмена";
+    pasteEl.hidden = !info.pendingPaste;
+    importBtn.hidden = !info.pendingPaste;
     if (info.userCode) {
       deviceEl.hidden = false;
       deviceEl.textContent = `код: ${info.userCode}`;
+    } else if (info.pendingPaste) {
+      deviceEl.hidden = false;
+      deviceEl.textContent =
+        info.message ||
+        "Войдите на chatterino.com/client_login, скопируйте строку и вставьте сюда";
     } else if (info.message && !signed) {
       deviceEl.hidden = false;
       deviceEl.textContent = info.message;
@@ -158,14 +175,44 @@ async function boot(): Promise<void> {
   async function startLogin(): Promise<void> {
     signinBtn.disabled = true;
     try {
-      const started = await invoke<{ userCode: string }>("auth_start");
-      deviceEl.hidden = false;
-      deviceEl.textContent = `код: ${started.userCode}`;
+      const started = await invoke<{
+        mode: string;
+        userCode?: string;
+      }>("auth_start");
+      if (started.mode === "paste") {
+        pasteEl.hidden = false;
+        importBtn.hidden = false;
+        deviceEl.hidden = false;
+        deviceEl.textContent =
+          "Войдите на chatterino.com/client_login, скопируйте строку и вставьте сюда";
+      } else if (started.userCode) {
+        deviceEl.hidden = false;
+        deviceEl.textContent = `код: ${started.userCode}`;
+      }
     } catch (err) {
       deviceEl.hidden = false;
       deviceEl.textContent = formatError(err);
     } finally {
       signinBtn.disabled = false;
+    }
+  }
+
+  async function importLogin(): Promise<void> {
+    const blob = pasteEl.value;
+    importBtn.disabled = true;
+    try {
+      await invoke("auth_import", { blob });
+      pasteEl.value = "";
+      try {
+        await navigator.clipboard.writeText("");
+      } catch {
+        /* clipboard may be denied */
+      }
+    } catch (err) {
+      deviceEl.hidden = false;
+      deviceEl.textContent = formatError(err);
+    } finally {
+      importBtn.disabled = false;
     }
   }
 

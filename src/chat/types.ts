@@ -99,5 +99,6 @@ export type AuthInfo = {
   canSend: boolean;
   fromEnv: boolean;
   userCode?: string;
+  pendingPaste?: boolean;
   message?: string;
 };

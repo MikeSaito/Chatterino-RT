@@ -450,9 +450,17 @@ fn dispatch_line(
                         let login_s = login.to_string();
                         let id_s = id.to_string();
                         let token = auth::oauth_token(shared);
+                        let client_id = auth::resolved_client_id(shared);
                         tauri::async_runtime::spawn(async move {
                             fetch::load_channel(
-                                &cat, &badges, &cheers, &hub, &login_s, &id_s, token.as_deref(),
+                                &cat,
+                                &badges,
+                                &cheers,
+                                &hub,
+                                &login_s,
+                                &id_s,
+                                token.as_deref(),
+                                &client_id,
                             )
                             .await;
                         });
@@ -575,8 +583,9 @@ fn credentials(shared: &Shared) -> (String, Option<String>) {
 fn spawn_helix_globals(shared: &Shared) {
     let badges = shared.badges.clone();
     let token = auth::oauth_token(shared);
+    let client_id = auth::resolved_client_id(shared);
     tauri::async_runtime::spawn(async move {
-        super::helix::load_global_badges(&badges, token.as_deref()).await;
+        super::helix::load_global_badges(&badges, token.as_deref(), &client_id).await;
     });
 }
 

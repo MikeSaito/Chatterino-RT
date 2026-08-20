@@ -138,7 +138,16 @@ pub async fn auth_start(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<DeviceStart, ApiError> {
-    Ok(auth::start_device(app, state.inner().clone()).await?)
+    Ok(auth::start_login(app, state.inner().clone()).await?)
+}
+
+#[tauri::command]
+pub async fn auth_import(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    blob: String,
+) -> Result<(), ApiError> {
+    Ok(auth::import_blob(app, state.inner().clone(), blob).await?)
 }
 
 #[tauri::command]
