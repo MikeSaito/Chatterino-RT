@@ -5,9 +5,11 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::cheers::attach_cheers;
 use super::constants::BATCH_FLUSH_MS;
-use super::emotes::{attach_third_party, Catalog};
+use super::emotes::attach_third_party;
 use super::fetch;
+use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
 use super::spans::decorate_text_spans;
 use super::state::Shared;
@@ -38,7 +40,7 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 }
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
-    fetch::load_globals(&shared.catalog).await;
+    fetch::load_globals(&shared.catalog, &shared.badges).await;
     let mut wanted: Option<String> = None;
     let mut join_blocked = false;
     let mut last_error: Option<String> = None;
@@ -343,18 +345,19 @@ fn dispatch_line(
                     if need {
                         *loaded_room = Some((login.to_string(), id.to_string()));
                         let cat = shared.catalog.clone();
+                        let badges = shared.badges.clone();
+                        let cheers = shared.cheers.clone();
                         let hub = shared.hub.clone();
                         let login_s = login.to_string();
                         let id_s = id.to_string();
                         tauri::async_runtime::spawn(async move {
-                            fetch::load_channel(&cat, &hub, &login_s, &id_s).await;
+                            fetch::load_channel(&cat, &badges, &cheers, &hub, &login_s, &id_s)
+                                .await;
                         });
                     }
                 }
             }
-            if let Ok(cat) = shared.catalog.lock() {
-                decorate_event(&mut event, &cat, &channel);
-            }
+            decorate_event(&mut event, shared, &channel);
             let batch = shared
                 .hub
                 .lock()
@@ -410,24 +413,40 @@ fn flush_emit(app: &AppHandle, shared: &Shared) {
     }
 }
 
-fn decorate_event(event: &mut ChatEvent, catalog: &Catalog, channel: &str) {
+pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &str) {
     match event {
         ChatEvent::Privmsg {
             text,
             emote_spans,
             link_spans,
             mention_spans,
+            badges,
+            bits,
             ..
         } => {
-            let extra = attach_third_party(text, emote_spans, catalog, channel);
-            emote_spans.extend(extra);
+            if let Some(n) = *bits {
+                if let Ok(cat) = shared.cheers.lock() {
+                    let extra = attach_cheers(text, emote_spans, &cat, channel, n);
+                    emote_spans.extend(extra);
+                }
+            }
+            if let Ok(cat) = shared.catalog.lock() {
+                let extra = attach_third_party(text, emote_spans, &cat, channel);
+                emote_spans.extend(extra);
+            }
+            if let Ok(cat) = shared.badges.lock() {
+                resolve_badge_urls(badges, &cat, channel);
+            }
             emote_spans.sort_by_key(|s| s.start);
             let (links, mentions) = decorate_text_spans(text, emote_spans);
             *link_spans = links;
             *mention_spans = mentions;
         }
-        ChatEvent::Usernotice { privmsg: Some(inner), .. } => {
-            decorate_event(inner, catalog, channel);
+        ChatEvent::Usernotice {
+            privmsg: Some(inner),
+            ..
+        } => {
+            decorate_event(inner, shared, channel);
         }
         _ => {}
     }

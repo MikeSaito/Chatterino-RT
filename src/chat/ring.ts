@@ -10,16 +10,19 @@ import {
 } from "pixi.js";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  BADGE_SIZE,
+  BADGE_SLOTS_PER_ROW,
   CHAR_WIDTH,
   EMOTE_SLOTS_PER_ROW,
   FONT_SIZE,
   LINE_HEIGHT,
   MESSAGE_POOL_SIZE,
 } from "../constants";
-import type { ChatEvent, EmoteSpan, LinkSpan } from "./types";
+import type { Badge, ChatEvent, EmoteSpan, LinkSpan } from "./types";
 import { TextureLru } from "./textures";
 
 const TIME_GAP = 8;
+const BADGE_GAP = 2;
 
 type Slot = {
   root: Container;
@@ -28,6 +31,9 @@ type Slot = {
   body: BitmapText;
   emotes: Sprite[];
   emoteKeys: string[];
+  badges: Sprite[];
+  badgeKeys: string[];
+  badgesRaw: Badge[];
   msgId: string;
   login: string;
   bodyRaw: string;
@@ -43,6 +49,7 @@ type Drawn = {
   body: string;
   spans: EmoteSpan[];
   links: LinkSpan[];
+  badges: Badge[];
 };
 
 export class MessageRing {
@@ -105,6 +112,17 @@ export class MessageRing {
         root.addChild(spr);
         emotes.push(spr);
       }
+      const badges: Sprite[] = [];
+      for (let b = 0; b < BADGE_SLOTS_PER_ROW; b += 1) {
+        const spr = new Sprite(Texture.EMPTY);
+        spr.visible = false;
+        spr.eventMode = "none";
+        spr.width = BADGE_SIZE;
+        spr.height = BADGE_SIZE;
+        spr.y = (LINE_HEIGHT - BADGE_SIZE) / 2;
+        root.addChild(spr);
+        badges.push(spr);
+      }
       root.addChild(time, nick, body);
       const slot: Slot = {
         root,
@@ -113,6 +131,9 @@ export class MessageRing {
         body,
         emotes,
         emoteKeys: [],
+        badges,
+        badgeKeys: [],
+        badgesRaw: [],
         msgId: "",
         login: "",
         bodyRaw: "",
@@ -200,7 +221,12 @@ export class MessageRing {
     for (const key of slot.emoteKeys) {
       this.textures.release(key);
     }
+    for (const key of slot.badgeKeys) {
+      this.textures.release(key);
+    }
     slot.emoteKeys = [];
+    slot.badgeKeys = [];
+    slot.badgesRaw = [];
     slot.root.visible = false;
     slot.root.cursor = "default";
     slot.time.text = "";
@@ -213,6 +239,10 @@ export class MessageRing {
     slot.linkSpans = [];
     slot.visibleChars = 0;
     for (const spr of slot.emotes) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    for (const spr of slot.badges) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
     }
@@ -229,22 +259,51 @@ export class MessageRing {
     slot.bodyRaw = drawn.body;
     slot.spansRaw = drawn.spans;
     slot.linkSpans = drawn.links;
+    slot.badgesRaw = drawn.badges;
+    for (const spr of slot.emotes) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    for (const spr of slot.badges) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
     for (const key of slot.emoteKeys) {
       this.textures.release(key);
     }
+    for (const key of slot.badgeKeys) {
+      this.textures.release(key);
+    }
     slot.emoteKeys = [];
+    slot.badgeKeys = [];
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = drawn.spans[i];
       if (!span) {
-        spr.visible = false;
-        spr.texture = Texture.EMPTY;
         continue;
       }
-      const key = `${span.provider}:${span.emoteId}`;
+      const key =
+        span.provider === "cheer"
+          ? `cheer:${span.url}`
+          : `${span.provider}:${span.emoteId}`;
       slot.emoteKeys.push(key);
       this.textures.acquire(key);
       void this.textures.load(key, span.url).then((tex) => {
+        if (tex && slot.msgId === event.id) {
+          spr.texture = tex;
+        }
+      });
+    }
+    for (let i = 0; i < slot.badges.length; i += 1) {
+      const spr = slot.badges[i];
+      const badge = drawn.badges[i];
+      if (!badge || !badge.url) {
+        continue;
+      }
+      const key = `badge:${badge.url}`;
+      slot.badgeKeys.push(key);
+      this.textures.acquire(key);
+      void this.textures.load(key, badge.url).then((tex) => {
         if (tex && slot.msgId === event.id) {
           spr.texture = tex;
         }
@@ -271,12 +330,14 @@ export class MessageRing {
           body: `${prefix}${event.text}`,
           spans: shiftSpans(event.emoteSpans, shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
+          badges: badgesWithUrl(event.badges),
         };
       }
       case "usernotice": {
         let body = event.systemText;
         let spans: EmoteSpan[] = [];
         let links: LinkSpan[] = [];
+        let badges: Badge[] = [];
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
           const sep = body.length > 0 ? " " : "";
@@ -285,6 +346,7 @@ export class MessageRing {
           body += `${sep}${innerPrefix}${inner.text}`;
           spans = shiftSpans(inner.emoteSpans, shift);
           links = shiftSpans(inner.linkSpans ?? [], shift);
+          badges = badgesWithUrl(inner.badges);
         }
         return {
           time,
@@ -293,6 +355,7 @@ export class MessageRing {
           body,
           spans,
           links,
+          badges,
         };
       }
       case "clearchat":
@@ -303,6 +366,7 @@ export class MessageRing {
           body: clearchatText(event.targetLogin, event.durationSec),
           spans: [],
           links: [],
+          badges: [],
         };
       case "roomstate":
         return {
@@ -312,6 +376,7 @@ export class MessageRing {
           body: `emote:${event.emoteOnly} subs:${event.subsOnly} slow:${event.slowSec}`,
           spans: [],
           links: [],
+          badges: [],
         };
       case "notice":
         return {
@@ -321,6 +386,7 @@ export class MessageRing {
           body: event.text,
           spans: [],
           links: [],
+          badges: [],
         };
       default:
         return {
@@ -330,6 +396,7 @@ export class MessageRing {
           body: event.kind,
           spans: [],
           links: [],
+          badges: [],
         };
     }
   }
@@ -337,9 +404,22 @@ export class MessageRing {
   private paintClip(slot: Slot): void {
     const timeW = 5 * CHAR_WIDTH + TIME_GAP;
     slot.time.x = 0;
-    slot.nick.x = timeW;
+    const badgeN = slot.badgesRaw.length;
+    const badgeBand =
+      badgeN === 0 ? 0 : badgeN * BADGE_SIZE + (badgeN - 1) * BADGE_GAP;
+    for (let i = 0; i < slot.badges.length; i += 1) {
+      const spr = slot.badges[i];
+      const badge = slot.badgesRaw[i];
+      if (!badge) {
+        spr.visible = false;
+        continue;
+      }
+      spr.visible = true;
+      spr.x = timeW + i * (BADGE_SIZE + BADGE_GAP);
+    }
+    slot.nick.x = timeW + badgeBand;
     const nickW = Math.max(slot.nick.text.length * CHAR_WIDTH, 8);
-    const bodyX = timeW + nickW + TIME_GAP;
+    const bodyX = timeW + badgeBand + nickW + TIME_GAP;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
@@ -450,6 +530,20 @@ function shiftSpans<T extends { start: number; end: number }>(spans: T[], shift:
     start: span.start + shift,
     end: span.end + shift,
   }));
+}
+
+function badgesWithUrl(badges: Badge[]): Badge[] {
+  const out: Badge[] = [];
+  for (const badge of badges) {
+    if (!badge.url) {
+      continue;
+    }
+    out.push(badge);
+    if (out.length >= BADGE_SLOTS_PER_ROW) {
+      break;
+    }
+  }
+  return out;
 }
 
 function parseColor(color: string): number {

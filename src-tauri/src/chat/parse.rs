@@ -1,4 +1,4 @@
-use super::types::{ChatEvent, EmoteSpan};
+use super::types::{Badge, ChatEvent, EmoteSpan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedLine {
@@ -334,10 +334,27 @@ fn login_from_prefix(prefix: &str) -> Option<String> {
     }
 }
 
-fn parse_badges(raw: Option<&str>) -> Vec<String> {
+fn parse_badges(raw: Option<&str>) -> Vec<Badge> {
     match raw {
         None | Some("") => Vec::new(),
-        Some(s) => s.split(',').filter(|p| !p.is_empty()).map(|s| s.to_string()).collect(),
+        Some(s) => s
+            .split(',')
+            .filter_map(|part| {
+                let part = part.trim();
+                if part.is_empty() {
+                    return None;
+                }
+                let (set, version) = part.split_once('/')?;
+                if set.is_empty() || version.is_empty() {
+                    return None;
+                }
+                Some(Badge {
+                    set: set.to_string(),
+                    version: version.to_string(),
+                    url: None,
+                })
+            })
+            .collect(),
     }
 }
 
@@ -434,6 +451,25 @@ mod tests {
                 assert_eq!(emote_spans[0].provider, "twitch");
             }
             other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_badge_set_and_version() {
+        let line = "@badges=broadcaster/1,subscriber/12;id=abc;display-name=Test;user-id=1 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :hi";
+        match parse_line(line, 1) {
+            ParsedLine::Event {
+                event: ChatEvent::Privmsg { badges, .. },
+                ..
+            } => {
+                assert_eq!(badges.len(), 2);
+                assert_eq!(badges[0].set, "broadcaster");
+                assert_eq!(badges[0].version, "1");
+                assert!(badges[0].url.is_none());
+                assert_eq!(badges[1].set, "subscriber");
+                assert_eq!(badges[1].version, "12");
+            }
+            other => panic!("{other:?}"),
         }
     }
 

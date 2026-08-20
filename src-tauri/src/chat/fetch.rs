@@ -2,12 +2,17 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::cheers::CheerCatalog;
 use super::emotes::{Catalog, EmoteDef};
+use super::helix::BadgeCatalog;
 use super::hub::Hub;
 
 const ATTEMPTS: u32 = 3;
 
-pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
+pub async fn load_globals(
+    catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>,
+    badges: &std::sync::Arc<std::sync::Mutex<BadgeCatalog>>,
+) {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await {
@@ -24,10 +29,13 @@ pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
             cat.insert_global(k, v);
         }
     }
+    super::helix::load_global_badges(badges).await;
 }
 
 pub async fn load_channel(
     catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>,
+    badges: &std::sync::Arc<std::sync::Mutex<BadgeCatalog>>,
+    cheers: &std::sync::Arc<std::sync::Mutex<CheerCatalog>>,
     hub: &std::sync::Arc<std::sync::Mutex<Hub>>,
     login: &str,
     room_id: &str,
@@ -64,6 +72,7 @@ pub async fn load_channel(
     if let Ok(mut cat) = catalog.lock() {
         cat.replace_channel(login.to_string(), map);
     }
+    super::helix::load_channel(badges, cheers, hub, login, room_id).await;
 }
 
 fn http_client() -> reqwest::Client {

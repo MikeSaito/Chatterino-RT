@@ -55,6 +55,15 @@ pub struct MentionSpan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Badge {
+    pub set: String,
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChatEvent {
     #[serde(rename = "privmsg")]
@@ -65,7 +74,7 @@ pub enum ChatEvent {
         login: String,
         display_name: String,
         color: String,
-        badges: Vec<String>,
+        badges: Vec<Badge>,
         text: String,
         emote_spans: Vec<EmoteSpan>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

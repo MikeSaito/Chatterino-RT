@@ -46,6 +46,12 @@ pub async fn chat_join(
     if let Ok(mut cat) = state.catalog.lock() {
         cat.retain_channel(&normalized);
     }
+    if let Ok(mut cat) = state.badges.lock() {
+        cat.retain_channel(&normalized);
+    }
+    if let Ok(mut cat) = state.cheers.lock() {
+        cat.retain_channel(&normalized);
+    }
     Ok(normalized)
 }
 
@@ -68,6 +74,12 @@ pub async fn chat_part(state: tauri::State<'_, Shared>) -> Result<(), ApiError> 
     if let Ok(mut cat) = state.catalog.lock() {
         cat.clear_channels();
     }
+    if let Ok(mut cat) = state.badges.lock() {
+        cat.clear_channels();
+    }
+    if let Ok(mut cat) = state.cheers.lock() {
+        cat.clear_channels();
+    }
     Ok(())
 }
 
@@ -77,11 +89,17 @@ pub fn chat_snapshot(
     channel: String,
 ) -> Result<ChatBatch, ApiError> {
     let normalized = normalize_channel(&channel)?;
-    let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-    hub.snapshot(&normalized).ok_or_else(|| ApiError {
-        code: "not_found".into(),
-        message: format!("нет истории для {normalized}"),
-    })
+    let mut batch = {
+        let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.snapshot(&normalized).ok_or_else(|| ApiError {
+            code: "not_found".into(),
+            message: format!("нет истории для {normalized}"),
+        })?
+    };
+    for event in &mut batch.events {
+        super::irc::decorate_event(event, &state, &normalized);
+    }
+    Ok(batch)
 }
 
 #[tauri::command]

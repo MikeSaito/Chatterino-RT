@@ -34,11 +34,11 @@ export class TextureLru {
 
   async load(id: string, url: string): Promise<Texture | null> {
     const cached = this.get(id);
-    if (cached) {
+    if (cached && this.urls.get(id) === url) {
       return cached;
     }
     const pending = this.inflight.get(id);
-    if (pending) {
+    if (pending && this.urls.get(id) === url) {
       return pending;
     }
     const job = Assets.load<Texture>(url)
@@ -53,6 +53,7 @@ export class TextureLru {
         return null;
       });
     this.inflight.set(id, job);
+    this.urls.set(id, url);
     return job;
   }
 
