@@ -9,10 +9,7 @@ use super::hub::Hub;
 
 const ATTEMPTS: u32 = 3;
 
-pub async fn load_globals(
-    catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>,
-    badges: &std::sync::Arc<std::sync::Mutex<BadgeCatalog>>,
-) {
+pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await {
@@ -29,7 +26,6 @@ pub async fn load_globals(
             cat.insert_global(k, v);
         }
     }
-    super::helix::load_global_badges(badges).await;
 }
 
 pub async fn load_channel(
@@ -39,6 +35,7 @@ pub async fn load_channel(
     hub: &std::sync::Arc<std::sync::Mutex<Hub>>,
     login: &str,
     room_id: &str,
+    token: Option<&str>,
 ) {
     let client = http_client();
     let mut map = std::collections::HashMap::new();
@@ -72,7 +69,7 @@ pub async fn load_channel(
     if let Ok(mut cat) = catalog.lock() {
         cat.replace_channel(login.to_string(), map);
     }
-    super::helix::load_channel(badges, cheers, hub, login, room_id).await;
+    super::helix::load_channel(badges, cheers, hub, login, room_id, token).await;
 }
 
 fn http_client() -> reqwest::Client {

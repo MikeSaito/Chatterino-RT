@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod channel;
 pub mod commands;
 pub mod constants;

@@ -6,6 +6,7 @@ use super::types::{ChatBatch, ChatEvent};
 #[derive(Default)]
 pub struct Hub {
     pub active: Option<String>,
+    pub joined: bool,
     buffers: HashMap<String, ChannelBuf>,
 }
 
@@ -43,9 +44,18 @@ impl Hub {
 
     pub fn set_active(&mut self, channel: Option<String>) {
         self.active = channel.clone();
+        self.joined = false;
         match &self.active {
             Some(ch) => self.buffers.retain(|k, _| k == ch),
             None => self.buffers.clear(),
+        }
+    }
+
+    pub fn set_joined(&mut self, channel: &str, yes: bool) {
+        if self.active.as_deref() == Some(channel) {
+            self.joined = yes;
+        } else if !yes {
+            self.joined = false;
         }
     }
 }
@@ -72,5 +82,15 @@ mod tests {
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
+    }
+
+    #[test]
+    fn set_active_clears_joined() {
+        let mut hub = Hub::default();
+        hub.set_active(Some("xqc".into()));
+        hub.set_joined("xqc", true);
+        assert!(hub.joined);
+        hub.set_active(Some("lirik".into()));
+        assert!(!hub.joined);
     }
 }

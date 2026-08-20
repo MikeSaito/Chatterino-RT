@@ -17,6 +17,12 @@
           <button type="submit">Join</button>
         </form>
         <ul id="channel-list"></ul>
+        <div id="auth-box">
+          <p id="auth-login"></p>
+          <button type="button" id="auth-signin">Войти</button>
+          <button type="button" id="auth-logout" hidden>Выйти</button>
+          <p id="auth-device" hidden></p>
+        </div>
       </aside>
       <div id="main">
         <header id="header">
@@ -42,7 +48,7 @@
                 id="composer-send"
                 type="submit"
                 disabled
-                title="Outgoing chat needs a Twitch OAuth login"
+                title="Нужен вход Twitch, чтобы отправлять сообщения"
               >
                 Send
               </button>

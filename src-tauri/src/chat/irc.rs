@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use futures_util::{Sink, SinkExt, StreamExt};
@@ -5,6 +6,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::auth;
 use super::cheers::attach_cheers;
 use super::constants::BATCH_FLUSH_MS;
 use super::emotes::attach_third_party;
@@ -12,20 +14,13 @@ use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
 use super::spans::decorate_text_spans;
-use super::state::Shared;
+use super::state::{IrcCmd, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
 const CLIENT_PING: Duration = Duration::from_secs(30);
 const PONG_TIMEOUT: Duration = Duration::from_secs(10);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
-
-#[derive(Debug, Clone)]
-pub enum IrcCmd {
-    Join(String),
-    Part,
-    Shutdown,
-}
 
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
     let (tx, rx) = mpsc::channel::<IrcCmd>(32);
@@ -40,11 +35,12 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 }
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
-    fetch::load_globals(&shared.catalog, &shared.badges).await;
+    fetch::load_globals(&shared.catalog).await;
     let mut wanted: Option<String> = None;
     let mut join_blocked = false;
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
+    let mut pending_out: VecDeque<(String, String)> = VecDeque::new();
     loop {
         match connect_session(
             &app,
@@ -54,12 +50,17 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
             &mut join_blocked,
             &mut last_error,
             &mut backoff,
+            &mut pending_out,
         )
         .await
         {
             SessionEnd::Shutdown => break,
-            SessionEnd::Reconnect => {
+            SessionEnd::Reconnect { wait } => {
                 emit_status(&app, ChatConnState::Reconnecting, wanted.as_deref(), None);
+                if !wait {
+                    backoff = Duration::from_secs(1);
+                    continue;
+                }
                 let sleep = tokio::time::sleep(backoff);
                 tokio::pin!(sleep);
                 tokio::select! {
@@ -81,6 +82,13 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                                 wanted = None;
                                 join_blocked = false;
                                 last_error = None;
+                                pending_out.clear();
+                            }
+                            Some(IrcCmd::Privmsg { channel, text }) => {
+                                pending_out.push_back((channel, text));
+                            }
+                            Some(IrcCmd::Relogin) => {
+                                backoff = Duration::from_secs(1);
                             }
                         }
                     }
@@ -92,7 +100,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
 
 enum SessionEnd {
     Shutdown,
-    Reconnect,
+    Reconnect { wait: bool },
 }
 
 async fn connect_session(
@@ -103,6 +111,7 @@ async fn connect_session(
     join_blocked: &mut bool,
     last_error: &mut Option<String>,
     backoff: &mut Duration,
+    pending_out: &mut VecDeque<(String, String)>,
 ) -> SessionEnd {
     if *join_blocked {
         emit_status(
@@ -117,11 +126,12 @@ async fn connect_session(
     let Ok(Ok((stream, _))) =
         tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::connect_async(IRC_URL)).await
     else {
-        return SessionEnd::Reconnect;
+        return SessionEnd::Reconnect { wait: true };
     };
     *backoff = Duration::from_secs(1);
     let (mut write, mut read) = stream.split();
-    let (nick, pass) = credentials();
+    let (nick, pass) = credentials(shared);
+    let authed = pass.is_some();
     let mut hello = vec!["CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership".to_string()];
     if let Some(token) = pass {
         hello.push(format!("PASS oauth:{token}"));
@@ -129,13 +139,16 @@ async fn connect_session(
     hello.push(format!("NICK {nick}"));
     for line in &hello {
         if send_line(&mut write, line).await.is_err() {
-            return SessionEnd::Reconnect;
+            return SessionEnd::Reconnect { wait: true };
         }
+    }
+    if authed {
+        spawn_helix_globals(shared);
     }
     if !*join_blocked {
         if let Some(ch) = wanted.clone() {
             if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-                return SessionEnd::Reconnect;
+                return SessionEnd::Reconnect { wait: true };
             }
         }
     }
@@ -156,15 +169,15 @@ async fn connect_session(
             _ = ticker.tick() => {
                 flush_emit(app, shared);
                 if pong_deadline.is_some_and(|d| Instant::now() >= d) {
-                    return SessionEnd::Reconnect;
+                    return SessionEnd::Reconnect { wait: true };
                 }
             }
             _ = ping_at.tick() => {
                 if pong_deadline.is_some() {
-                    return SessionEnd::Reconnect;
+                    return SessionEnd::Reconnect { wait: true };
                 }
                 if send_line(&mut write, "PING :webtv").await.is_err() {
-                    return SessionEnd::Reconnect;
+                    return SessionEnd::Reconnect { wait: true };
                 }
                 pong_deadline = Some(Instant::now() + PONG_TIMEOUT);
             }
@@ -182,9 +195,11 @@ async fn connect_session(
                         in_room = false;
                         *join_blocked = false;
                         *last_error = None;
+                        pending_out.clear();
                         emit_status(app, ChatConnState::Connected, None, None);
                     }
                     Some(IrcCmd::Join(ch)) => {
+                        pending_out.retain(|(c, _)| c == &ch);
                         *join_blocked = false;
                         *last_error = None;
                         if wanted.as_deref() == Some(ch.as_str()) {
@@ -194,7 +209,7 @@ async fn connect_session(
                             }
                             emit_status(app, ChatConnState::Connecting, Some(&ch), None);
                             if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-                                return SessionEnd::Reconnect;
+                                return SessionEnd::Reconnect { wait: true };
                             }
                             continue;
                         }
@@ -205,19 +220,38 @@ async fn connect_session(
                         }
                         loaded_room = None;
                         if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-                            return SessionEnd::Reconnect;
+                            return SessionEnd::Reconnect { wait: true };
                         }
+                    }
+                    Some(IrcCmd::Privmsg { channel, text }) => {
+                        pending_out.push_back((channel, text));
+                        if flush_outgoing(
+                            &mut write,
+                            wanted,
+                            in_room,
+                            *join_blocked,
+                            pending_out,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            return SessionEnd::Reconnect { wait: true };
+                        }
+                    }
+                    Some(IrcCmd::Relogin) => {
+                        let _ = send_ws(&mut write, Message::Close(None)).await;
+                        return SessionEnd::Reconnect { wait: false };
                     }
                 }
             }
             incoming = read.next() => {
                 match incoming {
-                    None => return SessionEnd::Reconnect,
-                    Some(Err(_)) => return SessionEnd::Reconnect,
-                    Some(Ok(Message::Close(_))) => return SessionEnd::Reconnect,
+                    None => return SessionEnd::Reconnect { wait: true },
+                    Some(Err(_)) => return SessionEnd::Reconnect { wait: true },
+                    Some(Ok(Message::Close(_))) => return SessionEnd::Reconnect { wait: true },
                     Some(Ok(Message::Ping(p))) => {
                         if send_ws(&mut write, Message::Pong(p)).await.is_err() {
-                            return SessionEnd::Reconnect;
+                            return SessionEnd::Reconnect { wait: true };
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
@@ -227,7 +261,7 @@ async fn connect_session(
                                 LineAction::None => {}
                                 LineAction::Pong(pong) => {
                                     if send_line(&mut write, &pong).await.is_err() {
-                                        return SessionEnd::Reconnect;
+                                        return SessionEnd::Reconnect { wait: true };
                                     }
                                 }
                                 LineAction::PongAck => {
@@ -235,16 +269,35 @@ async fn connect_session(
                                 }
                                 LineAction::Joined => {
                                     in_room = true;
+                                    if flush_outgoing(
+                                        &mut write,
+                                        wanted,
+                                        in_room,
+                                        *join_blocked,
+                                        pending_out,
+                                    )
+                                    .await
+                                    .is_err()
+                                    {
+                                        return SessionEnd::Reconnect { wait: true };
+                                    }
                                 }
                                 LineAction::LeftRoom => {
                                     in_room = false;
+                                    if let Some(ch) = wanted.as_deref() {
+                                        if let Ok(mut hub) = shared.hub.lock() {
+                                            hub.set_joined(ch, false);
+                                        }
+                                        auth::emit(app, shared);
+                                    }
                                 }
                                 LineAction::JoinFailed(msg) => {
                                     in_room = false;
                                     *join_blocked = true;
                                     *last_error = Some(msg);
+                                    pending_out.clear();
                                 }
-                                LineAction::Reconnect => return SessionEnd::Reconnect,
+                                LineAction::Reconnect => return SessionEnd::Reconnect { wait: true },
                             }
                         }
                     }
@@ -260,6 +313,37 @@ where
     S: Sink<Message> + Unpin,
 {
     send_ws(write, Message::Text(format!("{line}\r\n").into())).await
+}
+
+async fn flush_outgoing<S>(
+    write: &mut S,
+    wanted: &Option<String>,
+    in_room: bool,
+    join_blocked: bool,
+    pending: &mut VecDeque<(String, String)>,
+) -> Result<(), ()>
+where
+    S: Sink<Message> + Unpin,
+{
+    if !in_room || join_blocked {
+        return Ok(());
+    }
+    let mut rest = VecDeque::new();
+    while let Some((channel, text)) = pending.pop_front() {
+        if wanted.as_deref() != Some(channel.as_str()) {
+            continue;
+        }
+        if send_line(write, &format!("PRIVMSG #{channel} :{text}"))
+            .await
+            .is_err()
+        {
+            rest.push_back((channel, text));
+            rest.append(pending);
+            *pending = rest;
+            return Err(());
+        }
+    }
+    Ok(())
 }
 
 async fn send_ws<S>(write: &mut S, msg: Message) -> Result<(), ()>
@@ -328,11 +412,26 @@ fn dispatch_line(
                 && wanted.as_deref() == Some(channel.as_str());
             if joined {
                 emit_status(app, ChatConnState::Connected, Some(&channel), None);
+                if let Ok(mut hub) = shared.hub.lock() {
+                    hub.set_joined(&channel, true);
+                }
+                auth::emit(app, shared);
             }
             let mut failed: Option<String> = None;
             if let ChatEvent::Notice { id, text, .. } = &event {
+                if is_login_failure(&channel, id, text) {
+                    let app2 = app.clone();
+                    let shared2 = shared.clone();
+                    tauri::async_runtime::spawn(async move {
+                        auth::reject_session(app2, shared2, "вход IRC отклонён").await;
+                    });
+                }
                 if wanted.as_deref() == Some(channel.as_str()) && is_join_failure(id) {
                     emit_status(app, ChatConnState::Error, Some(&channel), Some(text));
+                    if let Ok(mut hub) = shared.hub.lock() {
+                        hub.set_joined(&channel, false);
+                    }
+                    auth::emit(app, shared);
                     failed = Some(text.clone());
                 }
             }
@@ -350,9 +449,12 @@ fn dispatch_line(
                         let hub = shared.hub.clone();
                         let login_s = login.to_string();
                         let id_s = id.to_string();
+                        let token = auth::oauth_token(shared);
                         tauri::async_runtime::spawn(async move {
-                            fetch::load_channel(&cat, &badges, &cheers, &hub, &login_s, &id_s)
-                                .await;
+                            fetch::load_channel(
+                                &cat, &badges, &cheers, &hub, &login_s, &id_s, token.as_deref(),
+                            )
+                            .await;
                         });
                     }
                 }
@@ -376,6 +478,16 @@ fn dispatch_line(
         }
         ParsedLine::Ignore => LineAction::None,
     }
+}
+
+fn is_login_failure(channel: &str, id: &str, text: &str) -> bool {
+    if channel != "*" && !channel.is_empty() {
+        return false;
+    }
+    id.eq_ignore_ascii_case("login_unsuccessful")
+        || text
+            .to_ascii_lowercase()
+            .contains("login authentication failed")
 }
 
 fn is_join_failure(msg_id: &str) -> bool {
@@ -452,26 +564,20 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
     }
 }
 
-fn credentials() -> (String, Option<String>) {
-    let login = std::env::var("TWITCH_LOGIN")
-        .ok()
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty() && s != "your_login_here");
-    let token = std::env::var("TWITCH_OAUTH_TOKEN").ok().and_then(|s| {
-        let t = s.trim().trim_start_matches("oauth:").to_string();
-        if t.is_empty() || t == "YOUR_API_KEY_HERE" {
-            None
-        } else {
-            Some(t)
-        }
-    });
-    match (login, token) {
-        (Some(l), Some(t)) => (l, Some(t)),
-        _ => {
-            let n = unix_ms() % 90_000 + 10_000;
-            (format!("justinfan{n}"), None)
-        }
+fn credentials(shared: &Shared) -> (String, Option<String>) {
+    if let Some((login, token)) = auth::resolved_login_token(shared) {
+        return (login, Some(token));
     }
+    let n = unix_ms() % 90_000 + 10_000;
+    (format!("justinfan{n}"), None)
+}
+
+fn spawn_helix_globals(shared: &Shared) {
+    let badges = shared.badges.clone();
+    let token = auth::oauth_token(shared);
+    tauri::async_runtime::spawn(async move {
+        super::helix::load_global_badges(&badges, token.as_deref()).await;
+    });
 }
 
 fn unix_ms() -> u64 {

@@ -1,19 +1,22 @@
 mod chat;
 mod security;
 
-use chat::commands::{chat_join, chat_part, chat_snapshot, open_chat_link};
-use chat::state::Shared;
+use chat::commands::{
+    auth_logout, auth_start, auth_status, chat_join, chat_part, chat_send, chat_snapshot,
+    open_chat_link,
+};
+use chat::state::{IrcCmd, Shared};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shared = Shared::new();
-    let for_irc = shared.clone();
     tauri::Builder::default()
         .plugin(security::freeze_app_prototype())
-        .manage(shared)
+        .manage(shared.clone())
         .setup(move |app| {
-            chat::irc::start(app.handle().clone(), for_irc)?;
+            chat::auth::init(app.handle(), &shared)?;
+            chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
         })
@@ -21,7 +24,11 @@ pub fn run() {
             chat_join,
             chat_part,
             chat_snapshot,
-            open_chat_link
+            chat_send,
+            open_chat_link,
+            auth_start,
+            auth_status,
+            auth_logout
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -30,7 +37,7 @@ pub fn run() {
                 if let Some(state) = app.try_state::<Shared>() {
                     if let Ok(guard) = state.irc_tx.lock() {
                         if let Some(tx) = guard.as_ref() {
-                            let _ = tx.try_send(chat::irc::IrcCmd::Shutdown);
+                            let _ = tx.try_send(IrcCmd::Shutdown);
                         }
                     }
                 }

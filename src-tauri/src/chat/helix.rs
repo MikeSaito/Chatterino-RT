@@ -71,8 +71,8 @@ pub fn resolve_badge_urls(badges: &mut [Badge], catalog: &BadgeCatalog, channel:
     }
 }
 
-pub async fn load_global_badges(catalog: &Arc<Mutex<BadgeCatalog>>) {
-    let Some((client_id, token)) = helix_creds() else {
+pub async fn load_global_badges(catalog: &Arc<Mutex<BadgeCatalog>>, token: Option<&str>) {
+    let Some((client_id, token)) = helix_creds(token) else {
         return;
     };
     let client = http_client();
@@ -100,8 +100,9 @@ pub async fn load_channel(
     hub: &Arc<Mutex<Hub>>,
     login: &str,
     room_id: &str,
+    token: Option<&str>,
 ) {
-    let Some((client_id, token)) = helix_creds() else {
+    let Some((client_id, token)) = helix_creds(token) else {
         return;
     };
     if !still_active(hub, login) {
@@ -176,13 +177,22 @@ fn commit_if_active<T>(
     write(&mut cat);
 }
 
-pub fn helix_creds() -> Option<(String, String)> {
+pub fn helix_creds(token: Option<&str>) -> Option<(String, String)> {
     let client_id = env_secret("TWITCH_CLIENT_ID")?;
-    let raw = env_secret("TWITCH_OAUTH_TOKEN")?;
-    let token = raw.trim_start_matches("oauth:").to_string();
-    if token.is_empty() || token == "YOUR_API_KEY_HERE" {
-        return None;
-    }
+    let token = if let Some(t) = token {
+        let t = t.trim().trim_start_matches("oauth:");
+        if t.is_empty() || t == "YOUR_API_KEY_HERE" {
+            return None;
+        }
+        t.to_string()
+    } else {
+        let raw = env_secret("TWITCH_OAUTH_TOKEN")?;
+        let t = raw.trim_start_matches("oauth:").to_string();
+        if t.is_empty() || t == "YOUR_API_KEY_HERE" {
+            return None;
+        }
+        t
+    };
     Some((client_id, token))
 }
 
@@ -298,7 +308,7 @@ fn still_active(hub: &Arc<Mutex<Hub>>, login: &str) -> bool {
         .is_some_and(|ch| ch == login)
 }
 
-fn env_secret(name: &str) -> Option<String> {
+pub(crate) fn env_secret(name: &str) -> Option<String> {
     let s = std::env::var(name).ok()?.trim().to_string();
     if s.is_empty() || s == "YOUR_API_KEY_HERE" {
         None

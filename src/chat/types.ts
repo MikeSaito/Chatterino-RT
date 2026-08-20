@@ -93,3 +93,11 @@ export type ChatStatus = {
   channel?: string;
   message?: string;
 };
+
+export type AuthInfo = {
+  login?: string;
+  canSend: boolean;
+  fromEnv: boolean;
+  userCode?: string;
+  message?: string;
+};
