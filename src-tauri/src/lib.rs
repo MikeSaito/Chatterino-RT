@@ -3,7 +3,7 @@ mod security;
 
 use chat::commands::{
     auth_import, auth_logout, auth_start, auth_status, chat_complete, chat_join, chat_part, chat_send,
-    chat_snapshot, filters_get, filters_set, open_chat_link,
+    chat_snapshot, chat_subscribe, filters_get, filters_set, open_chat_link,
 };
 use chat::state::{EventCmd, IrcCmd, Shared};
 use tauri::Manager;
@@ -26,6 +26,7 @@ pub fn run() {
             chat_join,
             chat_part,
             chat_snapshot,
+            chat_subscribe,
             chat_send,
             chat_complete,
             open_chat_link,

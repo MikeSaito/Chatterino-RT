@@ -26,7 +26,7 @@ impl Pending {
     }
 
     fn event_bytes(event: &ChatEvent) -> usize {
-        serde_json::to_vec(event).map(|v| v.len()).unwrap_or(0)
+        rmp_serde::to_vec_named(event).map(|v| v.len()).unwrap_or(0)
     }
 
     pub fn would_exceed(&self, event: &ChatEvent) -> bool {

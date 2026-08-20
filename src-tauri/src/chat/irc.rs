@@ -170,7 +170,7 @@ async fn connect_session(
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                flush_emit(app, shared);
+                flush_emit(shared);
                 if pong_deadline.is_some_and(|d| Instant::now() >= d) {
                     return SessionEnd::Reconnect { wait: true };
                 }
@@ -515,7 +515,7 @@ fn dispatch_line(
                 .ok()
                 .and_then(|mut hub| hub.ingest(&channel, event));
             if let Some(batch) = batch {
-                let _ = app.emit("chat:batch", &batch);
+                shared.send_batch(&batch);
             }
             if let Some(msg) = failed {
                 LineAction::JoinFailed(msg)
@@ -596,13 +596,13 @@ fn emit_status(app: &AppHandle, state: ChatConnState, channel: Option<&str>, mes
     );
 }
 
-fn flush_emit(app: &AppHandle, shared: &Shared) {
+fn flush_emit(shared: &Shared) {
     let batches = match shared.hub.lock() {
         Ok(mut hub) => hub.flush_all(),
         Err(_) => return,
     };
     for batch in batches {
-        let _ = app.emit("chat:batch", &batch);
+        shared.send_batch(&batch);
     }
 }
 

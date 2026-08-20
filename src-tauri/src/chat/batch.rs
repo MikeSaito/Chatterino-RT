@@ -1,0 +1,80 @@
+use super::types::ChatBatch;
+
+pub fn encode_batch(batch: &ChatBatch) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+    rmp_serde::to_vec_named(batch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::types::{Badge, ChatEvent, EmoteSpan};
+
+    fn decode_batch(bytes: &[u8]) -> Result<ChatBatch, rmp_serde::decode::Error> {
+        rmp_serde::from_slice(bytes)
+    }
+
+    fn sample_batch() -> ChatBatch {
+        ChatBatch {
+            channel_id: "xqc".into(),
+            seq: 3,
+            dropped: 1,
+            events: vec![
+                ChatEvent::Privmsg {
+                    id: "1".into(),
+                    timestamp_ms: 10,
+                    user_id: "9".into(),
+                    login: "ann".into(),
+                    display_name: "Ann".into(),
+                    color: "#fff".into(),
+                    badges: vec![Badge {
+                        set: "moderator".into(),
+                        version: "1".into(),
+                        url: None,
+                    }],
+                    text: "hi".into(),
+                    emote_spans: vec![EmoteSpan {
+                        start: 0,
+                        end: 2,
+                        emote_id: "25".into(),
+                        provider: "twitch".into(),
+                        url: "https://static-cdn.jtvnw.net/x".into(),
+                        zero_width: false,
+                    }],
+                    link_spans: vec![],
+                    mention_spans: vec![],
+                    bits: None,
+                    reply_to_id: None,
+                    reply_to_login: None,
+                    reply_to_text: None,
+                    action: false,
+                    highlight_color: None,
+                },
+                ChatEvent::Roomstate {
+                    id: "r".into(),
+                    timestamp_ms: 11,
+                    emote_only: true,
+                    subs_only: false,
+                    slow_sec: 5,
+                    followers_sec: 0,
+                },
+                ChatEvent::Notice {
+                    id: "n".into(),
+                    timestamp_ms: 12,
+                    text: "ok".into(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn messagepack_roundtrip_preserves_batch() {
+        let batch = sample_batch();
+        let bytes = encode_batch(&batch).expect("encode");
+        assert!(!bytes.is_empty());
+        let back = decode_batch(&bytes).expect("decode");
+        assert_eq!(back, batch);
+        assert_eq!(back.events[0].id(), "1");
+        assert_eq!(back.channel_id, "xqc");
+        assert_eq!(back.dropped, 1);
+    }
+}

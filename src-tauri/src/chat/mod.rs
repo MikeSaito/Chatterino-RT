@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod batch;
 pub mod channel;
 pub mod chatters;
 pub mod commands;

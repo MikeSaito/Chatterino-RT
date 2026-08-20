@@ -1,15 +1,18 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 
 use super::auth::AuthInner;
+use super::batch::encode_batch;
 use super::cheers::CheerCatalog;
 use super::chatters::Chatters;
 use super::emotes::Catalog;
 use super::filters::FiltersInner;
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
+use super::types::ChatBatch;
 
 #[derive(Debug, Clone)]
 pub enum IrcCmd {
@@ -58,6 +61,7 @@ pub struct Shared {
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
+    pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
 }
 
 impl Shared {
@@ -74,7 +78,27 @@ impl Shared {
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
+            batch_tx: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn set_batch_channel(&self, channel: Channel<Vec<u8>>) -> Result<(), ()> {
+        let mut slot = self.batch_tx.lock().map_err(|_| ())?;
+        *slot = Some(channel);
+        Ok(())
+    }
+
+    pub fn send_batch(&self, batch: &ChatBatch) {
+        let Ok(bytes) = encode_batch(batch) else {
+            return;
+        };
+        let Ok(slot) = self.batch_tx.lock() else {
+            return;
+        };
+        let Some(channel) = slot.as_ref() else {
+            return;
+        };
+        let _ = channel.send(bytes);
     }
 
     pub fn snapshot_event_wanted(&self) -> EventWanted {

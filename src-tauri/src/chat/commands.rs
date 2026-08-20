@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::AppHandle;
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
@@ -100,6 +101,16 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     }
     auth::emit(&app, &state);
     Ok(())
+}
+
+#[tauri::command]
+pub fn chat_subscribe(
+    state: tauri::State<'_, Shared>,
+    channel: Channel<Vec<u8>>,
+) -> Result<(), ApiError> {
+    state
+        .set_batch_channel(channel)
+        .map_err(|_| ApiError::internal("lock"))
 }
 
 #[tauri::command]
