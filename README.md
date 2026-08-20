@@ -1,4 +1,4 @@
-# WebTV_chats
+# Chatterino RT
 
 Гибридный клиент Twitch-чата на Tauri 2: Rust принимает IRC, один WebView рисует чат (PixiJS) и embed.
 
