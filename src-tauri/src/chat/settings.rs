@@ -11,8 +11,8 @@ use super::commands::ApiError;
 use super::state::Shared;
 
 const SETTINGS_FILE: &str = "settings.json";
-const MIN_SCALE: f64 = 0.75;
-const MAX_SCALE: f64 = 2.0;
+const MIN_SCALE: f64 = 0.5;
+const MAX_SCALE: f64 = 4.0;
 const DEFAULT_SCALE: f64 = 1.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -147,12 +147,12 @@ mod tests {
     #[test]
     fn sanitize_rejects_out_of_range() {
         assert!(sanitize(DisplaySettings {
-            font_scale: 0.5,
+            font_scale: 0.4,
             show_timestamps: true,
         })
         .is_err());
         assert!(sanitize(DisplaySettings {
-            font_scale: 2.5,
+            font_scale: 4.5,
             show_timestamps: true,
         })
         .is_err());

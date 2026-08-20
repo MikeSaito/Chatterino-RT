@@ -122,7 +122,7 @@ export class MessageRing {
 
   /** Масштаб шрифта и timestamps без destroy PIXI.Application. */
   applyDisplay(fontScale: number, showTimestamps: boolean): void {
-    const scale = Math.min(2, Math.max(0.75, fontScale));
+    const scale = Math.min(4, Math.max(0.5, fontScale));
     this.showTimestamps = showTimestamps;
     this.fontSize = FONT_SIZE * scale;
     this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));

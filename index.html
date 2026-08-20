@@ -17,25 +17,6 @@
           <button type="submit">Join</button>
         </form>
         <ul id="channel-list"></ul>
-        <details id="filters-box">
-          <summary>Фильтры</summary>
-          <form id="filters-form">
-            <label class="filters-check">
-              <input type="checkbox" id="filters-self" checked />
-              свой ник
-            </label>
-            <label for="filters-ignore-logins">игнор логинов</label>
-            <textarea id="filters-ignore-logins" rows="3" spellcheck="false" autocomplete="off"></textarea>
-            <label for="filters-ignore-phrases">игнор фраз</label>
-            <textarea id="filters-ignore-phrases" rows="3" spellcheck="false" autocomplete="off"></textarea>
-            <label for="filters-highlight-phrases">хайлайт фраз</label>
-            <textarea id="filters-highlight-phrases" rows="3" spellcheck="false" autocomplete="off"></textarea>
-            <label for="filters-highlight-logins">хайлайт логинов</label>
-            <textarea id="filters-highlight-logins" rows="3" spellcheck="false" autocomplete="off"></textarea>
-            <button type="submit">Сохранить</button>
-            <p id="filters-status"></p>
-          </form>
-        </details>
         <div id="auth-box">
           <p id="auth-login"></p>
           <button type="button" id="auth-signin">Войти</button>
@@ -113,29 +94,160 @@
         aria-modal="true"
         aria-labelledby="settings-title"
       >
-        <div id="settings-dialog-head">
-          <h2 id="settings-title">Настройки</h2>
-          <button type="button" id="settings-close" title="Закрыть">×</button>
-        </div>
-        <form id="settings-form">
-          <h3 class="settings-section">Отображение</h3>
-          <label for="settings-font-scale">масштаб шрифта</label>
+        <header id="settings-dialog-head">
+          <h2 id="settings-title">Настройки Chatterino RT</h2>
+          <label class="sr-only" for="settings-search">Поиск в настройках</label>
           <input
-            id="settings-font-scale"
-            type="range"
-            min="0.75"
-            max="2"
-            step="0.05"
-            value="1"
+            id="settings-search"
+            type="search"
+            placeholder="Поиск в настройках... (Ctrl+F)"
+            autocomplete="off"
+            spellcheck="false"
           />
-          <p id="settings-font-value">1.00</p>
-          <label class="filters-check">
-            <input type="checkbox" id="settings-timestamps" checked />
-            время сообщений
-          </label>
-          <button type="submit">Сохранить</button>
+        </header>
+        <div id="settings-body">
+          <nav id="settings-tabs" aria-label="Разделы настроек">
+            <button type="button" class="settings-tab is-active" data-page="general" data-search="общие general interface zoom масштаб">
+              Общие
+            </button>
+            <div class="settings-tab-gap" aria-hidden="true"></div>
+            <button type="button" class="settings-tab" data-page="accounts" data-search="аккаунты accounts">
+              Аккаунты
+            </button>
+            <button type="button" class="settings-tab" data-page="nicknames" data-search="ники nicknames">
+              Ники
+            </button>
+            <div class="settings-tab-gap" aria-hidden="true"></div>
+            <button type="button" class="settings-tab" data-page="commands" data-search="команды commands">
+              Команды
+            </button>
+            <button type="button" class="settings-tab" data-page="highlights" data-search="подсветка highlights highlight">
+              Подсветка
+            </button>
+            <button type="button" class="settings-tab" data-page="ignores" data-search="игноры ignores ignore">
+              Игноры
+            </button>
+            <button type="button" class="settings-tab" data-page="filters" data-search="фильтры filters">
+              Фильтры
+            </button>
+            <div class="settings-tab-gap" aria-hidden="true"></div>
+            <button type="button" class="settings-tab" data-page="hotkeys" data-search="горячие клавиши hotkeys">
+              Горячие клавиши
+            </button>
+            <button type="button" class="settings-tab" data-page="moderation" data-search="модерация moderation">
+              Модерация
+            </button>
+            <button type="button" class="settings-tab" data-page="notifications" data-search="уведомления notifications live">
+              Уведомления о трансляциях
+            </button>
+            <button type="button" class="settings-tab" data-page="external" data-search="внешние инструменты external tools">
+              Внешние инструменты
+            </button>
+            <div class="settings-tab-spacer" aria-hidden="true"></div>
+            <button type="button" class="settings-tab" data-page="about" data-search="о программе about">
+              О программе
+            </button>
+          </nav>
+          <div id="settings-pages">
+            <section class="settings-page is-active" data-page="general" data-search="общие interface интерфейс zoom масштаб messages сообщения timestamp время">
+              <h3 class="settings-page-title">Общие</h3>
+              <div class="settings-block" data-search="interface интерфейс zoom масштаб">
+                <h4 class="settings-section">Интерфейс</h4>
+                <div class="settings-row">
+                  <label for="settings-font-scale">Масштаб</label>
+                  <select id="settings-font-scale"></select>
+                </div>
+              </div>
+              <div class="settings-block" data-search="messages сообщения timestamp время формат">
+                <h4 class="settings-section">Сообщения</h4>
+                <div class="settings-row">
+                  <label for="settings-timestamps">Формат времени сообщений</label>
+                  <select id="settings-timestamps">
+                    <option value="off">Disable</option>
+                    <option value="hh:mm">hh:mm</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+            <section class="settings-page" data-page="accounts" data-search="аккаунты accounts">
+              <h3 class="settings-page-title">Аккаунты</h3>
+              <p class="settings-empty">Вход Twitch — в сайдбаре окна чата. Управление несколькими аккаунтами появится позже.</p>
+            </section>
+            <section class="settings-page" data-page="nicknames" data-search="ники nicknames">
+              <h3 class="settings-page-title">Ники</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="commands" data-search="команды commands">
+              <h3 class="settings-page-title">Команды</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT. Базовые slash уже работают в composer.</p>
+            </section>
+            <section class="settings-page" data-page="highlights" data-search="подсветка highlights highlight свой ник">
+              <h3 class="settings-page-title">Подсветка</h3>
+              <div class="settings-block" data-search="свой ник self">
+                <h4 class="settings-section">Пользователь</h4>
+                <label class="filters-check">
+                  <input type="checkbox" id="filters-self" checked />
+                  Подсвечивать сообщения с вашим ником
+                </label>
+              </div>
+              <div class="settings-block" data-search="фразы phrases">
+                <h4 class="settings-section">Фразы</h4>
+                <label for="filters-highlight-phrases">По одной фразе на строку</label>
+                <textarea id="filters-highlight-phrases" rows="6" spellcheck="false" autocomplete="off"></textarea>
+              </div>
+              <div class="settings-block" data-search="логины users">
+                <h4 class="settings-section">Пользователи</h4>
+                <label for="filters-highlight-logins">По одному логину на строку</label>
+                <textarea id="filters-highlight-logins" rows="6" spellcheck="false" autocomplete="off"></textarea>
+              </div>
+            </section>
+            <section class="settings-page" data-page="ignores" data-search="игноры ignores ignore">
+              <h3 class="settings-page-title">Игноры</h3>
+              <div class="settings-block" data-search="логины users">
+                <h4 class="settings-section">Пользователи</h4>
+                <label for="filters-ignore-logins">По одному логину на строку</label>
+                <textarea id="filters-ignore-logins" rows="6" spellcheck="false" autocomplete="off"></textarea>
+              </div>
+              <div class="settings-block" data-search="фразы phrases">
+                <h4 class="settings-section">Фразы</h4>
+                <label for="filters-ignore-phrases">По одной фразе на строку</label>
+                <textarea id="filters-ignore-phrases" rows="6" spellcheck="false" autocomplete="off"></textarea>
+              </div>
+            </section>
+            <section class="settings-page" data-page="filters" data-search="фильтры filters">
+              <h3 class="settings-page-title">Фильтры</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="hotkeys" data-search="горячие клавиши hotkeys">
+              <h3 class="settings-page-title">Горячие клавиши</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="moderation" data-search="модерация moderation">
+              <h3 class="settings-page-title">Модерация</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="notifications" data-search="уведомления notifications live">
+              <h3 class="settings-page-title">Уведомления о трансляциях</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="external" data-search="внешние инструменты external tools">
+              <h3 class="settings-page-title">Внешние инструменты</h3>
+              <p class="settings-empty">Раздел ещё не перенесён в Chatterino RT.</p>
+            </section>
+            <section class="settings-page" data-page="about" data-search="о программе about">
+              <h3 class="settings-page-title">О программе</h3>
+              <p class="settings-about-name">Chatterino RT</p>
+              <p class="settings-empty">Гибрид Tauri + Pixi. Поведение чата по логике Chatterino 2 (MIT), без порта Qt-окон.</p>
+            </section>
+          </div>
+        </div>
+        <footer id="settings-dialog-foot">
           <p id="settings-status"></p>
-        </form>
+          <div id="settings-actions">
+            <button type="button" id="settings-ok">ОК</button>
+            <button type="button" id="settings-cancel">Отмена</button>
+          </div>
+        </footer>
       </div>
     </div>
   </body>

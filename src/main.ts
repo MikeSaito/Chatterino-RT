@@ -7,9 +7,10 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import { bindSettingsDialog } from "./shell/settingsDialog";
 import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
-import type { AuthInfo, ChatStatus, DisplaySettings, Filters } from "./chat/types";
+import type { AuthInfo, ChatStatus } from "./chat/types";
 
 let chatIpc: ChatIpc | null = null;
 
@@ -50,24 +51,8 @@ async function boot(): Promise<void> {
   const authDevice = document.querySelector<HTMLElement>("#auth-device");
   const authPaste = document.querySelector<HTMLTextAreaElement>("#auth-paste");
   const authImport = document.querySelector<HTMLButtonElement>("#auth-import");
-  const filtersForm = document.querySelector<HTMLFormElement>("#filters-form");
-  const filtersSelf = document.querySelector<HTMLInputElement>("#filters-self");
-  const filtersIgnoreLogins = document.querySelector<HTMLTextAreaElement>("#filters-ignore-logins");
-  const filtersIgnorePhrases = document.querySelector<HTMLTextAreaElement>("#filters-ignore-phrases");
-  const filtersHighlightPhrases = document.querySelector<HTMLTextAreaElement>("#filters-highlight-phrases");
-  const filtersHighlightLogins = document.querySelector<HTMLTextAreaElement>("#filters-highlight-logins");
-  const filtersStatus = document.querySelector<HTMLElement>("#filters-status");
-  const filtersSave = filtersForm?.querySelector<HTMLButtonElement>("button[type=submit]");
-  const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
-  const settingsFontScale = document.querySelector<HTMLInputElement>("#settings-font-scale");
-  const settingsFontValue = document.querySelector<HTMLElement>("#settings-font-value");
-  const settingsTimestamps = document.querySelector<HTMLInputElement>("#settings-timestamps");
-  const settingsStatus = document.querySelector<HTMLElement>("#settings-status");
-  const settingsSave = settingsForm?.querySelector<HTMLButtonElement>("button[type=submit]");
   const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
   const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
-  const settingsClose = document.querySelector<HTMLButtonElement>("#settings-close");
-  const settingsBackdrop = document.querySelector<HTMLElement>("#settings-backdrop");
   if (
     !canvas ||
     !pane ||
@@ -96,24 +81,8 @@ async function boot(): Promise<void> {
     !authDevice ||
     !authPaste ||
     !authImport ||
-    !filtersForm ||
-    !filtersSelf ||
-    !filtersIgnoreLogins ||
-    !filtersIgnorePhrases ||
-    !filtersHighlightPhrases ||
-    !filtersHighlightLogins ||
-    !filtersStatus ||
-    !filtersSave ||
-    !settingsForm ||
-    !settingsFontScale ||
-    !settingsFontValue ||
-    !settingsTimestamps ||
-    !settingsStatus ||
-    !settingsSave ||
     !settingsModal ||
-    !settingsOpen ||
-    !settingsClose ||
-    !settingsBackdrop
+    !settingsOpen
   ) {
     return;
   }
@@ -135,24 +104,6 @@ async function boot(): Promise<void> {
   const deviceEl = authDevice;
   const pasteEl = authPaste;
   const importBtn = authImport;
-  const filterForm = filtersForm;
-  const selfBox = filtersSelf;
-  const ignoreLoginsEl = filtersIgnoreLogins;
-  const ignorePhrasesEl = filtersIgnorePhrases;
-  const highlightPhrasesEl = filtersHighlightPhrases;
-  const highlightLoginsEl = filtersHighlightLogins;
-  const filterStatusEl = filtersStatus;
-  const filterSaveBtn = filtersSave;
-  const displayForm = settingsForm;
-  const fontScaleEl = settingsFontScale;
-  const fontValueEl = settingsFontValue;
-  const timestampsEl = settingsTimestamps;
-  const settingsStatusEl = settingsStatus;
-  const settingsSaveBtn = settingsSave;
-  const settingsModalEl = settingsModal;
-  const settingsOpenBtn = settingsOpen;
-  const settingsCloseBtn = settingsClose;
-  const settingsBackdropEl = settingsBackdrop;
   const completeBox = completeList;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
@@ -175,11 +126,11 @@ async function boot(): Promise<void> {
   const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
   await ring.init();
-  try {
-    applyDisplaySettings(await invoke<DisplaySettings>("settings_get"));
-  } catch (err) {
-    settingsStatusEl.textContent = formatError(err);
-  }
+  bindSettingsDialog({
+    ring,
+    openBtn: settingsOpen,
+    modal: settingsModal,
+  });
   bindScrollChrome({
     ring,
     host: canvasHost,
@@ -354,77 +305,10 @@ async function boot(): Promise<void> {
     void importLogin();
   });
 
-  filterForm.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    void saveFilters();
-  });
-
-  displayForm.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    void saveDisplaySettings();
-  });
-
-  const openSettingsModal = (): void => {
-    hideContextMenu();
-    settingsModalEl.hidden = false;
-    settingsCloseBtn.focus();
-  };
-
-  const closeSettingsModal = (): void => {
-    if (settingsModalEl.hidden) {
-      return;
-    }
-    settingsModalEl.hidden = true;
-    settingsOpenBtn.focus();
-  };
-
-  settingsOpenBtn.addEventListener("click", () => {
-    openSettingsModal();
-  });
-
-  settingsCloseBtn.addEventListener("click", () => {
-    closeSettingsModal();
-  });
-
-  settingsBackdropEl.addEventListener("click", () => {
-    closeSettingsModal();
-  });
-
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Escape" || settingsModalEl.hidden) {
-      return;
-    }
-    ev.preventDefault();
-    closeSettingsModal();
-  });
-
-  let displayPreviewTimer = 0;
-  const scheduleDisplayPreview = (): void => {
-    paintFontScaleLabel();
-    window.clearTimeout(displayPreviewTimer);
-    displayPreviewTimer = window.setTimeout(() => {
-      ring.applyDisplay(Number(fontScaleEl.value), timestampsEl.checked);
-    }, 80);
-  };
-
-  fontScaleEl.addEventListener("input", () => {
-    scheduleDisplayPreview();
-  });
-
-  timestampsEl.addEventListener("change", () => {
-    scheduleDisplayPreview();
-  });
-
   try {
     applyAuth(await invoke<AuthInfo>("auth_status"));
   } catch (err) {
     statusEl.textContent = formatError(err);
-  }
-
-  try {
-    applyFilters(await invoke<Filters>("filters_get"));
-  } catch (err) {
-    filterStatusEl.textContent = formatError(err);
   }
 
   try {
@@ -581,65 +465,6 @@ async function boot(): Promise<void> {
       statusEl.textContent = formatError(err);
     } finally {
       logoutBtn.disabled = false;
-    }
-  }
-
-  function applyFilters(data: Filters): void {
-    selfBox.checked = data.enableSelfHighlight;
-    ignoreLoginsEl.value = data.ignoreLogins.join("\n");
-    ignorePhrasesEl.value = data.ignorePhrases.join("\n");
-    highlightPhrasesEl.value = data.highlightPhrases.join("\n");
-    highlightLoginsEl.value = data.highlightLogins.join("\n");
-  }
-
-  async function saveFilters(): Promise<void> {
-    filterSaveBtn.disabled = true;
-    try {
-      const saved = await invoke<Filters>("filters_set", {
-        filters: {
-          enableSelfHighlight: selfBox.checked,
-          ignoreLogins: splitLines(ignoreLoginsEl.value),
-          ignorePhrases: splitLines(ignorePhrasesEl.value),
-          highlightPhrases: splitLines(highlightPhrasesEl.value),
-          highlightLogins: splitLines(highlightLoginsEl.value),
-        },
-      });
-      applyFilters(saved);
-      filterStatusEl.textContent = "сохранено";
-    } catch (err) {
-      filterStatusEl.textContent = formatError(err);
-    } finally {
-      filterSaveBtn.disabled = false;
-    }
-  }
-
-  function paintFontScaleLabel(): void {
-    fontValueEl.textContent = Number(fontScaleEl.value).toFixed(2);
-  }
-
-  function applyDisplaySettings(data: DisplaySettings): void {
-    fontScaleEl.value = String(data.fontScale);
-    timestampsEl.checked = data.showTimestamps;
-    paintFontScaleLabel();
-    ring.applyDisplay(data.fontScale, data.showTimestamps);
-  }
-
-  async function saveDisplaySettings(): Promise<void> {
-    window.clearTimeout(displayPreviewTimer);
-    settingsSaveBtn.disabled = true;
-    try {
-      const saved = await invoke<DisplaySettings>("settings_set", {
-        settings: {
-          fontScale: Number(fontScaleEl.value),
-          showTimestamps: timestampsEl.checked,
-        },
-      });
-      applyDisplaySettings(saved);
-      settingsStatusEl.textContent = "сохранено";
-    } catch (err) {
-      settingsStatusEl.textContent = formatError(err);
-    } finally {
-      settingsSaveBtn.disabled = false;
     }
   }
 
@@ -934,13 +759,6 @@ function formatError(err: unknown): string {
     }
   }
   return String(err);
-}
-
-function splitLines(raw: string): string[] {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
