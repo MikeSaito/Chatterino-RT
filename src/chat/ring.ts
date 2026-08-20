@@ -20,9 +20,18 @@ import {
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan } from "./types";
 import { TextureLru } from "./textures";
+import {
+  clipNick,
+  indexToLineCol,
+  lineColToIndex,
+  renderWrapped,
+  wrapBody,
+  type WrapLine,
+} from "./wrap";
 
 const TIME_GAP = 8;
 const BADGE_GAP = 2;
+const MIN_BODY_CHARS = 24;
 
 type Slot = {
   root: Container;
@@ -37,9 +46,11 @@ type Slot = {
   msgId: string;
   login: string;
   bodyRaw: string;
+  nickRaw: string;
   spansRaw: EmoteSpan[];
   linkSpans: LinkSpan[];
-  visibleChars: number;
+  wrapLines: WrapLine[];
+  lineCount: number;
 };
 
 type Drawn = {
@@ -99,7 +110,12 @@ export class MessageRing {
       });
       const body = new BitmapText({
         text: "",
-        style: { fontFamily: "ChatFont", fontSize: FONT_SIZE, fill: 0xefeff1 },
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: FONT_SIZE,
+          fill: 0xefeff1,
+          lineHeight: LINE_HEIGHT,
+        },
       });
       const emotes: Sprite[] = [];
       for (let e = 0; e < EMOTE_SLOTS_PER_ROW; e += 1) {
@@ -131,9 +147,11 @@ export class MessageRing {
         msgId: "",
         login: "",
         bodyRaw: "",
+        nickRaw: "",
         spansRaw: [],
         linkSpans: [],
-        visibleChars: 0,
+        wrapLines: [{ start: 0, end: 0 }],
+        lineCount: 1,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -229,9 +247,11 @@ export class MessageRing {
     slot.msgId = "";
     slot.login = "";
     slot.bodyRaw = "";
+    slot.nickRaw = "";
     slot.spansRaw = [];
     slot.linkSpans = [];
-    slot.visibleChars = 0;
+    slot.wrapLines = [{ start: 0, end: 0 }];
+    slot.lineCount = 1;
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -248,6 +268,7 @@ export class MessageRing {
     slot.login = eventLogin(event);
     const drawn = this.line(event);
     slot.time.text = drawn.time;
+    slot.nickRaw = drawn.nick;
     slot.nick.text = drawn.nick;
     slot.nick.tint = drawn.nickColor;
     slot.bodyRaw = drawn.body;
@@ -412,24 +433,41 @@ export class MessageRing {
       spr.x = timeW + i * (BADGE_SIZE + BADGE_GAP);
     }
     slot.nick.x = timeW + badgeBand;
+    const paneW = this.app.screen.width;
+    const nickMaxPx = Math.max(
+      8,
+      paneW - timeW - badgeBand - TIME_GAP - 8 - MIN_BODY_CHARS * CHAR_WIDTH,
+    );
+    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / CHAR_WIDTH));
+    slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
     const nickW = Math.max(slot.nick.text.length * CHAR_WIDTH, 8);
     const bodyX = timeW + badgeBand + nickW + TIME_GAP;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const clipped = clipLine(slot.bodyRaw, maxBodyChars(this.app.screen.width, bodyX));
-    slot.body.text = maskEmoteCodes(clipped.text, slot.spansRaw, clipped.visible);
-    slot.visibleChars = clipped.visible;
+    const lines = wrapBody(
+      slot.bodyRaw,
+      maxBodyChars(this.app.screen.width, bodyX),
+      slot.spansRaw,
+    );
+    slot.wrapLines = lines;
+    slot.lineCount = lines.length;
+    slot.body.text = renderWrapped(slot.bodyRaw, lines, slot.spansRaw);
+    if (slot.root.hitArea instanceof Rectangle) {
+      slot.root.hitArea.height = slot.lineCount * LINE_HEIGHT;
+    }
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
-      if (!span || span.start >= clipped.visible) {
+      const pos = span ? indexToLineCol(lines, span.start) : null;
+      if (!pos) {
         spr.visible = false;
         continue;
       }
       spr.visible = true;
-      spr.x = bodyX + span.start * CHAR_WIDTH;
+      spr.x = bodyX + pos.col * CHAR_WIDTH;
+      spr.y = 1 + pos.line * LINE_HEIGHT;
     }
   }
 
@@ -446,7 +484,7 @@ export class MessageRing {
       }
       slot.root.y = row * LINE_HEIGHT;
       this.paintClip(slot);
-      row += 1;
+      row += slot.lineCount;
     }
     const content = row * LINE_HEIGHT;
     this.app.stage.y = content > h ? h - content : 0;
@@ -466,11 +504,13 @@ export class MessageRing {
 
   private linkAt(slot: Slot, ev: FederatedPointerEvent): string | undefined {
     const local = ev.getLocalPosition(slot.root);
-    if (local.x < slot.body.x) {
+    if (local.x < slot.body.x || local.y < 0) {
       return undefined;
     }
-    const idx = Math.floor((local.x - slot.body.x) / CHAR_WIDTH);
-    if (idx < 0 || idx >= slot.visibleChars) {
+    const col = Math.floor((local.x - slot.body.x) / CHAR_WIDTH);
+    const line = Math.floor(local.y / LINE_HEIGHT);
+    const idx = lineColToIndex(slot.wrapLines, line, col);
+    if (idx === null) {
       return undefined;
     }
     const hit = slot.linkSpans.find((span) => idx >= span.start && idx < span.end);
@@ -554,50 +594,6 @@ function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
   spr.height = size;
 }
 
-function maskEmoteCodes(text: string, spans: EmoteSpan[], visible: number): string {
-  if (spans.length === 0) {
-    return text;
-  }
-  const chars = text.split("");
-  for (const span of spans) {
-    const from = Math.max(0, span.start);
-    const to = Math.min(span.end, visible, chars.length);
-    for (let i = from; i < to; i += 1) {
-      chars[i] = " ";
-    }
-  }
-  return chars.join("");
-}
-
 function maxBodyChars(paneWidth: number, bodyX: number): number {
-  return Math.floor(Math.max(0, paneWidth - bodyX - 8) / CHAR_WIDTH);
-}
-
-function clipLine(text: string, maxChars: number): { text: string; visible: number } {
-  if (maxChars <= 0) {
-    return { text: "", visible: 0 };
-  }
-  if (text.length <= maxChars) {
-    return { text, visible: text.length };
-  }
-  const keep = maxChars <= 3 ? maxChars : maxChars - 3;
-  const visible = utf16Fit(text, keep);
-  if (maxChars <= 3) {
-    return { text: text.slice(0, visible), visible };
-  }
-  return { text: `${text.slice(0, visible)}...`, visible };
-}
-
-function utf16Fit(text: string, n: number): number {
-  if (n <= 0) {
-    return 0;
-  }
-  if (n >= text.length) {
-    return text.length;
-  }
-  const c = text.charCodeAt(n - 1);
-  if (c >= 0xd800 && c <= 0xdbff) {
-    return n - 1;
-  }
-  return n;
+  return Math.floor(Math.max(1, paneWidth - bodyX - 8) / CHAR_WIDTH);
 }
