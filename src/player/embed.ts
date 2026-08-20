@@ -10,6 +10,9 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
     "autoplay; encrypted-media; picture-in-picture; storage-access; accelerometer; gyroscope";
   frame.allowFullscreen = true;
   frame.setAttribute("allowfullscreen", "");
+  frame.style.visibility = "visible";
+  frame.style.opacity = "1";
+  frame.style.display = "block";
   const parent = window.location.hostname || "localhost";
   const params = new URLSearchParams({
     channel,
@@ -18,18 +21,24 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
     autoplay: "true",
   });
 
-  const isLive = () => epoch === playerEpoch && frame.isConnected;
+  const isLive = () => epoch === playerEpoch;
 
-  host.appendChild(frame);
-  whenSlotReady(host, isLive, () => {
-    if (!isLive() || frame.getAttribute("src")) {
+  const insert = () => {
+    if (!isLive() || frame.isConnected || frame.getAttribute("src")) {
       return;
     }
     const box = host.getBoundingClientRect();
+    if (box.width < 400 || box.height < 300) {
+      whenSlotReady(host, isLive, insert);
+      return;
+    }
     frame.width = String(Math.floor(box.width));
     frame.height = String(Math.floor(box.height));
     frame.src = `https://player.twitch.tv/?${params.toString()}`;
-  });
+    host.appendChild(frame);
+  };
+
+  whenSlotReady(host, isLive, insert);
   return frame;
 }
 
@@ -78,7 +87,11 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     }
     done = true;
     cleanup();
-    run();
+    requestAnimationFrame(() => {
+      if (isLive()) {
+        run();
+      }
+    });
   };
 
   slotWaitCleanup = cleanup;
