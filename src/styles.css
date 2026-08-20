@@ -71,29 +71,20 @@ body,
   border-top: 1px solid #2a2a2d;
 }
 
-#filters-box summary,
-#settings-box summary {
+#filters-box summary {
   cursor: pointer;
   font-size: 12px;
   color: #adadc0;
 }
 
-#settings-box {
-  flex-shrink: 0;
-  padding-top: 8px;
-  border-top: 1px solid #2a2a2d;
-}
-
-#filters-form,
-#settings-form {
+#filters-form {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
 }
 
-#filters-form label,
-#settings-form label {
+#filters-form label {
   font-size: 12px;
   color: #adadc0;
 }
@@ -112,17 +103,11 @@ body,
   gap: 6px;
 }
 
-#filters-status,
-#settings-status,
-#settings-font-value {
+#filters-status {
   margin: 0;
   font-size: 12px;
   color: #adadc0;
   word-break: break-word;
-}
-
-#settings-font-scale {
-  width: 100%;
 }
 
 .channel-item {
@@ -164,7 +149,7 @@ body,
 
 #header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   padding: 8px 12px;
   background: #18181b;
@@ -182,6 +167,102 @@ body,
   margin: 0;
   color: #adadc0;
   font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+
+#settings-open {
+  flex-shrink: 0;
+  padding: 0.35em 0.75em;
+  background: #2a2a2d;
+  border-color: #3a3a3d;
+  font-size: 13px;
+}
+
+#settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#settings-modal[hidden] {
+  display: none;
+}
+
+#settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+#settings-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(360px, 100%);
+  max-height: min(90vh, 520px);
+  overflow: auto;
+  padding: 16px;
+  background: #18181b;
+  border: 1px solid #3a3a3d;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+#settings-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+#settings-title {
+  margin: 0;
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#settings-close {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  background: #2a2a2d;
+  border-color: #3a3a3d;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+#settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#settings-form label {
+  font-size: 12px;
+  color: #adadc0;
+}
+
+.settings-section {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #efeff1;
+}
+
+#settings-status,
+#settings-font-value {
+  margin: 0;
+  font-size: 12px;
+  color: #adadc0;
+  word-break: break-word;
+}
+
+#settings-font-scale {
+  width: 100%;
 }
 
 input,

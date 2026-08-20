@@ -64,6 +64,10 @@ async function boot(): Promise<void> {
   const settingsTimestamps = document.querySelector<HTMLInputElement>("#settings-timestamps");
   const settingsStatus = document.querySelector<HTMLElement>("#settings-status");
   const settingsSave = settingsForm?.querySelector<HTMLButtonElement>("button[type=submit]");
+  const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
+  const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
+  const settingsClose = document.querySelector<HTMLButtonElement>("#settings-close");
+  const settingsBackdrop = document.querySelector<HTMLElement>("#settings-backdrop");
   if (
     !canvas ||
     !pane ||
@@ -105,7 +109,11 @@ async function boot(): Promise<void> {
     !settingsFontValue ||
     !settingsTimestamps ||
     !settingsStatus ||
-    !settingsSave
+    !settingsSave ||
+    !settingsModal ||
+    !settingsOpen ||
+    !settingsClose ||
+    !settingsBackdrop
   ) {
     return;
   }
@@ -141,6 +149,10 @@ async function boot(): Promise<void> {
   const timestampsEl = settingsTimestamps;
   const settingsStatusEl = settingsStatus;
   const settingsSaveBtn = settingsSave;
+  const settingsModalEl = settingsModal;
+  const settingsOpenBtn = settingsOpen;
+  const settingsCloseBtn = settingsClose;
+  const settingsBackdropEl = settingsBackdrop;
   const completeBox = completeList;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
@@ -350,6 +362,40 @@ async function boot(): Promise<void> {
   displayForm.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void saveDisplaySettings();
+  });
+
+  const openSettingsModal = (): void => {
+    hideContextMenu();
+    settingsModalEl.hidden = false;
+    settingsCloseBtn.focus();
+  };
+
+  const closeSettingsModal = (): void => {
+    if (settingsModalEl.hidden) {
+      return;
+    }
+    settingsModalEl.hidden = true;
+    settingsOpenBtn.focus();
+  };
+
+  settingsOpenBtn.addEventListener("click", () => {
+    openSettingsModal();
+  });
+
+  settingsCloseBtn.addEventListener("click", () => {
+    closeSettingsModal();
+  });
+
+  settingsBackdropEl.addEventListener("click", () => {
+    closeSettingsModal();
+  });
+
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || settingsModalEl.hidden) {
+      return;
+    }
+    ev.preventDefault();
+    closeSettingsModal();
   });
 
   let displayPreviewTimer = 0;

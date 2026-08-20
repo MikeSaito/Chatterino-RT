@@ -36,27 +36,6 @@
             <p id="filters-status"></p>
           </form>
         </details>
-        <details id="settings-box">
-          <summary>Отображение</summary>
-          <form id="settings-form">
-            <label for="settings-font-scale">масштаб шрифта</label>
-            <input
-              id="settings-font-scale"
-              type="range"
-              min="0.75"
-              max="2"
-              step="0.05"
-              value="1"
-            />
-            <p id="settings-font-value">1.00</p>
-            <label class="filters-check">
-              <input type="checkbox" id="settings-timestamps" checked />
-              время сообщений
-            </label>
-            <button type="submit">Сохранить</button>
-            <p id="settings-status"></p>
-          </form>
-        </details>
         <div id="auth-box">
           <p id="auth-login"></p>
           <button type="button" id="auth-signin">Войти</button>
@@ -71,6 +50,7 @@
         <header id="header">
           <p id="channel-title"></p>
           <p id="status"></p>
+          <button type="button" id="settings-open">Настройки</button>
         </header>
         <div id="stage">
           <div id="player-slot"></div>
@@ -125,5 +105,38 @@
       <button type="button" data-action="reply">Ответить</button>
       <button type="button" data-action="user">Открыть профиль</button>
     </menu>
+    <div id="settings-modal" hidden>
+      <div id="settings-backdrop"></div>
+      <div
+        id="settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
+        <div id="settings-dialog-head">
+          <h2 id="settings-title">Настройки</h2>
+          <button type="button" id="settings-close" title="Закрыть">×</button>
+        </div>
+        <form id="settings-form">
+          <h3 class="settings-section">Отображение</h3>
+          <label for="settings-font-scale">масштаб шрифта</label>
+          <input
+            id="settings-font-scale"
+            type="range"
+            min="0.75"
+            max="2"
+            step="0.05"
+            value="1"
+          />
+          <p id="settings-font-value">1.00</p>
+          <label class="filters-check">
+            <input type="checkbox" id="settings-timestamps" checked />
+            время сообщений
+          </label>
+          <button type="submit">Сохранить</button>
+          <p id="settings-status"></p>
+        </form>
+      </div>
+    </div>
   </body>
 </html>
