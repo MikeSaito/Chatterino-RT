@@ -381,6 +381,7 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
                 emote_id: id.to_string(),
                 provider: "twitch".to_string(),
                 url: twitch_emote_url(id),
+                zero_width: false,
             });
         }
     }

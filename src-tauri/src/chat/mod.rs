@@ -3,6 +3,7 @@ pub mod channel;
 pub mod commands;
 pub mod constants;
 pub mod cheers;
+pub mod emoji;
 pub mod emotes;
 pub mod fetch;
 pub mod helix;

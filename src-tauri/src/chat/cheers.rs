@@ -80,6 +80,7 @@ pub fn attach_cheers(
                             ),
                             provider: "cheer".into(),
                             url: hit.url,
+                            zero_width: false,
                         });
                     }
                 }
@@ -214,6 +215,7 @@ mod tests {
             emote_id: "25".into(),
             provider: "twitch".into(),
             url: "x".into(),
+            zero_width: false,
         }];
         let extra = attach_cheers("Kappa Cheer1", &twitch, &cat_with_cheer(), "xqc", 1);
         assert_eq!(extra.len(), 1);

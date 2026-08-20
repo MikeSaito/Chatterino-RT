@@ -4,6 +4,7 @@ export type EmoteSpan = {
   emoteId: string;
   provider: string;
   url: string;
+  zeroWidth: boolean;
 };
 
 export type LinkSpan = {

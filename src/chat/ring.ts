@@ -457,10 +457,23 @@ export class MessageRing {
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * LINE_HEIGHT;
     }
+    let prevX = 0;
+    let prevY = 0;
+    let hasPrev = false;
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
-      const pos = span ? indexToLineCol(lines, span.start) : null;
+      if (!span) {
+        spr.visible = false;
+        continue;
+      }
+      if (span.zeroWidth && hasPrev) {
+        spr.visible = true;
+        spr.x = prevX;
+        spr.y = prevY;
+        continue;
+      }
+      const pos = indexToLineCol(slot.bodyRaw, lines, span.start, slot.spansRaw);
       if (!pos) {
         spr.visible = false;
         continue;
@@ -468,6 +481,9 @@ export class MessageRing {
       spr.visible = true;
       spr.x = bodyX + pos.col * CHAR_WIDTH;
       spr.y = 1 + pos.line * LINE_HEIGHT;
+      prevX = spr.x;
+      prevY = spr.y;
+      hasPrev = true;
     }
   }
 
@@ -509,7 +525,7 @@ export class MessageRing {
     }
     const col = Math.floor((local.x - slot.body.x) / CHAR_WIDTH);
     const line = Math.floor(local.y / LINE_HEIGHT);
-    const idx = lineColToIndex(slot.wrapLines, line, col);
+    const idx = lineColToIndex(slot.bodyRaw, slot.wrapLines, line, col, slot.spansRaw);
     if (idx === null) {
       return undefined;
     }

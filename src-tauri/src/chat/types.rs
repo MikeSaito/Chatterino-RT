@@ -36,6 +36,8 @@ pub struct EmoteSpan {
     pub emote_id: String,
     pub provider: String,
     pub url: String,
+    #[serde(default)]
+    pub zero_width: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -172,6 +174,7 @@ mod tests {
                 emote_id: "25".into(),
                 provider: "twitch".into(),
                 url: "https://static-cdn.jtvnw.net/x".into(),
+                zero_width: false,
             }],
             link_spans: vec![],
             mention_spans: vec![],
@@ -189,6 +192,7 @@ mod tests {
         assert!(v.get("emoteSpans").is_some(), "wire key emoteSpans, got {v}");
         assert!(v.get("emote_spans").is_none());
         assert_eq!(v["emoteSpans"][0]["emoteId"], "25");
+        assert_eq!(v["emoteSpans"][0]["zeroWidth"], false);
         assert_eq!(v["badges"][0]["set"], "moderator");
         let room = serde_json::to_value(&ChatEvent::Roomstate {
             id: "r".into(),

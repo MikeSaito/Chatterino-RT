@@ -176,6 +176,7 @@ mod tests {
             emote_id: "25".into(),
             provider: "twitch".into(),
             url: "x".into(),
+            zero_width: false,
         }
     }
 

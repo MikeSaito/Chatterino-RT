@@ -125,6 +125,7 @@ fn collect_bttv(value: &Value, map: &mut std::collections::HashMap<String, Emote
                 id: id.to_string(),
                 provider: "bttv".into(),
                 url: format!("https://cdn.betterttv.net/emote/{id}/1x"),
+                zero_width: false,
             },
         );
     }
@@ -159,6 +160,7 @@ fn collect_ffz_sets(value: &Value, map: &mut std::collections::HashMap<String, E
                     id,
                     provider: "ffz".into(),
                     url,
+                    zero_width: false,
                 },
             );
         }
@@ -206,9 +208,19 @@ fn collect_7tv_set(value: &Value, map: &mut std::collections::HashMap<String, Em
                 id: id.to_string(),
                 provider: "7tv".into(),
                 url,
+                zero_width: is_7tv_zero_width(item),
             },
         );
     }
+}
+
+// 7TV ActiveEmote flags: ZeroWidth = 1 << 0 (Chatterino SeventvEmotes.cpp).
+const SEVENTV_ACTIVE_ZERO_WIDTH: u64 = 1;
+
+fn is_7tv_zero_width(item: &Value) -> bool {
+    item.get("flags")
+        .and_then(|v| v.as_u64().or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok())))
+        .is_some_and(|flags| flags & SEVENTV_ACTIVE_ZERO_WIDTH != 0)
 }
 
 fn abs_url(raw: &str) -> String {
@@ -218,5 +230,43 @@ fn abs_url(raw: &str) -> String {
         raw.to_string()
     } else {
         format!("https://{raw}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_7tv(flags: u64) -> Value {
+        serde_json::json!({
+            "emotes": [{
+                "id": "abc",
+                "name": "cvHazmat",
+                "flags": flags,
+                "data": {
+                    "id": "abc",
+                    "host": {
+                        "url": "//cdn.7tv.app/emote/abc",
+                        "files": [{"name": "1x.webp"}]
+                    }
+                }
+            }]
+        })
+    }
+
+    #[test]
+    fn seventv_flags_bit0_is_zero_width() {
+        let mut map = std::collections::HashMap::new();
+        collect_7tv_set(&sample_7tv(1), &mut map);
+        let def = map.get("cvHazmat").expect("emote");
+        assert!(def.zero_width);
+        assert_eq!(def.provider, "7tv");
+    }
+
+    #[test]
+    fn seventv_flags_unset_is_not_zero_width() {
+        let mut map = std::collections::HashMap::new();
+        collect_7tv_set(&sample_7tv(0), &mut map);
+        assert!(!map.get("cvHazmat").expect("emote").zero_width);
     }
 }

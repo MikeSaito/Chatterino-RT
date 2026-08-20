@@ -9,7 +9,8 @@ use tokio_tungstenite::tungstenite::Message;
 use super::auth;
 use super::cheers::attach_cheers;
 use super::constants::BATCH_FLUSH_MS;
-use super::emotes::attach_third_party;
+use super::emoji::attach_emoji;
+use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
@@ -554,10 +555,13 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
                 let extra = attach_third_party(text, emote_spans, &cat, channel);
                 emote_spans.extend(extra);
             }
+            let extra = attach_emoji(text, emote_spans);
+            emote_spans.extend(extra);
             if let Ok(cat) = shared.badges.lock() {
                 resolve_badge_urls(badges, &cat, channel);
             }
             emote_spans.sort_by_key(|s| s.start);
+            resolve_overlays(text, emote_spans);
             let (links, mentions) = decorate_text_spans(text, emote_spans);
             *link_spans = links;
             *mention_spans = mentions;
