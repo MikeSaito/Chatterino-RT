@@ -39,6 +39,22 @@ pub struct EmoteSpan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkSpan {
+    pub start: u32,
+    pub end: u32,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionSpan {
+    pub start: u32,
+    pub end: u32,
+    pub login: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChatEvent {
     #[serde(rename = "privmsg")]
@@ -52,10 +68,18 @@ pub enum ChatEvent {
         badges: Vec<String>,
         text: String,
         emote_spans: Vec<EmoteSpan>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        link_spans: Vec<LinkSpan>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mention_spans: Vec<MentionSpan>,
         #[serde(skip_serializing_if = "Option::is_none")]
         bits: Option<u32>,
         #[serde(rename = "replyToId", skip_serializing_if = "Option::is_none")]
         reply_to_id: Option<String>,
+        #[serde(rename = "replyToLogin", skip_serializing_if = "Option::is_none")]
+        reply_to_login: Option<String>,
+        #[serde(rename = "replyToText", skip_serializing_if = "Option::is_none")]
+        reply_to_text: Option<String>,
         action: bool,
     },
     #[serde(rename = "clearchat")]

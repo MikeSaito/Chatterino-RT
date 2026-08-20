@@ -3,6 +3,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::irc::IrcCmd;
+use super::spans::allowed_chat_url;
 use super::state::Shared;
 use super::types::ChatBatch;
 
@@ -83,6 +84,15 @@ pub fn chat_snapshot(
     })
 }
 
+#[tauri::command]
+pub fn open_chat_link(url: String) -> Result<(), ApiError> {
+    let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
+        code: "invalid_input".into(),
+        message,
+    })?;
+    tauri_plugin_opener::open_url(&allowed, None::<&str>).map_err(|e| ApiError::internal(&e.to_string()))
+}
+
 pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
     let s = raw.trim().trim_start_matches('#').to_lowercase();
     if s.is_empty() || s.len() > 25 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -103,5 +113,12 @@ mod tests {
         assert!(normalize_channel("").is_err());
         assert!(normalize_channel("has space").is_err());
         assert_eq!(normalize_channel("#XQC").unwrap(), "xqc");
+    }
+
+    #[test]
+    fn open_chat_link_rejects_bad_url() {
+        assert!(open_chat_link("javascript:alert(1)".into()).is_err());
+        assert!(open_chat_link("https://user:pass@example.com/".into()).is_err());
+        assert!(crate::chat::spans::allowed_chat_url("https://example.com/chat").is_ok());
     }
 }

@@ -8,5 +8,6 @@ pub mod irc;
 pub mod parse;
 pub mod pending;
 pub mod scrollback;
+pub mod spans;
 pub mod state;
 pub mod types;

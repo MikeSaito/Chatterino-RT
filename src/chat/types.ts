@@ -6,6 +6,18 @@ export type EmoteSpan = {
   url: string;
 };
 
+export type LinkSpan = {
+  start: number;
+  end: number;
+  url: string;
+};
+
+export type MentionSpan = {
+  start: number;
+  end: number;
+  login: string;
+};
+
 export type ChatEvent =
   | {
       kind: "privmsg";
@@ -18,8 +30,12 @@ export type ChatEvent =
       badges: string[];
       text: string;
       emoteSpans: EmoteSpan[];
+      linkSpans?: LinkSpan[];
+      mentionSpans?: MentionSpan[];
       bits?: number;
       replyToId?: string;
+      replyToLogin?: string;
+      replyToText?: string;
       action: boolean;
     }
   | {

@@ -84,6 +84,7 @@ fn parse_privmsg(
         .unwrap_or_default();
     let display_name = tags.get("display-name").filter(|s| !s.is_empty()).unwrap_or_else(|| login.clone());
     let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), &text);
+    let (link_spans, mention_spans) = super::spans::decorate_text_spans(&text, &emote_spans);
     ParsedLine::Event {
         room_id: tags.get("room-id"),
         event: ChatEvent::Privmsg {
@@ -95,8 +96,14 @@ fn parse_privmsg(
             color: tags.get("color").unwrap_or_default(),
             badges: parse_badges(tags.get("badges").as_deref()),
             emote_spans,
+            link_spans,
+            mention_spans,
             bits: tags.get("bits").and_then(|s| s.parse().ok()),
             reply_to_id: tags.get("reply-parent-msg-id"),
+            reply_to_login: tags
+                .get("reply-parent-user-login")
+                .or_else(|| tags.get("reply-parent-display-name")),
+            reply_to_text: tags.get("reply-parent-msg-body"),
             action,
             text,
         },
@@ -144,10 +151,11 @@ fn parse_usernotice(
     now_ms: u64,
 ) -> ParsedLine {
     let channel = channel_from_params(params);
-    let system_text = unescape_tag(&tags.get("system-msg").unwrap_or_default());
+    let system_text = tags.get("system-msg").unwrap_or_default();
     let login = tags.get("login");
     let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
         let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
+        let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
         Box::new(ChatEvent::Privmsg {
             id: format!("{}-body", tags.get("id").unwrap_or_else(|| synthetic_id("u", now_ms, text))),
             timestamp_ms: tags.timestamp(now_ms),
@@ -162,8 +170,12 @@ fn parse_usernotice(
             badges: parse_badges(tags.get("badges").as_deref()),
             text: text.to_string(),
             emote_spans,
+            link_spans,
+            mention_spans,
             bits: None,
             reply_to_id: None,
+            reply_to_login: None,
+            reply_to_text: None,
             action: false,
         })
     });
@@ -546,6 +558,29 @@ mod tests {
     }
 
     #[test]
+    fn usernotice_trailing_has_link_span() {
+        let line = "@system-msg=subbed;id=u2;login=ann;display-name=Ann :tmi.twitch.tv USERNOTICE #xqc :hi https://example.com";
+        match parse_line(line, 21) {
+            ParsedLine::Event {
+                event: ChatEvent::Usernotice { privmsg, .. },
+                ..
+            } => {
+                let Some(ChatEvent::Privmsg {
+                    text,
+                    link_spans,
+                    ..
+                }) = privmsg.as_deref()
+                else {
+                    panic!("no body");
+                };
+                assert_eq!(text, "hi https://example.com");
+                assert_eq!(link_spans.len(), 1);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn clearmsg_target_msg_id() {
         let line = "@login=x;target-msg-id=abc;room-id=1 :tmi.twitch.tv CLEARMSG #xqc :hide";
         match parse_line(line, 13) {
@@ -556,6 +591,35 @@ mod tests {
             } => {
                 assert_eq!(channel, "xqc");
                 assert_eq!(target_id, "abc");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_reply_tags_and_link_span() {
+        let line = "@id=r1;display-name=Test;user-id=1;reply-parent-msg-id=p0;reply-parent-user-login=ann;reply-parent-display-name=Ann;reply-parent-msg-body=hi\\sthere :test!test@test.tmi.twitch.tv PRIVMSG #xqc :see https://example.com @bob";
+        match parse_line(line, 20) {
+            ParsedLine::Event {
+                event: ChatEvent::Privmsg {
+                    reply_to_id,
+                    reply_to_login,
+                    reply_to_text,
+                    link_spans,
+                    mention_spans,
+                    text,
+                    ..
+                },
+                ..
+            } => {
+                assert_eq!(reply_to_id.as_deref(), Some("p0"));
+                assert_eq!(reply_to_login.as_deref(), Some("ann"));
+                assert_eq!(reply_to_text.as_deref(), Some("hi there"));
+                assert_eq!(text, "see https://example.com @bob");
+                assert_eq!(link_spans.len(), 1);
+                assert_eq!(link_spans[0].start, 4);
+                assert_eq!(mention_spans.len(), 1);
+                assert_eq!(mention_spans[0].login, "bob");
             }
             other => panic!("{other:?}"),
         }

@@ -6,9 +6,10 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::constants::BATCH_FLUSH_MS;
-use super::emotes::attach_third_party;
+use super::emotes::{attach_third_party, Catalog};
 use super::fetch;
 use super::parse::{parse_line, ParsedLine};
+use super::spans::decorate_text_spans;
 use super::state::Shared;
 use super::types::{ChatConnState, ChatEvent, ChatStatus};
 
@@ -351,17 +352,8 @@ fn dispatch_line(
                     }
                 }
             }
-            if let ChatEvent::Privmsg {
-                ref text,
-                ref mut emote_spans,
-                ..
-            } = event
-            {
-                if let Ok(cat) = shared.catalog.lock() {
-                    let extra = attach_third_party(text, emote_spans, &cat, &channel);
-                    emote_spans.extend(extra);
-                    emote_spans.sort_by_key(|s| s.start);
-                }
+            if let Ok(cat) = shared.catalog.lock() {
+                decorate_event(&mut event, &cat, &channel);
             }
             let batch = shared
                 .hub
@@ -415,6 +407,29 @@ fn flush_emit(app: &AppHandle, shared: &Shared) {
     };
     for batch in batches {
         let _ = app.emit("chat:batch", &batch);
+    }
+}
+
+fn decorate_event(event: &mut ChatEvent, catalog: &Catalog, channel: &str) {
+    match event {
+        ChatEvent::Privmsg {
+            text,
+            emote_spans,
+            link_spans,
+            mention_spans,
+            ..
+        } => {
+            let extra = attach_third_party(text, emote_spans, catalog, channel);
+            emote_spans.extend(extra);
+            emote_spans.sort_by_key(|s| s.start);
+            let (links, mentions) = decorate_text_spans(text, emote_spans);
+            *link_spans = links;
+            *mention_spans = mentions;
+        }
+        ChatEvent::Usernotice { privmsg: Some(inner), .. } => {
+            decorate_event(inner, catalog, channel);
+        }
+        _ => {}
     }
 }
 

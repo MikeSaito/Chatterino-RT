@@ -1,7 +1,7 @@
 mod chat;
 mod security;
 
-use chat::commands::{chat_join, chat_part, chat_snapshot};
+use chat::commands::{chat_join, chat_part, chat_snapshot, open_chat_link};
 use chat::state::Shared;
 use tauri::Manager;
 
@@ -17,7 +17,12 @@ pub fn run() {
             security::allow_embed_storage(app);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![chat_join, chat_part, chat_snapshot])
+        .invoke_handler(tauri::generate_handler![
+            chat_join,
+            chat_part,
+            chat_snapshot,
+            open_chat_link
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
