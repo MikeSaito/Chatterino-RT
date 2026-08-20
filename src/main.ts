@@ -9,7 +9,7 @@ import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
-import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
+import type { AuthInfo, ChatStatus, DisplaySettings, Filters } from "./chat/types";
 
 let chatIpc: ChatIpc | null = null;
 
@@ -58,6 +58,12 @@ async function boot(): Promise<void> {
   const filtersHighlightLogins = document.querySelector<HTMLTextAreaElement>("#filters-highlight-logins");
   const filtersStatus = document.querySelector<HTMLElement>("#filters-status");
   const filtersSave = filtersForm?.querySelector<HTMLButtonElement>("button[type=submit]");
+  const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
+  const settingsFontScale = document.querySelector<HTMLInputElement>("#settings-font-scale");
+  const settingsFontValue = document.querySelector<HTMLElement>("#settings-font-value");
+  const settingsTimestamps = document.querySelector<HTMLInputElement>("#settings-timestamps");
+  const settingsStatus = document.querySelector<HTMLElement>("#settings-status");
+  const settingsSave = settingsForm?.querySelector<HTMLButtonElement>("button[type=submit]");
   if (
     !canvas ||
     !pane ||
@@ -93,7 +99,13 @@ async function boot(): Promise<void> {
     !filtersHighlightPhrases ||
     !filtersHighlightLogins ||
     !filtersStatus ||
-    !filtersSave
+    !filtersSave ||
+    !settingsForm ||
+    !settingsFontScale ||
+    !settingsFontValue ||
+    !settingsTimestamps ||
+    !settingsStatus ||
+    !settingsSave
   ) {
     return;
   }
@@ -123,6 +135,12 @@ async function boot(): Promise<void> {
   const highlightLoginsEl = filtersHighlightLogins;
   const filterStatusEl = filtersStatus;
   const filterSaveBtn = filtersSave;
+  const displayForm = settingsForm;
+  const fontScaleEl = settingsFontScale;
+  const fontValueEl = settingsFontValue;
+  const timestampsEl = settingsTimestamps;
+  const settingsStatusEl = settingsStatus;
+  const settingsSaveBtn = settingsSave;
   const completeBox = completeList;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
@@ -145,6 +163,11 @@ async function boot(): Promise<void> {
   const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
   await ring.init();
+  try {
+    applyDisplaySettings(await invoke<DisplaySettings>("settings_get"));
+  } catch (err) {
+    settingsStatusEl.textContent = formatError(err);
+  }
   bindScrollChrome({
     ring,
     host: canvasHost,
@@ -322,6 +345,28 @@ async function boot(): Promise<void> {
   filterForm.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void saveFilters();
+  });
+
+  displayForm.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void saveDisplaySettings();
+  });
+
+  let displayPreviewTimer = 0;
+  const scheduleDisplayPreview = (): void => {
+    paintFontScaleLabel();
+    window.clearTimeout(displayPreviewTimer);
+    displayPreviewTimer = window.setTimeout(() => {
+      ring.applyDisplay(Number(fontScaleEl.value), timestampsEl.checked);
+    }, 80);
+  };
+
+  fontScaleEl.addEventListener("input", () => {
+    scheduleDisplayPreview();
+  });
+
+  timestampsEl.addEventListener("change", () => {
+    scheduleDisplayPreview();
   });
 
   try {
@@ -519,6 +564,36 @@ async function boot(): Promise<void> {
       filterStatusEl.textContent = formatError(err);
     } finally {
       filterSaveBtn.disabled = false;
+    }
+  }
+
+  function paintFontScaleLabel(): void {
+    fontValueEl.textContent = Number(fontScaleEl.value).toFixed(2);
+  }
+
+  function applyDisplaySettings(data: DisplaySettings): void {
+    fontScaleEl.value = String(data.fontScale);
+    timestampsEl.checked = data.showTimestamps;
+    paintFontScaleLabel();
+    ring.applyDisplay(data.fontScale, data.showTimestamps);
+  }
+
+  async function saveDisplaySettings(): Promise<void> {
+    window.clearTimeout(displayPreviewTimer);
+    settingsSaveBtn.disabled = true;
+    try {
+      const saved = await invoke<DisplaySettings>("settings_set", {
+        settings: {
+          fontScale: Number(fontScaleEl.value),
+          showTimestamps: timestampsEl.checked,
+        },
+      });
+      applyDisplaySettings(saved);
+      settingsStatusEl.textContent = "сохранено";
+    } catch (err) {
+      settingsStatusEl.textContent = formatError(err);
+    } finally {
+      settingsSaveBtn.disabled = false;
     }
   }
 

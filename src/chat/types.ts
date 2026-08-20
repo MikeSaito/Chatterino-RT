@@ -113,3 +113,8 @@ export type Filters = {
   highlightPhrases: string[];
   highlightLogins: string[];
 };
+
+export type DisplaySettings = {
+  fontScale: number;
+  showTimestamps: boolean;
+};

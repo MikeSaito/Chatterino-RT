@@ -7,6 +7,7 @@ use tauri::AppHandle;
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::complete;
 use super::filters::{self, Filters};
+use super::settings::DisplaySettings;
 use super::spans::allowed_chat_url;
 use super::state::{EventCmd, IrcCmd, Shared};
 use super::types::ChatBatch;
@@ -320,6 +321,21 @@ pub fn filters_set(
     filters: Filters,
 ) -> Result<Filters, ApiError> {
     filters::replace(&state, filters).map_err(ApiError::invalid)
+}
+
+#[tauri::command]
+pub fn settings_get(
+    state: tauri::State<'_, Shared>,
+) -> Result<DisplaySettings, ApiError> {
+    super::settings::snapshot(&state)
+}
+
+#[tauri::command]
+pub fn settings_set(
+    state: tauri::State<'_, Shared>,
+    settings: DisplaySettings,
+) -> Result<DisplaySettings, ApiError> {
+    super::settings::replace(&state, settings)
 }
 
 #[tauri::command]

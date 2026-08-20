@@ -18,6 +18,7 @@ pub mod parse;
 pub mod pending;
 pub mod scrollback;
 pub mod session;
+pub mod settings;
 pub mod spans;
 pub mod state;
 pub mod types;

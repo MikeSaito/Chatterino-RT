@@ -13,6 +13,7 @@ use super::filters::FiltersInner;
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
 use super::session::SessionInner;
+use super::settings::SettingsInner;
 use super::types::ChatBatch;
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,7 @@ pub struct Shared {
     pub chatters: Arc<Mutex<Chatters>>,
     pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
     pub session: Arc<Mutex<SessionInner>>,
+    pub settings: Arc<Mutex<SettingsInner>>,
 }
 
 pub enum BatchSend {
@@ -93,6 +95,7 @@ impl Shared {
             chatters: Arc::new(Mutex::new(Chatters::default())),
             batch_tx: Arc::new(Mutex::new(None)),
             session: Arc::new(Mutex::new(SessionInner::default())),
+            settings: Arc::new(Mutex::new(SettingsInner::default())),
         }
     }
 

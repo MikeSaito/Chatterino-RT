@@ -97,6 +97,11 @@ export class MessageRing {
   private occupied = 0;
   private head = 0;
   private ready = false;
+  private showTimestamps = true;
+  private fontSize = FONT_SIZE;
+  private lineHeight = LINE_HEIGHT;
+  private charWidth = CHAR_WIDTH;
+  private badgeSize = BADGE_SIZE;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
 
@@ -113,6 +118,38 @@ export class MessageRing {
 
   setOnContextMenu(cb: (ctx: SlotContext) => void): void {
     this.onContext = cb;
+  }
+
+  /** Масштаб шрифта и timestamps без destroy PIXI.Application. */
+  applyDisplay(fontScale: number, showTimestamps: boolean): void {
+    const scale = Math.min(2, Math.max(0.75, fontScale));
+    this.showTimestamps = showTimestamps;
+    this.fontSize = FONT_SIZE * scale;
+    this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
+    this.charWidth = CHAR_WIDTH * scale;
+    this.badgeSize = Math.max(8, Math.round(BADGE_SIZE * scale));
+    if (!this.ready) {
+      return;
+    }
+    const emoteSize = Math.max(1, this.lineHeight - 4);
+    for (const slot of this.slots) {
+      slot.time.style.fontSize = this.fontSize;
+      slot.nick.style.fontSize = this.fontSize;
+      slot.body.style.fontSize = this.fontSize;
+      slot.body.style.lineHeight = this.lineHeight;
+      for (const spr of slot.badges) {
+        spr.y = (this.lineHeight - this.badgeSize) / 2;
+        if (spr.visible && spr.texture !== Texture.EMPTY) {
+          applySpriteTexture(spr, spr.texture, this.badgeSize);
+        }
+      }
+      for (const spr of slot.emotes) {
+        if (spr.visible && spr.texture !== Texture.EMPTY) {
+          applySpriteTexture(spr, spr.texture, emoteSize);
+        }
+      }
+    }
+    this.layout();
   }
 
   scrollSnapshot(): ScrollSnapshot {
@@ -137,7 +174,7 @@ export class MessageRing {
       return;
     }
     this.scroll.wheel(
-      wheelDeltaRows(ev.deltaY, ev.deltaMode, LINE_HEIGHT, this.scroll.viewRows),
+      wheelDeltaRows(ev.deltaY, ev.deltaMode, this.lineHeight, this.scroll.viewRows),
     );
     this.applyStageY();
     this.notifyScroll();
@@ -147,44 +184,33 @@ export class MessageRing {
     if (this.ready) {
       return;
     }
-    BitmapFont.install({
-      name: "ChatFont",
-      style: {
-        fontFamily: "Consolas, Cascadia Mono, monospace",
-        fontSize: FONT_SIZE,
-        fill: "#efeff1",
-      },
-      chars: [
-        ["\u0020", "\u007e"],
-        ["\u0400", "\u04FF"],
-      ],
-    });
+    this.installChatFont();
     const stage = this.app.stage;
     stage.eventMode = "static";
     for (let i = 0; i < MESSAGE_POOL_SIZE; i += 1) {
       const root = new Container();
       root.visible = false;
       root.eventMode = "static";
-      root.hitArea = new Rectangle(0, 0, 1, LINE_HEIGHT);
+      root.hitArea = new Rectangle(0, 0, 1, this.lineHeight);
       const hl = new Graphics();
       hl.eventMode = "none";
       const mentions = new Graphics();
       mentions.eventMode = "none";
       const time = new BitmapText({
         text: "",
-        style: { fontFamily: "ChatFont", fontSize: FONT_SIZE, fill: 0xadadc0 },
+        style: { fontFamily: "ChatFont", fontSize: this.fontSize, fill: 0xadadc0 },
       });
       const nick = new BitmapText({
         text: "",
-        style: { fontFamily: "ChatFont", fontSize: FONT_SIZE, fill: 0xffffff },
+        style: { fontFamily: "ChatFont", fontSize: this.fontSize, fill: 0xffffff },
       });
       const body = new BitmapText({
         text: "",
         style: {
           fontFamily: "ChatFont",
-          fontSize: FONT_SIZE,
+          fontSize: this.fontSize,
           fill: 0xefeff1,
-          lineHeight: LINE_HEIGHT,
+          lineHeight: this.lineHeight,
         },
       });
       const emotes: Sprite[] = [];
@@ -200,7 +226,7 @@ export class MessageRing {
         const spr = new Sprite(Texture.EMPTY);
         spr.visible = false;
         spr.eventMode = "none";
-        spr.y = (LINE_HEIGHT - BADGE_SIZE) / 2;
+        spr.y = (this.lineHeight - this.badgeSize) / 2;
         badges.push(spr);
       }
       root.addChild(hl, mentions, time, nick, body, ...badges, ...emotes);
@@ -428,7 +454,7 @@ export class MessageRing {
         }
         void this.textures.load(item.key, item.url).then((tex) => {
           if (tex && slot.msgId === data.msgId) {
-            applySpriteTexture(spr, tex, LINE_HEIGHT - 4);
+            applySpriteTexture(spr, tex, this.lineHeight - 4);
           }
         });
       }
@@ -440,7 +466,7 @@ export class MessageRing {
         }
         void this.textures.load(item.key, item.url).then((tex) => {
           if (tex && slot.msgId === data.msgId) {
-            applySpriteTexture(spr, tex, BADGE_SIZE);
+            applySpriteTexture(spr, tex, this.badgeSize);
           }
         });
       }
@@ -541,7 +567,7 @@ export class MessageRing {
       this.textures.acquire(key);
       void this.textures.load(key, span.url).then((tex) => {
         if (tex && slot.msgId === msgId) {
-          applySpriteTexture(spr, tex, LINE_HEIGHT - 4);
+          applySpriteTexture(spr, tex, this.lineHeight - 4);
         }
       });
     }
@@ -556,7 +582,7 @@ export class MessageRing {
       this.textures.acquire(key);
       void this.textures.load(key, badge.url).then((tex) => {
         if (tex && slot.msgId === msgId) {
-          applySpriteTexture(spr, tex, BADGE_SIZE);
+          applySpriteTexture(spr, tex, this.badgeSize);
         }
       });
     }
@@ -685,11 +711,12 @@ export class MessageRing {
   }
 
   private paintClip(slot: Slot): void {
-    const timeW = 5 * CHAR_WIDTH + TIME_GAP;
+    const timeW = this.showTimestamps ? 5 * this.charWidth + TIME_GAP : 0;
     slot.time.x = 0;
+    slot.time.visible = this.showTimestamps;
     const badgeN = slot.badgesRaw.length;
     const badgeBand =
-      badgeN === 0 ? 0 : badgeN * BADGE_SIZE + (badgeN - 1) * BADGE_GAP;
+      badgeN === 0 ? 0 : badgeN * this.badgeSize + (badgeN - 1) * BADGE_GAP;
     for (let i = 0; i < slot.badges.length; i += 1) {
       const spr = slot.badges[i];
       const badge = slot.badgesRaw[i];
@@ -698,17 +725,17 @@ export class MessageRing {
         continue;
       }
       spr.visible = true;
-      spr.x = timeW + i * (BADGE_SIZE + BADGE_GAP);
+      spr.x = timeW + i * (this.badgeSize + BADGE_GAP);
     }
     slot.nick.x = timeW + badgeBand;
     const paneW = this.app.screen.width;
     const nickMaxPx = Math.max(
       8,
-      paneW - timeW - badgeBand - TIME_GAP - 8 - MIN_BODY_CHARS * CHAR_WIDTH,
+      paneW - timeW - badgeBand - TIME_GAP - 8 - MIN_BODY_CHARS * this.charWidth,
     );
-    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / CHAR_WIDTH));
+    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.charWidth));
     slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
-    const nickW = Math.max(slot.nick.text.length * CHAR_WIDTH, 8);
+    const nickW = Math.max(slot.nick.text.length * this.charWidth, 8);
     const bodyX = timeW + badgeBand + nickW + TIME_GAP;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
@@ -716,14 +743,14 @@ export class MessageRing {
     }
     const lines = wrapBody(
       slot.bodyRaw,
-      maxBodyChars(this.app.screen.width, bodyX),
+      maxBodyChars(this.app.screen.width, bodyX, this.charWidth),
       slot.spansRaw,
     );
     slot.wrapLines = lines;
     slot.lineCount = lines.length;
     slot.body.text = renderWrapped(slot.bodyRaw, lines, slot.spansRaw);
     if (slot.root.hitArea instanceof Rectangle) {
-      slot.root.hitArea.height = slot.lineCount * LINE_HEIGHT;
+      slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
     this.paintHighlight(slot);
     this.paintMentions(slot, bodyX);
@@ -749,8 +776,8 @@ export class MessageRing {
         continue;
       }
       spr.visible = true;
-      spr.x = bodyX + pos.col * CHAR_WIDTH;
-      spr.y = 1 + pos.line * LINE_HEIGHT;
+      spr.x = bodyX + pos.col * this.charWidth;
+      spr.y = 1 + pos.line * this.lineHeight;
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
@@ -764,7 +791,7 @@ export class MessageRing {
       return;
     }
     slot.highlight
-      .rect(0, 0, this.app.screen.width, slot.lineCount * LINE_HEIGHT)
+      .rect(0, 0, this.app.screen.width, slot.lineCount * this.lineHeight)
       .fill({ color: parsed.color, alpha: parsed.alpha });
   }
 
@@ -790,10 +817,10 @@ export class MessageRing {
         const cols = Math.max(1, end.col - start.col + 1);
         slot.mentions
           .rect(
-            bodyX + start.col * CHAR_WIDTH,
-            start.line * LINE_HEIGHT,
-            cols * CHAR_WIDTH,
-            LINE_HEIGHT,
+            bodyX + start.col * this.charWidth,
+            start.line * this.lineHeight,
+            cols * this.charWidth,
+            this.lineHeight,
           )
           .fill({ color: 0x5c65f9, alpha: 0.35 });
       }
@@ -811,12 +838,12 @@ export class MessageRing {
       if (!live) {
         continue;
       }
-      slot.root.y = row * LINE_HEIGHT;
+      slot.root.y = row * this.lineHeight;
       this.paintClip(slot);
       slot.startRow = row;
       row += slot.lineCount;
     }
-    const viewRows = this.app.screen.height / LINE_HEIGHT;
+    const viewRows = this.app.screen.height / this.lineHeight;
     this.scroll.applyLayout(row, viewRows, this.laidSlots(), resolved);
     this.applyStageY();
     this.notifyScroll();
@@ -840,11 +867,27 @@ export class MessageRing {
   }
 
   private applyStageY(): void {
-    this.app.stage.y = this.scroll.stageY(LINE_HEIGHT);
+    this.app.stage.y = this.scroll.stageY(this.lineHeight);
   }
 
   private notifyScroll(): void {
     this.onScroll?.(this.scroll.snapshot());
+  }
+
+  private installChatFont(): void {
+    // Один atlas на жизнь окна: glyphs при max scale, BitmapText fontSize масштабирует вниз.
+    BitmapFont.install({
+      name: "ChatFont",
+      style: {
+        fontFamily: "Consolas, Cascadia Mono, monospace",
+        fontSize: FONT_SIZE * 2,
+        fill: "#efeff1",
+      },
+      chars: [
+        ["\u0020", "\u007e"],
+        ["\u0400", "\u04FF"],
+      ],
+    });
   }
 
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
@@ -879,8 +922,8 @@ export class MessageRing {
     if (local.x < slot.body.x || local.y < 0) {
       return undefined;
     }
-    const col = Math.floor((local.x - slot.body.x) / CHAR_WIDTH);
-    const line = Math.floor(local.y / LINE_HEIGHT);
+    const col = Math.floor((local.x - slot.body.x) / this.charWidth);
+    const line = Math.floor(local.y / this.lineHeight);
     const idx = lineColToIndex(slot.bodyRaw, slot.wrapLines, line, col, slot.spansRaw);
     if (idx === null) {
       return undefined;
@@ -976,6 +1019,6 @@ function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
   spr.height = size;
 }
 
-function maxBodyChars(paneWidth: number, bodyX: number): number {
-  return Math.floor(Math.max(1, paneWidth - bodyX - 8) / CHAR_WIDTH);
+function maxBodyChars(paneWidth: number, bodyX: number, charWidth: number): number {
+  return Math.floor(Math.max(1, paneWidth - bodyX - 8) / charWidth);
 }
