@@ -1,7 +1,9 @@
-const observers = new WeakMap<HTMLElement, ResizeObserver>();
+let playerEpoch = 0;
+let slotWaitCleanup: (() => void) | null = null;
 
 export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameElement {
   unmountPlayer(host);
+  const epoch = ++playerEpoch;
   const frame = document.createElement("iframe");
   frame.title = "Twitch player";
   frame.allow =
@@ -16,38 +18,25 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
     autoplay: "true",
   });
 
-  const applySize = () => {
-    const box = host.getBoundingClientRect();
-    const w = Math.max(400, Math.floor(box.width));
-    const h = Math.max(300, Math.floor(box.height));
-    frame.width = String(w);
-    frame.height = String(h);
-  };
+  const isLive = () => epoch === playerEpoch && frame.isConnected;
 
   host.appendChild(frame);
-  applySize();
-  const ro = new ResizeObserver(() => applySize());
-  ro.observe(host);
-  observers.set(host, ro);
-
-  const start = () => {
-    applySize();
-    if (!frame.isConnected || frame.src) {
+  whenSlotReady(host, isLive, () => {
+    if (!isLive() || frame.getAttribute("src")) {
       return;
     }
+    const box = host.getBoundingClientRect();
+    frame.width = String(Math.floor(box.width));
+    frame.height = String(Math.floor(box.height));
     frame.src = `https://player.twitch.tv/?${params.toString()}`;
-  };
-
-  whenSlotReady(host, start);
+  });
   return frame;
 }
 
 export function unmountPlayer(host: HTMLElement): void {
-  const ro = observers.get(host);
-  if (ro) {
-    ro.disconnect();
-    observers.delete(host);
-  }
+  playerEpoch += 1;
+  slotWaitCleanup?.();
+  slotWaitCleanup = null;
   const frames = host.querySelectorAll("iframe");
   for (const frame of frames) {
     frame.remove();
@@ -55,16 +44,47 @@ export function unmountPlayer(host: HTMLElement): void {
   host.replaceChildren();
 }
 
-function whenSlotReady(host: HTMLElement, run: () => void): void {
-  let frames = 0;
-  const tick = () => {
-    const box = host.getBoundingClientRect();
-    if ((box.width >= 400 && box.height >= 300) || frames >= 16) {
-      run();
+function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void): void {
+  slotWaitCleanup?.();
+  let done = false;
+  let raf = 0;
+  const observer = new ResizeObserver(() => {
+    kick();
+  });
+
+  const cleanup = () => {
+    observer.disconnect();
+    if (raf !== 0) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+    if (slotWaitCleanup === cleanup) {
+      slotWaitCleanup = null;
+    }
+  };
+
+  const kick = () => {
+    if (done) {
       return;
     }
-    frames += 1;
-    requestAnimationFrame(tick);
+    if (!isLive()) {
+      done = true;
+      cleanup();
+      return;
+    }
+    const box = host.getBoundingClientRect();
+    if (box.width < 400 || box.height < 300) {
+      return;
+    }
+    done = true;
+    cleanup();
+    run();
   };
-  requestAnimationFrame(tick);
+
+  slotWaitCleanup = cleanup;
+  observer.observe(host);
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    kick();
+  });
 }

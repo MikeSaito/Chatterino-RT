@@ -14,6 +14,7 @@ pub fn run() {
         .manage(shared)
         .setup(move |app| {
             chat::irc::start(app.handle().clone(), for_irc)?;
+            security::allow_embed_storage(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![chat_join, chat_part, chat_snapshot])
