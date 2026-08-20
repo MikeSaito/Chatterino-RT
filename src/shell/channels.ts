@@ -1,6 +1,6 @@
 export type ChannelList = {
   hydrate: (recents: string[], open: string[], active: string) => void;
-  remember: (login: string) => void;
+  remember: (login: string, makeActive?: boolean) => void;
   remove: (login: string) => void;
   syncOpen: (open: string[], active: string) => void;
   paint: (active: string) => void;
@@ -69,14 +69,14 @@ export function bindChannelList(
       }
       paint(active);
     },
-    remember(login) {
+    remember(login, makeActive = true) {
       open.add(login);
       const at = recents.indexOf(login);
       if (at >= 0) {
         recents.splice(at, 1);
       }
       recents.unshift(login);
-      paint(login);
+      paint(makeActive ? login : activeLogin);
     },
     remove(login) {
       open.delete(login);

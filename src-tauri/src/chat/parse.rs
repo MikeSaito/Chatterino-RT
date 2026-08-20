@@ -183,9 +183,11 @@ fn parse_usernotice(
             link_spans,
             mention_spans,
             bits: None,
-            reply_to_id: None,
-            reply_to_login: None,
-            reply_to_text: None,
+            reply_to_id: tags.get("reply-parent-msg-id"),
+            reply_to_login: tags
+                .get("reply-parent-user-login")
+                .or_else(|| tags.get("reply-parent-display-name")),
+            reply_to_text: tags.get("reply-parent-msg-body"),
             action: false,
             highlight_color: None,
         })

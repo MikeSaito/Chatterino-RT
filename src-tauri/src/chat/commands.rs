@@ -49,23 +49,37 @@ pub async fn chat_join(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
     channel: String,
+    focus: Option<bool>,
 ) -> Result<String, ApiError> {
     let normalized = normalize_channel(&channel)?;
-    let switched = {
-        let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        let previous = hub.active.clone();
-        hub.set_active(Some(normalized.clone()));
-        previous.as_deref() != Some(normalized.as_str())
+    let do_focus = focus.unwrap_or(true);
+    let is_new = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        !hub.has_channel(&normalized)
     };
-    if switched {
-        state.notify_event(EventCmd::ClearChannel);
+    if is_new {
+        super::session::ensure_can_open(&state, &normalized)?;
+    }
+    if do_focus {
+        let switched = {
+            let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+            let previous = hub.active.clone();
+            hub.set_active(Some(normalized.clone()));
+            previous.as_deref() != Some(normalized.as_str())
+        };
+        if switched {
+            state.notify_event(EventCmd::ClearChannel);
+        }
+    } else {
+        let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.buffer(&normalized);
     }
     if let Ok(mut set) = state.chatters.lock() {
         set.ensure_channel(&normalized);
         set.add(&normalized, &normalized, &normalized);
     }
     send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
-    let _ = super::session::remember(&state, normalized.clone());
+    let _ = super::session::remember(&state, normalized.clone(), do_focus);
     auth::emit(&app, &state);
     Ok(normalized)
 }
@@ -77,17 +91,9 @@ pub async fn chat_leave(
     channel: String,
 ) -> Result<Option<String>, ApiError> {
     let normalized = normalize_channel(&channel)?;
-    let (left_was_active, next) = {
+    let left_was_active = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        let left_was_active = hub.active.as_deref() == Some(normalized.as_str());
-        let next = if left_was_active {
-            hub.channels()
-                .into_iter()
-                .find(|c| c != &normalized)
-        } else {
-            hub.active.clone()
-        };
-        (left_was_active, next)
+        hub.active.as_deref() == Some(normalized.as_str())
     };
     send_cmd(&state, IrcCmd::PartChannel(normalized.clone())).await?;
     if let Ok(mut cat) = state.catalog.lock() {
@@ -105,23 +111,29 @@ pub async fn chat_leave(
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.drop_channel(&normalized);
-        if left_was_active {
-            if let Some(ch) = next.clone() {
-                hub.set_active(Some(ch));
-            }
-        }
     }
+    let _ = super::session::forget_open(&state, &normalized);
+    let next = if left_was_active {
+        super::session::preferred_focus(&state)
+    } else {
+        state
+            .hub
+            .lock()
+            .ok()
+            .and_then(|h| h.active.clone())
+    };
     if left_was_active {
         state.notify_event(EventCmd::ClearChannel);
-        let _ = super::session::forget_open(&state, &normalized);
         if let Some(ch) = next.as_ref() {
-            let _ = super::session::remember(&state, ch.clone());
+            {
+                let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+                hub.set_active(Some(ch.clone()));
+            }
+            let _ = super::session::remember(&state, ch.clone(), true);
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
         } else {
             let _ = super::session::clear_last(&state);
         }
-    } else {
-        let _ = super::session::forget_open(&state, &normalized);
     }
     auth::emit(&app, &state);
     Ok(next)
@@ -195,7 +207,7 @@ pub async fn chat_send(
     };
     let channel = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        if !hub.joined {
+        if !hub.joined_active() {
             return Err(ApiError::invalid("канал ещё не подключён"));
         }
         hub.active

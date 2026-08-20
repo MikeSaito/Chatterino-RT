@@ -159,7 +159,7 @@ pub fn snapshot(shared: &Shared) -> AuthInfo {
         && login.is_some()
         && active
             .as_ref()
-            .is_some_and(|h| h.active.is_some() && h.joined);
+            .is_some_and(|h| h.active.is_some() && h.joined_active());
     AuthInfo {
         can_send,
         login,

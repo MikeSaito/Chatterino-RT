@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createChatApp, destroyChatApp } from "./pixi/app";
-  import { MessageRing, type SlotContext } from "./chat/ring";
-import { bindChatIpc } from "./chat/ipc";
+import { MessageRing, type SlotContext } from "./chat/ring";
+import { bindChatIpc, type ChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
@@ -11,11 +11,14 @@ import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
 
+let chatIpc: ChatIpc | null = null;
+
 window.addEventListener("DOMContentLoaded", () => {
   void boot();
 });
 
 window.addEventListener("beforeunload", () => {
+  chatIpc?.stop();
   destroyChatApp();
 });
 
@@ -160,6 +163,7 @@ async function boot(): Promise<void> {
     ring.goToBottom();
   });
   const ipc = bindChatIpc(ring);
+  chatIpc = ipc;
   let mountedChannel = "";
   let holdStatus = false;
   let sending = false;
@@ -177,7 +181,11 @@ async function boot(): Promise<void> {
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
   let channelBusy = false;
-  const channelQueue: { kind: "join" | "leave"; name: string }[] = [];
+  const channelQueue: {
+    kind: "join" | "leave" | "sync";
+    name: string;
+    focus?: boolean;
+  }[] = [];
 
   const channels = bindChannelList(
     list,
@@ -249,19 +257,10 @@ async function boot(): Promise<void> {
       channels.remove(ev.payload.dropped);
     }
     channels.syncOpen(open, focus);
-    void (async () => {
-      await ipc.syncActive(focus || null);
-      if (focus) {
-        applyMounted(focus);
-      } else {
-        titleEl.textContent = "";
-        channelInput.value = "";
-        if (mountedChannel) {
-          unmountPlayer(playerSlot);
-          mountedChannel = "";
-        }
-      }
-    })();
+    channelQueue.push({ kind: "sync", name: focus });
+    if (!channelBusy) {
+      drainChannelQueue();
+    }
   });
 
   await listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
@@ -355,10 +354,10 @@ async function boot(): Promise<void> {
       if (login === focus) {
         continue;
       }
-      void joinChannel(login);
+      void joinChannel(login, false);
     }
     if (focus) {
-      void joinChannel(focus);
+      void joinChannel(focus, true);
     }
   } catch {
     /* first run */
@@ -675,7 +674,40 @@ async function boot(): Promise<void> {
       void leaveChannel(next.name);
       return;
     }
-    void joinChannel(next.name);
+    if (next.kind === "sync") {
+      void syncRooms(next.name);
+      return;
+    }
+    void joinChannel(next.name, next.focus !== false);
+  }
+
+  async function syncRooms(focus: string): Promise<void> {
+    if (channelBusy) {
+      channelQueue.unshift({ kind: "sync", name: focus });
+      return;
+    }
+    channelBusy = true;
+    joinControl.disabled = true;
+    try {
+      await ipc.syncActive(focus || null);
+      if (focus) {
+        applyMounted(focus);
+      } else {
+        titleEl.textContent = "";
+        channelInput.value = "";
+        if (mountedChannel) {
+          unmountPlayer(playerSlot);
+          mountedChannel = "";
+        }
+      }
+    } catch (err) {
+      holdStatus = true;
+      statusEl.textContent = formatError(err);
+    } finally {
+      channelBusy = false;
+      joinControl.disabled = false;
+      drainChannelQueue();
+    }
   }
 
   async function leaveChannel(raw: string): Promise<void> {
@@ -720,7 +752,7 @@ async function boot(): Promise<void> {
     }
   }
 
-  async function joinChannel(raw: string): Promise<void> {
+  async function joinChannel(raw: string, focus = true): Promise<void> {
     const name = raw.trim();
     if (!name) {
       holdStatus = true;
@@ -728,7 +760,7 @@ async function boot(): Promise<void> {
       return;
     }
     if (channelBusy) {
-      channelQueue.push({ kind: "join", name });
+      channelQueue.push({ kind: "join", name, focus });
       return;
     }
     channelBusy = true;
@@ -738,8 +770,12 @@ async function boot(): Promise<void> {
     clearReply();
     hideContextMenu();
     try {
-      const joined = await ipc.join(name);
-      applyMounted(joined);
+      const joined = await ipc.join(name, focus);
+      if (focus) {
+        applyMounted(joined);
+      } else {
+        channels.remember(joined, false);
+      }
     } catch (err) {
       holdStatus = true;
       statusEl.textContent = formatError(err);

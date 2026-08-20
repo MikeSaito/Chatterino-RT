@@ -31,10 +31,6 @@ impl CheerCatalog {
         self.channel.insert(channel, sets);
     }
 
-    pub fn retain_channel(&mut self, channel: &str) {
-        self.channel.retain(|k, _| k == channel);
-    }
-
     pub fn drop_channel(&mut self, channel: &str) {
         self.channel.remove(channel);
     }

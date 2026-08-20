@@ -1,3 +1,4 @@
+import { encode } from "@msgpack/msgpack";
 import { decodeBatch } from "../src/chat/batchDecode.ts";
 
 function assert(cond: boolean, msg: string): void {
@@ -40,6 +41,23 @@ const RUST_FIXTURE_HEX =
   assert(decodeBatch(null) === null, "null");
   assert(decodeBatch({}) === null, "object");
   assert(decodeBatch(new Uint8Array([0xff])) === null, "bad bytes");
+}
+
+{
+  const packed = encode({
+    channelId: "xqc",
+    seq: Number.NaN,
+    dropped: 0,
+    events: [],
+  });
+  assert(decodeBatch(packed) === null, "nan seq");
+  const packedInf = encode({
+    channelId: "xqc",
+    seq: 1,
+    dropped: Number.POSITIVE_INFINITY,
+    events: [],
+  });
+  assert(decodeBatch(packedInf) === null, "inf dropped");
 }
 
 console.log("batch decode tests ok");

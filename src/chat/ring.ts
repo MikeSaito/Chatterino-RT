@@ -303,20 +303,151 @@ export class MessageRing {
   }
 
   private hideById(id: string): void {
+    let changed = false;
     for (const slot of this.slots) {
       if (slot.msgId === id) {
         this.clearSlot(slot);
+        changed = true;
       }
+    }
+    if (changed) {
+      this.compactLive();
     }
   }
 
   private hideByLogin(login: string): void {
     const needle = login.toLowerCase();
+    let changed = false;
     for (const slot of this.slots) {
       if (slot.login === needle) {
         this.clearSlot(slot);
+        changed = true;
       }
     }
+    if (changed) {
+      this.compactLive();
+    }
+  }
+
+  private compactLive(): void {
+    if (this.occupied === 0) {
+      return;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    type Saved = {
+      msgId: string;
+      login: string;
+      bodyRaw: string;
+      nickRaw: string;
+      copyText: string;
+      spansRaw: EmoteSpan[];
+      linkSpans: LinkSpan[];
+      mentionSpans: MentionSpan[];
+      badgesRaw: Badge[];
+      highlightColor: string;
+      time: string;
+      nickColor: number;
+      bodyFill: number;
+      emoteUrls: { key: string; url: string }[];
+      badgeUrls: { key: string; url: string }[];
+    };
+    const saved: Saved[] = [];
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (!slot.msgId) {
+        continue;
+      }
+      const emoteUrls: { key: string; url: string }[] = [];
+      for (let e = 0; e < slot.emoteKeys.length; e += 1) {
+        const key = slot.emoteKeys[e];
+        const span = slot.spansRaw[e];
+        if (key && span) {
+          emoteUrls.push({ key, url: span.url });
+        }
+      }
+      const badgeUrls: { key: string; url: string }[] = [];
+      for (let b = 0; b < slot.badgeKeys.length; b += 1) {
+        const key = slot.badgeKeys[b];
+        const badge = slot.badgesRaw[b];
+        if (key && badge?.url) {
+          badgeUrls.push({ key, url: badge.url });
+        }
+      }
+      saved.push({
+        msgId: slot.msgId,
+        login: slot.login,
+        bodyRaw: slot.bodyRaw,
+        nickRaw: slot.nickRaw,
+        copyText: slot.copyText,
+        spansRaw: slot.spansRaw.slice(),
+        linkSpans: slot.linkSpans.slice(),
+        mentionSpans: slot.mentionSpans.slice(),
+        badgesRaw: slot.badgesRaw.slice(),
+        highlightColor: slot.highlightColor,
+        time: slot.time.text,
+        nickColor: slot.nick.tint,
+        bodyFill: 0xefeff1,
+        emoteUrls,
+        badgeUrls,
+      });
+    }
+    for (let i = 0; i < this.occupied; i += 1) {
+      this.clearSlot(this.slots[(start + i) % MESSAGE_POOL_SIZE]);
+    }
+    this.occupied = 0;
+    this.head = start;
+    for (const data of saved) {
+      const slot = this.slots[this.head];
+      slot.root.visible = true;
+      slot.msgId = data.msgId;
+      slot.login = data.login;
+      slot.time.text = data.time;
+      slot.nickRaw = data.nickRaw;
+      slot.nick.text = data.nickRaw;
+      slot.nick.tint = data.nickColor;
+      slot.bodyRaw = data.bodyRaw;
+      slot.copyText = data.copyText;
+      slot.spansRaw = data.spansRaw;
+      slot.linkSpans = data.linkSpans;
+      slot.mentionSpans = data.mentionSpans;
+      slot.badgesRaw = data.badgesRaw;
+      slot.highlightColor = data.highlightColor;
+      for (const key of data.emoteUrls.map((x) => x.key)) {
+        slot.emoteKeys.push(key);
+        this.textures.acquire(key);
+      }
+      for (const key of data.badgeUrls.map((x) => x.key)) {
+        slot.badgeKeys.push(key);
+        this.textures.acquire(key);
+      }
+      for (let e = 0; e < data.emoteUrls.length; e += 1) {
+        const item = data.emoteUrls[e];
+        const spr = slot.emotes[e];
+        if (!item || !spr) {
+          continue;
+        }
+        void this.textures.load(item.key, item.url).then((tex) => {
+          if (tex && slot.msgId === data.msgId) {
+            applySpriteTexture(spr, tex, LINE_HEIGHT - 4);
+          }
+        });
+      }
+      for (let b = 0; b < data.badgeUrls.length; b += 1) {
+        const item = data.badgeUrls[b];
+        const spr = slot.badges[b];
+        if (!item || !spr) {
+          continue;
+        }
+        void this.textures.load(item.key, item.url).then((tex) => {
+          if (tex && slot.msgId === data.msgId) {
+            applySpriteTexture(spr, tex, BADGE_SIZE);
+          }
+        });
+      }
+      this.head = (this.head + 1) % MESSAGE_POOL_SIZE;
+      this.occupied += 1;
+    }
+    this.layout();
   }
 
   private clearSlot(slot: Slot): void {
@@ -379,6 +510,7 @@ export class MessageRing {
     slot.mentionSpans = drawn.mentions;
     slot.badgesRaw = drawn.badges;
     slot.highlightColor = drawn.highlightColor;
+    const msgId = slot.msgId;
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -408,7 +540,7 @@ export class MessageRing {
       slot.emoteKeys.push(key);
       this.textures.acquire(key);
       void this.textures.load(key, span.url).then((tex) => {
-        if (tex && slot.msgId === event.id) {
+        if (tex && slot.msgId === msgId) {
           applySpriteTexture(spr, tex, LINE_HEIGHT - 4);
         }
       });
@@ -423,7 +555,7 @@ export class MessageRing {
       slot.badgeKeys.push(key);
       this.textures.acquire(key);
       void this.textures.load(key, badge.url).then((tex) => {
-        if (tex && slot.msgId === event.id) {
+        if (tex && slot.msgId === msgId) {
           applySpriteTexture(spr, tex, BADGE_SIZE);
         }
       });
@@ -465,8 +597,14 @@ export class MessageRing {
         let copyText = event.systemText;
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
+          let innerPrefix = "";
+          if (inner.replyToLogin) {
+            innerPrefix += `@${inner.replyToLogin} `;
+          }
+          if (inner.action) {
+            innerPrefix += "* ";
+          }
           const sep = body.length > 0 ? " " : "";
-          const innerPrefix = inner.action ? "* " : "";
           const shift = body.length + sep.length + innerPrefix.length;
           body += `${sep}${innerPrefix}${inner.text}`;
           copyText = inner.text;

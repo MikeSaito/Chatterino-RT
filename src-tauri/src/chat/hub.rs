@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::channel::ChannelBuf;
 use super::types::{ChatBatch, ChatEvent};
@@ -6,7 +6,7 @@ use super::types::{ChatBatch, ChatEvent};
 #[derive(Default)]
 pub struct Hub {
     pub active: Option<String>,
-    pub joined: bool,
+    joined: HashSet<String>,
     buffers: HashMap<String, ChannelBuf>,
 }
 
@@ -25,6 +25,16 @@ impl Hub {
         let mut keys: Vec<String> = self.buffers.keys().cloned().collect();
         keys.sort();
         keys
+    }
+
+    pub fn joined_active(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|ch| self.joined.contains(ch))
+    }
+
+    pub fn is_joined(&self, channel: &str) -> bool {
+        self.joined.contains(channel)
     }
 
     pub fn ingest(&mut self, channel: &str, event: ChatEvent) -> Option<ChatBatch> {
@@ -50,6 +60,8 @@ impl Hub {
     }
 
     pub fn snapshot(&mut self, channel: &str) -> Option<ChatBatch> {
+        // Flush pending into seq so live Channel does not re-send the same
+        // events after UI applies this scrollback snapshot (events already in scrollback).
         let buf = self.buffers.get_mut(channel)?;
         let _ = buf.flush();
         Some(buf.snapshot_batch(channel))
@@ -57,7 +69,6 @@ impl Hub {
 
     pub fn set_active(&mut self, channel: Option<String>) {
         self.active = channel;
-        self.joined = false;
         if let Some(ch) = self.active.clone() {
             self.buffer(&ch);
         }
@@ -65,21 +76,23 @@ impl Hub {
 
     pub fn drop_channel(&mut self, channel: &str) {
         self.buffers.remove(channel);
+        self.joined.remove(channel);
         if self.active.as_deref() == Some(channel) {
             self.active = None;
-            self.joined = false;
         }
     }
 
     pub fn clear_all(&mut self) {
         self.buffers.clear();
+        self.joined.clear();
         self.active = None;
-        self.joined = false;
     }
 
     pub fn set_joined(&mut self, channel: &str, yes: bool) {
-        if self.active.as_deref() == Some(channel) {
-            self.joined = yes;
+        if yes {
+            self.joined.insert(channel.to_string());
+        } else {
+            self.joined.remove(channel);
         }
     }
 }
@@ -121,12 +134,15 @@ mod tests {
     }
 
     #[test]
-    fn set_active_clears_joined() {
+    fn set_active_preserves_joined_flag() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         hub.set_joined("xqc", true);
-        assert!(hub.joined);
+        assert!(hub.joined_active());
         hub.set_active(Some("lirik".into()));
-        assert!(!hub.joined);
+        assert!(!hub.joined_active());
+        assert!(hub.is_joined("xqc"));
+        hub.set_active(Some("xqc".into()));
+        assert!(hub.joined_active());
     }
 }

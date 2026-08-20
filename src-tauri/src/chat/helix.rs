@@ -47,10 +47,6 @@ impl BadgeCatalog {
         self.channel.insert(channel, map);
     }
 
-    pub fn retain_channel(&mut self, channel: &str) {
-        self.channel.retain(|k, _| k == channel);
-    }
-
     pub fn drop_channel(&mut self, channel: &str) {
         self.channel.remove(channel);
     }

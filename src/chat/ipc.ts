@@ -6,7 +6,7 @@ import type { ChatBatch } from "./types";
 import type { MessageRing } from "./ring";
 
 export type ChatIpc = {
-  join: (channel: string) => Promise<string>;
+  join: (channel: string, focus?: boolean) => Promise<string>;
   leave: (channel: string) => Promise<string | null>;
   syncActive: (channel: string | null) => Promise<void>;
   part: () => Promise<void>;
@@ -14,20 +14,44 @@ export type ChatIpc = {
   active: () => string;
 };
 
+type Op =
+  | {
+      kind: "join";
+      channel: string;
+      focus: boolean;
+      resolve: (v: string) => void;
+      reject: (e: unknown) => void;
+    }
+  | {
+      kind: "leave";
+      channel: string;
+      resolve: (v: string | null) => void;
+      reject: (e: unknown) => void;
+    }
+  | {
+      kind: "sync";
+      channel: string | null;
+      resolve: () => void;
+      reject: (e: unknown) => void;
+    };
+
 export function bindChatIpc(ring: MessageRing): ChatIpc {
   let lastSeq = 0;
   let active = "";
   let epoch = 0;
-  let joining = false;
+  let pipeEpoch = 0;
+  let stopped = false;
   let handling = false;
   let snapshotQueued = false;
   let retryTimer: number | undefined;
   let resubscribing = false;
+  let opBusy = false;
   const queued: ChatBatch[] = [];
+  const ops: Op[] = [];
 
   const applySnapshot = async (channel: string, expected: number): Promise<boolean> => {
     const snap = await invoke<ChatBatch>("chat_snapshot", { channel });
-    if (expected !== epoch || channel !== active) {
+    if (expected !== epoch || channel !== active || stopped) {
       return false;
     }
     lastSeq = snap.seq;
@@ -36,7 +60,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const recoverSnapshot = async (): Promise<boolean> => {
-    if (!active) {
+    if (!active || stopped) {
       return true;
     }
     const expected = epoch;
@@ -65,7 +89,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       }
       return;
     }
-    if (expected !== epoch || batch.channelId !== active) {
+    if (expected !== epoch || batch.channelId !== active || stopped) {
       return;
     }
     lastSeq = batch.seq;
@@ -73,7 +97,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const scheduleRetry = () => {
-    if (retryTimer !== undefined) {
+    if (retryTimer !== undefined || stopped) {
       return;
     }
     retryTimer = window.setTimeout(() => {
@@ -83,11 +107,14 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const pump = async () => {
-    if (handling) {
+    if (handling || stopped) {
       return;
     }
     handling = true;
     while (queued.length > 0 || snapshotQueued) {
+      if (stopped) {
+        break;
+      }
       if (snapshotQueued) {
         queued.length = 0;
         const ok = await recoverSnapshot();
@@ -114,6 +141,9 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const onBatch = (batch: ChatBatch) => {
+    if (stopped) {
+      return;
+    }
     if (snapshotQueued) {
       void pump();
       return;
@@ -128,6 +158,9 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const onBadPipe = () => {
+    if (stopped) {
+      return;
+    }
     queued.length = 0;
     snapshotQueued = true;
     void resubscribe();
@@ -135,8 +168,12 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const attachChannel = async (): Promise<void> => {
+    const my = ++pipeEpoch;
     const channel = new Channel<unknown>();
     channel.onmessage = (payload) => {
+      if (my !== pipeEpoch || stopped) {
+        return;
+      }
       const batch = decodeBatch(payload);
       if (batch) {
         onBatch(batch);
@@ -148,7 +185,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   };
 
   const resubscribe = async (): Promise<void> => {
-    if (resubscribing) {
+    if (resubscribing || stopped) {
       return;
     }
     resubscribing = true;
@@ -196,69 +233,92 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     ring.reset();
   };
 
+  const runOps = async (): Promise<void> => {
+    if (opBusy) {
+      return;
+    }
+    opBusy = true;
+    while (ops.length > 0 && !stopped) {
+      const op = ops.shift();
+      if (!op) {
+        break;
+      }
+      try {
+        if (op.kind === "join") {
+          await attachChannel();
+          const joined = await invoke<string>("chat_join", {
+            channel: op.channel,
+            focus: op.focus,
+          });
+          if (op.focus) {
+            await mountActive(joined);
+          }
+          op.resolve(joined);
+        } else if (op.kind === "leave") {
+          const next = await invoke<string | null>("chat_leave", { channel: op.channel });
+          if (!next) {
+            clearActive();
+            op.resolve(null);
+          } else if (next === active) {
+            op.resolve(next);
+          } else {
+            await attachChannel();
+            await mountActive(next);
+            op.resolve(next);
+          }
+        } else if (!op.channel) {
+          clearActive();
+          op.resolve();
+        } else if (op.channel === active) {
+          op.resolve();
+        } else {
+          await attachChannel();
+          await mountActive(op.channel);
+          op.resolve();
+        }
+      } catch (err) {
+        op.reject(err);
+      }
+    }
+    opBusy = false;
+    if (ops.length > 0 && !stopped) {
+      void runOps();
+    }
+  };
+
   void listen(CHAT_PIPE_EVENT, () => {
     onBadPipe();
   });
 
   return {
-    async join(channel: string) {
-      if (joining) {
-        return active;
-      }
-      joining = true;
-      try {
-        await attachChannel();
-        const joined = await invoke<string>("chat_join", { channel });
-        return await mountActive(joined);
-      } finally {
-        joining = false;
-      }
+    join(channel: string, focus = true) {
+      return new Promise<string>((resolve, reject) => {
+        ops.push({ kind: "join", channel, focus, resolve, reject });
+        void runOps();
+      });
     },
-    async leave(channel: string) {
-      if (joining) {
-        return active || null;
-      }
-      joining = true;
-      try {
-        const next = await invoke<string | null>("chat_leave", { channel });
-        if (!next) {
-          clearActive();
-          return null;
-        }
-        if (next === active) {
-          return next;
-        }
-        await attachChannel();
-        return await mountActive(next);
-      } finally {
-        joining = false;
-      }
+    leave(channel: string) {
+      return new Promise<string | null>((resolve, reject) => {
+        ops.push({ kind: "leave", channel, resolve, reject });
+        void runOps();
+      });
     },
-    async syncActive(channel: string | null) {
-      if (!channel) {
-        clearActive();
-        return;
-      }
-      if (channel === active) {
-        return;
-      }
-      if (joining) {
-        return;
-      }
-      joining = true;
-      try {
-        await attachChannel();
-        await mountActive(channel);
-      } finally {
-        joining = false;
-      }
+    syncActive(channel: string | null) {
+      return new Promise<void>((resolve, reject) => {
+        ops.push({ kind: "sync", channel, resolve, reject });
+        void runOps();
+      });
     },
     async part() {
       clearActive();
       await invoke("chat_part");
     },
     stop() {
+      stopped = true;
       epoch += 1;
+      pipeEpoch += 1;
+      ops.length = 0;
+      queued.length = 0;
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer);
         retryTimer = undefined;

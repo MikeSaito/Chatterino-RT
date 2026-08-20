@@ -58,14 +58,6 @@ impl Catalog {
         self.channel.insert(channel, map);
     }
 
-    pub fn retain_channel(&mut self, channel: &str) {
-        self.channel.retain(|k, _| k == channel);
-        self.set_scope.retain(|_, scope| match scope {
-            SetScope::Global => true,
-            SetScope::Channel(ch) => ch == channel,
-        });
-    }
-
     pub fn drop_channel(&mut self, channel: &str) {
         self.channel.remove(channel);
         self.set_scope.retain(|_, scope| match scope {

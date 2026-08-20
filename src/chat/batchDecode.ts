@@ -25,6 +25,12 @@ export function decodeBatch(raw: unknown): ChatBatch | null {
     if (typeof batch.channelId !== "string" || typeof batch.seq !== "number") {
       return null;
     }
+    if (!Number.isFinite(batch.seq) || batch.seq < 0) {
+      return null;
+    }
+    if (typeof batch.dropped === "number" && !Number.isFinite(batch.dropped)) {
+      return null;
+    }
     if (!Array.isArray(batch.events)) {
       return null;
     }

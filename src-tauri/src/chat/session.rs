@@ -9,7 +9,7 @@ use super::state::Shared;
 
 const SESSION_FILE: &str = "session.json";
 const MAX_RECENTS: usize = 30;
-const MAX_OPEN: usize = 20;
+pub const MAX_OPEN: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -47,10 +47,42 @@ pub fn snapshot(shared: &Shared) -> Result<Session, ApiError> {
         .map_err(|_| ApiError::internal("lock"))
 }
 
-pub fn remember(shared: &Shared, normalized: String) -> Result<Session, ApiError> {
-    if !valid_login(&normalized) {
+pub fn ensure_can_open(shared: &Shared, normalized: &str) -> Result<(), ApiError> {
+    if !valid_login(normalized) {
         return Err(ApiError::invalid("имя канала: 1-25 символов [a-z0-9_]"));
     }
+    let inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+    if inner.data.open.iter().any(|c| c == normalized) {
+        return Ok(());
+    }
+    if inner.data.open.len() >= MAX_OPEN {
+        return Err(ApiError::invalid(format!(
+            "не больше {MAX_OPEN} открытых каналов"
+        )));
+    }
+    Ok(())
+}
+
+pub fn preferred_focus(shared: &Shared) -> Option<String> {
+    let open = shared
+        .session
+        .lock()
+        .ok()
+        .map(|inner| inner.data.open.clone())
+        .unwrap_or_default();
+    let hub = shared.hub.lock().ok()?;
+    for ch in &open {
+        if hub.has_channel(ch) {
+            return Some(ch.clone());
+        }
+    }
+    hub.channels().into_iter().next()
+}
+
+/// `bump_mru`: move channel to front of `open` / update `last_channel`.
+/// Background joins pass `false` so restore order stays intact.
+pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<Session, ApiError> {
+    ensure_can_open(shared, &normalized)?;
     let (path, data) = {
         let mut inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
         let list = &mut inner.data.recents;
@@ -60,12 +92,19 @@ pub fn remember(shared: &Shared, normalized: String) -> Result<Session, ApiError
         list.insert(0, normalized.clone());
         list.truncate(MAX_RECENTS);
         let open = &mut inner.data.open;
-        if let Some(pos) = open.iter().position(|c| c == &normalized) {
-            open.remove(pos);
+        let already = open.iter().any(|c| c == &normalized);
+        if bump_mru {
+            if let Some(pos) = open.iter().position(|c| c == &normalized) {
+                open.remove(pos);
+            }
+            open.insert(0, normalized.clone());
+        } else if !already {
+            open.push(normalized.clone());
         }
-        open.insert(0, normalized.clone());
-        open.truncate(MAX_OPEN);
-        inner.data.last_channel = Some(normalized);
+        debug_assert!(open.len() <= MAX_OPEN);
+        if bump_mru {
+            inner.data.last_channel = Some(normalized);
+        }
         (inner.path.clone(), inner.data.clone())
     };
     save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
@@ -97,10 +136,17 @@ pub fn clear_last(shared: &Shared) -> Result<Session, ApiError> {
 }
 
 pub fn emit_rooms(app: &AppHandle, shared: &Shared, dropped: Option<String>) {
-    let (active, open) = match shared.hub.lock() {
-        Ok(hub) => (hub.active.clone(), hub.channels()),
-        Err(_) => (None, Vec::new()),
-    };
+    let active = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.active.clone());
+    let open = shared
+        .session
+        .lock()
+        .ok()
+        .map(|inner| inner.data.open.clone())
+        .unwrap_or_default();
     let _ = app.emit(
         "chat:rooms",
         super::types::ChatRooms {
@@ -175,18 +221,24 @@ mod tests {
                 std::process::id()
             ));
         }
-        for i in 0..35 {
-            remember(&shared, format!("u{i}")).unwrap();
+        for i in 0..MAX_OPEN {
+            remember(&shared, format!("u{i}"), true).unwrap();
         }
+        assert!(remember(&shared, "overflow".into(), true).is_err());
+        remember(&shared, "u0".into(), true).unwrap();
         let snap = snapshot(&shared).unwrap();
-        assert_eq!(snap.recents.len(), MAX_RECENTS);
-        assert_eq!(snap.recents[0], "u34");
-        assert_eq!(snap.last_channel.as_deref(), Some("u34"));
-        assert!(snap.open.len() <= MAX_OPEN);
-        assert!(snap.open.contains(&"u34".to_string()));
-        forget_open(&shared, "u34").unwrap();
+        assert_eq!(snap.recents.len(), MAX_OPEN);
+        assert_eq!(snap.recents[0], "u0");
+        assert_eq!(snap.last_channel.as_deref(), Some("u0"));
+        assert_eq!(snap.open.len(), MAX_OPEN);
+        assert_eq!(snap.open[0], "u0");
+        forget_open(&shared, "u0").unwrap();
         let snap2 = snapshot(&shared).unwrap();
-        assert!(!snap2.open.contains(&"u34".to_string()));
+        assert!(!snap2.open.contains(&"u0".to_string()));
+        remember(&shared, "overflow".into(), true).unwrap();
+        assert!(snapshot(&shared).unwrap().open.contains(&"overflow".to_string()));
+        remember(&shared, "u1".into(), false).unwrap();
+        assert_ne!(snapshot(&shared).unwrap().open[0], "u1");
         let _ = fs::remove_file(&shared.session.lock().unwrap().path);
     }
 }

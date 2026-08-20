@@ -40,7 +40,6 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
         shared.notify_event(EventCmd::SetGlobal { set_id });
     }
     let mut wanted: HashSet<String> = HashSet::new();
-    let mut join_blocked = false;
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
     let mut pending_out: VecDeque<(String, String, Option<String>)> = VecDeque::new();
@@ -50,7 +49,6 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
             &shared,
             &mut rx,
             &mut wanted,
-            &mut join_blocked,
             &mut last_error,
             &mut backoff,
             &mut pending_out,
@@ -83,19 +81,16 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                             None | Some(IrcCmd::Shutdown) => break,
                             Some(IrcCmd::Join(ch)) => {
                                 wanted.insert(ch);
-                                join_blocked = false;
                                 last_error = None;
                                 backoff = Duration::from_secs(1);
                             }
                             Some(IrcCmd::PartChannel(ch)) => {
                                 wanted.remove(&ch);
-                                join_blocked = false;
                                 last_error = None;
                                 pending_out.retain(|(c, _, _)| c != &ch);
                             }
                             Some(IrcCmd::Part) => {
                                 wanted.clear();
-                                join_blocked = false;
                                 last_error = None;
                                 pending_out.clear();
                             }
@@ -127,22 +122,12 @@ async fn connect_session(
     shared: &Shared,
     rx: &mut mpsc::Receiver<IrcCmd>,
     wanted: &mut HashSet<String>,
-    join_blocked: &mut bool,
     last_error: &mut Option<String>,
     backoff: &mut Duration,
     pending_out: &mut VecDeque<(String, String, Option<String>)>,
 ) -> SessionEnd {
     let status_ch = status_channel(shared, wanted);
-    if *join_blocked {
-        emit_status(
-            app,
-            ChatConnState::Error,
-            status_ch.as_deref(),
-            last_error.as_deref(),
-        );
-    } else {
-        emit_status(app, ChatConnState::Connecting, status_ch.as_deref(), None);
-    }
+    emit_status(app, ChatConnState::Connecting, status_ch.as_deref(), None);
     let Ok(Ok((stream, _))) =
         tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::connect_async(IRC_URL)).await
     else {
@@ -165,11 +150,9 @@ async fn connect_session(
     if authed {
         spawn_helix_globals(shared);
     }
-    if !*join_blocked {
-        for ch in wanted.iter() {
-            if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-                return SessionEnd::Reconnect { wait: true };
-            }
+    for ch in wanted.iter() {
+        if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
+            return SessionEnd::Reconnect { wait: true };
         }
     }
 
@@ -214,7 +197,6 @@ async fn connect_session(
                         wanted.clear();
                         in_rooms.clear();
                         loaded_room.clear();
-                        *join_blocked = false;
                         *last_error = None;
                         pending_out.clear();
                         emit_status(app, ChatConnState::Connected, None, None);
@@ -225,18 +207,10 @@ async fn connect_session(
                         loaded_room.remove(&ch);
                         pending_out.retain(|(c, _, _)| c != &ch);
                         let _ = send_line(&mut write, &format!("PART #{ch}")).await;
-                        let active_match = shared
-                            .hub
-                            .lock()
-                            .ok()
-                            .is_some_and(|h| h.active.as_deref() == Some(ch.as_str()));
-                        if active_match {
-                            if let Ok(mut hub) = shared.hub.lock() {
-                                hub.set_joined(&ch, false);
-                            }
-                            auth::emit(app, shared);
+                        if let Ok(mut hub) = shared.hub.lock() {
+                            hub.set_joined(&ch, false);
                         }
-                        *join_blocked = false;
+                        auth::emit(app, shared);
                         *last_error = None;
                         let status_ch = status_channel(shared, wanted);
                         emit_status(
@@ -247,7 +221,6 @@ async fn connect_session(
                         );
                     }
                     Some(IrcCmd::Join(ch)) => {
-                        *join_blocked = false;
                         *last_error = None;
                         let already = wanted.contains(&ch);
                         wanted.insert(ch.clone());
@@ -284,7 +257,6 @@ async fn connect_session(
                             &mut write,
                             wanted,
                             &in_rooms,
-                            *join_blocked,
                             pending_out,
                         )
                         .await
@@ -328,7 +300,6 @@ async fn connect_session(
                                         &mut write,
                                         wanted,
                                         &in_rooms,
-                                        *join_blocked,
                                         pending_out,
                                     )
                                     .await
@@ -376,28 +347,23 @@ async fn connect_session(
                                     if let Ok(mut set) = shared.chatters.lock() {
                                         set.drop_channel(&channel);
                                     }
-                                    let (was_active, next_focus) = match shared.hub.lock() {
-                                        Ok(mut hub) => {
-                                            let was_active =
-                                                hub.active.as_deref() == Some(channel.as_str());
-                                            hub.drop_channel(&channel);
-                                            if was_active {
-                                                let next = hub.channels().into_iter().next();
-                                                if let Some(ch) = next.clone() {
-                                                    hub.set_active(Some(ch));
-                                                }
-                                                (true, next)
-                                            } else {
-                                                (false, None)
-                                            }
-                                        }
-                                        Err(_) => (false, None),
-                                    };
+                                    let was_active = shared
+                                        .hub
+                                        .lock()
+                                        .ok()
+                                        .is_some_and(|h| h.active.as_deref() == Some(channel.as_str()));
+                                    if let Ok(mut hub) = shared.hub.lock() {
+                                        hub.drop_channel(&channel);
+                                    }
+                                    let _ = crate::chat::session::forget_open(shared, &channel);
                                     if was_active {
                                         shared.notify_event(EventCmd::ClearChannel);
-                                        let _ = crate::chat::session::forget_open(shared, &channel);
+                                        let next_focus = crate::chat::session::preferred_focus(shared);
                                         if let Some(ch) = next_focus {
-                                            let _ = crate::chat::session::remember(shared, ch.clone());
+                                            if let Ok(mut hub) = shared.hub.lock() {
+                                                hub.set_active(Some(ch.clone()));
+                                            }
+                                            let _ = crate::chat::session::remember(shared, ch.clone(), true);
                                             wanted.insert(ch.clone());
                                             if !in_rooms.contains(&ch) {
                                                 if send_line(&mut write, &format!("JOIN #{ch}"))
@@ -414,8 +380,6 @@ async fn connect_session(
                                         } else {
                                             let _ = crate::chat::session::clear_last(shared);
                                         }
-                                    } else {
-                                        let _ = crate::chat::session::forget_open(shared, &channel);
                                     }
                                     *last_error = Some(message.clone());
                                     emit_status(
@@ -462,15 +426,11 @@ async fn flush_outgoing<S>(
     write: &mut S,
     wanted: &HashSet<String>,
     in_rooms: &HashSet<String>,
-    join_blocked: bool,
     pending: &mut VecDeque<(String, String, Option<String>)>,
 ) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
 {
-    if join_blocked {
-        return Ok(());
-    }
     let mut rest = VecDeque::new();
     while let Some((channel, text, reply_to)) = pending.pop_front() {
         if !wanted.contains(&channel) {
@@ -725,18 +685,26 @@ fn flush_emit(app: &AppHandle, shared: &Shared) {
 }
 
 fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBatch) {
-    if shared.send_batch(batch) {
-        return;
+    match shared.send_batch(batch) {
+        super::state::BatchSend::Delivered => {}
+        super::state::BatchSend::EncodeError => {
+            eprintln!(
+                "chat batch encode failed for channel {}",
+                batch.channel_id
+            );
+        }
+        super::state::BatchSend::NoSubscriber => {
+            let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
+            shared.note_undelivered(&batch.channel_id, n);
+            let _ = app.emit(
+                "chat:pipe",
+                ChatPipe {
+                    ok: false,
+                    channel: Some(batch.channel_id.clone()),
+                },
+            );
+        }
     }
-    let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
-    shared.note_undelivered(&batch.channel_id, n);
-    let _ = app.emit(
-        "chat:pipe",
-        ChatPipe {
-            ok: false,
-            channel: Some(batch.channel_id.clone()),
-        },
-    );
 }
 
 pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &str) {

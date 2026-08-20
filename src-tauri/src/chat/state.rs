@@ -71,6 +71,12 @@ pub struct Shared {
     pub session: Arc<Mutex<SessionInner>>,
 }
 
+pub enum BatchSend {
+    Delivered,
+    NoSubscriber,
+    EncodeError,
+}
+
 impl Shared {
     pub fn new() -> Self {
         Self {
@@ -96,17 +102,21 @@ impl Shared {
         Ok(())
     }
 
-    pub fn send_batch(&self, batch: &ChatBatch) -> bool {
+    pub fn send_batch(&self, batch: &ChatBatch) -> BatchSend {
         let Ok(bytes) = encode_batch(batch) else {
-            return false;
+            return BatchSend::EncodeError;
         };
         let Ok(slot) = self.batch_tx.lock() else {
-            return false;
+            return BatchSend::NoSubscriber;
         };
         let Some(channel) = slot.as_ref() else {
-            return false;
+            return BatchSend::NoSubscriber;
         };
-        channel.send(bytes).is_ok()
+        if channel.send(bytes).is_ok() {
+            BatchSend::Delivered
+        } else {
+            BatchSend::NoSubscriber
+        }
     }
 
     pub fn note_undelivered(&self, channel: &str, count: u32) {
