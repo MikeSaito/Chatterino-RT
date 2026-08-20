@@ -485,6 +485,15 @@ fn dispatch_line(
                     }
                 }
             }
+            if super::filters::gate_event(shared, &mut event) {
+                if let Some(msg) = failed {
+                    return LineAction::JoinFailed(msg);
+                }
+                if joined {
+                    return LineAction::Joined;
+                }
+                return LineAction::None;
+            }
             decorate_event(&mut event, shared, &channel);
             let batch = shared
                 .hub

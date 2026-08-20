@@ -17,6 +17,25 @@
           <button type="submit">Join</button>
         </form>
         <ul id="channel-list"></ul>
+        <details id="filters-box">
+          <summary>Фильтры</summary>
+          <form id="filters-form">
+            <label class="filters-check">
+              <input type="checkbox" id="filters-self" checked />
+              свой ник
+            </label>
+            <label for="filters-ignore-logins">игнор логинов</label>
+            <textarea id="filters-ignore-logins" rows="3" spellcheck="false" autocomplete="off"></textarea>
+            <label for="filters-ignore-phrases">игнор фраз</label>
+            <textarea id="filters-ignore-phrases" rows="3" spellcheck="false" autocomplete="off"></textarea>
+            <label for="filters-highlight-phrases">хайлайт фраз</label>
+            <textarea id="filters-highlight-phrases" rows="3" spellcheck="false" autocomplete="off"></textarea>
+            <label for="filters-highlight-logins">хайлайт логинов</label>
+            <textarea id="filters-highlight-logins" rows="3" spellcheck="false" autocomplete="off"></textarea>
+            <button type="submit">Сохранить</button>
+            <p id="filters-status"></p>
+          </form>
+        </details>
         <div id="auth-box">
           <p id="auth-login"></p>
           <button type="button" id="auth-signin">Войти</button>

@@ -3,6 +3,7 @@ import {
   BitmapText,
   Container,
   FederatedPointerEvent,
+  Graphics,
   Rectangle,
   Sprite,
   Texture,
@@ -35,6 +36,7 @@ const MIN_BODY_CHARS = 24;
 
 type Slot = {
   root: Container;
+  highlight: Graphics;
   time: BitmapText;
   nick: BitmapText;
   body: BitmapText;
@@ -51,6 +53,7 @@ type Slot = {
   linkSpans: LinkSpan[];
   wrapLines: WrapLine[];
   lineCount: number;
+  highlightColor: string;
 };
 
 type Drawn = {
@@ -61,6 +64,7 @@ type Drawn = {
   spans: EmoteSpan[];
   links: LinkSpan[];
   badges: Badge[];
+  highlightColor: string;
 };
 
 export class MessageRing {
@@ -100,6 +104,8 @@ export class MessageRing {
       root.visible = false;
       root.eventMode = "static";
       root.hitArea = new Rectangle(0, 0, 1, LINE_HEIGHT);
+      const hl = new Graphics();
+      hl.eventMode = "none";
       const time = new BitmapText({
         text: "",
         style: { fontFamily: "ChatFont", fontSize: FONT_SIZE, fill: 0xadadc0 },
@@ -133,9 +139,10 @@ export class MessageRing {
         spr.y = (LINE_HEIGHT - BADGE_SIZE) / 2;
         badges.push(spr);
       }
-      root.addChild(time, nick, body, ...badges, ...emotes);
+      root.addChild(hl, time, nick, body, ...badges, ...emotes);
       const slot: Slot = {
         root,
+        highlight: hl,
         time,
         nick,
         body,
@@ -152,6 +159,7 @@ export class MessageRing {
         linkSpans: [],
         wrapLines: [{ start: 0, end: 0 }],
         lineCount: 1,
+        highlightColor: "",
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -252,6 +260,8 @@ export class MessageRing {
     slot.linkSpans = [];
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.lineCount = 1;
+    slot.highlightColor = "";
+    slot.highlight.clear();
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -275,6 +285,7 @@ export class MessageRing {
     slot.spansRaw = drawn.spans;
     slot.linkSpans = drawn.links;
     slot.badgesRaw = drawn.badges;
+    slot.highlightColor = drawn.highlightColor;
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -346,6 +357,7 @@ export class MessageRing {
           spans: shiftSpans(event.emoteSpans ?? [], shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
           badges: badgesWithUrl(event.badges ?? []),
+          highlightColor: event.highlightColor ?? "",
         };
       }
       case "usernotice": {
@@ -353,6 +365,7 @@ export class MessageRing {
         let spans: EmoteSpan[] = [];
         let links: LinkSpan[] = [];
         let badges: Badge[] = [];
+        let highlightColor = "";
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
           const sep = body.length > 0 ? " " : "";
@@ -362,6 +375,9 @@ export class MessageRing {
           spans = shiftSpans(inner.emoteSpans ?? [], shift);
           links = shiftSpans(inner.linkSpans ?? [], shift);
           badges = badgesWithUrl(inner.badges ?? []);
+          highlightColor = inner.highlightColor ?? event.highlightColor ?? "";
+        } else {
+          highlightColor = event.highlightColor ?? "";
         }
         return {
           time,
@@ -371,6 +387,7 @@ export class MessageRing {
           spans,
           links,
           badges,
+          highlightColor,
         };
       }
       case "clearchat":
@@ -382,6 +399,7 @@ export class MessageRing {
           spans: [],
           links: [],
           badges: [],
+          highlightColor: "",
         };
       case "roomstate":
         return {
@@ -392,6 +410,7 @@ export class MessageRing {
           spans: [],
           links: [],
           badges: [],
+          highlightColor: "",
         };
       case "notice":
         return {
@@ -402,6 +421,7 @@ export class MessageRing {
           spans: [],
           links: [],
           badges: [],
+          highlightColor: "",
         };
       default:
         return {
@@ -412,6 +432,7 @@ export class MessageRing {
           spans: [],
           links: [],
           badges: [],
+          highlightColor: "",
         };
     }
   }
@@ -457,6 +478,7 @@ export class MessageRing {
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * LINE_HEIGHT;
     }
+    this.paintHighlight(slot);
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
@@ -485,6 +507,17 @@ export class MessageRing {
       prevY = spr.y;
       hasPrev = true;
     }
+  }
+
+  private paintHighlight(slot: Slot): void {
+    slot.highlight.clear();
+    const parsed = parseHighlight(slot.highlightColor);
+    if (!parsed) {
+      return;
+    }
+    slot.highlight
+      .rect(0, 0, this.app.screen.width, slot.lineCount * LINE_HEIGHT)
+      .fill({ color: parsed.color, alpha: parsed.alpha });
   }
 
   private layout(): void {
@@ -602,6 +635,16 @@ function parseColor(color: string): number {
     return 0xbf94ff;
   }
   return Number.parseInt(m[1], 16);
+}
+
+function parseHighlight(raw: string): { color: number; alpha: number } | undefined {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(raw);
+  if (!m) {
+    return undefined;
+  }
+  const color = Number.parseInt(m[1], 16);
+  const alpha = m[2] ? Number.parseInt(m[2], 16) / 255 : 1;
+  return { color, alpha };
 }
 
 function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {

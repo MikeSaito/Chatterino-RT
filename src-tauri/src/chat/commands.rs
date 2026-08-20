@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
+use super::filters::{self, Filters};
 use super::spans::allowed_chat_url;
 use super::state::{EventCmd, IrcCmd, Shared};
 use super::types::ChatBatch;
@@ -24,7 +25,7 @@ impl ApiError {
         }
     }
 
-    fn invalid(message: impl Into<String>) -> Self {
+    pub fn invalid(message: impl Into<String>) -> Self {
         Self {
             code: "invalid_input".into(),
             message: message.into(),
@@ -167,6 +168,19 @@ pub async fn auth_logout(app: AppHandle, state: tauri::State<'_, Shared>) -> Res
 }
 
 #[tauri::command]
+pub fn filters_get(state: tauri::State<'_, Shared>) -> Result<Filters, ApiError> {
+    Ok(filters::snapshot(&state).map_err(|_| ApiError::internal("lock"))?)
+}
+
+#[tauri::command]
+pub fn filters_set(
+    state: tauri::State<'_, Shared>,
+    filters: Filters,
+) -> Result<Filters, ApiError> {
+    filters::replace(&state, filters).map_err(ApiError::invalid)
+}
+
+#[tauri::command]
 pub fn open_chat_link(url: String) -> Result<(), ApiError> {
     let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
         code: "invalid_input".into(),
@@ -268,5 +282,18 @@ mod tests {
         assert_eq!(format_outgoing("/Me waves").unwrap(), "/Me waves");
         let long = format!("/me {}", "a".repeat(500));
         assert!(format_outgoing(&long).is_err());
+    }
+
+    #[test]
+    fn filters_set_rejects_bad_login() {
+        let shared = Shared::new();
+        assert!(filters::replace(
+            &shared,
+            Filters {
+                ignore_logins: vec!["bad login".into()],
+                ..Filters::default()
+            }
+        )
+        .is_err());
     }
 }

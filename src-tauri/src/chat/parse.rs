@@ -106,6 +106,7 @@ fn parse_privmsg(
             reply_to_text: tags.get("reply-parent-msg-body"),
             action,
             text,
+            highlight_color: None,
         },
         channel,
     }
@@ -177,6 +178,7 @@ fn parse_usernotice(
             reply_to_login: None,
             reply_to_text: None,
             action: false,
+            highlight_color: None,
         })
     });
     ParsedLine::Event {
@@ -187,6 +189,7 @@ fn parse_usernotice(
             system_text,
             login,
             privmsg: attached,
+            highlight_color: None,
         },
         channel,
     }

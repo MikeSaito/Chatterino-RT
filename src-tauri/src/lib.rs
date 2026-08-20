@@ -3,7 +3,7 @@ mod security;
 
 use chat::commands::{
     auth_import, auth_logout, auth_start, auth_status, chat_join, chat_part, chat_send,
-    chat_snapshot, open_chat_link,
+    chat_snapshot, filters_get, filters_set, open_chat_link,
 };
 use chat::state::{EventCmd, IrcCmd, Shared};
 use tauri::Manager;
@@ -16,6 +16,7 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             chat::auth::init(app.handle(), &shared)?;
+            chat::filters::init(app.handle(), &shared)?;
             chat::eventapi::start(shared.clone())?;
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
@@ -30,7 +31,9 @@ pub fn run() {
             auth_start,
             auth_status,
             auth_import,
-            auth_logout
+            auth_logout,
+            filters_get,
+            filters_set
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

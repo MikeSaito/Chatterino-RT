@@ -44,6 +44,7 @@ export type ChatEvent =
       replyToLogin?: string;
       replyToText?: string;
       action: boolean;
+      highlightColor?: string;
     }
   | {
       kind: "clearchat";
@@ -65,6 +66,7 @@ export type ChatEvent =
       systemText: string;
       login?: string;
       privmsg?: ChatEvent;
+      highlightColor?: string;
     }
   | {
       kind: "roomstate";
@@ -102,4 +104,12 @@ export type AuthInfo = {
   userCode?: string;
   pendingPaste?: boolean;
   message?: string;
+};
+
+export type Filters = {
+  enableSelfHighlight: boolean;
+  ignoreLogins: string[];
+  ignorePhrases: string[];
+  highlightPhrases: string[];
+  highlightLogins: string[];
 };

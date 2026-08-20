@@ -6,6 +6,7 @@ pub mod cheers;
 pub mod emoji;
 pub mod emotes;
 pub mod eventapi;
+pub mod filters;
 pub mod fetch;
 pub mod helix;
 pub mod hub;

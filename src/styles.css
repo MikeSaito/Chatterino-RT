@@ -63,6 +63,53 @@ body,
   margin-top: 4px;
 }
 
+#filters-box {
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow: auto;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a2d;
+}
+
+#filters-box summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #adadc0;
+}
+
+#filters-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#filters-form label {
+  font-size: 12px;
+  color: #adadc0;
+}
+
+#filters-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 48px;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.filters-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#filters-status {
+  margin: 0;
+  font-size: 12px;
+  color: #adadc0;
+  word-break: break-word;
+}
+
 .channel-item {
   width: 100%;
   text-align: left;

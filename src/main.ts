@@ -7,7 +7,7 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindChannelList } from "./shell/channels";
 import { CHAT_AUTH_EVENT, CHAT_STATUS_EVENT } from "./constants";
-import type { AuthInfo, ChatStatus } from "./chat/types";
+import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
 
 window.addEventListener("DOMContentLoaded", () => {
   void boot();
@@ -36,6 +36,14 @@ async function boot(): Promise<void> {
   const authDevice = document.querySelector<HTMLElement>("#auth-device");
   const authPaste = document.querySelector<HTMLTextAreaElement>("#auth-paste");
   const authImport = document.querySelector<HTMLButtonElement>("#auth-import");
+  const filtersForm = document.querySelector<HTMLFormElement>("#filters-form");
+  const filtersSelf = document.querySelector<HTMLInputElement>("#filters-self");
+  const filtersIgnoreLogins = document.querySelector<HTMLTextAreaElement>("#filters-ignore-logins");
+  const filtersIgnorePhrases = document.querySelector<HTMLTextAreaElement>("#filters-ignore-phrases");
+  const filtersHighlightPhrases = document.querySelector<HTMLTextAreaElement>("#filters-highlight-phrases");
+  const filtersHighlightLogins = document.querySelector<HTMLTextAreaElement>("#filters-highlight-logins");
+  const filtersStatus = document.querySelector<HTMLElement>("#filters-status");
+  const filtersSave = filtersForm?.querySelector<HTMLButtonElement>("button[type=submit]");
   if (
     !canvas ||
     !pane ||
@@ -54,7 +62,15 @@ async function boot(): Promise<void> {
     !authLogout ||
     !authDevice ||
     !authPaste ||
-    !authImport
+    !authImport ||
+    !filtersForm ||
+    !filtersSelf ||
+    !filtersIgnoreLogins ||
+    !filtersIgnorePhrases ||
+    !filtersHighlightPhrases ||
+    !filtersHighlightLogins ||
+    !filtersStatus ||
+    !filtersSave
   ) {
     return;
   }
@@ -72,6 +88,14 @@ async function boot(): Promise<void> {
   const deviceEl = authDevice;
   const pasteEl = authPaste;
   const importBtn = authImport;
+  const filterForm = filtersForm;
+  const selfBox = filtersSelf;
+  const ignoreLoginsEl = filtersIgnoreLogins;
+  const ignorePhrasesEl = filtersIgnorePhrases;
+  const highlightPhrasesEl = filtersHighlightPhrases;
+  const highlightLoginsEl = filtersHighlightLogins;
+  const filterStatusEl = filtersStatus;
+  const filterSaveBtn = filtersSave;
 
   const app = await createChatApp(canvas, pane);
   const ring = new MessageRing(app, new TextureLru());
@@ -128,10 +152,21 @@ async function boot(): Promise<void> {
     void importLogin();
   });
 
+  filterForm.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void saveFilters();
+  });
+
   try {
     applyAuth(await invoke<AuthInfo>("auth_status"));
   } catch (err) {
     statusEl.textContent = formatError(err);
+  }
+
+  try {
+    applyFilters(await invoke<Filters>("filters_get"));
+  } catch (err) {
+    filterStatusEl.textContent = formatError(err);
   }
 
   function applyAuth(info: AuthInfo): void {
@@ -227,6 +262,35 @@ async function boot(): Promise<void> {
     }
   }
 
+  function applyFilters(data: Filters): void {
+    selfBox.checked = data.enableSelfHighlight;
+    ignoreLoginsEl.value = data.ignoreLogins.join("\n");
+    ignorePhrasesEl.value = data.ignorePhrases.join("\n");
+    highlightPhrasesEl.value = data.highlightPhrases.join("\n");
+    highlightLoginsEl.value = data.highlightLogins.join("\n");
+  }
+
+  async function saveFilters(): Promise<void> {
+    filterSaveBtn.disabled = true;
+    try {
+      const saved = await invoke<Filters>("filters_set", {
+        filters: {
+          enableSelfHighlight: selfBox.checked,
+          ignoreLogins: splitLines(ignoreLoginsEl.value),
+          ignorePhrases: splitLines(ignorePhrasesEl.value),
+          highlightPhrases: splitLines(highlightPhrasesEl.value),
+          highlightLogins: splitLines(highlightLoginsEl.value),
+        },
+      });
+      applyFilters(saved);
+      filterStatusEl.textContent = "сохранено";
+    } catch (err) {
+      filterStatusEl.textContent = formatError(err);
+    } finally {
+      filterSaveBtn.disabled = false;
+    }
+  }
+
   async function sendMessage(): Promise<void> {
     if (!lastAuth.canSend || sending) {
       return;
@@ -310,4 +374,11 @@ function formatError(err: unknown): string {
     }
   }
   return String(err);
+}
+
+function splitLines(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
