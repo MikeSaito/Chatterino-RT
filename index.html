@@ -55,7 +55,22 @@
           <div id="player-slot"></div>
           <div id="chat-column">
             <div id="chat-pane">
-              <canvas id="chat-canvas"></canvas>
+              <div id="chat-canvas-host">
+                <canvas id="chat-canvas"></canvas>
+                <button id="chat-jump-bottom" type="button" hidden>вниз</button>
+              </div>
+              <div
+                id="chat-scroll"
+                role="scrollbar"
+                aria-orientation="vertical"
+                aria-controls="chat-canvas"
+                aria-valuemin="0"
+                aria-valuemax="0"
+                aria-valuenow="0"
+                tabindex="0"
+              >
+                <div id="chat-scroll-thumb"></div>
+              </div>
             </div>
             <form id="composer">
               <label class="sr-only" for="composer-input">сообщение</label>

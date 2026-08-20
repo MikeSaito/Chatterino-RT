@@ -5,6 +5,7 @@ import { MessageRing } from "./chat/ring";
 import { bindChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
+import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { CHAT_AUTH_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
@@ -20,6 +21,10 @@ window.addEventListener("beforeunload", () => {
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
   const pane = document.querySelector<HTMLElement>("#chat-pane");
+  const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
+  const scrollTrack = document.querySelector<HTMLElement>("#chat-scroll");
+  const scrollThumb = document.querySelector<HTMLElement>("#chat-scroll-thumb");
+  const jumpBottom = document.querySelector<HTMLButtonElement>("#chat-jump-bottom");
   const form = document.querySelector<HTMLFormElement>("#join-form");
   const input = document.querySelector<HTMLInputElement>("#channel-input");
   const joinBtn = form?.querySelector<HTMLButtonElement>("button[type=submit]");
@@ -47,6 +52,10 @@ async function boot(): Promise<void> {
   if (
     !canvas ||
     !pane ||
+    !canvasHost ||
+    !scrollTrack ||
+    !scrollThumb ||
+    !jumpBottom ||
     !form ||
     !input ||
     !joinBtn ||
@@ -97,9 +106,26 @@ async function boot(): Promise<void> {
   const filterStatusEl = filtersStatus;
   const filterSaveBtn = filtersSave;
 
-  const app = await createChatApp(canvas, pane);
+  const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
   await ring.init();
+  bindScrollChrome({
+    ring,
+    host: canvasHost,
+    track: scrollTrack,
+    thumb: scrollThumb,
+    jump: jumpBottom,
+  });
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key !== "End" || !ev.ctrlKey || ev.altKey || ev.metaKey) {
+      return;
+    }
+    if (isEditableTarget(ev.target)) {
+      return;
+    }
+    ev.preventDefault();
+    ring.goToBottom();
+  });
   const ipc = bindChatIpc(ring);
   let mountedChannel = "";
   let holdStatus = false;
@@ -381,4 +407,15 @@ function splitLines(raw: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }

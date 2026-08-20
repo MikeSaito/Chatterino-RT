@@ -22,6 +22,13 @@ import {
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan } from "./types";
 import { TextureLru } from "./textures";
 import {
+  ScrollModel,
+  wheelDeltaRows,
+  type LaidSlot,
+  type ScrollAnchor,
+  type ScrollSnapshot,
+} from "./scroll";
+import {
   clipNick,
   indexToLineCol,
   lineColToIndex,
@@ -53,6 +60,7 @@ type Slot = {
   linkSpans: LinkSpan[];
   wrapLines: WrapLine[];
   lineCount: number;
+  startRow: number;
   highlightColor: string;
 };
 
@@ -70,15 +78,50 @@ type Drawn = {
 export class MessageRing {
   private readonly slots: Slot[] = [];
   private readonly textures: TextureLru;
+  private readonly scroll = new ScrollModel();
+  private readonly laidBuf: LaidSlot[] = [];
   private occupied = 0;
   private head = 0;
   private ready = false;
+  private onScroll: ((state: ScrollSnapshot) => void) | undefined;
 
   constructor(
     private readonly app: Application,
     textures: TextureLru,
   ) {
     this.textures = textures;
+  }
+
+  setOnScroll(cb: (state: ScrollSnapshot) => void): void {
+    this.onScroll = cb;
+  }
+
+  scrollSnapshot(): ScrollSnapshot {
+    return this.scroll.snapshot();
+  }
+
+  goToBottom(): void {
+    this.scroll.goToBottom();
+    this.applyStageY();
+    this.notifyScroll();
+  }
+
+  setDesired(rows: number): void {
+    this.scroll.setDesired(rows);
+    this.applyStageY();
+    this.notifyScroll();
+  }
+
+  handleWheel(ev: WheelEvent): void {
+    ev.preventDefault();
+    if (ev.ctrlKey) {
+      return;
+    }
+    this.scroll.wheel(
+      wheelDeltaRows(ev.deltaY, ev.deltaMode, LINE_HEIGHT, this.scroll.viewRows),
+    );
+    this.applyStageY();
+    this.notifyScroll();
   }
 
   async init(): Promise<void> {
@@ -159,6 +202,7 @@ export class MessageRing {
         linkSpans: [],
         wrapLines: [{ start: 0, end: 0 }],
         lineCount: 1,
+        startRow: 0,
         highlightColor: "",
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
@@ -180,24 +224,35 @@ export class MessageRing {
   }
 
   applySnapshot(events: ChatEvent[]): void {
-    this.resetSlots();
+    const follow = this.scroll.atBottom;
+    const anchor = this.scroll.captureAnchor(this.laidSlots());
+    this.clearSlots();
     const start = Math.max(0, events.length - MESSAGE_POOL_SIZE);
-    this.pushMany(events.slice(start));
+    for (const event of events.slice(start)) {
+      this.pushOne(event);
+    }
+    this.layout(follow ? undefined : anchor);
   }
 
   pushMany(events: ChatEvent[]): void {
+    const anchor = this.scroll.captureAnchor(this.laidSlots());
     for (const event of events) {
       this.pushOne(event);
     }
-    this.layout();
+    this.layout(anchor);
   }
 
-  private resetSlots(): void {
+  private clearSlots(): void {
     this.occupied = 0;
     this.head = 0;
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
+  }
+
+  private resetSlots(): void {
+    this.clearSlots();
+    this.scroll.reset();
   }
 
   private pushOne(event: ChatEvent): void {
@@ -260,6 +315,7 @@ export class MessageRing {
     slot.linkSpans = [];
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.lineCount = 1;
+    slot.startRow = 0;
     slot.highlightColor = "";
     slot.highlight.clear();
     for (const spr of slot.emotes) {
@@ -520,8 +576,8 @@ export class MessageRing {
       .fill({ color: parsed.color, alpha: parsed.alpha });
   }
 
-  private layout(): void {
-    const h = this.app.screen.height;
+  private layout(anchor?: ScrollAnchor): void {
+    const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
     const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
     let row = 0;
     for (let i = 0; i < this.occupied; i += 1) {
@@ -533,10 +589,38 @@ export class MessageRing {
       }
       slot.root.y = row * LINE_HEIGHT;
       this.paintClip(slot);
+      slot.startRow = row;
       row += slot.lineCount;
     }
-    const content = row * LINE_HEIGHT;
-    this.app.stage.y = content > h ? h - content : 0;
+    const viewRows = this.app.screen.height / LINE_HEIGHT;
+    this.scroll.applyLayout(row, viewRows, this.laidSlots(), resolved);
+    this.applyStageY();
+    this.notifyScroll();
+  }
+
+  private laidSlots(): LaidSlot[] {
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    this.laidBuf.length = 0;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (slot.msgId.length === 0) {
+        continue;
+      }
+      this.laidBuf.push({
+        msgId: slot.msgId,
+        startRow: slot.startRow,
+        lineCount: slot.lineCount,
+      });
+    }
+    return this.laidBuf;
+  }
+
+  private applyStageY(): void {
+    this.app.stage.y = this.scroll.stageY(LINE_HEIGHT);
+  }
+
+  private notifyScroll(): void {
+    this.onScroll?.(this.scroll.snapshot());
   }
 
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {

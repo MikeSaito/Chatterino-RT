@@ -1,4 +1,8 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::types::{Badge, ChatEvent, EmoteSpan};
+
+static SYNTHETIC_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedLine {
@@ -422,7 +426,8 @@ fn unescape_tag(value: &str) -> String {
 }
 
 fn synthetic_id(prefix: &str, now_ms: u64, salt: &str) -> String {
-    format!("{prefix}-{now_ms}-{}", salt.len())
+    let seq = SYNTHETIC_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{now_ms}-{seq}-{}", salt.len())
 }
 
 #[cfg(test)]
