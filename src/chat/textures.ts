@@ -1,6 +1,8 @@
 import { Texture, Assets } from "pixi.js";
 import { TEXTURE_LRU_LIMIT } from "../constants";
 
+Assets.setPreferences({ preferWorkers: false });
+
 const ATTEMPTS = 3;
 
 export class TextureLru {
