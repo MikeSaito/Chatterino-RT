@@ -12,13 +12,19 @@ use super::emotes::Catalog;
 use super::filters::FiltersInner;
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
+use super::session::SessionInner;
 use super::types::ChatBatch;
 
 #[derive(Debug, Clone)]
 pub enum IrcCmd {
     Join(String),
     Part,
-    Privmsg { channel: String, text: String },
+    PartChannel(String),
+    Privmsg {
+        channel: String,
+        text: String,
+        reply_to: Option<String>,
+    },
     Relogin,
     Shutdown,
 }
@@ -62,6 +68,7 @@ pub struct Shared {
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
     pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
+    pub session: Arc<Mutex<SessionInner>>,
 }
 
 impl Shared {
@@ -79,6 +86,7 @@ impl Shared {
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
             batch_tx: Arc::new(Mutex::new(None)),
+            session: Arc::new(Mutex::new(SessionInner::default())),
         }
     }
 
@@ -88,17 +96,26 @@ impl Shared {
         Ok(())
     }
 
-    pub fn send_batch(&self, batch: &ChatBatch) {
+    pub fn send_batch(&self, batch: &ChatBatch) -> bool {
         let Ok(bytes) = encode_batch(batch) else {
-            return;
+            return false;
         };
         let Ok(slot) = self.batch_tx.lock() else {
-            return;
+            return false;
         };
         let Some(channel) = slot.as_ref() else {
-            return;
+            return false;
         };
-        let _ = channel.send(bytes);
+        channel.send(bytes).is_ok()
+    }
+
+    pub fn note_undelivered(&self, channel: &str, count: u32) {
+        if let Ok(mut hub) = self.hub.lock() {
+            if !hub.has_channel(channel) {
+                return;
+            }
+            hub.buffer(channel).pending.note_undelivered(count);
+        }
     }
 
     pub fn snapshot_event_wanted(&self) -> EventWanted {

@@ -51,6 +51,10 @@ impl Pending {
         self.events.len() >= BATCH_MAX_MESSAGES || self.bytes >= BATCH_MAX_BYTES
     }
 
+    pub fn note_undelivered(&mut self, count: u32) {
+        self.dropped = self.dropped.saturating_add(count.max(1));
+    }
+
     pub fn take_batch(&mut self) -> Option<ChatBatch> {
         if self.events.is_empty() {
             return None;

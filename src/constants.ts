@@ -12,4 +12,6 @@ export const FONT_SIZE = 15;
 export const CHAR_WIDTH = 8.4;
 export const CHAT_STATUS_EVENT = "chat:status";
 export const CHAT_AUTH_EVENT = "chat:auth";
+export const CHAT_PIPE_EVENT = "chat:pipe";
+export const CHAT_ROOMS_EVENT = "chat:rooms";
 export const IPC_QUEUE_MAX = 8;

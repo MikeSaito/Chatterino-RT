@@ -19,7 +19,7 @@ import {
   LINE_HEIGHT,
   MESSAGE_POOL_SIZE,
 } from "../constants";
-import type { Badge, ChatEvent, EmoteSpan, LinkSpan } from "./types";
+import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import { TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -41,9 +41,19 @@ const TIME_GAP = 8;
 const BADGE_GAP = 2;
 const MIN_BODY_CHARS = 24;
 
+export type SlotContext = {
+  msgId: string;
+  login: string;
+  nick: string;
+  text: string;
+  clientX: number;
+  clientY: number;
+};
+
 type Slot = {
   root: Container;
   highlight: Graphics;
+  mentions: Graphics;
   time: BitmapText;
   nick: BitmapText;
   body: BitmapText;
@@ -56,8 +66,10 @@ type Slot = {
   login: string;
   bodyRaw: string;
   nickRaw: string;
+  copyText: string;
   spansRaw: EmoteSpan[];
   linkSpans: LinkSpan[];
+  mentionSpans: MentionSpan[];
   wrapLines: WrapLine[];
   lineCount: number;
   startRow: number;
@@ -69,8 +81,10 @@ type Drawn = {
   nick: string;
   nickColor: number;
   body: string;
+  copyText: string;
   spans: EmoteSpan[];
   links: LinkSpan[];
+  mentions: MentionSpan[];
   badges: Badge[];
   highlightColor: string;
 };
@@ -84,6 +98,7 @@ export class MessageRing {
   private head = 0;
   private ready = false;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
+  private onContext: ((ctx: SlotContext) => void) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -94,6 +109,10 @@ export class MessageRing {
 
   setOnScroll(cb: (state: ScrollSnapshot) => void): void {
     this.onScroll = cb;
+  }
+
+  setOnContextMenu(cb: (ctx: SlotContext) => void): void {
+    this.onContext = cb;
   }
 
   scrollSnapshot(): ScrollSnapshot {
@@ -149,6 +168,8 @@ export class MessageRing {
       root.hitArea = new Rectangle(0, 0, 1, LINE_HEIGHT);
       const hl = new Graphics();
       hl.eventMode = "none";
+      const mentions = new Graphics();
+      mentions.eventMode = "none";
       const time = new BitmapText({
         text: "",
         style: { fontFamily: "ChatFont", fontSize: FONT_SIZE, fill: 0xadadc0 },
@@ -182,10 +203,11 @@ export class MessageRing {
         spr.y = (LINE_HEIGHT - BADGE_SIZE) / 2;
         badges.push(spr);
       }
-      root.addChild(hl, time, nick, body, ...badges, ...emotes);
+      root.addChild(hl, mentions, time, nick, body, ...badges, ...emotes);
       const slot: Slot = {
         root,
         highlight: hl,
+        mentions,
         time,
         nick,
         body,
@@ -198,8 +220,10 @@ export class MessageRing {
         login: "",
         bodyRaw: "",
         nickRaw: "",
+        copyText: "",
         spansRaw: [],
         linkSpans: [],
+        mentionSpans: [],
         wrapLines: [{ start: 0, end: 0 }],
         lineCount: 1,
         startRow: 0,
@@ -207,6 +231,9 @@ export class MessageRing {
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
+      });
+      root.on("rightclick", (ev: FederatedPointerEvent) => {
+        this.onSlotContext(slot, ev);
       });
       root.on("pointermove", (ev: FederatedPointerEvent) => {
         this.onSlotMove(slot, ev);
@@ -311,13 +338,16 @@ export class MessageRing {
     slot.login = "";
     slot.bodyRaw = "";
     slot.nickRaw = "";
+    slot.copyText = "";
     slot.spansRaw = [];
     slot.linkSpans = [];
+    slot.mentionSpans = [];
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.lineCount = 1;
     slot.startRow = 0;
     slot.highlightColor = "";
     slot.highlight.clear();
+    slot.mentions.clear();
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -330,16 +360,23 @@ export class MessageRing {
 
   private write(slot: Slot, event: ChatEvent): void {
     slot.root.visible = true;
-    slot.msgId = event.id;
-    slot.login = eventLogin(event);
+    if (event.kind === "usernotice" && event.privmsg && event.privmsg.kind === "privmsg") {
+      slot.msgId = event.privmsg.id;
+      slot.login = event.privmsg.login.toLowerCase();
+    } else {
+      slot.msgId = event.id;
+      slot.login = eventLogin(event);
+    }
     const drawn = this.line(event);
     slot.time.text = drawn.time;
     slot.nickRaw = drawn.nick;
     slot.nick.text = drawn.nick;
     slot.nick.tint = drawn.nickColor;
     slot.bodyRaw = drawn.body;
+    slot.copyText = drawn.copyText;
     slot.spansRaw = drawn.spans;
     slot.linkSpans = drawn.links;
+    slot.mentionSpans = drawn.mentions;
     slot.badgesRaw = drawn.badges;
     slot.highlightColor = drawn.highlightColor;
     for (const spr of slot.emotes) {
@@ -410,8 +447,10 @@ export class MessageRing {
           nick: event.displayName || event.login,
           nickColor: parseColor(event.color),
           body: `${prefix}${event.text}`,
+          copyText: event.text,
           spans: shiftSpans(event.emoteSpans ?? [], shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
+          mentions: shiftSpans(event.mentionSpans ?? [], shift),
           badges: badgesWithUrl(event.badges ?? []),
           highlightColor: event.highlightColor ?? "",
         };
@@ -420,16 +459,20 @@ export class MessageRing {
         let body = event.systemText;
         let spans: EmoteSpan[] = [];
         let links: LinkSpan[] = [];
+        let mentions: MentionSpan[] = [];
         let badges: Badge[] = [];
         let highlightColor = "";
+        let copyText = event.systemText;
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
           const sep = body.length > 0 ? " " : "";
           const innerPrefix = inner.action ? "* " : "";
           const shift = body.length + sep.length + innerPrefix.length;
           body += `${sep}${innerPrefix}${inner.text}`;
+          copyText = inner.text;
           spans = shiftSpans(inner.emoteSpans ?? [], shift);
           links = shiftSpans(inner.linkSpans ?? [], shift);
+          mentions = shiftSpans(inner.mentionSpans ?? [], shift);
           badges = badgesWithUrl(inner.badges ?? []);
           highlightColor = inner.highlightColor ?? event.highlightColor ?? "";
         } else {
@@ -440,8 +483,10 @@ export class MessageRing {
           nick: "*",
           nickColor: 0xadadc0,
           body,
+          copyText,
           spans,
           links,
+          mentions,
           badges,
           highlightColor,
         };
@@ -452,8 +497,10 @@ export class MessageRing {
           nick: "*",
           nickColor: 0xadadc0,
           body: clearchatText(event.targetLogin, event.durationSec),
+          copyText: clearchatText(event.targetLogin, event.durationSec),
           spans: [],
           links: [],
+          mentions: [],
           badges: [],
           highlightColor: "",
         };
@@ -463,8 +510,10 @@ export class MessageRing {
           nick: "*",
           nickColor: 0xadadc0,
           body: `emote:${event.emoteOnly} subs:${event.subsOnly} slow:${event.slowSec}`,
+          copyText: "",
           spans: [],
           links: [],
+          mentions: [],
           badges: [],
           highlightColor: "",
         };
@@ -474,8 +523,10 @@ export class MessageRing {
           nick: "*",
           nickColor: 0xadadc0,
           body: event.text,
+          copyText: event.text,
           spans: [],
           links: [],
+          mentions: [],
           badges: [],
           highlightColor: "",
         };
@@ -485,8 +536,10 @@ export class MessageRing {
           nick: "*",
           nickColor: 0xadadc0,
           body: event.kind,
+          copyText: "",
           spans: [],
           links: [],
+          mentions: [],
           badges: [],
           highlightColor: "",
         };
@@ -535,6 +588,7 @@ export class MessageRing {
       slot.root.hitArea.height = slot.lineCount * LINE_HEIGHT;
     }
     this.paintHighlight(slot);
+    this.paintMentions(slot, bodyX);
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
@@ -574,6 +628,38 @@ export class MessageRing {
     slot.highlight
       .rect(0, 0, this.app.screen.width, slot.lineCount * LINE_HEIGHT)
       .fill({ color: parsed.color, alpha: parsed.alpha });
+  }
+
+  private paintMentions(slot: Slot, bodyX: number): void {
+    slot.mentions.clear();
+    for (const span of slot.mentionSpans) {
+      for (const line of slot.wrapLines) {
+        const a = Math.max(span.start, line.start);
+        const b = Math.min(span.end, line.end);
+        if (a >= b) {
+          continue;
+        }
+        const start = indexToLineCol(slot.bodyRaw, slot.wrapLines, a, slot.spansRaw);
+        const end = indexToLineCol(
+          slot.bodyRaw,
+          slot.wrapLines,
+          Math.max(a, b - 1),
+          slot.spansRaw,
+        );
+        if (!start || !end || start.line !== end.line) {
+          continue;
+        }
+        const cols = Math.max(1, end.col - start.col + 1);
+        slot.mentions
+          .rect(
+            bodyX + start.col * CHAR_WIDTH,
+            start.line * LINE_HEIGHT,
+            cols * CHAR_WIDTH,
+            LINE_HEIGHT,
+          )
+          .fill({ color: 0x5c65f9, alpha: 0.35 });
+      }
+    }
   }
 
   private layout(anchor?: ScrollAnchor): void {
@@ -629,6 +715,21 @@ export class MessageRing {
       return;
     }
     void invoke("open_chat_link", { url }).catch(() => undefined);
+  }
+
+  private onSlotContext(slot: Slot, ev: FederatedPointerEvent): void {
+    if (!slot.msgId || !this.onContext) {
+      return;
+    }
+    ev.preventDefault();
+    this.onContext({
+      msgId: slot.msgId,
+      login: slot.login,
+      nick: slot.nickRaw,
+      text: slot.copyText || slot.bodyRaw,
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+    });
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {

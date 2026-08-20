@@ -51,32 +51,80 @@ pub async fn chat_join(
     channel: String,
 ) -> Result<String, ApiError> {
     let normalized = normalize_channel(&channel)?;
-    let previous = {
+    let switched = {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        let prev = hub.active.clone();
+        let previous = hub.active.clone();
         hub.set_active(Some(normalized.clone()));
-        hub.buffer(&normalized);
-        prev
+        previous.as_deref() != Some(normalized.as_str())
     };
-    if previous.as_deref() != Some(normalized.as_str()) {
+    if switched {
         state.notify_event(EventCmd::ClearChannel);
     }
-    if let Ok(mut cat) = state.catalog.lock() {
-        cat.retain_channel(&normalized);
-    }
-    if let Ok(mut cat) = state.badges.lock() {
-        cat.retain_channel(&normalized);
-    }
-    if let Ok(mut cat) = state.cheers.lock() {
-        cat.retain_channel(&normalized);
-    }
     if let Ok(mut set) = state.chatters.lock() {
-        set.retain_channel(&normalized);
+        set.ensure_channel(&normalized);
         set.add(&normalized, &normalized, &normalized);
     }
     send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
+    let _ = super::session::remember(&state, normalized.clone());
     auth::emit(&app, &state);
     Ok(normalized)
+}
+
+#[tauri::command]
+pub async fn chat_leave(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<Option<String>, ApiError> {
+    let normalized = normalize_channel(&channel)?;
+    let (left_was_active, next) = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        let left_was_active = hub.active.as_deref() == Some(normalized.as_str());
+        let next = if left_was_active {
+            hub.channels()
+                .into_iter()
+                .find(|c| c != &normalized)
+        } else {
+            hub.active.clone()
+        };
+        (left_was_active, next)
+    };
+    send_cmd(&state, IrcCmd::PartChannel(normalized.clone())).await?;
+    if let Ok(mut cat) = state.catalog.lock() {
+        cat.drop_channel(&normalized);
+    }
+    if let Ok(mut cat) = state.badges.lock() {
+        cat.drop_channel(&normalized);
+    }
+    if let Ok(mut cat) = state.cheers.lock() {
+        cat.drop_channel(&normalized);
+    }
+    if let Ok(mut set) = state.chatters.lock() {
+        set.drop_channel(&normalized);
+    }
+    {
+        let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.drop_channel(&normalized);
+        if left_was_active {
+            if let Some(ch) = next.clone() {
+                hub.set_active(Some(ch));
+            }
+        }
+    }
+    if left_was_active {
+        state.notify_event(EventCmd::ClearChannel);
+        let _ = super::session::forget_open(&state, &normalized);
+        if let Some(ch) = next.as_ref() {
+            let _ = super::session::remember(&state, ch.clone());
+            send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
+        } else {
+            let _ = super::session::clear_last(&state);
+        }
+    } else {
+        let _ = super::session::forget_open(&state, &normalized);
+    }
+    auth::emit(&app, &state);
+    Ok(next)
 }
 
 #[tauri::command]
@@ -85,7 +133,7 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     state.notify_event(EventCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        hub.set_active(None);
+        hub.clear_all();
     }
     if let Ok(mut cat) = state.catalog.lock() {
         cat.clear_channels();
@@ -99,6 +147,7 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     if let Ok(mut set) = state.chatters.lock() {
         set.clear();
     }
+    let _ = super::session::clear_last(&state);
     auth::emit(&app, &state);
     Ok(())
 }
@@ -133,8 +182,17 @@ pub fn chat_snapshot(
 }
 
 #[tauri::command]
-pub async fn chat_send(state: tauri::State<'_, Shared>, text: String) -> Result<(), ApiError> {
+pub async fn chat_send(
+    state: tauri::State<'_, Shared>,
+    text: String,
+    #[allow(non_snake_case)]
+    replyToId: Option<String>,
+) -> Result<(), ApiError> {
     let payload = format_outgoing(&text)?;
+    let reply_to = match replyToId.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) => Some(validate_msg_id(id)?),
+        None => None,
+    };
     let channel = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         if !hub.joined {
@@ -154,9 +212,15 @@ pub async fn chat_send(state: tauri::State<'_, Shared>, text: String) -> Result<
         IrcCmd::Privmsg {
             channel,
             text: payload,
+            reply_to,
         },
     )
     .await
+}
+
+#[tauri::command]
+pub fn session_get(state: tauri::State<'_, Shared>) -> Result<super::session::Session, ApiError> {
+    super::session::snapshot(&state)
 }
 
 #[tauri::command]
@@ -277,21 +341,39 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
     if trimmed.chars().any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}')) {
         return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
     }
-    if trimmed == "/me" {
-        return Err(ApiError::invalid("пустое действие /me"));
-    }
-    if let Some(rest) = trimmed.strip_prefix("/me ") {
-        let action = rest.trim();
-        if action.is_empty() {
-            return Err(ApiError::invalid("пустое действие /me"));
+    if trimmed.starts_with('/') {
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let cmd = parts.next().unwrap_or("");
+        let rest = parts.next().unwrap_or("").trim();
+        if cmd.eq_ignore_ascii_case("/me") {
+            if rest.is_empty() {
+                return Err(ApiError::invalid("пустое действие /me"));
+            }
+            let wire = format!("\u{0001}ACTION {rest}\u{0001}");
+            if wire.chars().count() > MAX_CHAT_CHARS {
+                return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+            }
+            return Ok(wire);
         }
-        let wire = format!("\u{0001}ACTION {action}\u{0001}");
-        if wire.chars().count() > MAX_CHAT_CHARS {
-            return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+        let name = cmd.trim_start_matches('/');
+        if !complete::is_known_command(name) {
+            return Err(ApiError::invalid("неизвестная slash-команда"));
         }
-        return Ok(wire);
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_msg_id(id: &str) -> Result<String, ApiError> {
+    if id.is_empty() || id.len() > 64 {
+        return Err(ApiError::invalid("некорректный id ответа"));
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(ApiError::invalid("некорректный id ответа"));
+    }
+    Ok(id.to_string())
 }
 
 async fn send_cmd(state: &Shared, cmd: IrcCmd) -> Result<(), ApiError> {
@@ -345,7 +427,12 @@ mod tests {
         );
         assert!(format_outgoing("/me ").is_err());
         assert!(format_outgoing("/me    ").is_err());
-        assert_eq!(format_outgoing("/Me waves").unwrap(), "/Me waves");
+        assert_eq!(
+            format_outgoing("/Me waves").unwrap(),
+            "\u{0001}ACTION waves\u{0001}"
+        );
+        assert_eq!(format_outgoing("/ban bad").unwrap(), "/ban bad");
+        assert!(format_outgoing("/nope").is_err());
         let long = format!("/me {}", "a".repeat(500));
         assert!(format_outgoing(&long).is_err());
     }

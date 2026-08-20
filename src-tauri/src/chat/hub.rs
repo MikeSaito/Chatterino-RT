@@ -17,8 +17,21 @@ impl Hub {
             .or_insert_with(|| ChannelBuf::new(channel))
     }
 
+    pub fn has_channel(&self, channel: &str) -> bool {
+        self.buffers.contains_key(channel)
+    }
+
+    pub fn channels(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.buffers.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
     pub fn ingest(&mut self, channel: &str, event: ChatEvent) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
+            if self.buffers.contains_key(channel) {
+                self.buffer(channel).scrollback.push(event);
+            }
             return None;
         }
         self.buffer(channel).ingest(event)
@@ -43,19 +56,30 @@ impl Hub {
     }
 
     pub fn set_active(&mut self, channel: Option<String>) {
-        self.active = channel.clone();
+        self.active = channel;
         self.joined = false;
-        match &self.active {
-            Some(ch) => self.buffers.retain(|k, _| k == ch),
-            None => self.buffers.clear(),
+        if let Some(ch) = self.active.clone() {
+            self.buffer(&ch);
         }
+    }
+
+    pub fn drop_channel(&mut self, channel: &str) {
+        self.buffers.remove(channel);
+        if self.active.as_deref() == Some(channel) {
+            self.active = None;
+            self.joined = false;
+        }
+    }
+
+    pub fn clear_all(&mut self) {
+        self.buffers.clear();
+        self.active = None;
+        self.joined = false;
     }
 
     pub fn set_joined(&mut self, channel: &str, yes: bool) {
         if self.active.as_deref() == Some(channel) {
             self.joined = yes;
-        } else if !yes {
-            self.joined = false;
         }
     }
 }
@@ -74,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn ingest_ignores_inactive_channel() {
+    fn ingest_ignores_unknown_inactive() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         assert!(hub.ingest("xqc", notice("1")).is_none());
@@ -82,6 +106,18 @@ mod tests {
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
+    }
+
+    #[test]
+    fn inactive_joined_keeps_scrollback() {
+        let mut hub = Hub::default();
+        hub.set_active(Some("xqc".into()));
+        hub.buffer("lirik");
+        hub.ingest("lirik", notice("a"));
+        hub.set_active(Some("lirik".into()));
+        let snap = hub.snapshot("lirik").unwrap();
+        assert_eq!(snap.events.len(), 1);
+        assert!(hub.snapshot("xqc").is_some());
     }
 
     #[test]

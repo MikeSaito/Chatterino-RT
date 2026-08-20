@@ -67,13 +67,59 @@ pub fn rank_prefix(items: &mut Vec<String>, prefix: &str) {
     }
 }
 
+const COMMANDS: &[&str] = &[
+    "me",
+    "ban",
+    "unban",
+    "timeout",
+    "untimeout",
+    "delete",
+    "clear",
+    "slow",
+    "slowoff",
+    "followers",
+    "followersoff",
+    "subscribers",
+    "subscribersoff",
+    "emoteonly",
+    "emoteonlyoff",
+    "uniquechat",
+    "uniquechatoff",
+    "r9kbeta",
+    "r9kbetaoff",
+    "mods",
+    "vips",
+    "mod",
+    "unmod",
+    "vip",
+    "unvip",
+    "commercial",
+    "raid",
+    "unraid",
+    "marker",
+    "color",
+    "block",
+    "unblock",
+    "w",
+];
+
+pub fn is_known_command(name: &str) -> bool {
+    let needle = name.to_ascii_lowercase();
+    COMMANDS.iter().any(|c| *c == needle)
+}
+
 fn command_items(token: &str) -> Vec<String> {
-    let rest = token.get(1..).unwrap_or("");
-    if "me".starts_with(&rest.to_ascii_lowercase()) {
-        vec!["/me ".into()]
-    } else {
-        Vec::new()
+    let rest = token.get(1..).unwrap_or("").to_ascii_lowercase();
+    let mut out = Vec::new();
+    for cmd in COMMANDS {
+        if cmd.starts_with(rest.as_str()) {
+            out.push(format!("/{cmd} "));
+            if out.len() >= COMPLETE_LIMIT {
+                break;
+            }
+        }
     }
+    out
 }
 
 #[cfg(test)]
@@ -89,10 +135,20 @@ mod tests {
     fn me_command() {
         assert_eq!(
             suggestions("/m", true, vec![], vec![]),
-            vec!["/me ".to_string()]
+            vec![
+                "/me ".to_string(),
+                "/mods ".to_string(),
+                "/mod ".to_string(),
+                "/marker ".to_string()
+            ]
         );
         assert!(suggestions("/m", false, vec![], vec![]).is_empty());
-        assert!(suggestions("/ban", true, vec![], vec![]).is_empty());
+        assert_eq!(
+            suggestions("/ban", true, vec![], vec![]),
+            vec!["/ban ".to_string()]
+        );
+        assert!(is_known_command("timeout"));
+        assert!(!is_known_command("nope"));
     }
 
     #[test]

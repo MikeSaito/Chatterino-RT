@@ -1,18 +1,36 @@
 export type ChannelList = {
+  hydrate: (recents: string[], open: string[], active: string) => void;
   remember: (login: string) => void;
+  remove: (login: string) => void;
+  syncOpen: (open: string[], active: string) => void;
   paint: (active: string) => void;
+  joined: () => string[];
 };
 
 export function bindChannelList(
   list: HTMLUListElement,
   onSelect: (login: string) => void,
+  onLeave: (login: string) => void,
 ): ChannelList {
   const recents: string[] = [];
+  const open = new Set<string>();
+  let activeLogin = "";
 
   const paint = (active: string): void => {
+    activeLogin = active;
     list.replaceChildren();
-    for (const login of recents) {
+    const order = [
+      ...[...open].sort((a, b) => a.localeCompare(b)),
+      ...recents.filter((login) => !open.has(login)),
+    ];
+    const seen = new Set<string>();
+    for (const login of order) {
+      if (seen.has(login)) {
+        continue;
+      }
+      seen.add(login);
       const item = document.createElement("li");
+      item.className = "channel-row";
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = login === active ? "channel-item is-active" : "channel-item";
@@ -21,12 +39,38 @@ export function bindChannelList(
         onSelect(login);
       });
       item.appendChild(btn);
+      if (open.has(login)) {
+        const leave = document.createElement("button");
+        leave.type = "button";
+        leave.className = "channel-leave";
+        leave.title = "Покинуть";
+        leave.textContent = "×";
+        leave.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onLeave(login);
+        });
+        item.appendChild(leave);
+      }
       list.appendChild(item);
     }
   };
 
   return {
-    remember(login: string) {
+    hydrate(nextRecents, nextOpen, active) {
+      recents.length = 0;
+      for (const login of nextRecents) {
+        if (!recents.includes(login)) {
+          recents.push(login);
+        }
+      }
+      open.clear();
+      for (const login of nextOpen) {
+        open.add(login);
+      }
+      paint(active);
+    },
+    remember(login) {
+      open.add(login);
       const at = recents.indexOf(login);
       if (at >= 0) {
         recents.splice(at, 1);
@@ -34,6 +78,18 @@ export function bindChannelList(
       recents.unshift(login);
       paint(login);
     },
+    remove(login) {
+      open.delete(login);
+      paint(activeLogin === login ? "" : activeLogin);
+    },
+    syncOpen(nextOpen, active) {
+      open.clear();
+      for (const login of nextOpen) {
+        open.add(login);
+      }
+      paint(active);
+    },
     paint,
+    joined: () => [...open],
   };
 }

@@ -66,6 +66,14 @@ impl Catalog {
         });
     }
 
+    pub fn drop_channel(&mut self, channel: &str) {
+        self.channel.remove(channel);
+        self.set_scope.retain(|_, scope| match scope {
+            SetScope::Global => true,
+            SetScope::Channel(ch) => ch != channel,
+        });
+    }
+
     pub fn clear_channels(&mut self) {
         self.channel.clear();
         self.set_scope

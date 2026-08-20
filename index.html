@@ -73,6 +73,10 @@
               </div>
             </div>
             <ul id="complete-list" hidden></ul>
+            <div id="reply-bar" hidden>
+              <p id="reply-label"></p>
+              <button type="button" id="reply-cancel" title="Отмена">×</button>
+            </div>
             <form id="composer">
               <label class="sr-only" for="composer-input">сообщение</label>
               <textarea
@@ -95,5 +99,10 @@
         </div>
       </div>
     </div>
+    <menu id="chat-context" hidden>
+      <button type="button" data-action="copy">Копировать</button>
+      <button type="button" data-action="reply">Ответить</button>
+      <button type="button" data-action="user">Открыть профиль</button>
+    </menu>
   </body>
 </html>

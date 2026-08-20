@@ -6,31 +6,32 @@ use std::collections::{HashMap, VecDeque};
 pub const CHATTER_LIMIT: usize = 2000;
 
 #[derive(Debug, Default)]
-pub struct Chatters {
-    channel: Option<String>,
+struct ChannelChatters {
     order: VecDeque<String>,
     names: HashMap<String, String>,
 }
 
+#[derive(Debug, Default)]
+pub struct Chatters {
+    by_channel: HashMap<String, ChannelChatters>,
+}
+
 impl Chatters {
-    pub fn retain_channel(&mut self, channel: &str) {
-        if self.channel.as_deref() == Some(channel) {
-            return;
-        }
-        self.clear();
-        self.channel = Some(channel.to_string());
+    pub fn ensure_channel(&mut self, channel: &str) {
+        self.by_channel
+            .entry(channel.to_string())
+            .or_insert_with(ChannelChatters::default);
+    }
+
+    pub fn drop_channel(&mut self, channel: &str) {
+        self.by_channel.remove(channel);
     }
 
     pub fn clear(&mut self) {
-        self.channel = None;
-        self.order.clear();
-        self.names.clear();
+        self.by_channel.clear();
     }
 
     pub fn add(&mut self, channel: &str, login: &str, display: &str) {
-        if self.channel.as_deref() != Some(channel) {
-            return;
-        }
         let key = login
             .trim()
             .trim_start_matches(['@', '+', '%', '~', '&'])
@@ -46,33 +47,37 @@ impl Chatters {
         } else {
             key.as_str()
         };
-        if self.names.contains_key(&key) {
-            self.names.insert(key.clone(), shown.to_string());
-            touch(&mut self.order, &key);
+        let room = self
+            .by_channel
+            .entry(channel.to_string())
+            .or_insert_with(ChannelChatters::default);
+        if room.names.contains_key(&key) {
+            room.names.insert(key.clone(), shown.to_string());
+            touch(&mut room.order, &key);
             return;
         }
-        while self.names.len() >= CHATTER_LIMIT {
-            if let Some(old) = self.order.pop_front() {
-                self.names.remove(&old);
+        while room.names.len() >= CHATTER_LIMIT {
+            if let Some(old) = room.order.pop_front() {
+                room.names.remove(&old);
             } else {
                 break;
             }
         }
-        self.names.insert(key.clone(), shown.to_string());
-        self.order.push_back(key);
+        room.names.insert(key.clone(), shown.to_string());
+        room.order.push_back(key);
     }
 
     pub fn remove(&mut self, channel: &str, login: &str) {
-        if self.channel.as_deref() != Some(channel) {
+        let Some(room) = self.by_channel.get_mut(channel) else {
             return;
-        }
+        };
         let key = login
             .trim()
             .trim_start_matches(['@', '+', '%', '~', '&'])
             .to_ascii_lowercase();
-        if self.names.remove(&key).is_some() {
-            if let Some(pos) = self.order.iter().position(|k| k == &key) {
-                self.order.remove(pos);
+        if room.names.remove(&key).is_some() {
+            if let Some(pos) = room.order.iter().position(|k| k == &key) {
+                room.order.remove(pos);
             }
         }
     }
@@ -84,9 +89,9 @@ impl Chatters {
     }
 
     pub fn prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
-        if self.channel.as_deref() != Some(channel) {
+        let Some(room) = self.by_channel.get(channel) else {
             return Vec::new();
-        }
+        };
         let needle = prefix
             .strip_prefix('@')
             .unwrap_or(prefix)
@@ -94,13 +99,11 @@ impl Chatters {
         if needle.is_empty() {
             return Vec::new();
         }
-        let out: Vec<String> = self
-            .names
+        room.names
             .iter()
             .filter(|(k, _)| k.starts_with(&needle))
             .map(|(_, display)| display.clone())
-            .collect();
-        out
+            .collect()
     }
 }
 
@@ -126,7 +129,6 @@ mod tests {
     #[test]
     fn prefix_and_at() {
         let mut set = Chatters::default();
-        set.retain_channel("xqc");
         set.add("xqc", "Xqc", "xQc");
         set.add("xqc", "xqcow", "xqcow");
         let mut got = set.prefixed("xqc", "xq");
@@ -143,23 +145,34 @@ mod tests {
     }
 
     #[test]
+    fn keeps_separate_channels() {
+        let mut set = Chatters::default();
+        set.add("xqc", "bob", "bob");
+        set.add("lirik", "alice", "alice");
+        assert_eq!(set.prefixed("xqc", "bo"), vec!["bob".to_string()]);
+        assert_eq!(set.prefixed("lirik", "al"), vec!["alice".to_string()]);
+        set.drop_channel("xqc");
+        assert!(set.prefixed("xqc", "bo").is_empty());
+        assert_eq!(set.prefixed("lirik", "al"), vec!["alice".to_string()]);
+    }
+
+    #[test]
     fn evicts_oldest() {
         let mut set = Chatters::default();
-        set.retain_channel("xqc");
         for i in 0..CHATTER_LIMIT {
             set.add("xqc", &format!("u{i}"), &format!("u{i}"));
         }
         set.add("xqc", "fresh", "fresh");
-        assert_eq!(set.names.len(), CHATTER_LIMIT);
-        assert!(!set.names.contains_key("u0"));
-        assert!(set.names.contains_key("fresh"));
-        assert!(set.names.contains_key(&format!("u{}", CHATTER_LIMIT - 1)));
+        let room = set.by_channel.get("xqc").unwrap();
+        assert_eq!(room.names.len(), CHATTER_LIMIT);
+        assert!(!room.names.contains_key("u0"));
+        assert!(room.names.contains_key("fresh"));
+        assert!(room.names.contains_key(&format!("u{}", CHATTER_LIMIT - 1)));
     }
 
     #[test]
     fn part_removes() {
         let mut set = Chatters::default();
-        set.retain_channel("xqc");
         set.add("xqc", "bob", "bob");
         set.remove("xqc", "bob");
         assert!(set.prefixed("xqc", "bo").is_empty());
@@ -168,7 +181,6 @@ mod tests {
     #[test]
     fn completion_uses_ascii_case_not_localized() {
         let mut set = Chatters::default();
-        set.retain_channel("xqc");
         set.add("xqc", "bob", "밥");
         set.add("xqc", "alice", "Alice");
         let mut bob = set.prefixed("xqc", "bo");

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use futures_util::{Sink, SinkExt, StreamExt};
@@ -16,7 +16,7 @@ use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
 use super::spans::decorate_text_spans;
 use super::state::{EventCmd, IrcCmd, Shared};
-use super::types::{ChatConnState, ChatEvent, ChatStatus};
+use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
 const CLIENT_PING: Duration = Duration::from_secs(30);
@@ -39,11 +39,11 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
     if let Some(set_id) = fetch::load_globals(&shared.catalog).await {
         shared.notify_event(EventCmd::SetGlobal { set_id });
     }
-    let mut wanted: Option<String> = None;
+    let mut wanted: HashSet<String> = HashSet::new();
     let mut join_blocked = false;
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
-    let mut pending_out: VecDeque<(String, String)> = VecDeque::new();
+    let mut pending_out: VecDeque<(String, String, Option<String>)> = VecDeque::new();
     loop {
         match connect_session(
             &app,
@@ -59,7 +59,13 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
         {
             SessionEnd::Shutdown => break,
             SessionEnd::Reconnect { wait } => {
-                emit_status(&app, ChatConnState::Reconnecting, wanted.as_deref(), None);
+                let status_ch = status_channel(&shared, &wanted);
+                emit_status(
+                    &app,
+                    ChatConnState::Reconnecting,
+                    status_ch.as_deref(),
+                    None,
+                );
                 if !wait {
                     backoff = Duration::from_secs(1);
                     continue;
@@ -76,19 +82,29 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                         match cmd {
                             None | Some(IrcCmd::Shutdown) => break,
                             Some(IrcCmd::Join(ch)) => {
-                                wanted = Some(ch);
+                                wanted.insert(ch);
                                 join_blocked = false;
                                 last_error = None;
                                 backoff = Duration::from_secs(1);
                             }
+                            Some(IrcCmd::PartChannel(ch)) => {
+                                wanted.remove(&ch);
+                                join_blocked = false;
+                                last_error = None;
+                                pending_out.retain(|(c, _, _)| c != &ch);
+                            }
                             Some(IrcCmd::Part) => {
-                                wanted = None;
+                                wanted.clear();
                                 join_blocked = false;
                                 last_error = None;
                                 pending_out.clear();
                             }
-                            Some(IrcCmd::Privmsg { channel, text }) => {
-                                pending_out.push_back((channel, text));
+                            Some(IrcCmd::Privmsg {
+                                channel,
+                                text,
+                                reply_to,
+                            }) => {
+                                pending_out.push_back((channel, text, reply_to));
                             }
                             Some(IrcCmd::Relogin) => {
                                 backoff = Duration::from_secs(1);
@@ -110,21 +126,22 @@ async fn connect_session(
     app: &AppHandle,
     shared: &Shared,
     rx: &mut mpsc::Receiver<IrcCmd>,
-    wanted: &mut Option<String>,
+    wanted: &mut HashSet<String>,
     join_blocked: &mut bool,
     last_error: &mut Option<String>,
     backoff: &mut Duration,
-    pending_out: &mut VecDeque<(String, String)>,
+    pending_out: &mut VecDeque<(String, String, Option<String>)>,
 ) -> SessionEnd {
+    let status_ch = status_channel(shared, wanted);
     if *join_blocked {
         emit_status(
             app,
             ChatConnState::Error,
-            wanted.as_deref(),
+            status_ch.as_deref(),
             last_error.as_deref(),
         );
     } else {
-        emit_status(app, ChatConnState::Connecting, wanted.as_deref(), None);
+        emit_status(app, ChatConnState::Connecting, status_ch.as_deref(), None);
     }
     let Ok(Ok((stream, _))) =
         tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::connect_async(IRC_URL)).await
@@ -149,7 +166,7 @@ async fn connect_session(
         spawn_helix_globals(shared);
     }
     if !*join_blocked {
-        if let Some(ch) = wanted.clone() {
+        for ch in wanted.iter() {
             if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
                 return SessionEnd::Reconnect { wait: true };
             }
@@ -164,13 +181,13 @@ async fn connect_session(
     );
     ping_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut pong_deadline: Option<Instant> = None;
-    let mut loaded_room: Option<(String, String)> = None;
-    let mut in_room = false;
+    let mut loaded_room: HashMap<String, String> = HashMap::new();
+    let mut in_rooms: HashSet<String> = HashSet::new();
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                flush_emit(shared);
+                flush_emit(app, shared);
                 if pong_deadline.is_some_and(|d| Instant::now() >= d) {
                     return SessionEnd::Reconnect { wait: true };
                 }
@@ -191,47 +208,82 @@ async fn connect_session(
                         return SessionEnd::Shutdown;
                     }
                     Some(IrcCmd::Part) => {
-                        if let Some(ch) = wanted.take() {
+                        for ch in wanted.iter() {
                             let _ = send_line(&mut write, &format!("PART #{ch}")).await;
                         }
-                        loaded_room = None;
-                        in_room = false;
+                        wanted.clear();
+                        in_rooms.clear();
+                        loaded_room.clear();
                         *join_blocked = false;
                         *last_error = None;
                         pending_out.clear();
                         emit_status(app, ChatConnState::Connected, None, None);
                     }
-                    Some(IrcCmd::Join(ch)) => {
-                        pending_out.retain(|(c, _)| c == &ch);
+                    Some(IrcCmd::PartChannel(ch)) => {
+                        wanted.remove(&ch);
+                        in_rooms.remove(&ch);
+                        loaded_room.remove(&ch);
+                        pending_out.retain(|(c, _, _)| c != &ch);
+                        let _ = send_line(&mut write, &format!("PART #{ch}")).await;
+                        let active_match = shared
+                            .hub
+                            .lock()
+                            .ok()
+                            .is_some_and(|h| h.active.as_deref() == Some(ch.as_str()));
+                        if active_match {
+                            if let Ok(mut hub) = shared.hub.lock() {
+                                hub.set_joined(&ch, false);
+                            }
+                            auth::emit(app, shared);
+                        }
                         *join_blocked = false;
                         *last_error = None;
-                        if wanted.as_deref() == Some(ch.as_str()) {
-                            if in_room {
-                                emit_status(app, ChatConnState::Connected, Some(&ch), None);
-                                continue;
+                        let status_ch = status_channel(shared, wanted);
+                        emit_status(
+                            app,
+                            ChatConnState::Connected,
+                            status_ch.as_deref(),
+                            None,
+                        );
+                    }
+                    Some(IrcCmd::Join(ch)) => {
+                        *join_blocked = false;
+                        *last_error = None;
+                        let already = wanted.contains(&ch);
+                        wanted.insert(ch.clone());
+                        if already && in_rooms.contains(&ch) {
+                            emit_status(app, ChatConnState::Connected, Some(&ch), None);
+                            if let Ok(mut hub) = shared.hub.lock() {
+                                hub.set_joined(&ch, true);
                             }
-                            emit_status(app, ChatConnState::Connecting, Some(&ch), None);
-                            if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
-                                return SessionEnd::Reconnect { wait: true };
+                            auth::emit(app, shared);
+                            let is_active = shared
+                                .hub
+                                .lock()
+                                .ok()
+                                .is_some_and(|h| h.active.as_deref() == Some(ch.as_str()));
+                            if is_active {
+                                if let Some(id) = loaded_room.get(&ch).cloned() {
+                                    spawn_channel_assets(shared, ch.clone(), id);
+                                }
                             }
                             continue;
                         }
-                        in_room = false;
                         emit_status(app, ChatConnState::Connecting, Some(&ch), None);
-                        if let Some(prev) = wanted.replace(ch.clone()) {
-                            let _ = send_line(&mut write, &format!("PART #{prev}")).await;
-                        }
-                        loaded_room = None;
                         if send_line(&mut write, &format!("JOIN #{ch}")).await.is_err() {
                             return SessionEnd::Reconnect { wait: true };
                         }
                     }
-                    Some(IrcCmd::Privmsg { channel, text }) => {
-                        pending_out.push_back((channel, text));
+                    Some(IrcCmd::Privmsg {
+                        channel,
+                        text,
+                        reply_to,
+                    }) => {
+                        pending_out.push_back((channel, text, reply_to));
                         if flush_outgoing(
                             &mut write,
                             wanted,
-                            in_room,
+                            &in_rooms,
                             *join_blocked,
                             pending_out,
                         )
@@ -270,12 +322,12 @@ async fn connect_session(
                                 LineAction::PongAck => {
                                     pong_deadline = None;
                                 }
-                                LineAction::Joined => {
-                                    in_room = true;
+                                LineAction::Joined(ch) => {
+                                    in_rooms.insert(ch);
                                     if flush_outgoing(
                                         &mut write,
                                         wanted,
-                                        in_room,
+                                        &in_rooms,
                                         *join_blocked,
                                         pending_out,
                                     )
@@ -285,20 +337,99 @@ async fn connect_session(
                                         return SessionEnd::Reconnect { wait: true };
                                     }
                                 }
-                                LineAction::LeftRoom => {
-                                    in_room = false;
-                                    if let Some(ch) = wanted.as_deref() {
+                                LineAction::LeftRoom(ch) => {
+                                    in_rooms.remove(&ch);
+                                    let is_active = shared
+                                        .hub
+                                        .lock()
+                                        .ok()
+                                        .is_some_and(|h| h.active.as_deref() == Some(ch.as_str()));
+                                    if is_active {
                                         if let Ok(mut hub) = shared.hub.lock() {
-                                            hub.set_joined(ch, false);
+                                            hub.set_joined(&ch, false);
                                         }
                                         auth::emit(app, shared);
                                     }
+                                    if wanted.contains(&ch) {
+                                        if send_line(&mut write, &format!("JOIN #{ch}"))
+                                            .await
+                                            .is_err()
+                                        {
+                                            return SessionEnd::Reconnect { wait: true };
+                                        }
+                                    }
                                 }
-                                LineAction::JoinFailed(msg) => {
-                                    in_room = false;
-                                    *join_blocked = true;
-                                    *last_error = Some(msg);
-                                    pending_out.clear();
+                                LineAction::JoinFailed { channel, message } => {
+                                    wanted.remove(&channel);
+                                    in_rooms.remove(&channel);
+                                    loaded_room.remove(&channel);
+                                    pending_out.retain(|(c, _, _)| c != &channel);
+                                    if let Ok(mut cat) = shared.catalog.lock() {
+                                        cat.drop_channel(&channel);
+                                    }
+                                    if let Ok(mut cat) = shared.badges.lock() {
+                                        cat.drop_channel(&channel);
+                                    }
+                                    if let Ok(mut cat) = shared.cheers.lock() {
+                                        cat.drop_channel(&channel);
+                                    }
+                                    if let Ok(mut set) = shared.chatters.lock() {
+                                        set.drop_channel(&channel);
+                                    }
+                                    let (was_active, next_focus) = match shared.hub.lock() {
+                                        Ok(mut hub) => {
+                                            let was_active =
+                                                hub.active.as_deref() == Some(channel.as_str());
+                                            hub.drop_channel(&channel);
+                                            if was_active {
+                                                let next = hub.channels().into_iter().next();
+                                                if let Some(ch) = next.clone() {
+                                                    hub.set_active(Some(ch));
+                                                }
+                                                (true, next)
+                                            } else {
+                                                (false, None)
+                                            }
+                                        }
+                                        Err(_) => (false, None),
+                                    };
+                                    if was_active {
+                                        shared.notify_event(EventCmd::ClearChannel);
+                                        let _ = crate::chat::session::forget_open(shared, &channel);
+                                        if let Some(ch) = next_focus {
+                                            let _ = crate::chat::session::remember(shared, ch.clone());
+                                            wanted.insert(ch.clone());
+                                            if !in_rooms.contains(&ch) {
+                                                if send_line(&mut write, &format!("JOIN #{ch}"))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return SessionEnd::Reconnect { wait: true };
+                                                }
+                                            } else if let Some(id) =
+                                                loaded_room.get(&ch).cloned()
+                                            {
+                                                spawn_channel_assets(shared, ch, id);
+                                            }
+                                        } else {
+                                            let _ = crate::chat::session::clear_last(shared);
+                                        }
+                                    } else {
+                                        let _ = crate::chat::session::forget_open(shared, &channel);
+                                    }
+                                    *last_error = Some(message.clone());
+                                    emit_status(
+                                        app,
+                                        ChatConnState::Error,
+                                        status_channel(shared, wanted).as_deref(),
+                                        last_error.as_deref(),
+                                    );
+                                    crate::chat::session::emit_rooms(
+                                        app,
+                                        shared,
+                                        Some(channel),
+                                    );
+                                    auth::emit(app, shared);
                                 }
                                 LineAction::Reconnect => return SessionEnd::Reconnect { wait: true },
                             }
@@ -311,6 +442,15 @@ async fn connect_session(
     }
 }
 
+fn status_channel(shared: &Shared, wanted: &HashSet<String>) -> Option<String> {
+    shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.active.clone())
+        .filter(|c| wanted.contains(c))
+}
+
 async fn send_line<S>(write: &mut S, line: &str) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
@@ -320,32 +460,38 @@ where
 
 async fn flush_outgoing<S>(
     write: &mut S,
-    wanted: &Option<String>,
-    in_room: bool,
+    wanted: &HashSet<String>,
+    in_rooms: &HashSet<String>,
     join_blocked: bool,
-    pending: &mut VecDeque<(String, String)>,
+    pending: &mut VecDeque<(String, String, Option<String>)>,
 ) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
 {
-    if !in_room || join_blocked {
+    if join_blocked {
         return Ok(());
     }
     let mut rest = VecDeque::new();
-    while let Some((channel, text)) = pending.pop_front() {
-        if wanted.as_deref() != Some(channel.as_str()) {
+    while let Some((channel, text, reply_to)) = pending.pop_front() {
+        if !wanted.contains(&channel) {
             continue;
         }
-        if send_line(write, &format!("PRIVMSG #{channel} :{text}"))
-            .await
-            .is_err()
-        {
-            rest.push_back((channel, text));
+        if !in_rooms.contains(&channel) {
+            rest.push_back((channel, text, reply_to));
+            continue;
+        }
+        let line = match &reply_to {
+            Some(id) => format!("@reply-parent-msg-id={id} PRIVMSG #{channel} :{text}"),
+            None => format!("PRIVMSG #{channel} :{text}"),
+        };
+        if send_line(write, &line).await.is_err() {
+            rest.push_back((channel, text, reply_to));
             rest.append(pending);
             *pending = rest;
             return Err(());
         }
     }
+    *pending = rest;
     Ok(())
 }
 
@@ -363,9 +509,9 @@ enum LineAction {
     None,
     Pong(String),
     PongAck,
-    Joined,
-    LeftRoom,
-    JoinFailed(String),
+    Joined(String),
+    LeftRoom(String),
+    JoinFailed { channel: String, message: String },
     Reconnect,
 }
 
@@ -373,9 +519,9 @@ fn dispatch_line(
     app: &AppHandle,
     shared: &Shared,
     raw: &str,
-    wanted: &Option<String>,
+    wanted: &HashSet<String>,
     nick: &str,
-    loaded_room: &mut Option<(String, String)>,
+    loaded_room: &mut HashMap<String, String>,
 ) -> LineAction {
     let now = unix_ms();
     match parse_line(raw, now) {
@@ -389,7 +535,7 @@ fn dispatch_line(
         ParsedLine::Pong => LineAction::PongAck,
         ParsedLine::Reconnect => LineAction::Reconnect,
         ParsedLine::Ready => {
-            if wanted.is_none() {
+            if wanted.is_empty() {
                 emit_status(app, ChatConnState::Connected, None, None);
             }
             LineAction::None
@@ -399,9 +545,9 @@ fn dispatch_line(
             channel,
             login,
         } => {
-            if part && login == nick && wanted.as_deref() == Some(channel.as_str()) {
+            if part && login == nick && wanted.contains(&channel) {
                 emit_status(app, ChatConnState::Connecting, Some(&channel), None);
-                LineAction::LeftRoom
+                LineAction::LeftRoom(channel)
             } else {
                 if let Ok(mut set) = shared.chatters.lock() {
                     if part {
@@ -424,8 +570,7 @@ fn dispatch_line(
             mut event,
             room_id,
         } => {
-            let joined = matches!(&event, ChatEvent::Roomstate { .. })
-                && wanted.as_deref() == Some(channel.as_str());
+            let joined = matches!(&event, ChatEvent::Roomstate { .. }) && wanted.contains(&channel);
             if joined {
                 emit_status(app, ChatConnState::Connected, Some(&channel), None);
                 if let Ok(mut hub) = shared.hub.lock() {
@@ -442,7 +587,7 @@ fn dispatch_line(
                         auth::reject_session(app2, shared2, "вход IRC отклонён").await;
                     });
                 }
-                if wanted.as_deref() == Some(channel.as_str()) && is_join_failure(id) {
+                if wanted.contains(&channel) && is_join_failure(id) {
                     emit_status(app, ChatConnState::Error, Some(&channel), Some(text));
                     if let Ok(mut hub) = shared.hub.lock() {
                         hub.set_joined(&channel, false);
@@ -451,60 +596,30 @@ fn dispatch_line(
                     failed = Some(text.clone());
                 }
             }
-            if let (Some(id), Some(login)) = (room_id.as_deref(), wanted.as_deref()) {
-                if login == channel {
-                    let need = loaded_room
-                        .as_ref()
-                        .map(|(c, r)| c != login || r != id)
-                        .unwrap_or(true);
-                    if need {
-                        *loaded_room = Some((login.to_string(), id.to_string()));
-                        let cat = shared.catalog.clone();
-                        let badges = shared.badges.clone();
-                        let cheers = shared.cheers.clone();
-                        let hub = shared.hub.clone();
-                        let events = shared.clone();
-                        let login_s = login.to_string();
-                        let id_s = id.to_string();
-                        let token = auth::oauth_token(shared);
-                        let client_id = auth::resolved_client_id(shared);
-                        tauri::async_runtime::spawn(async move {
-                            if let Some((set_id, user_id)) = fetch::load_channel(
-                                &cat,
-                                &badges,
-                                &cheers,
-                                &hub,
-                                &login_s,
-                                &id_s,
-                                token.as_deref(),
-                                &client_id,
-                            )
-                            .await
-                            {
-                                let still = hub
-                                    .lock()
-                                    .ok()
-                                    .and_then(|h| h.active.clone())
-                                    .is_some_and(|ch| ch == login_s);
-                                if still {
-                                    events.notify_event(EventCmd::SetChannel {
-                                        login: login_s,
-                                        set_id,
-                                        user_id,
-                                    });
-                                }
-                            }
-                        });
+            if let Some(id) = room_id.as_deref() {
+                if wanted.contains(&channel) {
+                    let prev = loaded_room.insert(channel.clone(), id.to_string());
+                    let room_changed = prev.as_ref().map(|r| r.as_str() != id).unwrap_or(true);
+                    let is_active = shared
+                        .hub
+                        .lock()
+                        .ok()
+                        .is_some_and(|h| h.active.as_deref() == Some(channel.as_str()));
+                    if room_changed && is_active {
+                        spawn_channel_assets(shared, channel.clone(), id.to_string());
                     }
                 }
             }
             remember_chatter(shared, &channel, &event);
             if super::filters::gate_event(shared, &mut event) {
                 if let Some(msg) = failed {
-                    return LineAction::JoinFailed(msg);
+                    return LineAction::JoinFailed {
+                        channel,
+                        message: msg,
+                    };
                 }
                 if joined {
-                    return LineAction::Joined;
+                    return LineAction::Joined(channel);
                 }
                 return LineAction::None;
             }
@@ -515,12 +630,15 @@ fn dispatch_line(
                 .ok()
                 .and_then(|mut hub| hub.ingest(&channel, event));
             if let Some(batch) = batch {
-                shared.send_batch(&batch);
+                deliver_batch(app, shared, &batch);
             }
             if let Some(msg) = failed {
-                LineAction::JoinFailed(msg)
+                LineAction::JoinFailed {
+                    channel,
+                    message: msg,
+                }
             } else if joined {
-                LineAction::Joined
+                LineAction::Joined(channel)
             } else {
                 LineAction::None
             }
@@ -596,14 +714,29 @@ fn emit_status(app: &AppHandle, state: ChatConnState, channel: Option<&str>, mes
     );
 }
 
-fn flush_emit(shared: &Shared) {
+fn flush_emit(app: &AppHandle, shared: &Shared) {
     let batches = match shared.hub.lock() {
         Ok(mut hub) => hub.flush_all(),
         Err(_) => return,
     };
     for batch in batches {
-        shared.send_batch(&batch);
+        deliver_batch(app, shared, &batch);
     }
+}
+
+fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBatch) {
+    if shared.send_batch(batch) {
+        return;
+    }
+    let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
+    shared.note_undelivered(&batch.channel_id, n);
+    let _ = app.emit(
+        "chat:pipe",
+        ChatPipe {
+            ok: false,
+            channel: Some(batch.channel_id.clone()),
+        },
+    );
 }
 
 pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &str) {
@@ -668,6 +801,43 @@ fn spawn_helix_globals(shared: &Shared) {
             super::helix::load_global_badges(&badges, t, id),
             super::helix::load_global_emotes(&emotes, t, id),
         );
+    });
+}
+
+fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
+    let cat = shared.catalog.clone();
+    let badges = shared.badges.clone();
+    let cheers = shared.cheers.clone();
+    let hub = shared.hub.clone();
+    let events = shared.clone();
+    let token = auth::oauth_token(shared);
+    let client_id = auth::resolved_client_id(shared);
+    tauri::async_runtime::spawn(async move {
+        if let Some((set_id, user_id)) = fetch::load_channel(
+            &cat,
+            &badges,
+            &cheers,
+            &hub,
+            &login,
+            &room_id,
+            token.as_deref(),
+            &client_id,
+        )
+        .await
+        {
+            let still = hub
+                .lock()
+                .ok()
+                .and_then(|h| h.active.clone())
+                .is_some_and(|ch| ch == login);
+            if still {
+                events.notify_event(EventCmd::SetChannel {
+                    login,
+                    set_id,
+                    user_id,
+                });
+            }
+        }
     });
 }
 

@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createChatApp, destroyChatApp } from "./pixi/app";
-import { MessageRing } from "./chat/ring";
+  import { MessageRing, type SlotContext } from "./chat/ring";
 import { bindChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_STATUS_EVENT } from "./constants";
+import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -37,6 +37,10 @@ async function boot(): Promise<void> {
   const composer = document.querySelector<HTMLFormElement>("#composer");
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
   const composerSend = document.querySelector<HTMLButtonElement>("#composer-send");
+  const replyBar = document.querySelector<HTMLElement>("#reply-bar");
+  const replyLabel = document.querySelector<HTMLElement>("#reply-label");
+  const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
+  const contextMenu = document.querySelector<HTMLMenuElement>("#chat-context");
   const authLogin = document.querySelector<HTMLElement>("#auth-login");
   const authSignin = document.querySelector<HTMLButtonElement>("#auth-signin");
   const authLogout = document.querySelector<HTMLButtonElement>("#auth-logout");
@@ -69,6 +73,10 @@ async function boot(): Promise<void> {
     !composer ||
     !composerInput ||
     !composerSend ||
+    !replyBar ||
+    !replyLabel ||
+    !replyCancel ||
+    !contextMenu ||
     !authLogin ||
     !authSignin ||
     !authLogout ||
@@ -94,6 +102,10 @@ async function boot(): Promise<void> {
   const statusEl = status;
   const messageInput = composerInput;
   const sendBtn = composerSend;
+  const replyBarEl = replyBar;
+  const replyLabelEl = replyLabel;
+  const replyCancelBtn = replyCancel;
+  const contextMenuEl = contextMenu;
   const loginEl = authLogin;
   const signinBtn = authSignin;
   const logoutBtn = authLogout;
@@ -150,8 +162,6 @@ async function boot(): Promise<void> {
   const ipc = bindChatIpc(ring);
   let mountedChannel = "";
   let holdStatus = false;
-  let joining = false;
-  let queuedJoin: string | null = null;
   let sending = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
   let complete: {
@@ -164,9 +174,61 @@ async function boot(): Promise<void> {
   let completeSeq = 0;
   let completeInFlight = false;
   let completePending = 0;
+  let replyTarget: { id: string; login: string; text: string } | null = null;
+  let contextTarget: SlotContext | null = null;
+  let channelBusy = false;
+  const channelQueue: { kind: "join" | "leave"; name: string }[] = [];
 
-  const channels = bindChannelList(list, (login) => {
-    void joinChannel(login);
+  const channels = bindChannelList(
+    list,
+    (login) => {
+      void joinChannel(login);
+    },
+    (login) => {
+      void leaveChannel(login);
+    },
+  );
+
+  canvas.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+  });
+
+  ring.setOnContextMenu((ctx) => {
+    openContextMenu(ctx);
+  });
+
+  document.addEventListener("pointerdown", (ev) => {
+    if (!contextMenuEl.hidden && !contextMenuEl.contains(ev.target as Node)) {
+      hideContextMenu();
+    }
+  });
+
+  contextMenuEl.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement).closest("button");
+    if (!btn || !contextMenuEl.contains(btn) || !contextTarget) {
+      return;
+    }
+    const action = btn.dataset.action;
+    const target = contextTarget;
+    hideContextMenu();
+    if (action === "copy") {
+      void navigator.clipboard.writeText(target.text).catch(() => undefined);
+      return;
+    }
+    if (action === "reply" && target.login && target.msgId) {
+      setReply(target.msgId, target.login, target.text);
+      messageInput.focus();
+      return;
+    }
+    if (action === "user" && target.login) {
+      void invoke("open_chat_link", {
+        url: `https://www.twitch.tv/${target.login}`,
+      }).catch(() => undefined);
+    }
+  });
+
+  replyCancelBtn.addEventListener("click", () => {
+    clearReply();
   });
 
   await listen<ChatStatus>(CHAT_STATUS_EVENT, (ev) => {
@@ -174,6 +236,32 @@ async function boot(): Promise<void> {
       return;
     }
     statusEl.textContent = formatStatus(ev.payload);
+  });
+
+  await listen<{
+    active?: string | null;
+    open?: string[];
+    dropped?: string | null;
+  }>(CHAT_ROOMS_EVENT, (ev) => {
+    const open = Array.isArray(ev.payload.open) ? ev.payload.open : [];
+    const focus = ev.payload.active || "";
+    if (ev.payload.dropped) {
+      channels.remove(ev.payload.dropped);
+    }
+    channels.syncOpen(open, focus);
+    void (async () => {
+      await ipc.syncActive(focus || null);
+      if (focus) {
+        applyMounted(focus);
+      } else {
+        titleEl.textContent = "";
+        channelInput.value = "";
+        if (mountedChannel) {
+          unmountPlayer(playerSlot);
+          mountedChannel = "";
+        }
+      }
+    })();
   });
 
   await listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
@@ -247,6 +335,70 @@ async function boot(): Promise<void> {
     applyFilters(await invoke<Filters>("filters_get"));
   } catch (err) {
     filterStatusEl.textContent = formatError(err);
+  }
+
+  try {
+    const session = await invoke<{
+      lastChannel?: string | null;
+      recents?: string[];
+      open?: string[];
+    }>("session_get");
+    const recents = Array.isArray(session.recents) ? session.recents : [];
+    const open = Array.isArray(session.open) ? session.open : [];
+    const focus =
+      session.lastChannel && open.includes(session.lastChannel)
+        ? session.lastChannel
+        : open[0] || session.lastChannel || "";
+    channels.hydrate(recents, open, focus);
+    const restore = open.length > 0 ? open : focus ? [focus] : [];
+    for (const login of restore) {
+      if (login === focus) {
+        continue;
+      }
+      void joinChannel(login);
+    }
+    if (focus) {
+      void joinChannel(focus);
+    }
+  } catch {
+    /* first run */
+  }
+
+  function openContextMenu(ctx: SlotContext): void {
+    contextTarget = ctx;
+    const replyBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="reply"]');
+    const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
+    if (replyBtn) {
+      replyBtn.hidden = !ctx.login || !ctx.msgId;
+    }
+    if (userBtn) {
+      userBtn.hidden = !ctx.login;
+    }
+    contextMenuEl.hidden = false;
+    const pad = 8;
+    const rect = contextMenuEl.getBoundingClientRect();
+    const x = Math.min(ctx.clientX, window.innerWidth - rect.width - pad);
+    const y = Math.min(ctx.clientY, window.innerHeight - rect.height - pad);
+    contextMenuEl.style.left = `${Math.max(pad, x)}px`;
+    contextMenuEl.style.top = `${Math.max(pad, y)}px`;
+  }
+
+  function hideContextMenu(): void {
+    contextMenuEl.hidden = true;
+    contextTarget = null;
+  }
+
+  function setReply(id: string, login: string, text: string): void {
+    replyTarget = { id, login, text };
+    const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+    replyLabelEl.textContent = `Ответ @${login}: ${preview}`;
+    replyBarEl.hidden = false;
+  }
+
+  function clearReply(): void {
+    replyTarget = null;
+    replyLabelEl.textContent = "";
+    replyBarEl.hidden = true;
   }
 
   function applyAuth(info: AuthInfo): void {
@@ -488,14 +640,83 @@ async function boot(): Promise<void> {
     sending = true;
     syncComposer();
     try {
-      await invoke("chat_send", { text });
+      await invoke("chat_send", {
+        text,
+        replyToId: replyTarget?.id ?? null,
+      });
       messageInput.value = "";
       clearComplete();
+      clearReply();
     } catch (err) {
       statusEl.textContent = formatError(err);
     } finally {
       sending = false;
       syncComposer();
+    }
+  }
+
+  function applyMounted(joined: string): void {
+    channels.remember(joined);
+    titleEl.textContent = `#${joined}`;
+    channelInput.value = joined;
+    if (joined !== mountedChannel) {
+      unmountPlayer(playerSlot);
+      mountPlayer(playerSlot, joined);
+      mountedChannel = joined;
+    }
+  }
+
+  function drainChannelQueue(): void {
+    const next = channelQueue.shift();
+    if (!next) {
+      return;
+    }
+    if (next.kind === "leave") {
+      void leaveChannel(next.name);
+      return;
+    }
+    void joinChannel(next.name);
+  }
+
+  async function leaveChannel(raw: string): Promise<void> {
+    const name = raw.trim();
+    if (!name) {
+      return;
+    }
+    if (channelBusy) {
+      channelQueue.push({ kind: "leave", name });
+      return;
+    }
+    channelBusy = true;
+    joinControl.disabled = true;
+    clearComplete();
+    clearReply();
+    hideContextMenu();
+    const leftActive = ipc.active() === name;
+    try {
+      const next = await ipc.leave(name);
+      channels.remove(name);
+      if (!next) {
+        titleEl.textContent = "";
+        channelInput.value = "";
+        if (mountedChannel) {
+          unmountPlayer(playerSlot);
+          mountedChannel = "";
+        }
+        return;
+      }
+      if (leftActive) {
+        applyMounted(next);
+      } else {
+        channels.paint(ipc.active());
+      }
+    } catch (err) {
+      holdStatus = true;
+      statusEl.textContent = formatError(err);
+    } finally {
+      channelBusy = false;
+      joinControl.disabled = false;
+      drainChannelQueue();
     }
   }
 
@@ -506,35 +727,26 @@ async function boot(): Promise<void> {
       statusEl.textContent = "имя канала: 1-25 символов [a-z0-9_]";
       return;
     }
-    if (joining) {
-      queuedJoin = name;
+    if (channelBusy) {
+      channelQueue.push({ kind: "join", name });
       return;
     }
-    joining = true;
+    channelBusy = true;
     joinControl.disabled = true;
     holdStatus = false;
     clearComplete();
+    clearReply();
+    hideContextMenu();
     try {
       const joined = await ipc.join(name);
-      channels.remember(joined);
-      titleEl.textContent = `#${joined}`;
-      channelInput.value = joined;
-      if (joined !== mountedChannel) {
-        unmountPlayer(playerSlot);
-        mountPlayer(playerSlot, joined);
-        mountedChannel = joined;
-      }
+      applyMounted(joined);
     } catch (err) {
       holdStatus = true;
       statusEl.textContent = formatError(err);
     } finally {
-      joining = false;
+      channelBusy = false;
       joinControl.disabled = false;
-      const next = queuedJoin;
-      queuedJoin = null;
-      if (next) {
-        void joinChannel(next);
-      }
+      drainChannelQueue();
     }
   }
 }

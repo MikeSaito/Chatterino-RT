@@ -1,11 +1,14 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { IPC_QUEUE_MAX } from "../constants";
+import { listen } from "@tauri-apps/api/event";
+import { CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
 import { decodeBatch } from "./batchDecode";
 import type { ChatBatch } from "./types";
 import type { MessageRing } from "./ring";
 
 export type ChatIpc = {
   join: (channel: string) => Promise<string>;
+  leave: (channel: string) => Promise<string | null>;
+  syncActive: (channel: string | null) => Promise<void>;
   part: () => Promise<void>;
   stop: () => void;
   active: () => string;
@@ -158,6 +161,45 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     }
   };
 
+  const mountActive = async (joined: string): Promise<string> => {
+    const same = joined === active;
+    if (same) {
+      return joined;
+    }
+    epoch += 1;
+    const expected = epoch;
+    active = joined;
+    lastSeq = 0;
+    ring.reset();
+    queued.length = 0;
+    snapshotQueued = false;
+    try {
+      const applied = await applySnapshot(joined, expected);
+      if (!applied && expected === epoch) {
+        lastSeq = 0;
+      }
+    } catch {
+      if (expected === epoch) {
+        lastSeq = 0;
+      }
+    }
+    void pump();
+    return joined;
+  };
+
+  const clearActive = (): void => {
+    epoch += 1;
+    active = "";
+    lastSeq = 0;
+    queued.length = 0;
+    snapshotQueued = false;
+    ring.reset();
+  };
+
+  void listen(CHAT_PIPE_EVENT, () => {
+    onBadPipe();
+  });
+
   return {
     async join(channel: string) {
       if (joining) {
@@ -167,40 +209,52 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       try {
         await attachChannel();
         const joined = await invoke<string>("chat_join", { channel });
-        const same = joined === active;
-        if (same) {
-          return joined;
+        return await mountActive(joined);
+      } finally {
+        joining = false;
+      }
+    },
+    async leave(channel: string) {
+      if (joining) {
+        return active || null;
+      }
+      joining = true;
+      try {
+        const next = await invoke<string | null>("chat_leave", { channel });
+        if (!next) {
+          clearActive();
+          return null;
         }
-        epoch += 1;
-        const expected = epoch;
-        active = joined;
-        lastSeq = 0;
-        ring.reset();
-        queued.length = 0;
-        snapshotQueued = false;
-        try {
-          const applied = await applySnapshot(joined, expected);
-          if (!applied && expected === epoch) {
-            lastSeq = 0;
-          }
-        } catch {
-          if (expected === epoch) {
-            lastSeq = 0;
-          }
+        if (next === active) {
+          return next;
         }
-        void pump();
-        return joined;
+        await attachChannel();
+        return await mountActive(next);
+      } finally {
+        joining = false;
+      }
+    },
+    async syncActive(channel: string | null) {
+      if (!channel) {
+        clearActive();
+        return;
+      }
+      if (channel === active) {
+        return;
+      }
+      if (joining) {
+        return;
+      }
+      joining = true;
+      try {
+        await attachChannel();
+        await mountActive(channel);
       } finally {
         joining = false;
       }
     },
     async part() {
-      epoch += 1;
-      active = "";
-      lastSeq = 0;
-      queued.length = 0;
-      snapshotQueued = false;
-      ring.reset();
+      clearActive();
       await invoke("chat_part");
     },
     stop() {

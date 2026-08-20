@@ -30,6 +30,23 @@ pub struct ChatStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatPipe {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRooms {
+    pub active: Option<String>,
+    pub open: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct EmoteSpan {
     pub start: u32,
     pub end: u32,
