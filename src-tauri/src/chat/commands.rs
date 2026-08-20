@@ -310,6 +310,39 @@ pub fn chat_complete(
     ))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub ids: Vec<String>,
+}
+
+#[tauri::command]
+pub fn chat_search(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    query: String,
+) -> Result<SearchResult, ApiError> {
+    let normalized = normalize_channel(&channel)?;
+    if query.chars().count() > MAX_CHAT_CHARS {
+        return Err(ApiError::invalid("запрос слишком длинный"));
+    }
+    if query
+        .chars()
+        .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+    {
+        return Err(ApiError::invalid("недопустимые символы в запросе"));
+    }
+    let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+    if hub.active.as_deref() != Some(normalized.as_str()) {
+        return Err(ApiError::invalid("канал не активен"));
+    }
+    if !hub.has_channel(&normalized) {
+        return Ok(SearchResult { ids: Vec::new() });
+    }
+    let ids = hub.buffer(&normalized).scrollback.search_ids(&query);
+    Ok(SearchResult { ids })
+}
+
 #[tauri::command]
 pub fn filters_get(state: tauri::State<'_, Shared>) -> Result<Filters, ApiError> {
     Ok(filters::snapshot(&state).map_err(|_| ApiError::internal("lock"))?)

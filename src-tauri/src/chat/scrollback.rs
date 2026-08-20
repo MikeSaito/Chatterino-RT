@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use super::constants::SCROLLBACK_LIMIT;
 use super::types::ChatEvent;
 
+const SEARCH_LIMIT: usize = 200;
+
 #[derive(Debug, Default)]
 pub struct Scrollback {
     items: VecDeque<ChatEvent>,
@@ -28,6 +30,27 @@ impl Scrollback {
         self.items.iter().cloned().collect()
     }
 
+    /// Case-insensitive substring match (Chatterino SubstringPredicate).
+    /// Newest-first, capped — UI jumps to most recent hit by default.
+    pub fn search_ids(&self, query: &str) -> Vec<String> {
+        let needle = query.trim();
+        if needle.is_empty() {
+            return Vec::new();
+        }
+        let needle_lower = needle.to_lowercase();
+        let mut newest_first = Vec::new();
+        for event in self.items.iter().rev() {
+            if event.matches_substring(&needle_lower) {
+                newest_first.push(event.search_jump_id().to_string());
+                if newest_first.len() >= SEARCH_LIMIT {
+                    break;
+                }
+            }
+        }
+        newest_first.reverse();
+        newest_first
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
@@ -42,13 +65,35 @@ impl Scrollback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::types::ChatEvent;
+    use crate::chat::types::{Badge, ChatEvent, EmoteSpan};
 
-    fn notice(id: &str) -> ChatEvent {
+    fn notice(id: &str, text: &str) -> ChatEvent {
         ChatEvent::Notice {
             id: id.to_string(),
             timestamp_ms: 1,
-            text: id.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn privmsg(id: &str, login: &str, text: &str) -> ChatEvent {
+        ChatEvent::Privmsg {
+            id: id.to_string(),
+            timestamp_ms: 1,
+            user_id: "1".into(),
+            login: login.to_string(),
+            display_name: login.to_string(),
+            color: "#fff".into(),
+            badges: Vec::<Badge>::new(),
+            text: text.to_string(),
+            emote_spans: Vec::<EmoteSpan>::new(),
+            link_spans: vec![],
+            mention_spans: vec![],
+            bits: None,
+            reply_to_id: None,
+            reply_to_login: None,
+            reply_to_text: None,
+            action: false,
+            highlight_color: None,
         }
     }
 
@@ -56,12 +101,68 @@ mod tests {
     fn evicts_oldest_without_growing_past_limit() {
         let mut q = Scrollback::new();
         for i in 0..(SCROLLBACK_LIMIT + 5) {
-            q.push(notice(&i.to_string()));
+            q.push(notice(&i.to_string(), &i.to_string()));
         }
         assert!(!q.is_empty());
         assert_eq!(q.len(), SCROLLBACK_LIMIT);
         let snap = q.snapshot();
         assert_eq!(snap.first().unwrap().id(), "5");
-        assert_eq!(snap.last().unwrap().id(), &(SCROLLBACK_LIMIT + 4).to_string());
+        assert_eq!(
+            snap.last().unwrap().id(),
+            &(SCROLLBACK_LIMIT + 4).to_string()
+        );
+    }
+
+    #[test]
+    fn search_empty_query_returns_nothing() {
+        let mut q = Scrollback::new();
+        q.push(privmsg("1", "ann", "hello world"));
+        assert!(q.search_ids("").is_empty());
+        assert!(q.search_ids("   ").is_empty());
+    }
+
+    #[test]
+    fn search_substring_case_insensitive_chronological() {
+        let mut q = Scrollback::new();
+        q.push(privmsg("1", "ann", "Hello kappa"));
+        q.push(privmsg("2", "bob", "nothing"));
+        q.push(notice("3", "HELLO again"));
+        assert_eq!(
+            q.search_ids("hello"),
+            vec!["1".to_string(), "3".to_string()]
+        );
+        assert_eq!(q.search_ids("ANN"), vec!["1".to_string()]);
+    }
+
+    #[test]
+    fn search_prefers_newest_when_capped() {
+        let mut q = Scrollback::new();
+        for i in 0..250 {
+            q.push(privmsg(&i.to_string(), "ann", "needle here"));
+        }
+        let ids = q.search_ids("needle");
+        assert_eq!(ids.len(), SEARCH_LIMIT);
+        assert_eq!(ids.first().unwrap(), "50");
+        assert_eq!(ids.last().unwrap(), "249");
+    }
+
+    #[test]
+    fn search_no_history() {
+        let q = Scrollback::new();
+        assert!(q.search_ids("x").is_empty());
+    }
+
+    #[test]
+    fn search_usernotice_jumps_to_nested_privmsg_id() {
+        let mut q = Scrollback::new();
+        q.push(ChatEvent::Usernotice {
+            id: "outer".into(),
+            timestamp_ms: 1,
+            system_text: "ann subscribed".into(),
+            login: Some("ann".into()),
+            privmsg: Some(Box::new(privmsg("inner-body", "ann", "hello sub"))),
+            highlight_color: None,
+        });
+        assert_eq!(q.search_ids("hello"), vec!["inner-body".to_string()]);
     }
 }

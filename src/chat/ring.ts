@@ -102,6 +102,7 @@ export class MessageRing {
   private lineHeight = LINE_HEIGHT;
   private charWidth = CHAR_WIDTH;
   private badgeSize = BADGE_SIZE;
+  private findHitId = "";
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
 
@@ -166,6 +167,53 @@ export class MessageRing {
     this.scroll.setDesired(rows);
     this.applyStageY();
     this.notifyScroll();
+  }
+
+  /** Прыжок к сообщению в кольце; подсветка hit. false если id нет в пуле. */
+  scrollToMsgId(id: string): boolean {
+    if (!id || !this.ready) {
+      return false;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    let target: Slot | undefined;
+    let prevSlot: Slot | undefined;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (this.findHitId && slot.msgId === this.findHitId) {
+        prevSlot = slot;
+      }
+      if (slot.msgId === id) {
+        target = slot;
+      }
+    }
+    if (!target) {
+      return false;
+    }
+    this.findHitId = id;
+    this.scroll.setDesired(target.startRow);
+    this.applyStageY();
+    this.notifyScroll();
+    if (prevSlot && prevSlot !== target) {
+      this.paintHighlight(prevSlot);
+    }
+    this.paintHighlight(target);
+    return true;
+  }
+
+  clearFindHit(): void {
+    if (!this.findHitId) {
+      return;
+    }
+    const prev = this.findHitId;
+    this.findHitId = "";
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (slot.msgId === prev) {
+        this.paintHighlight(slot);
+        break;
+      }
+    }
   }
 
   handleWheel(ev: WheelEvent): void {
@@ -786,13 +834,16 @@ export class MessageRing {
 
   private paintHighlight(slot: Slot): void {
     slot.highlight.clear();
+    const h = slot.lineCount * this.lineHeight;
+    const w = this.app.screen.width;
+    if (this.findHitId && slot.msgId === this.findHitId) {
+      slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
+    }
     const parsed = parseHighlight(slot.highlightColor);
     if (!parsed) {
       return;
     }
-    slot.highlight
-      .rect(0, 0, this.app.screen.width, slot.lineCount * this.lineHeight)
-      .fill({ color: parsed.color, alpha: parsed.alpha });
+    slot.highlight.rect(0, 0, w, h).fill({ color: parsed.color, alpha: parsed.alpha });
   }
 
   private paintMentions(slot: Slot, bodyX: number): void {

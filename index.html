@@ -36,6 +36,20 @@
         <div id="stage">
           <div id="player-slot"></div>
           <div id="chat-column">
+            <div id="chat-find" hidden>
+              <label class="sr-only" for="chat-find-input">поиск в чате</label>
+              <input
+                id="chat-find-input"
+                type="search"
+                placeholder="Поиск в чате..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <span id="chat-find-count"></span>
+              <button type="button" id="chat-find-prev" title="Предыдущее">↑</button>
+              <button type="button" id="chat-find-next" title="Следующее">↓</button>
+              <button type="button" id="chat-find-close" title="Закрыть">×</button>
+            </div>
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>

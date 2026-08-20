@@ -157,7 +157,6 @@ pub enum ChatEvent {
 }
 
 impl ChatEvent {
-    #[cfg(test)]
     pub fn id(&self) -> &str {
         match self {
             ChatEvent::Privmsg { id, .. }
@@ -168,6 +167,68 @@ impl ChatEvent {
             | ChatEvent::Notice { id, .. } => id,
         }
     }
+
+    /// Id stored on the Pixi slot (USERNOTICE with body uses nested privmsg id).
+    pub fn search_jump_id(&self) -> &str {
+        match self {
+            ChatEvent::Usernotice {
+                privmsg: Some(inner),
+                ..
+            } => match inner.as_ref() {
+                ChatEvent::Privmsg { id, .. } => id,
+                _ => self.id(),
+            },
+            _ => self.id(),
+        }
+    }
+
+    /// Haystack for Chatterino-style substring search (case folded by caller).
+    pub fn matches_substring(&self, needle_lower: &str) -> bool {
+        if needle_lower.is_empty() {
+            return false;
+        }
+        match self {
+            ChatEvent::Privmsg {
+                login,
+                display_name,
+                text,
+                reply_to_login,
+                reply_to_text,
+                ..
+            } => {
+                contains_ci(login, needle_lower)
+                    || contains_ci(display_name, needle_lower)
+                    || contains_ci(text, needle_lower)
+                    || reply_to_login
+                        .as_deref()
+                        .is_some_and(|v| contains_ci(v, needle_lower))
+                    || reply_to_text
+                        .as_deref()
+                        .is_some_and(|v| contains_ci(v, needle_lower))
+            }
+            ChatEvent::Usernotice {
+                system_text,
+                login,
+                privmsg,
+                ..
+            } => {
+                contains_ci(system_text, needle_lower)
+                    || login.as_deref().is_some_and(|v| contains_ci(v, needle_lower))
+                    || privmsg
+                        .as_ref()
+                        .is_some_and(|inner| inner.matches_substring(needle_lower))
+            }
+            ChatEvent::Notice { text, .. } => contains_ci(text, needle_lower),
+            ChatEvent::Clearchat { target_login, .. } => target_login
+                .as_deref()
+                .is_some_and(|v| contains_ci(v, needle_lower)),
+            ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } => false,
+        }
+    }
+}
+
+fn contains_ci(hay: &str, needle_lower: &str) -> bool {
+    hay.to_lowercase().contains(needle_lower)
 }
 
 #[cfg(test)]
