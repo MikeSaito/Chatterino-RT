@@ -48,12 +48,14 @@ export type SlotContext = {
   text: string;
   clientX: number;
   clientY: number;
+  disabled: boolean;
 };
 
 type Slot = {
   root: Container;
   highlight: Graphics;
   mentions: Graphics;
+  disabledGfx: Graphics;
   time: BitmapText;
   nick: BitmapText;
   body: BitmapText;
@@ -74,6 +76,9 @@ type Slot = {
   lineCount: number;
   startRow: number;
   highlightColor: string;
+  disabled: boolean;
+  /** System/timeout-like: не гасить при room CLEARCHAT (как MessageFlag::System). */
+  system: boolean;
 };
 
 type Drawn = {
@@ -103,6 +108,7 @@ export class MessageRing {
   private charWidth = CHAR_WIDTH;
   private badgeSize = BADGE_SIZE;
   private findHitId = "";
+  private hideModerated = false;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
 
@@ -121,10 +127,11 @@ export class MessageRing {
     this.onContext = cb;
   }
 
-  /** Масштаб шрифта и timestamps без destroy PIXI.Application. */
-  applyDisplay(fontScale: number, showTimestamps: boolean): void {
+  /** Масштаб шрифта, timestamps и hideModerated без destroy PIXI.Application. */
+  applyDisplay(fontScale: number, showTimestamps: boolean, hideModerated = false): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
     this.showTimestamps = showTimestamps;
+    this.hideModerated = hideModerated;
     this.fontSize = FONT_SIZE * scale;
     this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
     this.charWidth = CHAR_WIDTH * scale;
@@ -186,7 +193,7 @@ export class MessageRing {
         target = slot;
       }
     }
-    if (!target) {
+    if (!target || (this.hideModerated && target.disabled)) {
       return false;
     }
     this.findHitId = id;
@@ -244,6 +251,8 @@ export class MessageRing {
       hl.eventMode = "none";
       const mentions = new Graphics();
       mentions.eventMode = "none";
+      const disabledGfx = new Graphics();
+      disabledGfx.eventMode = "none";
       const time = new BitmapText({
         text: "",
         style: { fontFamily: "ChatFont", fontSize: this.fontSize, fill: 0xadadc0 },
@@ -277,11 +286,13 @@ export class MessageRing {
         spr.y = (this.lineHeight - this.badgeSize) / 2;
         badges.push(spr);
       }
-      root.addChild(hl, mentions, time, nick, body, ...badges, ...emotes);
+      // disabled overlay last — поверх текста/эмодзи как MessageLayout fillRect
+      root.addChild(hl, mentions, time, nick, body, ...badges, ...emotes, disabledGfx);
       const slot: Slot = {
         root,
         highlight: hl,
         mentions,
+        disabledGfx,
         time,
         nick,
         body,
@@ -302,6 +313,8 @@ export class MessageRing {
         lineCount: 1,
         startRow: 0,
         highlightColor: "",
+        disabled: false,
+        system: false,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -358,14 +371,14 @@ export class MessageRing {
 
   private pushOne(event: ChatEvent): void {
     if (event.kind === "clearmsg") {
-      this.hideById(event.targetId);
+      this.disableById(event.targetId);
       return;
     }
     if (event.kind === "clearchat") {
       if (event.targetLogin) {
-        this.hideByLogin(event.targetLogin);
+        this.disableByLogin(event.targetLogin);
       } else {
-        this.resetSlots();
+        this.disableAllUserMessages();
       }
     }
     const slot = this.slots[this.head];
@@ -376,152 +389,30 @@ export class MessageRing {
     }
   }
 
-  private hideById(id: string): void {
-    let changed = false;
+  /** Soft-delete: MessageFlag::Disabled, слот остаётся (Chatterino Channel). */
+  private disableById(id: string): void {
     for (const slot of this.slots) {
       if (slot.msgId === id) {
-        this.clearSlot(slot);
-        changed = true;
+        slot.disabled = true;
       }
-    }
-    if (changed) {
-      this.compactLive();
     }
   }
 
-  private hideByLogin(login: string): void {
+  private disableByLogin(login: string): void {
     const needle = login.toLowerCase();
-    let changed = false;
     for (const slot of this.slots) {
-      if (slot.login === needle) {
-        this.clearSlot(slot);
-        changed = true;
+      if (slot.msgId && slot.login === needle) {
+        slot.disabled = true;
       }
-    }
-    if (changed) {
-      this.compactLive();
     }
   }
 
-  private compactLive(): void {
-    if (this.occupied === 0) {
-      return;
+  private disableAllUserMessages(): void {
+    for (const slot of this.slots) {
+      if (slot.msgId && slot.login && !slot.system) {
+        slot.disabled = true;
+      }
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
-    type Saved = {
-      msgId: string;
-      login: string;
-      bodyRaw: string;
-      nickRaw: string;
-      copyText: string;
-      spansRaw: EmoteSpan[];
-      linkSpans: LinkSpan[];
-      mentionSpans: MentionSpan[];
-      badgesRaw: Badge[];
-      highlightColor: string;
-      time: string;
-      nickColor: number;
-      bodyFill: number;
-      emoteUrls: { key: string; url: string }[];
-      badgeUrls: { key: string; url: string }[];
-    };
-    const saved: Saved[] = [];
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
-      if (!slot.msgId) {
-        continue;
-      }
-      const emoteUrls: { key: string; url: string }[] = [];
-      for (let e = 0; e < slot.emoteKeys.length; e += 1) {
-        const key = slot.emoteKeys[e];
-        const span = slot.spansRaw[e];
-        if (key && span) {
-          emoteUrls.push({ key, url: span.url });
-        }
-      }
-      const badgeUrls: { key: string; url: string }[] = [];
-      for (let b = 0; b < slot.badgeKeys.length; b += 1) {
-        const key = slot.badgeKeys[b];
-        const badge = slot.badgesRaw[b];
-        if (key && badge?.url) {
-          badgeUrls.push({ key, url: badge.url });
-        }
-      }
-      saved.push({
-        msgId: slot.msgId,
-        login: slot.login,
-        bodyRaw: slot.bodyRaw,
-        nickRaw: slot.nickRaw,
-        copyText: slot.copyText,
-        spansRaw: slot.spansRaw.slice(),
-        linkSpans: slot.linkSpans.slice(),
-        mentionSpans: slot.mentionSpans.slice(),
-        badgesRaw: slot.badgesRaw.slice(),
-        highlightColor: slot.highlightColor,
-        time: slot.time.text,
-        nickColor: slot.nick.tint,
-        bodyFill: 0xefeff1,
-        emoteUrls,
-        badgeUrls,
-      });
-    }
-    for (let i = 0; i < this.occupied; i += 1) {
-      this.clearSlot(this.slots[(start + i) % MESSAGE_POOL_SIZE]);
-    }
-    this.occupied = 0;
-    this.head = start;
-    for (const data of saved) {
-      const slot = this.slots[this.head];
-      slot.root.visible = true;
-      slot.msgId = data.msgId;
-      slot.login = data.login;
-      slot.time.text = data.time;
-      slot.nickRaw = data.nickRaw;
-      slot.nick.text = data.nickRaw;
-      slot.nick.tint = data.nickColor;
-      slot.bodyRaw = data.bodyRaw;
-      slot.copyText = data.copyText;
-      slot.spansRaw = data.spansRaw;
-      slot.linkSpans = data.linkSpans;
-      slot.mentionSpans = data.mentionSpans;
-      slot.badgesRaw = data.badgesRaw;
-      slot.highlightColor = data.highlightColor;
-      for (const key of data.emoteUrls.map((x) => x.key)) {
-        slot.emoteKeys.push(key);
-        this.textures.acquire(key);
-      }
-      for (const key of data.badgeUrls.map((x) => x.key)) {
-        slot.badgeKeys.push(key);
-        this.textures.acquire(key);
-      }
-      for (let e = 0; e < data.emoteUrls.length; e += 1) {
-        const item = data.emoteUrls[e];
-        const spr = slot.emotes[e];
-        if (!item || !spr) {
-          continue;
-        }
-        void this.textures.load(item.key, item.url).then((tex) => {
-          if (tex && slot.msgId === data.msgId) {
-            applySpriteTexture(spr, tex, this.lineHeight - 4);
-          }
-        });
-      }
-      for (let b = 0; b < data.badgeUrls.length; b += 1) {
-        const item = data.badgeUrls[b];
-        const spr = slot.badges[b];
-        if (!item || !spr) {
-          continue;
-        }
-        void this.textures.load(item.key, item.url).then((tex) => {
-          if (tex && slot.msgId === data.msgId) {
-            applySpriteTexture(spr, tex, this.badgeSize);
-          }
-        });
-      }
-      this.head = (this.head + 1) % MESSAGE_POOL_SIZE;
-      this.occupied += 1;
-    }
-    this.layout();
   }
 
   private clearSlot(slot: Slot): void {
@@ -551,8 +442,11 @@ export class MessageRing {
     slot.lineCount = 1;
     slot.startRow = 0;
     slot.highlightColor = "";
+    slot.disabled = false;
+    slot.system = false;
     slot.highlight.clear();
     slot.mentions.clear();
+    slot.disabledGfx.clear();
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -565,6 +459,10 @@ export class MessageRing {
 
   private write(slot: Slot, event: ChatEvent): void {
     slot.root.visible = true;
+    slot.disabled = false;
+    slot.disabledGfx.clear();
+    // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
+    slot.system = event.kind !== "privmsg";
     if (event.kind === "usernotice" && event.privmsg && event.privmsg.kind === "privmsg") {
       slot.msgId = event.privmsg.id;
       slot.login = event.privmsg.login.toLowerCase();
@@ -802,6 +700,7 @@ export class MessageRing {
     }
     this.paintHighlight(slot);
     this.paintMentions(slot, bodyX);
+    this.paintDisabled(slot);
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
@@ -846,6 +745,17 @@ export class MessageRing {
     slot.highlight.rect(0, 0, w, h).fill({ color: parsed.color, alpha: parsed.alpha });
   }
 
+  private paintDisabled(slot: Slot): void {
+    slot.disabledGfx.clear();
+    // Chatterino Dark messages.disabled = #99191919 (MessageLayout fillRect)
+    if (!slot.disabled) {
+      return;
+    }
+    slot.disabledGfx
+      .rect(0, 0, this.app.screen.width, slot.lineCount * this.lineHeight)
+      .fill({ color: 0x191919, alpha: 0x99 / 255 });
+  }
+
   private paintMentions(slot: Slot, bodyX: number): void {
     slot.mentions.clear();
     for (const span of slot.mentionSpans) {
@@ -885,8 +795,9 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
       const live = slot.msgId.length > 0;
-      slot.root.visible = live;
-      if (!live) {
+      const show = live && !(this.hideModerated && slot.disabled);
+      slot.root.visible = show;
+      if (!show) {
         continue;
       }
       slot.root.y = row * this.lineHeight;
@@ -906,6 +817,9 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
       if (slot.msgId.length === 0) {
+        continue;
+      }
+      if (this.hideModerated && slot.disabled) {
         continue;
       }
       this.laidBuf.push({
@@ -961,6 +875,7 @@ export class MessageRing {
       text: slot.copyText || slot.bodyRaw,
       clientX: ev.clientX,
       clientY: ev.clientY,
+      disabled: slot.disabled,
     });
   }
 

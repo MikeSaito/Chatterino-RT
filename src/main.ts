@@ -233,7 +233,7 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
     }
-    if (action === "reply" && target.login && target.msgId) {
+    if (action === "reply" && target.login && target.msgId && !target.disabled) {
       setReply(target.msgId, target.login, target.text);
       messageInput.focus();
       return;
@@ -367,7 +367,7 @@ async function boot(): Promise<void> {
     const replyBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="reply"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
     if (replyBtn) {
-      replyBtn.hidden = !ctx.login || !ctx.msgId;
+      replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
     }
     if (userBtn) {
       userBtn.hidden = !ctx.login;

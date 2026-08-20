@@ -117,4 +117,5 @@ export type Filters = {
 export type DisplaySettings = {
   fontScale: number;
   showTimestamps: boolean;
+  hideModerated: boolean;
 };

@@ -22,6 +22,8 @@ pub struct DisplaySettings {
     pub font_scale: f64,
     #[serde(default = "default_true")]
     pub show_timestamps: bool,
+    #[serde(default)]
+    pub hide_moderated: bool,
 }
 
 fn default_scale() -> f64 {
@@ -37,6 +39,7 @@ impl Default for DisplaySettings {
         Self {
             font_scale: DEFAULT_SCALE,
             show_timestamps: true,
+            hide_moderated: false,
         }
     }
 }
@@ -91,6 +94,7 @@ pub fn sanitize(raw: DisplaySettings) -> Result<DisplaySettings, ApiError> {
     Ok(DisplaySettings {
         font_scale: scale.clamp(MIN_SCALE, MAX_SCALE),
         show_timestamps: raw.show_timestamps,
+        hide_moderated: raw.hide_moderated,
     })
 }
 
@@ -149,16 +153,19 @@ mod tests {
         assert!(sanitize(DisplaySettings {
             font_scale: 0.4,
             show_timestamps: true,
+            hide_moderated: false,
         })
         .is_err());
         assert!(sanitize(DisplaySettings {
             font_scale: 4.5,
             show_timestamps: true,
+            hide_moderated: false,
         })
         .is_err());
         assert!(sanitize(DisplaySettings {
             font_scale: f64::NAN,
             show_timestamps: true,
+            hide_moderated: false,
         })
         .is_err());
     }
@@ -178,11 +185,13 @@ mod tests {
             DisplaySettings {
                 font_scale: 1.25,
                 show_timestamps: false,
+                hide_moderated: true,
             },
         )
         .unwrap();
         assert_eq!(saved.font_scale, 1.25);
         assert!(!saved.show_timestamps);
+        assert!(saved.hide_moderated);
         let snap = snapshot(&shared).unwrap();
         assert_eq!(snap, saved);
         let _ = fs::remove_file(&shared.settings.lock().unwrap().path);

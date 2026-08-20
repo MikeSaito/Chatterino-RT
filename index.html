@@ -172,7 +172,7 @@
                   <select id="settings-font-scale"></select>
                 </div>
               </div>
-              <div class="settings-block" data-search="messages сообщения timestamp время формат">
+              <div class="settings-block" data-search="messages сообщения timestamp время формат hide moderated удалённые">
                 <h4 class="settings-section">Сообщения</h4>
                 <div class="settings-row">
                   <label for="settings-timestamps">Формат времени сообщений</label>
@@ -181,6 +181,10 @@
                     <option value="hh:mm">hh:mm</option>
                   </select>
                 </div>
+                <label class="filters-check">
+                  <input type="checkbox" id="settings-hide-moderated" />
+                  Скрывать удалённые сообщения
+                </label>
               </div>
             </section>
             <section class="settings-page" data-page="accounts" data-search="аккаунты accounts">

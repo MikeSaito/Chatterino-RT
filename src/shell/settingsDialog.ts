@@ -79,6 +79,7 @@ export function bindSettingsDialog(opts: {
   const statusEl = modal.querySelector<HTMLElement>("#settings-status");
   const zoomEl = modal.querySelector<HTMLSelectElement>("#settings-font-scale");
   const timestampsEl = modal.querySelector<HTMLSelectElement>("#settings-timestamps");
+  const hideModeratedEl = modal.querySelector<HTMLInputElement>("#settings-hide-moderated");
   const selfBox = modal.querySelector<HTMLInputElement>("#filters-self");
   const ignoreLoginsEl = modal.querySelector<HTMLTextAreaElement>("#filters-ignore-logins");
   const ignorePhrasesEl = modal.querySelector<HTMLTextAreaElement>("#filters-ignore-phrases");
@@ -97,6 +98,7 @@ export function bindSettingsDialog(opts: {
     !statusEl ||
     !zoomEl ||
     !timestampsEl ||
+    !hideModeratedEl ||
     !selfBox ||
     !ignoreLoginsEl ||
     !ignorePhrasesEl ||
@@ -113,7 +115,11 @@ export function bindSettingsDialog(opts: {
     zoomEl.append(opt);
   }
 
-  let baselineDisplay: DisplaySettings = { fontScale: 1, showTimestamps: true };
+  let baselineDisplay: DisplaySettings = {
+    fontScale: 1,
+    showTimestamps: true,
+    hideModerated: false,
+  };
   let baselineFilters: Filters = {
     enableSelfHighlight: true,
     ignoreLogins: [],
@@ -127,6 +133,7 @@ export function bindSettingsDialog(opts: {
   const readDisplayDraft = (): DisplaySettings => ({
     fontScale: nearestZoom(Number(zoomEl.value)),
     showTimestamps: timestampsEl.value !== "off",
+    hideModerated: hideModeratedEl.checked,
   });
 
   const readFiltersDraft = (): Filters => ({
@@ -140,7 +147,8 @@ export function bindSettingsDialog(opts: {
   const paintDisplay = (data: DisplaySettings): void => {
     zoomEl.value = String(nearestZoom(data.fontScale));
     timestampsEl.value = data.showTimestamps ? "hh:mm" : "off";
-    ring.applyDisplay(data.fontScale, data.showTimestamps);
+    hideModeratedEl.checked = data.hideModerated;
+    ring.applyDisplay(data.fontScale, data.showTimestamps, data.hideModerated);
   };
 
   const paintFilters = (data: Filters): void => {
@@ -155,7 +163,7 @@ export function bindSettingsDialog(opts: {
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
       const draft = readDisplayDraft();
-      ring.applyDisplay(draft.fontScale, draft.showTimestamps);
+      ring.applyDisplay(draft.fontScale, draft.showTimestamps, draft.hideModerated);
     }, 80);
   };
 
@@ -348,6 +356,10 @@ export function bindSettingsDialog(opts: {
   });
 
   timestampsEl.addEventListener("change", () => {
+    schedulePreview();
+  });
+
+  hideModeratedEl.addEventListener("change", () => {
     schedulePreview();
   });
 
