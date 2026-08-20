@@ -7,6 +7,7 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus, Filters } from "./chat/types";
 
@@ -25,6 +26,7 @@ async function boot(): Promise<void> {
   const scrollTrack = document.querySelector<HTMLElement>("#chat-scroll");
   const scrollThumb = document.querySelector<HTMLElement>("#chat-scroll-thumb");
   const jumpBottom = document.querySelector<HTMLButtonElement>("#chat-jump-bottom");
+  const completeList = document.querySelector<HTMLUListElement>("#complete-list");
   const form = document.querySelector<HTMLFormElement>("#join-form");
   const input = document.querySelector<HTMLInputElement>("#channel-input");
   const joinBtn = form?.querySelector<HTMLButtonElement>("button[type=submit]");
@@ -56,6 +58,7 @@ async function boot(): Promise<void> {
     !scrollTrack ||
     !scrollThumb ||
     !jumpBottom ||
+    !completeList ||
     !form ||
     !input ||
     !joinBtn ||
@@ -105,6 +108,24 @@ async function boot(): Promise<void> {
   const highlightLoginsEl = filtersHighlightLogins;
   const filterStatusEl = filtersStatus;
   const filterSaveBtn = filtersSave;
+  const completeBox = completeList;
+  completeBox.addEventListener("mousedown", (ev) => {
+    const li = (ev.target as HTMLElement).closest("li");
+    if (!li || !completeBox.contains(li)) {
+      return;
+    }
+    ev.preventDefault();
+    if (!complete) {
+      return;
+    }
+    const i = Number(li.dataset.index);
+    if (!Number.isInteger(i) || i < 0 || i >= complete.items.length) {
+      return;
+    }
+    complete.index = i;
+    writeComplete();
+    messageInput.focus();
+  });
 
   const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
@@ -133,6 +154,16 @@ async function boot(): Promise<void> {
   let queuedJoin: string | null = null;
   let sending = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
+  let complete: {
+    start: number;
+    suffix: string;
+    items: string[];
+    index: number;
+  } | null = null;
+  let applyingComplete = false;
+  let completeSeq = 0;
+  let completeInFlight = false;
+  let completePending = 0;
 
   const channels = bindChannelList(list, (login) => {
     void joinChannel(login);
@@ -160,10 +191,33 @@ async function boot(): Promise<void> {
   });
 
   messageInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Tab") {
+      ev.preventDefault();
+      void cycleComplete(ev.shiftKey);
+      return;
+    }
+    if (ev.key === "Escape") {
+      clearComplete();
+      return;
+    }
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
       void sendMessage();
     }
+  });
+
+  messageInput.addEventListener("input", () => {
+    if (!applyingComplete) {
+      clearComplete();
+    }
+  });
+
+  messageInput.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      if (document.activeElement !== completeBox && document.activeElement !== messageInput) {
+        clearComplete();
+      }
+    }, 0);
   });
 
   signinBtn.addEventListener("click", () => {
@@ -317,6 +371,115 @@ async function boot(): Promise<void> {
     }
   }
 
+  async function cycleComplete(reverse: boolean): Promise<void> {
+    const cursor = messageInput.selectionStart ?? 0;
+    const text = messageInput.value;
+    if (complete) {
+      const current = complete.items[complete.index];
+      if (text.slice(complete.start, cursor) === current) {
+        const n = complete.items.length;
+        complete.index = reverse ? (complete.index - 1 + n) % n : (complete.index + 1) % n;
+        writeComplete();
+        return;
+      }
+    }
+    if (completeInFlight) {
+      completePending += reverse ? -1 : 1;
+      return;
+    }
+    const { start, token, firstWord } = tokenAtCursor(text, cursor);
+    if (Array.from(token).length < 2) {
+      clearComplete();
+      return;
+    }
+    complete = null;
+    completeBox.replaceChildren();
+    completeBox.hidden = true;
+    completePending = 0;
+    const seq = ++completeSeq;
+    completeInFlight = true;
+    let items: string[] = [];
+    try {
+      items = await invoke<string[]>("chat_complete", { token, firstWord });
+    } catch (err) {
+      statusEl.textContent = formatError(err);
+      if (seq === completeSeq) {
+        clearComplete();
+      }
+      return;
+    } finally {
+      completeInFlight = false;
+    }
+    if (seq !== completeSeq) {
+      return;
+    }
+    const now = messageInput.value;
+    const nowCursor = messageInput.selectionStart ?? 0;
+    if (now.slice(start, nowCursor) !== token) {
+      clearComplete();
+      return;
+    }
+    if (items.length === 0) {
+      clearComplete();
+      return;
+    }
+    const n = items.length;
+    const extra = completePending;
+    completePending = 0;
+    const index = ((extra % n) + n) % n;
+    complete = {
+      start,
+      suffix: now.slice(nowCursor),
+      items,
+      index,
+    };
+    writeComplete();
+  }
+
+  function writeComplete(): void {
+    if (!complete) {
+      return;
+    }
+    const item = complete.items[complete.index];
+    applyingComplete = true;
+    try {
+      messageInput.value = `${messageInput.value.slice(0, complete.start)}${item}${complete.suffix}`;
+      const pos = complete.start + item.length;
+      messageInput.setSelectionRange(pos, pos);
+      paintComplete();
+    } finally {
+      applyingComplete = false;
+    }
+  }
+
+  function paintComplete(): void {
+    completeBox.replaceChildren();
+    if (!complete) {
+      completeBox.hidden = true;
+      return;
+    }
+    completeBox.hidden = false;
+    complete.items.forEach((item, i) => {
+      const li = document.createElement("li");
+      li.textContent = item.trimEnd();
+      li.dataset.index = String(i);
+      if (i === complete?.index) {
+        li.className = "active";
+      }
+      completeBox.append(li);
+    });
+    const active = completeBox.querySelector(".active");
+    active?.scrollIntoView({ block: "nearest" });
+  }
+
+  function clearComplete(): void {
+    completeSeq += 1;
+    completePending = 0;
+    complete = null;
+    completeBox.replaceChildren();
+    completeBox.hidden = true;
+  }
+
   async function sendMessage(): Promise<void> {
     if (!lastAuth.canSend || sending) {
       return;
@@ -327,6 +490,7 @@ async function boot(): Promise<void> {
     try {
       await invoke("chat_send", { text });
       messageInput.value = "";
+      clearComplete();
     } catch (err) {
       statusEl.textContent = formatError(err);
     } finally {
@@ -349,6 +513,7 @@ async function boot(): Promise<void> {
     joining = true;
     joinControl.disabled = true;
     holdStatus = false;
+    clearComplete();
     try {
       const joined = await ipc.join(name);
       channels.remember(joined);

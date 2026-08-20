@@ -4,6 +4,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
+use super::complete;
 use super::filters::{self, Filters};
 use super::spans::allowed_chat_url;
 use super::state::{EventCmd, IrcCmd, Shared};
@@ -49,7 +50,6 @@ pub async fn chat_join(
     channel: String,
 ) -> Result<String, ApiError> {
     let normalized = normalize_channel(&channel)?;
-    send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
     let previous = {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         let prev = hub.active.clone();
@@ -69,6 +69,11 @@ pub async fn chat_join(
     if let Ok(mut cat) = state.cheers.lock() {
         cat.retain_channel(&normalized);
     }
+    if let Ok(mut set) = state.chatters.lock() {
+        set.retain_channel(&normalized);
+        set.add(&normalized, &normalized, &normalized);
+    }
+    send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
     auth::emit(&app, &state);
     Ok(normalized)
 }
@@ -89,6 +94,9 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     }
     if let Ok(mut cat) = state.cheers.lock() {
         cat.clear_channels();
+    }
+    if let Ok(mut set) = state.chatters.lock() {
+        set.clear();
     }
     auth::emit(&app, &state);
     Ok(())
@@ -165,6 +173,53 @@ pub fn auth_status(state: tauri::State<'_, Shared>) -> Result<AuthInfo, ApiError
 #[tauri::command]
 pub async fn auth_logout(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     Ok(auth::logout(app, state.inner().clone()).await?)
+}
+
+#[tauri::command]
+pub fn chat_complete(
+    state: tauri::State<'_, Shared>,
+    token: String,
+    first_word: bool,
+) -> Result<Vec<String>, ApiError> {
+    if token.chars().count() < complete::MIN_QUERY {
+        return Ok(Vec::new());
+    }
+    if token.chars().count() > MAX_CHAT_CHARS {
+        return Ok(Vec::new());
+    }
+    if token
+        .chars()
+        .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+    {
+        return Ok(Vec::new());
+    }
+    if first_word && (token.starts_with('/') || token.starts_with('.')) {
+        return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
+    }
+    let at_only = token.starts_with('@');
+    let channel = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.active.clone().unwrap_or_default()
+    };
+    let emotes = if at_only {
+        Vec::new()
+    } else {
+        let catalog = state
+            .catalog
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        catalog.codes_prefixed(&channel, &token)
+    };
+    let names = {
+        let chatters = state
+            .chatters
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        chatters.prefixed(&channel, &token)
+    };
+    Ok(complete::suggestions(
+        &token, first_word, emotes, names,
+    ))
 }
 
 #[tauri::command]

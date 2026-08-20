@@ -403,8 +403,21 @@ fn dispatch_line(
                 emit_status(app, ChatConnState::Connecting, Some(&channel), None);
                 LineAction::LeftRoom
             } else {
+                if let Ok(mut set) = shared.chatters.lock() {
+                    if part {
+                        set.remove(&channel, &login);
+                    } else {
+                        set.add(&channel, &login, &login);
+                    }
+                }
                 LineAction::None
             }
+        }
+        ParsedLine::Names { channel, logins } => {
+            if let Ok(mut set) = shared.chatters.lock() {
+                set.add_many(&channel, &logins);
+            }
+            LineAction::None
         }
         ParsedLine::Event {
             channel,
@@ -485,6 +498,7 @@ fn dispatch_line(
                     }
                 }
             }
+            remember_chatter(shared, &channel, &event);
             if super::filters::gate_event(shared, &mut event) {
                 if let Some(msg) = failed {
                     return LineAction::JoinFailed(msg);
@@ -512,6 +526,38 @@ fn dispatch_line(
             }
         }
         ParsedLine::Ignore => LineAction::None,
+    }
+}
+
+fn remember_chatter(shared: &Shared, channel: &str, event: &ChatEvent) {
+    let (login, display) = match event {
+        ChatEvent::Privmsg {
+            login,
+            display_name,
+            ..
+        } => (login.as_str(), display_name.as_str()),
+        ChatEvent::Usernotice {
+            login,
+            privmsg,
+            ..
+        } => {
+            if let Some(ChatEvent::Privmsg {
+                login,
+                display_name,
+                ..
+            }) = privmsg.as_deref()
+            {
+                (login.as_str(), display_name.as_str())
+            } else if let Some(login) = login.as_deref() {
+                (login, login)
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    };
+    if let Ok(mut set) = shared.chatters.lock() {
+        set.add(channel, login, display);
     }
 }
 
@@ -612,10 +658,16 @@ fn credentials(shared: &Shared) -> (String, Option<String>) {
 
 fn spawn_helix_globals(shared: &Shared) {
     let badges = shared.badges.clone();
+    let emotes = shared.catalog.clone();
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
     tauri::async_runtime::spawn(async move {
-        super::helix::load_global_badges(&badges, token.as_deref(), &client_id).await;
+        let t = token.as_deref();
+        let id = client_id.as_str();
+        tokio::join!(
+            super::helix::load_global_badges(&badges, t, id),
+            super::helix::load_global_emotes(&emotes, t, id),
+        );
     });
 }
 

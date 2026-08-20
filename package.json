@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:wrap": "node --experimental-strip-types ./tests/wrap.test.ts",
     "test:scroll": "node --experimental-strip-types ./tests/scroll.test.ts",
+    "test:token": "node --experimental-strip-types ./tests/token.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

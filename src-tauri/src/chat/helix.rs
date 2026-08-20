@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2018 Contributors to Chatterino <https://chatterino.com>
 // SPDX-License-Identifier: MIT
 //
-// Reimplementation of Helix badge and cheermote catalog loading from Chatterino
-// src/providers/twitch/TwitchBadges.cpp, TwitchChannel.cpp, and api/Helix.cpp.
+// Reimplementation of Helix badge, cheermote, and chat emote catalog loading
+// from Chatterino TwitchBadges.cpp, TwitchChannel.cpp, and api/Helix.cpp.
 // Not a copy of C++/Qt source.
 
 use std::collections::HashMap;
@@ -13,7 +13,9 @@ use serde_json::Value;
 use url::Url;
 
 use super::cheers::{CheerCatalog, CheerSet, CheerTier};
+use super::emotes::{Catalog, EmoteDef};
 use super::hub::Hub;
+use super::parse::twitch_emote_url;
 use super::types::Badge;
 
 const ATTEMPTS: u32 = 3;
@@ -98,14 +100,45 @@ pub async fn load_global_badges(
     }
 }
 
+pub async fn load_global_emotes(
+    catalog: &Arc<Mutex<Catalog>>,
+    token: Option<&str>,
+    client_id: &str,
+) {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return;
+    };
+    let client = http_client();
+    let url = format!("{HELIX}/chat/emotes/global");
+    let v = match get_helix(&client, &url, &client_id, &token).await {
+        HelixFetch::Ok(v) => v,
+        HelixFetch::Auth => return,
+        HelixFetch::Fail => {
+            tokio::time::sleep(RETRY_WAIT).await;
+            match get_helix(&client, &url, &client_id, &token).await {
+                HelixFetch::Ok(v) => v,
+                HelixFetch::Auth | HelixFetch::Fail => return,
+            }
+        }
+    };
+    let map = parse_chat_emotes(&v);
+    if let Ok(mut cat) = catalog.lock() {
+        for (code, def) in map {
+            cat.insert_global_vacant(code, def);
+        }
+    }
+}
+
 pub async fn load_channel(
     badges: &Arc<Mutex<BadgeCatalog>>,
     cheers: &Arc<Mutex<CheerCatalog>>,
+    emotes: &Arc<Mutex<Catalog>>,
     hub: &Arc<Mutex<Hub>>,
     login: &str,
     room_id: &str,
     token: Option<&str>,
     client_id: &str,
+    load_gen: u64,
 ) {
     let Some((client_id, token)) = helix_creds(token, client_id) else {
         return;
@@ -116,12 +149,18 @@ pub async fn load_channel(
     let client = http_client();
     let badge_url = helix_query("/chat/badges", &[("broadcaster_id", room_id)]);
     let cheer_url = helix_query("/bits/cheermotes", &[("broadcaster_id", room_id)]);
-    let (badge_json, cheer_json) = tokio::join!(
+    let emote_url = helix_query("/chat/emotes", &[("broadcaster_id", room_id)]);
+    let (badge_json, cheer_json, emote_json) = tokio::join!(
         get_helix(&client, &badge_url, &client_id, &token),
         get_helix(&client, &cheer_url, &client_id, &token),
+        get_helix(&client, &emote_url, &client_id, &token),
     );
     let badge_json = recover_helix(&client, &badge_url, &client_id, &token, hub, login, badge_json).await;
     let cheer_json = recover_helix(&client, &cheer_url, &client_id, &token, hub, login, cheer_json).await;
+    let emote_json = recover_helix(&client, &emote_url, &client_id, &token, hub, login, emote_json).await;
+    if !load_gen_active(hub, emotes, login, load_gen) {
+        return;
+    }
     if let Some(v) = badge_json {
         let map = parse_badge_sets(&v);
         commit_if_active(hub, login, badges, |cat| {
@@ -132,6 +171,15 @@ pub async fn load_channel(
         let sets = parse_cheermote_sets(&v);
         commit_if_active(hub, login, cheers, |cat| {
             cat.replace_channel(login.to_string(), sets);
+        });
+    }
+    if let Some(v) = emote_json {
+        let map = parse_chat_emotes(&v);
+        commit_if_active(hub, login, emotes, |cat| {
+            if cat.load_gen() != load_gen {
+                return;
+            }
+            cat.merge_channel_vacant(login, map);
         });
     }
 }
@@ -164,7 +212,7 @@ async fn recover_helix(
     }
 }
 
-fn commit_if_active<T>(
+pub(crate) fn commit_if_active<T>(
     hub: &Arc<Mutex<Hub>>,
     login: &str,
     catalog: &Arc<Mutex<T>>,
@@ -225,6 +273,45 @@ fn allowed_https_host(raw: &str, hosts: &[&str]) -> Option<String> {
         return None;
     }
     Some(parsed.as_str().to_string())
+}
+
+pub fn parse_chat_emotes(value: &Value) -> HashMap<String, EmoteDef> {
+    let mut map = HashMap::new();
+    let Some(arr) = value.get("data").and_then(Value::as_array) else {
+        return map;
+    };
+    for item in arr {
+        let id = item.get("id").and_then(Value::as_str).unwrap_or("");
+        let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+        if !safe_twitch_emote_id(id) || name.is_empty() || name.len() > 100 {
+            continue;
+        }
+        if name
+            .chars()
+            .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+        {
+            continue;
+        }
+        map.insert(
+            name.to_string(),
+            EmoteDef {
+                id: id.to_string(),
+                provider: "twitch".into(),
+                url: twitch_emote_url(id),
+                zero_width: false,
+            },
+        );
+    }
+    map
+}
+
+fn safe_twitch_emote_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && !id.contains("..")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 pub fn parse_badge_sets(value: &Value) -> BadgeMap {
@@ -314,6 +401,24 @@ fn still_active(hub: &Arc<Mutex<Hub>>, login: &str) -> bool {
         .ok()
         .and_then(|h| h.active.clone())
         .is_some_and(|ch| ch == login)
+}
+
+fn load_gen_active(
+    hub: &Arc<Mutex<Hub>>,
+    emotes: &Arc<Mutex<Catalog>>,
+    login: &str,
+    load_gen: u64,
+) -> bool {
+    let Ok(h) = hub.lock() else {
+        return false;
+    };
+    if h.active.as_deref() != Some(login) {
+        return false;
+    }
+    let Ok(cat) = emotes.lock() else {
+        return false;
+    };
+    cat.load_gen() == load_gen
 }
 
 pub(crate) fn env_secret(name: &str) -> Option<String> {
@@ -414,6 +519,23 @@ mod tests {
       ]
     }"#;
 
+    const EMOTES_JSON: &str = r#"{
+      "data": [
+        {
+          "id": "25",
+          "name": "Kappa"
+        },
+        {
+          "id": "../x",
+          "name": "Evil"
+        },
+        {
+          "id": "emotesv2_abc",
+          "name": "CoolStoryBob"
+        }
+      ]
+    }"#;
+
     const CHEERS_JSON: &str = r#"{
       "data": [
         {
@@ -443,6 +565,19 @@ mod tests {
         }
       ]
     }"#;
+
+    #[test]
+    fn parses_chat_emotes_and_drops_bad_id() {
+        let v: Value = serde_json::from_str(EMOTES_JSON).unwrap();
+        let map = parse_chat_emotes(&v);
+        assert_eq!(map.get("Kappa").map(|d| d.provider.as_str()), Some("twitch"));
+        assert_eq!(
+            map.get("Kappa").map(|d| d.url.as_str()),
+            Some("https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+        );
+        assert!(map.get("Evil").is_none());
+        assert!(map.contains_key("CoolStoryBob"));
+    }
 
     #[test]
     fn parses_badge_sets_and_drops_bad_url() {

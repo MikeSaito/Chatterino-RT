@@ -45,6 +45,18 @@ pub async fn load_channel(
     token: Option<&str>,
     client_id: &str,
 ) -> Option<(String, String)> {
+    let gen = {
+        let Ok(h) = hub.lock() else {
+            return None;
+        };
+        if h.active.as_deref() != Some(login) {
+            return None;
+        }
+        let Ok(mut cat) = catalog.lock() else {
+            return None;
+        };
+        cat.bump_load()
+    };
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
@@ -72,22 +84,26 @@ pub async fn load_channel(
             }
         }
     }
-    {
-        let Ok(h) = hub.lock() else {
-            return None;
-        };
-        if h.active.as_deref() != Some(login) {
-            return None;
+    let mut applied = false;
+    super::helix::commit_if_active(hub, login, catalog, |cat| {
+        if cat.load_gen() != gen {
+            return;
         }
-        let Ok(mut cat) = catalog.lock() else {
-            return None;
-        };
-        cat.replace_channel(login.to_string(), map);
+        if !map.is_empty() {
+            cat.replace_channel(login.to_string(), map);
+        }
         if let Some((set_id, _)) = seventv.as_ref() {
             cat.bind_set(set_id.clone(), SetScope::Channel(login.to_string()));
         }
+        applied = true;
+    });
+    if !applied {
+        return None;
     }
-    super::helix::load_channel(badges, cheers, hub, login, room_id, token, client_id).await;
+    super::helix::load_channel(
+        badges, cheers, catalog, hub, login, room_id, token, client_id, gen,
+    )
+    .await;
     let still_active = hub
         .lock()
         .ok()

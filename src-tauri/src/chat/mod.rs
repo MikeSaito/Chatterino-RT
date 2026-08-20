@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod channel;
+pub mod chatters;
 pub mod commands;
+pub mod complete;
 pub mod constants;
 pub mod cheers;
 pub mod emoji;

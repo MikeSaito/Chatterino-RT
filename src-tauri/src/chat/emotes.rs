@@ -19,11 +19,39 @@ pub struct Catalog {
     global: std::collections::HashMap<String, EmoteDef>,
     channel: std::collections::HashMap<String, std::collections::HashMap<String, EmoteDef>>,
     set_scope: std::collections::HashMap<String, SetScope>,
+    load_gen: u64,
 }
 
 impl Catalog {
+    pub fn bump_load(&mut self) -> u64 {
+        self.load_gen = self.load_gen.wrapping_add(1);
+        self.load_gen
+    }
+
+    pub fn load_gen(&self) -> u64 {
+        self.load_gen
+    }
+
     pub fn insert_global(&mut self, code: String, def: EmoteDef) {
         self.global.insert(code, def);
+    }
+
+    pub fn insert_global_vacant(&mut self, code: String, def: EmoteDef) {
+        self.global.entry(code).or_insert(def);
+    }
+
+    pub fn merge_channel_vacant(
+        &mut self,
+        channel: &str,
+        incoming: std::collections::HashMap<String, EmoteDef>,
+    ) {
+        let map = self
+            .channel
+            .entry(channel.to_string())
+            .or_default();
+        for (code, def) in incoming {
+            map.entry(code).or_insert(def);
+        }
     }
 
     pub fn replace_channel(&mut self, channel: String, map: std::collections::HashMap<String, EmoteDef>) {
@@ -49,6 +77,30 @@ impl Catalog {
             .get(channel)
             .and_then(|m| m.get(code))
             .or_else(|| self.global.get(code))
+    }
+
+    pub fn codes_prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
+        let needle = prefix.to_ascii_lowercase();
+        if needle.is_empty() {
+            return Vec::new();
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let mut push = |code: &str| {
+            if code.to_ascii_lowercase().starts_with(&needle) && seen.insert(code.to_ascii_lowercase())
+            {
+                out.push(code.to_string());
+            }
+        };
+        if let Some(map) = self.channel.get(channel) {
+            for code in map.keys() {
+                push(code);
+            }
+        }
+        for code in self.global.keys() {
+            push(code);
+        }
+        out
     }
 
     pub fn bind_set(&mut self, set_id: String, scope: SetScope) {
@@ -364,5 +416,48 @@ mod tests {
             def("z", "7tv", false),
         );
         assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("bttv"));
+    }
+
+    #[test]
+    fn twitch_vacant_does_not_overwrite_third_party() {
+        let mut cat = Catalog::default();
+        cat.insert_global("Kappa".into(), def("7", "7tv", false));
+        cat.insert_global_vacant("Kappa".into(), def("25", "twitch", false));
+        cat.insert_global_vacant("PogChamp".into(), def("88", "twitch", false));
+        assert_eq!(
+            cat.lookup("xqc", "Kappa").map(|d| d.provider.as_str()),
+            Some("7tv")
+        );
+        assert_eq!(
+            cat.lookup("xqc", "PogChamp").map(|d| d.provider.as_str()),
+            Some("twitch")
+        );
+        let mut channel = std::collections::HashMap::new();
+        channel.insert("Pog".into(), def("b", "bttv", false));
+        cat.replace_channel("xqc".into(), channel);
+        let mut twitch = std::collections::HashMap::new();
+        twitch.insert("Pog".into(), def("x", "twitch", false));
+        twitch.insert("CoolStoryBob".into(), def("y", "twitch", false));
+        cat.merge_channel_vacant("xqc", twitch);
+        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("bttv"));
+        assert_eq!(
+            cat.lookup("xqc", "CoolStoryBob").map(|d| d.provider.as_str()),
+            Some("twitch")
+        );
+    }
+
+    #[test]
+    fn bump_load_rejects_stale_generation() {
+        let mut cat = Catalog::default();
+        let first = cat.bump_load();
+        let second = cat.bump_load();
+        assert_ne!(first, second);
+        assert_eq!(cat.load_gen(), second);
+        let mut stale = std::collections::HashMap::new();
+        stale.insert("Kappa".into(), def("25", "twitch", false));
+        if cat.load_gen() == first {
+            cat.replace_channel("xqc".into(), stale);
+        }
+        assert!(cat.lookup("xqc", "Kappa").is_none());
     }
 }

@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use super::auth::AuthInner;
 use super::cheers::CheerCatalog;
+use super::chatters::Chatters;
 use super::emotes::Catalog;
 use super::filters::FiltersInner;
 use super::helix::BadgeCatalog;
@@ -56,6 +57,7 @@ pub struct Shared {
     pub event_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
+    pub chatters: Arc<Mutex<Chatters>>,
 }
 
 impl Shared {
@@ -71,6 +73,7 @@ impl Shared {
             event_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
+            chatters: Arc::new(Mutex::new(Chatters::default())),
         }
     }
 

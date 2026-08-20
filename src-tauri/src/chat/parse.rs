@@ -20,6 +20,10 @@ pub enum ParsedLine {
         channel: String,
         login: String,
     },
+    Names {
+        channel: String,
+        logins: Vec<String>,
+    },
     Ignore,
 }
 
@@ -57,7 +61,8 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "RECONNECT" => ParsedLine::Reconnect,
         "JOIN" => parse_membership(false, prefix.as_deref(), &params),
         "PART" => parse_membership(true, prefix.as_deref(), &params),
-        "353" | "366" | "CAP" | "GLOBALUSERSTATE" => ParsedLine::Ignore,
+        "353" => parse_names(&params, trailing.as_deref()),
+        "366" | "CAP" | "GLOBALUSERSTATE" => ParsedLine::Ignore,
         _ => ParsedLine::Ignore,
     }
 }
@@ -217,6 +222,28 @@ fn parse_roomstate(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
         },
         channel,
     }
+}
+
+fn parse_names(params: &[String], trailing: Option<&str>) -> ParsedLine {
+    let channel = params
+        .iter()
+        .rev()
+        .find(|s| s.starts_with('#'))
+        .map(|s| s.trim_start_matches('#').to_lowercase())
+        .unwrap_or_default();
+    if channel.is_empty() {
+        return ParsedLine::Ignore;
+    }
+    let logins = trailing
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|n| n.trim_start_matches(['@', '+']).to_string())
+        .filter(|n| !n.is_empty())
+        .collect::<Vec<_>>();
+    if logins.is_empty() {
+        return ParsedLine::Ignore;
+    }
+    ParsedLine::Names { channel, logins }
 }
 
 fn parse_membership(part: bool, prefix: Option<&str>, params: &[String]) -> ParsedLine {
@@ -709,5 +736,23 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_names_353() {
+        match parse_line(
+            ":tmi.twitch.tv 353 justinfan1 = #xqc :bob @Mod_user +voice",
+            20,
+        ) {
+            ParsedLine::Names { channel, logins } => {
+                assert_eq!(channel, "xqc");
+                assert_eq!(logins, vec!["bob", "Mod_user", "voice"]);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            parse_line(":tmi.twitch.tv 366 justinfan1 #xqc :End of /NAMES list", 21),
+            ParsedLine::Ignore
+        ));
     }
 }
