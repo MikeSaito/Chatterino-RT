@@ -1,5 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
+const root = path.dirname(fileURLToPath(import.meta.url));
+const xmldomStub = path.resolve(root, "src/pixi/xmldom-stub.ts");
 const host = process.env.TAURI_DEV_HOST;
 
 const DEV_CSP = [
@@ -13,6 +17,19 @@ const DEV_CSP = [
 
 export default defineConfig(async () => ({
   clearScreen: false,
+  resolve: {
+    alias: {
+      "@xmldom/xmldom": xmldomStub,
+    },
+  },
+  optimizeDeps: {
+    exclude: ["@xmldom/xmldom"],
+    esbuildOptions: {
+      alias: {
+        "@xmldom/xmldom": xmldomStub,
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
