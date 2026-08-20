@@ -106,10 +106,7 @@ export class MessageRing {
         const spr = new Sprite(Texture.EMPTY);
         spr.visible = false;
         spr.eventMode = "none";
-        spr.width = LINE_HEIGHT - 4;
-        spr.height = LINE_HEIGHT - 4;
         spr.y = 1;
-        root.addChild(spr);
         emotes.push(spr);
       }
       const badges: Sprite[] = [];
@@ -117,13 +114,10 @@ export class MessageRing {
         const spr = new Sprite(Texture.EMPTY);
         spr.visible = false;
         spr.eventMode = "none";
-        spr.width = BADGE_SIZE;
-        spr.height = BADGE_SIZE;
         spr.y = (LINE_HEIGHT - BADGE_SIZE) / 2;
-        root.addChild(spr);
         badges.push(spr);
       }
-      root.addChild(time, nick, body);
+      root.addChild(time, nick, body, ...badges, ...emotes);
       const slot: Slot = {
         root,
         time,
@@ -290,7 +284,7 @@ export class MessageRing {
       this.textures.acquire(key);
       void this.textures.load(key, span.url).then((tex) => {
         if (tex && slot.msgId === event.id) {
-          spr.texture = tex;
+          applySpriteTexture(spr, tex, LINE_HEIGHT - 4);
         }
       });
     }
@@ -305,7 +299,7 @@ export class MessageRing {
       this.textures.acquire(key);
       void this.textures.load(key, badge.url).then((tex) => {
         if (tex && slot.msgId === event.id) {
-          spr.texture = tex;
+          applySpriteTexture(spr, tex, BADGE_SIZE);
         }
       });
     }
@@ -425,7 +419,7 @@ export class MessageRing {
       slot.root.hitArea.width = this.app.screen.width;
     }
     const clipped = clipLine(slot.bodyRaw, maxBodyChars(this.app.screen.width, bodyX));
-    slot.body.text = clipped.text;
+    slot.body.text = maskEmoteCodes(clipped.text, slot.spansRaw, clipped.visible);
     slot.visibleChars = clipped.visible;
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
@@ -552,6 +546,27 @@ function parseColor(color: string): number {
     return 0xbf94ff;
   }
   return Number.parseInt(m[1], 16);
+}
+
+function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
+  spr.texture = tex;
+  spr.width = size;
+  spr.height = size;
+}
+
+function maskEmoteCodes(text: string, spans: EmoteSpan[], visible: number): string {
+  if (spans.length === 0) {
+    return text;
+  }
+  const chars = text.split("");
+  for (const span of spans) {
+    const from = Math.max(0, span.start);
+    const to = Math.min(span.end, visible, chars.length);
+    for (let i = from; i < to; i += 1) {
+      chars[i] = " ";
+    }
+  }
+  return chars.join("");
 }
 
 function maxBodyChars(paneWidth: number, bodyX: number): number {

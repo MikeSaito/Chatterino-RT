@@ -1,7 +1,5 @@
-import { Texture, Assets } from "pixi.js";
+import { Texture } from "pixi.js";
 import { TEXTURE_LRU_LIMIT } from "../constants";
-
-Assets.setPreferences({ preferWorkers: false });
 
 const ATTEMPTS = 3;
 
@@ -48,8 +46,12 @@ export class TextureLru {
     const job = loadTexture(url)
       .then((tex) => {
         this.inflight.delete(id);
+        const prev = this.map.get(id);
         this.urls.set(id, url);
         this.set(id, tex);
+        if (prev && prev !== tex && prev !== Texture.EMPTY) {
+          prev.destroy(true);
+        }
         return tex;
       })
       .catch(() => {
@@ -81,11 +83,11 @@ export class TextureLru {
       if (!victim) {
         break;
       }
+      const dropped = this.map.get(victim);
       this.map.delete(victim);
-      const url = this.urls.get(victim);
       this.urls.delete(victim);
-      if (url) {
-        void Assets.unload(url);
+      if (dropped && dropped !== Texture.EMPTY) {
+        dropped.destroy(true);
       }
     }
   }
@@ -96,10 +98,13 @@ async function loadTexture(url: string): Promise<Texture> {
   let last: unknown = new Error("texture load failed");
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     try {
-      return await Assets.load<Texture>({
-        src: url,
-        parser: "texture",
-      });
+      const res = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const bitmap = await createImageBitmap(blob);
+      return Texture.from(bitmap);
     } catch (err) {
       last = err;
       if (attempt + 1 < ATTEMPTS) {
