@@ -38,7 +38,7 @@
         "title": "WebTV_chats",
         "width": 1280,
         "height": 800,
-        "minWidth": 800,
+        "minWidth": 960,
         "minHeight": 420,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }

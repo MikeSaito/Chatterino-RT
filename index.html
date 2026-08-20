@@ -9,18 +9,45 @@
   </head>
   <body>
     <div id="app">
-      <header id="toolbar">
+      <aside id="sidebar">
+        <p id="brand">WebTV_chats</p>
         <form id="join-form">
           <label for="channel-input">канал</label>
           <input id="channel-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
           <button type="submit">Join</button>
         </form>
-        <p id="status"></p>
-      </header>
-      <div id="stage">
-        <div id="player-slot"></div>
-        <div id="chat-pane">
-          <canvas id="chat-canvas"></canvas>
+        <ul id="channel-list"></ul>
+      </aside>
+      <div id="main">
+        <header id="header">
+          <p id="channel-title"></p>
+          <p id="status"></p>
+        </header>
+        <div id="stage">
+          <div id="player-slot"></div>
+          <div id="chat-column">
+            <div id="chat-pane">
+              <canvas id="chat-canvas"></canvas>
+            </div>
+            <form id="composer">
+              <label class="sr-only" for="composer-input">сообщение</label>
+              <textarea
+                id="composer-input"
+                name="message"
+                rows="2"
+                maxlength="500"
+                spellcheck="false"
+              ></textarea>
+              <button
+                id="composer-send"
+                type="submit"
+                disabled
+                title="Outgoing chat needs a Twitch OAuth login"
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
