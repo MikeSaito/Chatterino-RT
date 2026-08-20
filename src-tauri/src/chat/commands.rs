@@ -313,7 +313,7 @@ pub fn chat_complete(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
-    pub ids: Vec<String>,
+    pub hits: Vec<super::types::SearchHit>,
 }
 
 #[tauri::command]
@@ -337,10 +337,10 @@ pub fn chat_search(
         return Err(ApiError::invalid("канал не активен"));
     }
     if !hub.has_channel(&normalized) {
-        return Ok(SearchResult { ids: Vec::new() });
+        return Ok(SearchResult { hits: Vec::new() });
     }
-    let ids = hub.buffer(&normalized).scrollback.search_ids(&query);
-    Ok(SearchResult { ids })
+    let hits = hub.buffer(&normalized).scrollback.search_hits(&query);
+    Ok(SearchResult { hits })
 }
 
 #[tauri::command]

@@ -7,7 +7,7 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
-import { bindChatFind } from "./shell/chatFind";
+import { bindSearchPopup } from "./shell/chatFind";
 import { bindSettingsDialog } from "./shell/settingsDialog";
 import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
@@ -54,12 +54,7 @@ async function boot(): Promise<void> {
   const authImport = document.querySelector<HTMLButtonElement>("#auth-import");
   const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
   const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
-  const chatFind = document.querySelector<HTMLElement>("#chat-find");
-  const chatFindInput = document.querySelector<HTMLInputElement>("#chat-find-input");
-  const chatFindCount = document.querySelector<HTMLElement>("#chat-find-count");
-  const chatFindPrev = document.querySelector<HTMLButtonElement>("#chat-find-prev");
-  const chatFindNext = document.querySelector<HTMLButtonElement>("#chat-find-next");
-  const chatFindClose = document.querySelector<HTMLButtonElement>("#chat-find-close");
+  const searchModal = document.querySelector<HTMLElement>("#search-modal");
   if (
     !canvas ||
     !pane ||
@@ -90,12 +85,7 @@ async function boot(): Promise<void> {
     !authImport ||
     !settingsModal ||
     !settingsOpen ||
-    !chatFind ||
-    !chatFindInput ||
-    !chatFindCount ||
-    !chatFindPrev ||
-    !chatFindNext ||
-    !chatFindClose
+    !searchModal
   ) {
     return;
   }
@@ -163,16 +153,14 @@ async function boot(): Promise<void> {
   });
   const ipc = bindChatIpc(ring);
   chatIpc = ipc;
-  const chatFindCtl = bindChatFind({
+  const chatFindCtl = bindSearchPopup({
     ring,
-    bar: chatFind,
-    input: chatFindInput,
-    count: chatFindCount,
-    prev: chatFindPrev,
-    next: chatFindNext,
-    close: chatFindClose,
+    modal: searchModal,
     settingsModal,
     activeChannel: () => ipc.active(),
+    onOpen: () => {
+      hideContextMenu();
+    },
   });
   let mountedChannel = "";
   let holdStatus = false;

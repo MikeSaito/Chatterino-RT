@@ -1,84 +1,174 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing } from "../chat/ring";
 
-type SearchResult = { ids: string[] };
+/** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
+export type SearchHit = {
+  id: string;
+  timestampMs: number;
+  nick: string;
+  login: string;
+  text: string;
+  color: string;
+};
 
-export function bindChatFind(opts: {
+type SearchResult = { hits: SearchHit[] };
+
+function formatTime(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) {
+    return "--:--";
+  }
+  const h = d.getHours().toString().padStart(2, "0");
+  const m = d.getMinutes().toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function focusables(root: HTMLElement): HTMLElement[] {
+  const nodes = root.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  );
+  return [...nodes].filter((el) => !el.hidden && el.getClientRects().length > 0);
+}
+
+/**
+ * SPA SearchPopup: поле сверху + отфильтрованный список сообщений
+ * (как Chatterino SearchPopup / ChannelView Context::Search).
+ */
+export function bindSearchPopup(opts: {
   ring: MessageRing;
-  bar: HTMLElement;
-  input: HTMLInputElement;
-  count: HTMLElement;
-  prev: HTMLButtonElement;
-  next: HTMLButtonElement;
-  close: HTMLButtonElement;
+  modal: HTMLElement;
   settingsModal: HTMLElement;
   activeChannel: () => string;
+  onOpen?: () => void;
 }): {
   onChannelChanged: () => void;
 } {
-  const { ring, bar, input, count, prev, next, close, settingsModal, activeChannel } = opts;
+  const { ring, modal, settingsModal, activeChannel, onOpen } = opts;
+  const appRoot = document.querySelector<HTMLElement>("#app");
+  const dialog = modal.querySelector<HTMLElement>("#search-dialog");
+  const backdrop = modal.querySelector<HTMLElement>("#search-backdrop");
+  const titleEl = modal.querySelector<HTMLElement>("#search-title");
+  const input = modal.querySelector<HTMLInputElement>("#search-input");
+  const view = modal.querySelector<HTMLElement>("#search-view");
+  const closeBtn = modal.querySelector<HTMLButtonElement>("#search-close");
+  if (!dialog || !backdrop || !titleEl || !input || !view || !closeBtn) {
+    return { onChannelChanged: () => undefined };
+  }
 
-  let ids: string[] = [];
-  let index = -1;
-  let query = "";
+  let hits: SearchHit[] = [];
+  let activeId = "";
   let timer = 0;
   let seq = 0;
   let boundChannel = "";
+  let hasQuery = false;
+  let restoreFocus: HTMLElement | null = null;
 
-  const paintCount = (): void => {
-    if (!query.trim()) {
-      count.textContent = "";
+  const setAppInert = (inert: boolean): void => {
+    if (!appRoot) {
       return;
     }
-    if (ids.length === 0) {
-      count.textContent = "0/0";
-      return;
+    if (inert) {
+      appRoot.setAttribute("inert", "");
+    } else {
+      appRoot.removeAttribute("inert");
     }
-    count.textContent = `${index + 1}/${ids.length}`;
   };
 
-  const jumpCurrent = (): void => {
-    if (index < 0 || index >= ids.length) {
-      ring.clearFindHit();
-      paintCount();
+  const paintTitle = (): void => {
+    const ch = activeChannel();
+    // SearchPopup::updateWindowTitle — "Searching in {name}'s history"
+    titleEl.textContent = ch
+      ? `Searching in ${ch}'s history`
+      : "Searching in history";
+  };
+
+  const setActiveRow = (id: string): void => {
+    activeId = id;
+    for (const el of view.querySelectorAll<HTMLElement>(".search-hit")) {
+      el.classList.toggle("is-active", el.dataset.id === id);
+    }
+  };
+
+  const paintHits = (scrollToEnd: boolean): void => {
+    const keepTop = view.scrollTop;
+    view.replaceChildren();
+    if (hits.length === 0) {
+      if (hasQuery) {
+        const empty = document.createElement("p");
+        empty.className = "search-hit-empty";
+        empty.textContent = "Нет совпадений";
+        view.append(empty);
+      }
       return;
     }
-    const id = ids[index];
-    if (!ring.scrollToMsgId(id)) {
-      ring.clearFindHit();
+    const frag = document.createDocumentFragment();
+    for (const hit of hits) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = hit.id === activeId ? "search-hit is-active" : "search-hit";
+      row.dataset.id = hit.id;
+      row.setAttribute("role", "listitem");
+      row.title = "Перейти к сообщению";
+      const time = document.createElement("span");
+      time.className = "search-hit-time";
+      time.textContent = formatTime(hit.timestampMs);
+      const body = document.createElement("span");
+      body.className = "search-hit-body";
+      const nick = document.createElement("span");
+      nick.className = "search-hit-nick";
+      nick.textContent = hit.nick || "*";
+      if (hit.color && /^#[0-9a-fA-F]{6}$/.test(hit.color)) {
+        nick.style.color = hit.color;
+      }
+      const text = document.createElement("span");
+      text.className = "search-hit-text";
+      text.textContent = hit.text;
+      body.append(nick, document.createTextNode(" "), text);
+      row.append(time, body);
+      frag.append(row);
     }
-    paintCount();
+    view.append(frag);
+    if (scrollToEnd) {
+      view.scrollTop = view.scrollHeight;
+    } else {
+      view.scrollTop = keepTop;
+    }
   };
 
   const runSearch = async (raw: string): Promise<void> => {
     const q = raw.trim();
-    query = q;
+    hasQuery = q.length > 0;
     const channel = activeChannel();
     boundChannel = channel;
-    if (!q || !channel) {
-      ids = [];
-      index = -1;
+    paintTitle();
+    if (!channel) {
+      hits = [];
+      activeId = "";
       ring.clearFindHit();
-      paintCount();
+      paintHits(true);
       return;
     }
     const token = ++seq;
     try {
-      const result = await invoke<SearchResult>("chat_search", { channel, query: q });
+      const result = await invoke<SearchResult>("chat_search", {
+        channel,
+        query: q,
+      });
       if (token !== seq) {
         return;
       }
-      ids = Array.isArray(result.ids) ? result.ids : [];
-      index = ids.length > 0 ? ids.length - 1 : -1;
-      jumpCurrent();
+      hits = Array.isArray(result.hits) ? result.hits : [];
+      activeId = "";
+      ring.clearFindHit();
+      paintHits(true);
     } catch {
       if (token !== seq) {
         return;
       }
-      ids = [];
-      index = -1;
+      hits = [];
+      activeId = "";
       ring.clearFindHit();
-      paintCount();
+      paintHits(true);
     }
   };
 
@@ -89,35 +179,49 @@ export function bindChatFind(opts: {
     }, 120);
   };
 
+  const close = (): void => {
+    window.clearTimeout(timer);
+    seq += 1;
+    modal.hidden = true;
+    setAppInert(false);
+    hits = [];
+    activeId = "";
+    hasQuery = false;
+    boundChannel = "";
+    input.value = "";
+    view.replaceChildren();
+    ring.clearFindHit();
+    const focusBack = restoreFocus;
+    restoreFocus = null;
+    if (focusBack && document.contains(focusBack)) {
+      focusBack.focus();
+    }
+  };
+
   const open = (): void => {
     if (!settingsModal.hidden) {
       return;
     }
-    bar.hidden = false;
+    onOpen?.();
+    if (!modal.hidden) {
+      input.focus();
+      input.select();
+      return;
+    }
+    const active = document.activeElement;
+    restoreFocus =
+      active instanceof HTMLElement && active !== document.body ? active : null;
+    paintTitle();
+    modal.hidden = false;
+    setAppInert(true);
     input.focus();
     input.select();
-    if (input.value.trim()) {
-      void runSearch(input.value);
-    } else {
-      paintCount();
-    }
-  };
-
-  const hide = (): void => {
-    window.clearTimeout(timer);
-    seq += 1;
-    bar.hidden = true;
-    ids = [];
-    index = -1;
-    query = "";
-    boundChannel = "";
-    ring.clearFindHit();
-    paintCount();
+    void runSearch(input.value);
   };
 
   const onChannelChanged = (): void => {
     const channel = activeChannel();
-    if (bar.hidden) {
+    if (modal.hidden) {
       boundChannel = channel;
       return;
     }
@@ -125,30 +229,37 @@ export function bindChatFind(opts: {
       return;
     }
     if (!channel) {
-      hide();
+      close();
       return;
     }
+    seq += 1;
+    hits = [];
+    activeId = "";
+    ring.clearFindHit();
+    paintHits(true);
     void runSearch(input.value);
   };
 
-  const step = (delta: number): void => {
-    if (ids.length === 0) {
+  closeBtn.addEventListener("click", () => {
+    close();
+  });
+
+  backdrop.addEventListener("click", () => {
+    close();
+  });
+
+  view.addEventListener("click", (ev) => {
+    const row = (ev.target as HTMLElement).closest<HTMLElement>(".search-hit");
+    if (!row || !view.contains(row) || !row.dataset.id) {
       return;
     }
-    index = (index + delta + ids.length) % ids.length;
-    jumpCurrent();
-  };
-
-  close.addEventListener("click", () => {
-    hide();
-  });
-
-  prev.addEventListener("click", () => {
-    step(-1);
-  });
-
-  next.addEventListener("click", () => {
-    step(1);
+    const id = row.dataset.id;
+    setActiveRow(id);
+    if (!ring.scrollToMsgId(id)) {
+      row.title = "Сообщение не в текущей ленте";
+    } else {
+      row.title = "Перейти к сообщению";
+    }
   });
 
   input.addEventListener("input", () => {
@@ -156,18 +267,9 @@ export function bindChatFind(opts: {
   });
 
   input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") {
-      ev.preventDefault();
-      if (ev.shiftKey) {
-        step(-1);
-      } else {
-        step(1);
-      }
-      return;
-    }
     if (ev.key === "Escape") {
       ev.preventDefault();
-      hide();
+      close();
     }
   });
 
@@ -180,10 +282,31 @@ export function bindChatFind(opts: {
       open();
       return;
     }
-    if (ev.key === "Escape" && !bar.hidden && settingsModal.hidden) {
-      if (document.activeElement === input || bar.contains(document.activeElement)) {
+    if (modal.hidden || !settingsModal.hidden) {
+      return;
+    }
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      close();
+      return;
+    }
+    if (ev.key === "Tab") {
+      const items = focusables(dialog);
+      if (items.length === 0) {
         ev.preventDefault();
-        hide();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (ev.shiftKey) {
+        if (!active || active === first || !dialog.contains(active)) {
+          ev.preventDefault();
+          last.focus();
+        }
+      } else if (!active || active === last || !dialog.contains(active)) {
+        ev.preventDefault();
+        first.focus();
       }
     }
   });

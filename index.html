@@ -36,20 +36,6 @@
         <div id="stage">
           <div id="player-slot"></div>
           <div id="chat-column">
-            <div id="chat-find" hidden>
-              <label class="sr-only" for="chat-find-input">поиск в чате</label>
-              <input
-                id="chat-find-input"
-                type="search"
-                placeholder="Поиск в чате..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <span id="chat-find-count"></span>
-              <button type="button" id="chat-find-prev" title="Предыдущее">↑</button>
-              <button type="button" id="chat-find-next" title="Следующее">↓</button>
-              <button type="button" id="chat-find-close" title="Закрыть">×</button>
-            </div>
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>
@@ -100,6 +86,31 @@
       <button type="button" data-action="reply">Ответить</button>
       <button type="button" data-action="user">Открыть профиль</button>
     </menu>
+    <div id="search-modal" hidden>
+      <div id="search-backdrop"></div>
+      <div
+        id="search-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="search-title"
+      >
+        <header id="search-dialog-head">
+          <h2 id="search-title">Поиск в истории</h2>
+          <button type="button" id="search-close" title="Закрыть">×</button>
+        </header>
+        <div id="search-input-row">
+          <label class="sr-only" for="search-input">Type to search</label>
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Type to search"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+        <div id="search-view" role="list" aria-label="Результаты поиска"></div>
+      </div>
+    </div>
     <div id="settings-modal" hidden>
       <div id="settings-backdrop"></div>
       <div

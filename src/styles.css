@@ -140,6 +140,132 @@ body,
   font-size: 13px;
 }
 
+/* SearchPopup-like (Chatterino ~400x600): input + filtered message list */
+#search-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#search-modal[hidden] {
+  display: none;
+}
+
+#search-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+#search-dialog {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  height: min(600px, 92vh);
+  background: #191919;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+#search-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2a2a2d;
+  flex-shrink: 0;
+}
+
+#search-title {
+  margin: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#search-close {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  background: #2a2a2d;
+  border-color: #3a3a3d;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+#search-input-row {
+  display: flex;
+  padding: 8px;
+  gap: 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+#search-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+#search-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  background: #0e0e10;
+}
+
+.search-hit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.search-hit:hover,
+.search-hit.is-active {
+  background: #222226;
+}
+
+.search-hit-time {
+  font-size: 12px;
+  color: #adadc0;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  padding-top: 1px;
+}
+
+.search-hit-body {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.search-hit-nick {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.search-hit-empty {
+  margin: 16px 12px;
+  font-size: 13px;
+  color: #adadc0;
+}
+
 #settings-modal {
   position: fixed;
   inset: 0;
@@ -436,44 +562,6 @@ button:disabled {
   display: flex;
   flex-direction: column;
   background: #000;
-}
-
-#chat-find {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  padding: 6px 8px;
-  background: #18181b;
-  border-bottom: 1px solid #2a2a2d;
-}
-
-#chat-find[hidden] {
-  display: none;
-}
-
-#chat-find-input {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-}
-
-#chat-find-count {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: #adadc0;
-  min-width: 3.5em;
-  text-align: center;
-}
-
-#chat-find-prev,
-#chat-find-next,
-#chat-find-close {
-  flex-shrink: 0;
-  padding: 2px 8px;
-  background: #2a2a2d;
-  border-color: #3a3a3d;
-  font-size: 13px;
 }
 
 #chat-pane {

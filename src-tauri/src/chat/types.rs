@@ -222,13 +222,145 @@ impl ChatEvent {
             ChatEvent::Clearchat { target_login, .. } => target_login
                 .as_deref()
                 .is_some_and(|v| contains_ci(v, needle_lower)),
-            ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } => false,
+            ChatEvent::Roomstate {
+                emote_only,
+                subs_only,
+                slow_sec,
+                ..
+            } => contains_ci(&roomstate_text(*emote_only, *subs_only, *slow_sec), needle_lower),
+            ChatEvent::Clearmsg { .. } => false,
         }
     }
 }
 
 fn contains_ci(hay: &str, needle_lower: &str) -> bool {
     hay.to_lowercase().contains(needle_lower)
+}
+
+fn roomstate_text(emote_only: bool, subs_only: bool, slow_sec: u32) -> String {
+    format!("emote:{emote_only} subs:{subs_only} slow:{slow_sec}")
+}
+
+/// Row for SearchPopup-like UI (Chatterino ChannelView filter result).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: String,
+    pub timestamp_ms: u64,
+    pub nick: String,
+    pub login: String,
+    pub text: String,
+    pub color: String,
+}
+
+impl ChatEvent {
+    pub fn to_search_hit(&self) -> SearchHit {
+        match self {
+            ChatEvent::Privmsg {
+                timestamp_ms,
+                login,
+                display_name,
+                text,
+                color,
+                ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: display_name.clone(),
+                login: login.clone(),
+                text: text.clone(),
+                color: color.clone(),
+            },
+            ChatEvent::Usernotice {
+                timestamp_ms,
+                system_text,
+                login,
+                privmsg,
+                ..
+            } => {
+                if let Some(inner) = privmsg {
+                    if let ChatEvent::Privmsg {
+                        login: pl,
+                        display_name,
+                        text,
+                        color,
+                        timestamp_ms: pts,
+                        ..
+                    } = inner.as_ref()
+                    {
+                        return SearchHit {
+                            id: self.search_jump_id().to_string(),
+                            timestamp_ms: *pts,
+                            nick: display_name.clone(),
+                            login: pl.clone(),
+                            text: format!("{system_text} {text}"),
+                            color: color.clone(),
+                        };
+                    }
+                }
+                SearchHit {
+                    id: self.search_jump_id().to_string(),
+                    timestamp_ms: *timestamp_ms,
+                    nick: "*".into(),
+                    login: login.clone().unwrap_or_default(),
+                    text: system_text.clone(),
+                    color: "#adadc0".into(),
+                }
+            }
+            ChatEvent::Notice {
+                timestamp_ms, text, ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: "*".into(),
+                login: String::new(),
+                text: text.clone(),
+                color: "#adadc0".into(),
+            },
+            ChatEvent::Clearchat {
+                timestamp_ms,
+                target_login,
+                duration_sec,
+                ..
+            } => {
+                let text = match (target_login.as_deref(), *duration_sec) {
+                    (None, _) => "чат очищен".to_string(),
+                    (Some(login), Some(sec)) => format!("{login} тайм-аут {sec}с"),
+                    (Some(login), None) => format!("{login} забанен"),
+                };
+                SearchHit {
+                    id: self.search_jump_id().to_string(),
+                    timestamp_ms: *timestamp_ms,
+                    nick: "*".into(),
+                    login: target_login.clone().unwrap_or_default(),
+                    text,
+                    color: "#adadc0".into(),
+                }
+            }
+            ChatEvent::Roomstate {
+                timestamp_ms,
+                emote_only,
+                subs_only,
+                slow_sec,
+                ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: "*".into(),
+                login: String::new(),
+                text: roomstate_text(*emote_only, *subs_only, *slow_sec),
+                color: "#adadc0".into(),
+            },
+            ChatEvent::Clearmsg { .. } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: 0,
+                nick: "*".into(),
+                login: String::new(),
+                text: String::new(),
+                color: "#adadc0".into(),
+            },
+        }
+    }
 }
 
 #[cfg(test)]

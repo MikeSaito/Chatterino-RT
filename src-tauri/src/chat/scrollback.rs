@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use super::constants::SCROLLBACK_LIMIT;
-use super::types::ChatEvent;
+use super::types::{ChatEvent, SearchHit};
 
 const SEARCH_LIMIT: usize = 200;
 
@@ -31,17 +31,26 @@ impl Scrollback {
     }
 
     /// Case-insensitive substring match (Chatterino SubstringPredicate).
-    /// Newest-first, capped — UI jumps to most recent hit by default.
-    pub fn search_ids(&self, query: &str) -> Vec<String> {
+    /// Empty query: full snapshot capped (SearchPopup with no predicates).
+    /// Chronological order; prefer newest when capped.
+    pub fn search_hits(&self, query: &str) -> Vec<SearchHit> {
         let needle = query.trim();
         if needle.is_empty() {
-            return Vec::new();
+            let skip = self.items.len().saturating_sub(SEARCH_LIMIT);
+            return self
+                .items
+                .iter()
+                .skip(skip)
+                // CLEARMSG не создаёт слот в ring — только soft-disable target
+                .filter(|e| !matches!(e, ChatEvent::Clearmsg { .. }))
+                .map(ChatEvent::to_search_hit)
+                .collect();
         }
         let needle_lower = needle.to_lowercase();
         let mut newest_first = Vec::new();
         for event in self.items.iter().rev() {
             if event.matches_substring(&needle_lower) {
-                newest_first.push(event.search_jump_id().to_string());
+                newest_first.push(event.to_search_hit());
                 if newest_first.len() >= SEARCH_LIMIT {
                     break;
                 }
@@ -49,6 +58,14 @@ impl Scrollback {
         }
         newest_first.reverse();
         newest_first
+    }
+
+    #[cfg(test)]
+    pub fn search_ids(&self, query: &str) -> Vec<String> {
+        self.search_hits(query)
+            .into_iter()
+            .map(|h| h.id)
+            .collect()
     }
 
     #[cfg(test)]
@@ -114,11 +131,12 @@ mod tests {
     }
 
     #[test]
-    fn search_empty_query_returns_nothing() {
+    fn search_empty_query_returns_recent_snapshot() {
         let mut q = Scrollback::new();
         q.push(privmsg("1", "ann", "hello world"));
-        assert!(q.search_ids("").is_empty());
-        assert!(q.search_ids("   ").is_empty());
+        q.push(privmsg("2", "bob", "other"));
+        assert_eq!(q.search_ids(""), vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(q.search_ids("   "), vec!["1".to_string(), "2".to_string()]);
     }
 
     #[test]

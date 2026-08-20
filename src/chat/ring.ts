@@ -193,9 +193,10 @@ export class MessageRing {
         target = slot;
       }
     }
-    if (!target || (this.hideModerated && target.disabled)) {
+    if (!target) {
       return false;
     }
+    // Go to message даже если hideModerated скрыл слот в ленте
     this.findHitId = id;
     this.scroll.setDesired(target.startRow);
     this.applyStageY();
