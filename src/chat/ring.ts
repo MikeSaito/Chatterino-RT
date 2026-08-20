@@ -328,9 +328,9 @@ export class MessageRing {
           nick: event.displayName || event.login,
           nickColor: parseColor(event.color),
           body: `${prefix}${event.text}`,
-          spans: shiftSpans(event.emoteSpans, shift),
+          spans: shiftSpans(event.emoteSpans ?? [], shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
-          badges: badgesWithUrl(event.badges),
+          badges: badgesWithUrl(event.badges ?? []),
         };
       }
       case "usernotice": {
@@ -344,9 +344,9 @@ export class MessageRing {
           const innerPrefix = inner.action ? "* " : "";
           const shift = body.length + sep.length + innerPrefix.length;
           body += `${sep}${innerPrefix}${inner.text}`;
-          spans = shiftSpans(inner.emoteSpans, shift);
+          spans = shiftSpans(inner.emoteSpans ?? [], shift);
           links = shiftSpans(inner.linkSpans ?? [], shift);
-          badges = badgesWithUrl(inner.badges);
+          badges = badgesWithUrl(inner.badges ?? []);
         }
         return {
           time,

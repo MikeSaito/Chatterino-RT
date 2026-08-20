@@ -66,7 +66,7 @@ pub struct Badge {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChatEvent {
-    #[serde(rename = "privmsg")]
+    #[serde(rename = "privmsg", rename_all = "camelCase")]
     Privmsg {
         id: String,
         timestamp_ms: u64,
@@ -83,15 +83,15 @@ pub enum ChatEvent {
         mention_spans: Vec<MentionSpan>,
         #[serde(skip_serializing_if = "Option::is_none")]
         bits: Option<u32>,
-        #[serde(rename = "replyToId", skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_id: Option<String>,
-        #[serde(rename = "replyToLogin", skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_login: Option<String>,
-        #[serde(rename = "replyToText", skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_text: Option<String>,
         action: bool,
     },
-    #[serde(rename = "clearchat")]
+    #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
         id: String,
         timestamp_ms: u64,
@@ -100,13 +100,13 @@ pub enum ChatEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_sec: Option<u32>,
     },
-    #[serde(rename = "clearmsg")]
+    #[serde(rename = "clearmsg", rename_all = "camelCase")]
     Clearmsg {
         id: String,
         timestamp_ms: u64,
         target_id: String,
     },
-    #[serde(rename = "usernotice")]
+    #[serde(rename = "usernotice", rename_all = "camelCase")]
     Usernotice {
         id: String,
         timestamp_ms: u64,
@@ -116,7 +116,7 @@ pub enum ChatEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         privmsg: Option<Box<ChatEvent>>,
     },
-    #[serde(rename = "roomstate")]
+    #[serde(rename = "roomstate", rename_all = "camelCase")]
     Roomstate {
         id: String,
         timestamp_ms: u64,
@@ -125,7 +125,7 @@ pub enum ChatEvent {
         slow_sec: u32,
         followers_sec: u32,
     },
-    #[serde(rename = "notice")]
+    #[serde(rename = "notice", rename_all = "camelCase")]
     Notice {
         id: String,
         timestamp_ms: u64,
@@ -144,5 +144,63 @@ impl ChatEvent {
             | ChatEvent::Roomstate { id, .. }
             | ChatEvent::Notice { id, .. } => id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn privmsg_json_uses_camel_case_fields() {
+        let event = ChatEvent::Privmsg {
+            id: "1".into(),
+            timestamp_ms: 10,
+            user_id: "9".into(),
+            login: "ann".into(),
+            display_name: "Ann".into(),
+            color: "#fff".into(),
+            badges: vec![Badge {
+                set: "moderator".into(),
+                version: "1".into(),
+                url: None,
+            }],
+            text: "hi".into(),
+            emote_spans: vec![EmoteSpan {
+                start: 0,
+                end: 2,
+                emote_id: "25".into(),
+                provider: "twitch".into(),
+                url: "https://static-cdn.jtvnw.net/x".into(),
+            }],
+            link_spans: vec![],
+            mention_spans: vec![],
+            bits: None,
+            reply_to_id: None,
+            reply_to_login: None,
+            reply_to_text: None,
+            action: false,
+        };
+        let v = serde_json::to_value(&event).unwrap();
+        assert_eq!(v["kind"], "privmsg");
+        assert_eq!(v["timestampMs"], 10);
+        assert_eq!(v["userId"], "9");
+        assert_eq!(v["displayName"], "Ann");
+        assert!(v.get("emoteSpans").is_some(), "wire key emoteSpans, got {v}");
+        assert!(v.get("emote_spans").is_none());
+        assert_eq!(v["emoteSpans"][0]["emoteId"], "25");
+        assert_eq!(v["badges"][0]["set"], "moderator");
+        let room = serde_json::to_value(&ChatEvent::Roomstate {
+            id: "r".into(),
+            timestamp_ms: 11,
+            emote_only: true,
+            subs_only: false,
+            slow_sec: 5,
+            followers_sec: 0,
+        })
+        .unwrap();
+        assert_eq!(room["timestampMs"], 11);
+        assert_eq!(room["emoteOnly"], true);
+        assert_eq!(room["slowSec"], 5);
     }
 }
