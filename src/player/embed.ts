@@ -2,7 +2,7 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
   unmountPlayer(host);
   const frame = document.createElement("iframe");
   frame.title = "Twitch player";
-  frame.allow = "autoplay; encrypted-media; picture-in-picture";
+  frame.allow = "autoplay; encrypted-media; picture-in-picture; storage-access";
   frame.allowFullscreen = true;
   const parent = window.location.hostname || "localhost";
   const params = new URLSearchParams({

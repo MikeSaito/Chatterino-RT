@@ -1,4 +1,5 @@
 mod chat;
+mod security;
 
 use chat::commands::{chat_join, chat_part, chat_snapshot};
 use chat::state::Shared;
@@ -9,6 +10,7 @@ pub fn run() {
     let shared = Shared::new();
     let for_irc = shared.clone();
     tauri::Builder::default()
+        .plugin(security::freeze_app_prototype())
         .manage(shared)
         .setup(move |app| {
             chat::irc::start(app.handle().clone(), for_irc)?;
