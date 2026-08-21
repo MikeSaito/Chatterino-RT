@@ -9,6 +9,7 @@ import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindSettingsDialog } from "./shell/settings/dialog";
+import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
@@ -140,6 +141,7 @@ async function boot(): Promise<void> {
   const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
   await ring.init();
+  bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;

@@ -9,12 +9,15 @@ let lastPlay = 0;
 let cachedCustom: { path: string; url: string } | null = null;
 let alwaysPlay = false;
 let customPath = "";
+let muted = false;
 
 export function configureHighlightSound(opts: {
   alwaysPlay: boolean;
   path: string;
+  muted?: boolean;
 }): void {
   alwaysPlay = opts.alwaysPlay;
+  muted = opts.muted === true;
   const next = opts.path.trim();
   if (next !== customPath) {
     customPath = next;
@@ -35,6 +38,9 @@ export function notifyHighlightSounds(
 }
 
 export async function playHighlightSound(): Promise<void> {
+  if (muted) {
+    return;
+  }
   const focused = document.hasFocus();
   if (focused && !alwaysPlay) {
     return;

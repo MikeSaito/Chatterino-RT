@@ -3,6 +3,12 @@ import type { MessageRing } from "../../chat/ring";
 import type { Filters } from "../../chat/types";
 import { configureHighlightSound } from "../highlightSound";
 import {
+  configureStreamerMode,
+  isStreamerModeActive,
+  setStreamerModeOnChange,
+  streamerModeState,
+} from "../streamerMode";
+import {
   SETTINGS_PAGES,
   ZOOM_LEVELS,
   defaultAppSettingsTables,
@@ -158,7 +164,24 @@ function applyDisplay(
   data: AppSettings,
   onDisplay?: (data: AppSettings) => void,
 ): void {
+  configureStreamerMode({
+    mode: String(data.knobs["streamerMode.enabled"] ?? "DetectStreamingSoftware"),
+    muteMentions: data.knobs["streamerMode.muteMentions"] !== false,
+    hideModActions: data.knobs["streamerMode.hideModActions"] !== false,
+  });
+  paintRuntime(ring, data, onDisplay);
+}
+
+function paintRuntime(
+  ring: MessageRing,
+  data: AppSettings,
+  onDisplay?: (data: AppSettings) => void,
+): void {
   const scaleRaw = Number(data.knobs["emotes.emoteScale"] ?? 1);
+  const sm = streamerModeState();
+  const hideMod =
+    data.knobs["appearance.hideModerationActions"] === true ||
+    (sm.active && sm.hideModActions);
   ring.applyDisplay(
     data.fontScale,
     data.showTimestamps,
@@ -166,7 +189,7 @@ function applyDisplay(
     data.timestampFormat,
     data.knobs["appearance.alternateMessages"] === true,
     data.knobs["appearance.separateMessages"] === true,
-    data.knobs["appearance.hideModerationActions"] === true,
+    hideMod,
     data.knobs["appearance.showReplyButton"] === true,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
@@ -181,6 +204,7 @@ function applyDisplay(
   configureHighlightSound({
     alwaysPlay: data.knobs["highlighting.highlightAlwaysPlaySound"] === true,
     path: String(data.knobs["highlighting.pathHighlightSound"] ?? ""),
+    muted: isStreamerModeActive() && sm.muteMentions,
   });
   onDisplay?.(data);
 }
@@ -192,6 +216,20 @@ export function bindSettingsDialog(opts: {
   onDisplay?: (data: AppSettings) => void;
 }): void {
   const { ring, openBtn, modal, onDisplay } = opts;
+  let lastSettings: AppSettings | null = null;
+  setStreamerModeOnChange(() => {
+    if (lastSettings) {
+      paintRuntime(ring, lastSettings, onDisplay);
+    }
+  });
+  const wrapApply = (
+    r: MessageRing,
+    data: AppSettings,
+    cb?: (data: AppSettings) => void,
+  ): void => {
+    lastSettings = data;
+    applyDisplay(r, data, cb);
+  };
   const appRoot = document.querySelector<HTMLElement>("#app");
   const dialog = modal.querySelector<HTMLElement>("#settings-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#settings-backdrop");
@@ -642,14 +680,14 @@ export function bindSettingsDialog(opts: {
     for (const [path, api] of tableApis) {
       api.setRows(tablePathGet(data, path));
     }
-    applyDisplay(ring, data, onDisplay);
+    wrapApply(ring, data, onDisplay);
   };
 
   let previewTimer = 0;
   const schedulePreview = (): void => {
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
-      applyDisplay(ring, readDraft(), onDisplay);
+      wrapApply(ring, readDraft(), onDisplay);
     }, 50);
   };
 
@@ -841,9 +879,9 @@ export function bindSettingsDialog(opts: {
         ...display,
         knobs: { ...defaultKnobs(), ...(display.knobs ?? {}) },
       };
-      applyDisplay(ring, merged, onDisplay);
+      wrapApply(ring, merged, onDisplay);
     } catch {
-      applyDisplay(ring, emptySettings(), onDisplay);
+      wrapApply(ring, emptySettings(), onDisplay);
     }
   })();
 }

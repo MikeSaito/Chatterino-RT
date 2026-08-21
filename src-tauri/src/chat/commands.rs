@@ -392,6 +392,11 @@ pub fn highlight_sound_pick(
 }
 
 #[tauri::command]
+pub fn streamer_mode_detect() -> Result<bool, ApiError> {
+    Ok(super::streamer_mode::broadcasting_software_active())
+}
+
+#[tauri::command]
 pub fn open_chat_link(url: String) -> Result<(), ApiError> {
     let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
         code: "invalid_input".into(),

@@ -24,4 +24,5 @@ pub mod session;
 pub mod settings;
 pub mod spans;
 pub mod state;
+pub mod streamer_mode;
 pub mod types;

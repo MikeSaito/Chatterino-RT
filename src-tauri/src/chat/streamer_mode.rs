@@ -1,0 +1,100 @@
+//! Детект стримерского софта для Automatic Streamer Mode (как Chatterino StreamerMode).
+
+/// Имена процессов Win (эталон broadcastingBinaries в StreamerMode.cpp).
+pub const BROADCASTING_BINARIES: &[&str] = &[
+    "obs.exe",
+    "obs64.exe",
+    "PRISMLiveStudio.exe",
+    "XSplit.Core.exe",
+    "TwitchStudio.exe",
+    "vMix64.exe",
+];
+
+pub fn broadcasting_software_active() -> bool {
+    #[cfg(windows)]
+    {
+        windows_broadcasting_active()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+pub fn is_broadcasting_process_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    BROADCASTING_BINARIES
+        .iter()
+        .any(|bin| lower == bin.to_ascii_lowercase())
+}
+
+#[cfg(windows)]
+fn windows_broadcasting_active() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    unsafe {
+        let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+        if snap.is_invalid() {
+            return false;
+        }
+        struct SnapGuard(windows::Win32::Foundation::HANDLE);
+        impl Drop for SnapGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = CloseHandle(self.0);
+                }
+            }
+        }
+        let _guard = SnapGuard(snap);
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snap, &mut entry).is_err() {
+            return false;
+        }
+        loop {
+            let name = wchar_to_string(&entry.szExeFile);
+            if is_broadcasting_process_name(&name) {
+                return true;
+            }
+            if Process32NextW(snap, &mut entry).is_err() {
+                break;
+            }
+        }
+        false
+    }
+}
+
+#[cfg(windows)]
+fn wchar_to_string(buf: &[u16]) -> String {
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..len])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_obs_case_insensitive() {
+        assert!(is_broadcasting_process_name("obs.exe"));
+        assert!(is_broadcasting_process_name("OBS.EXE"));
+        assert!(is_broadcasting_process_name("Obs64.Exe"));
+        assert!(is_broadcasting_process_name("TwitchStudio.exe"));
+    }
+
+    #[test]
+    fn rejects_unrelated() {
+        assert!(!is_broadcasting_process_name("chrome.exe"));
+        assert!(!is_broadcasting_process_name("obs"));
+        assert!(!is_broadcasting_process_name(""));
+    }
+}
