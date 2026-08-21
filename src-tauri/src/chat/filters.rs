@@ -195,9 +195,15 @@ pub(crate) fn apply_highlight(
                     && (custom_reward_id.as_ref().is_some_and(|s| !s.is_empty())
                         || is_redeemed_system_msg_id(system_msg_id.as_deref()));
                 if redeemed {
-                    *highlight_color = Some(REDEEMED_HIGHLIGHT_COLOR.to_string());
+                    *highlight_color = Some(resolve_highlight_color_or(
+                        &kinds.redeemed_color,
+                        REDEEMED_HIGHLIGHT_COLOR,
+                    ));
                 } else if kinds.enable_first && *first_msg {
-                    *highlight_color = Some(FIRST_MSG_HIGHLIGHT_COLOR.to_string());
+                    *highlight_color = Some(resolve_highlight_color_or(
+                        &kinds.first_color,
+                        FIRST_MSG_HIGHLIGHT_COLOR,
+                    ));
                 }
             }
         }
@@ -246,14 +252,16 @@ pub(crate) fn apply_highlight(
             }
             // HighlightController: Sub before Phrase — overwrite for sub USERNOTICE.
             if kinds.enable_sub && is_subscription_msg_id(msg_id.as_deref()) {
-                *highlight_color = Some(SUB_HIGHLIGHT_COLOR.to_string());
+                let color =
+                    resolve_highlight_color_or(&kinds.sub_color, SUB_HIGHLIGHT_COLOR);
+                *highlight_color = Some(color.clone());
                 if let Some(inner) = privmsg.as_mut() {
                     if let ChatEvent::Privmsg {
                         highlight_color: inner_color,
                         ..
                     } = inner.as_mut()
                     {
-                        *inner_color = Some(SUB_HIGHLIGHT_COLOR.to_string());
+                        *inner_color = Some(color);
                     }
                 }
             }
@@ -284,6 +292,9 @@ pub(crate) struct HighlightKindsCtx {
     pub enable_sub: bool,
     pub enable_first: bool,
     pub enable_redeemed: bool,
+    pub sub_color: String,
+    pub first_color: String,
+    pub redeemed_color: String,
 }
 
 impl Default for HighlightKindsCtx {
@@ -292,6 +303,9 @@ impl Default for HighlightKindsCtx {
             enable_sub: true,
             enable_first: true,
             enable_redeemed: true,
+            sub_color: String::new(),
+            first_color: String::new(),
+            redeemed_color: String::new(),
         }
     }
 }
@@ -302,6 +316,13 @@ impl HighlightKindsCtx {
             return Self::default();
         };
         let knobs = &settings.data.knobs;
+        let knob_str = |key: &str| {
+            knobs
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
         Self {
             enable_sub: knobs
                 .get("highlighting.enableSubHighlight")
@@ -315,6 +336,9 @@ impl HighlightKindsCtx {
                 .get("highlighting.enableRedeemedHighlight")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
+            sub_color: knob_str("highlighting.subHighlightColor"),
+            first_color: knob_str("highlighting.firstMessageHighlightColor"),
+            redeemed_color: knob_str("highlighting.redeemedHighlightColor"),
         }
     }
 }
@@ -1088,6 +1112,7 @@ mod tests {
             enable_sub: false,
             enable_first: false,
             enable_redeemed: false,
+            ..HighlightKindsCtx::default()
         };
         let mut first = privmsg("ann", "hi");
         if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
@@ -1106,6 +1131,92 @@ mod tests {
         match sub {
             ChatEvent::Usernotice { highlight_color, .. } => assert!(highlight_color.is_none()),
             _ => panic!("usernotice"),
+        }
+    }
+
+    #[test]
+    fn irc_kind_custom_colors() {
+        let filters = Filters {
+            enable_self_highlight: false,
+            ..Filters::default()
+        };
+        let kinds = HighlightKindsCtx {
+            first_color: "#11111122".into(),
+            redeemed_color: "#33333344".into(),
+            sub_color: "#55555566".into(),
+            ..HighlightKindsCtx::default()
+        };
+        let mut first = privmsg("ann", "hi");
+        if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
+            *first_msg = true;
+        }
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &mut first,
+            Some("me"),
+        );
+        match first {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11111122"));
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut redeem = privmsg("ann", "hi");
+        if let ChatEvent::Privmsg { custom_reward_id, .. } = &mut redeem {
+            *custom_reward_id = Some("r1".into());
+        }
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &mut redeem,
+            Some("me"),
+        );
+        match redeem {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#33333344"));
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut sub = usernotice("ann", "ann subscribed");
+        if let ChatEvent::Usernotice { msg_id, .. } = &mut sub {
+            *msg_id = Some("sub".into());
+        }
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &mut sub,
+            Some("me"),
+        );
+        match sub {
+            ChatEvent::Usernotice { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#55555566"));
+            }
+            _ => panic!("usernotice"),
+        }
+        let bad = HighlightKindsCtx {
+            first_color: "#xyz".into(),
+            ..HighlightKindsCtx::default()
+        };
+        let mut first_bad = privmsg("ann", "hi");
+        if let ChatEvent::Privmsg { first_msg, .. } = &mut first_bad {
+            *first_msg = true;
+        }
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &bad,
+            &mut first_bad,
+            Some("me"),
+        );
+        match first_bad {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some(FIRST_MSG_HIGHLIGHT_COLOR));
+            }
+            _ => panic!("privmsg"),
         }
     }
 
