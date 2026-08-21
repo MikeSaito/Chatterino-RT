@@ -3,7 +3,8 @@
 export type TableColumn = {
   key: string;
   label: string;
-  type: "text" | "checkbox" | "color";
+  type: "text" | "checkbox" | "color" | "select";
+  options?: { label: string; value: string }[];
 };
 
 export type TableModel = {
@@ -97,6 +98,27 @@ export function mountEditableTable(
             onChange();
           });
           td.append(input);
+        } else if (col.type === "select") {
+          const select = document.createElement("select");
+          for (const opt of col.options ?? []) {
+            const option = document.createElement("option");
+            option.value = opt.value;
+            option.textContent = opt.label;
+            select.append(option);
+          }
+          select.value =
+            typeof value === "string" && (col.options ?? []).some((o) => o.value === value)
+              ? value
+              : (col.options?.[0]?.value ?? "");
+          row[col.key] = select.value;
+          select.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+          });
+          select.addEventListener("change", () => {
+            row[col.key] = select.value;
+            onChange();
+          });
+          td.append(select);
         } else {
           const input = document.createElement("input");
           input.type = "text";

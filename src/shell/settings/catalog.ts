@@ -34,7 +34,8 @@ export type SectionDef = {
 export type TableColumn = {
   key: string;
   label: string;
-  type: "text" | "checkbox" | "color";
+  type: "text" | "checkbox" | "color" | "select";
+  options?: { label: string; value: string }[];
 };
 
 export type TableDef = {
@@ -574,10 +575,23 @@ const HOTKEYS_TABLE: TableDef = {
   id: "hotkeys",
   path: "hotkeys",
   columns: [
-    { key: "name", label: "Hotkey name", type: "text" },
+    {
+      key: "action",
+      label: "Action",
+      type: "select",
+      options: [
+        { label: "Show search", value: "showSearch" },
+        { label: "Open settings", value: "openSettings" },
+        { label: "Open emotes popup", value: "openEmotesPopup" },
+        { label: "Scroll to bottom", value: "scrollToBottom" },
+        { label: "Zoom in", value: "zoomIn" },
+        { label: "Zoom out", value: "zoomOut" },
+        { label: "Zoom reset", value: "zoomReset" },
+      ],
+    },
     { key: "keybinding", label: "Keybinding", type: "text" },
   ],
-  blankRow: { name: "", keybinding: "" },
+  blankRow: { action: "showSearch", keybinding: "Ctrl+F", name: "Show search" },
 };
 
 const LOG_CHANNELS_TABLE: TableDef = {
@@ -1910,6 +1924,18 @@ export const SETTINGS_PAGES: PageDef[] = [
     search: "hotkeys shortcuts keybinding",
     kind: "hotkeys",
     table: HOTKEYS_TABLE,
+    sections: [
+      {
+        title: "Defaults",
+        knobs: [
+          btn(
+            "reset-hotkeys",
+            "__action.resetHotkeys",
+            "Reset to defaults",
+          ),
+        ],
+      },
+    ],
   },
   {
     id: "moderation",

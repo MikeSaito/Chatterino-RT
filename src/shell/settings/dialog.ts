@@ -3,6 +3,12 @@ import type { MessageRing } from "../../chat/ring";
 import type { Filters } from "../../chat/types";
 import { configureHighlightSound } from "../highlightSound";
 import {
+  configureHotkeys,
+  defaultHotkeyTableRows,
+  normalizeHotkeyRows,
+  stepZoom,
+} from "../hotkeys";
+import {
   configureStreamerMode,
   isStreamerModeActive,
   setStreamerModeOnChange,
@@ -89,6 +95,7 @@ function emptySettings(): AppSettings {
     knobs: { ...defaultKnobs() },
     enableSelfHighlight: true,
     ...defaultAppSettingsTables(),
+    hotkeys: defaultHotkeyTableRows(),
   };
 }
 
@@ -206,6 +213,7 @@ function paintRuntime(
     path: String(data.knobs["highlighting.pathHighlightSound"] ?? ""),
     muted: isStreamerModeActive() && sm.muteMentions,
   });
+  configureHotkeys(data.hotkeys ?? []);
   onDisplay?.(data);
 }
 
@@ -214,7 +222,11 @@ export function bindSettingsDialog(opts: {
   openBtn: HTMLButtonElement;
   modal: HTMLElement;
   onDisplay?: (data: AppSettings) => void;
-}): void {
+}): {
+  open: () => void;
+  close: () => void;
+  bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
+} {
   const { ring, openBtn, modal, onDisplay } = opts;
   let lastSettings: AppSettings | null = null;
   setStreamerModeOnChange(() => {
@@ -240,7 +252,11 @@ export function bindSettingsDialog(opts: {
   const cancelBtn = modal.querySelector<HTMLButtonElement>("#settings-cancel");
   const statusEl = modal.querySelector<HTMLElement>("#settings-status");
   if (!dialog || !backdrop || !search || !tabsHost || !pagesHost || !okBtn || !cancelBtn || !statusEl) {
-    return;
+    return {
+      open: () => undefined,
+      close: () => undefined,
+      bumpZoom: async () => undefined,
+    };
   }
 
   const knobInputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
@@ -280,6 +296,15 @@ export function bindSettingsDialog(opts: {
       const input = knobInputs.get("highlighting.pathHighlightSound");
       if (input instanceof HTMLInputElement) {
         input.value = "";
+      }
+      statusEl.textContent = "";
+      schedulePreview();
+      return;
+    }
+    if (path === "__action.resetHotkeys") {
+      const api = tableApis.get("hotkeys");
+      if (api) {
+        api.setRows(defaultHotkeyTableRows());
       }
       statusEl.textContent = "";
       schedulePreview();
@@ -400,6 +425,7 @@ export function bindSettingsDialog(opts: {
       },
       () => {
         statusEl.textContent = "";
+        schedulePreview();
       },
     );
     tableApis.set(def.path, api);
@@ -514,6 +540,19 @@ export function bindSettingsDialog(opts: {
       const host = document.createElement("div");
       mountTable(host, page.table);
       section.append(host);
+      for (const block of page.sections ?? []) {
+        const wrap = document.createElement("div");
+        wrap.className = "settings-block";
+        wrap.dataset.search = block.title;
+        const h = document.createElement("h4");
+        h.className = "settings-section";
+        h.textContent = block.title;
+        wrap.append(h);
+        for (const knob of block.knobs) {
+          renderKnob(knob, wrap);
+        }
+        section.append(wrap);
+      }
       return section;
     }
 
@@ -640,7 +679,14 @@ export function bindSettingsDialog(opts: {
       }
     }
     for (const [path, api] of tableApis) {
-      const rows = api.getRows();
+      let rows = api.getRows();
+      if (path === "hotkeys") {
+        rows = normalizeHotkeyRows(rows).map((r) => ({
+          action: r.action,
+          keybinding: r.keybinding,
+          name: r.name,
+        }));
+      }
       (draft as unknown as Record<string, unknown>)[path] = rows;
     }
     return draft;
@@ -748,6 +794,11 @@ export function bindSettingsDialog(opts: {
           ...emptySettings(),
           ...loaded,
           knobs: { ...defaultKnobs(), ...(loaded.knobs ?? {}) },
+          hotkeys: normalizeHotkeyRows(loaded.hotkeys ?? []).map((r) => ({
+            action: r.action,
+            keybinding: r.keybinding,
+            name: r.name,
+          })),
           enableSelfHighlight: filters.enableSelfHighlight,
         },
         filters,
@@ -878,10 +929,65 @@ export function bindSettingsDialog(opts: {
         ...emptySettings(),
         ...display,
         knobs: { ...defaultKnobs(), ...(display.knobs ?? {}) },
+        hotkeys: normalizeHotkeyRows(display.hotkeys ?? []).map((r) => ({
+          action: r.action,
+          keybinding: r.keybinding,
+          name: r.name,
+        })),
       };
       wrapApply(ring, merged, onDisplay);
     } catch {
       wrapApply(ring, emptySettings(), onDisplay);
     }
   })();
+
+  return {
+    open: () => {
+      void openModal();
+    },
+    close: () => {
+      closeModal(true);
+    },
+    bumpZoom: (() => {
+      let chain: Promise<void> = Promise.resolve();
+      return (dir: 1 | -1 | 0): Promise<void> => {
+        chain = chain
+          .catch(() => undefined)
+          .then(async () => {
+            const base = lastSettings ?? emptySettings();
+            const next: AppSettings = {
+              ...base,
+              fontScale: stepZoom(base.fontScale, dir),
+              knobs: { ...defaultKnobs(), ...base.knobs },
+              hotkeys: normalizeHotkeyRows(base.hotkeys ?? []).map((r) => ({
+                action: r.action,
+                keybinding: r.keybinding,
+                name: r.name,
+              })),
+            };
+            try {
+              const saved = await invoke<AppSettings>("settings_set", {
+                settings: next,
+              });
+              const merged: AppSettings = {
+                ...emptySettings(),
+                ...saved,
+                knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
+                hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
+                  action: r.action,
+                  keybinding: r.keybinding,
+                  name: r.name,
+                })),
+              };
+              baseline = merged;
+              paintDraft(merged);
+              wrapApply(ring, merged, onDisplay);
+            } catch {
+              wrapApply(ring, next, onDisplay);
+            }
+          });
+        return chain;
+      };
+    })(),
+  };
 }

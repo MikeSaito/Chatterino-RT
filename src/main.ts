@@ -9,6 +9,11 @@ import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindSettingsDialog } from "./shell/settings/dialog";
+import {
+  actionAllowsEditable,
+  resolveAction,
+  type HotkeyAction,
+} from "./shell/hotkeys";
 import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
@@ -146,7 +151,7 @@ async function boot(): Promise<void> {
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;
   let lastPointerY = 0;
-  bindSettingsDialog({
+  const settingsCtl = bindSettingsDialog({
     ring,
     openBtn: settingsOpen,
     modal: settingsModal,
@@ -178,16 +183,6 @@ async function boot(): Promise<void> {
       const hostRect = canvasHost.getBoundingClientRect();
       replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
     },
-  });
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key !== "End" || !ev.ctrlKey || ev.altKey || ev.metaKey) {
-      return;
-    }
-    if (isEditableTarget(ev.target)) {
-      return;
-    }
-    ev.preventDefault();
-    ring.goToBottom();
   });
   const ipc = bindChatIpc(ring);
   chatIpc = ipc;
@@ -279,6 +274,53 @@ async function boot(): Promise<void> {
   emoteOpen.addEventListener("click", () => {
     emotePopup.open();
   });
+  window.addEventListener("keydown", (ev) => {
+    if (ev.defaultPrevented) {
+      return;
+    }
+    const action = resolveAction(ev);
+    if (!action) {
+      return;
+    }
+    if (!actionAllowsEditable(action) && isEditableTarget(ev.target)) {
+      return;
+    }
+    if (!settingsModal.hidden) {
+      return;
+    }
+    if (dispatchHotkey(action)) {
+      ev.preventDefault();
+    }
+  });
+  function dispatchHotkey(action: HotkeyAction): boolean {
+    switch (action) {
+      case "showSearch":
+        chatFindCtl.open();
+        return true;
+      case "openSettings":
+        chatFindCtl.close();
+        settingsCtl.open();
+        return true;
+      case "openEmotesPopup":
+        chatFindCtl.close();
+        emotePopup.open();
+        return true;
+      case "scrollToBottom":
+        ring.goToBottom();
+        return true;
+      case "zoomIn":
+        void settingsCtl.bumpZoom(1);
+        return true;
+      case "zoomOut":
+        void settingsCtl.bumpZoom(-1);
+        return true;
+      case "zoomReset":
+        void settingsCtl.bumpZoom(0);
+        return true;
+      default:
+        return false;
+    }
+  }
   let mountedChannel = "";
   let holdStatus = false;
   let sending = false;

@@ -42,6 +42,8 @@ export function bindSearchPopup(opts: {
   onOpen?: () => void;
 }): {
   onChannelChanged: () => void;
+  open: () => void;
+  close: () => void;
 } {
   const { ring, modal, settingsModal, activeChannel, onOpen } = opts;
   const appRoot = document.querySelector<HTMLElement>("#app");
@@ -52,7 +54,11 @@ export function bindSearchPopup(opts: {
   const view = modal.querySelector<HTMLElement>("#search-view");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#search-close");
   if (!dialog || !backdrop || !titleEl || !input || !view || !closeBtn) {
-    return { onChannelChanged: () => undefined };
+    return {
+      onChannelChanged: () => undefined,
+      open: () => undefined,
+      close: () => undefined,
+    };
   }
 
   let hits: SearchHit[] = [];
@@ -274,14 +280,6 @@ export function bindSearchPopup(opts: {
   });
 
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "f" && ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
-      if (!settingsModal.hidden) {
-        return;
-      }
-      ev.preventDefault();
-      open();
-      return;
-    }
     if (modal.hidden || !settingsModal.hidden) {
       return;
     }
@@ -311,5 +309,5 @@ export function bindSearchPopup(opts: {
     }
   });
 
-  return { onChannelChanged };
+  return { onChannelChanged, open, close };
 }

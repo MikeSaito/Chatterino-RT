@@ -21,6 +21,16 @@ const MAX_KNOB_KEY: usize = 120;
 const MAX_TABLE_ROWS: usize = 500;
 const MAX_CELL: usize = 2000;
 
+const HOTKEY_ACTIONS: &[&str] = &[
+    "showSearch",
+    "openSettings",
+    "openEmotesPopup",
+    "scrollToBottom",
+    "zoomIn",
+    "zoomOut",
+    "zoomReset",
+];
+
 fn default_scale() -> f64 {
     DEFAULT_SCALE
 }
@@ -150,6 +160,8 @@ pub struct FilterRow {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HotkeyRow {
+    #[serde(default)]
+    pub action: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -427,8 +439,15 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         trim_cell(&mut row.filter)?;
     }
     for row in &mut raw.hotkeys {
+        trim_cell(&mut row.action)?;
         trim_cell(&mut row.name)?;
         trim_cell(&mut row.keybinding)?;
+        if !HOTKEY_ACTIONS.contains(&row.action.as_str()) {
+            return Err(ApiError::invalid("invalid hotkey action"));
+        }
+        if row.keybinding.is_empty() || row.keybinding.len() > 64 {
+            return Err(ApiError::invalid("invalid hotkey keybinding"));
+        }
     }
     for row in &mut raw.mod_actions {
         trim_cell(&mut row.action)?;
