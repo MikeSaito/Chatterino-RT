@@ -158,6 +158,7 @@ function applyDisplay(
   data: AppSettings,
   onDisplay?: (data: AppSettings) => void,
 ): void {
+  const scaleRaw = Number(data.knobs["emotes.emoteScale"] ?? 1);
   ring.applyDisplay(
     data.fontScale,
     data.showTimestamps,
@@ -167,6 +168,13 @@ function applyDisplay(
     data.knobs["appearance.separateMessages"] === true,
     data.knobs["appearance.hideModerationActions"] === true,
     data.knobs["appearance.showReplyButton"] === true,
+    {
+      scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
+      images: data.knobs["emotes.enableEmoteImages"] !== false,
+      zeroWidth: data.knobs["emotes.enableZeroWidthEmotes"] !== false,
+      animate: data.knobs["emotes.animateEmotes"] !== false,
+      animateOnlyFocused: data.knobs["appearance.animationsWhenFocused"] === true,
+    },
   );
   const root = document.documentElement;
   root.style.setProperty("--chat-ui-scale", String(data.fontScale));

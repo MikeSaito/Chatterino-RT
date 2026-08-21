@@ -20,7 +20,7 @@ import {
   MESSAGE_POOL_SIZE,
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
-import { TextureLru } from "./textures";
+import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
   wheelDeltaRows,
@@ -35,6 +35,7 @@ import {
   renderWrapped,
   wrapBody,
   type WrapLine,
+  type WrapOptions,
 } from "./wrap";
 
 const TIME_GAP = 8;
@@ -101,6 +102,7 @@ type Drawn = {
 export class MessageRing {
   private readonly slots: Slot[] = [];
   private readonly textures: TextureLru;
+  private readonly emoteTicker = new EmoteFrameTicker();
   private readonly scroll = new ScrollModel();
   private readonly laidBuf: LaidSlot[] = [];
   private occupied = 0;
@@ -112,6 +114,10 @@ export class MessageRing {
   private lineHeight = LINE_HEIGHT;
   private charWidth = CHAR_WIDTH;
   private badgeSize = BADGE_SIZE;
+  private emoteScale = 1;
+  private enableEmoteImages = true;
+  private enableZeroWidthEmotes = true;
+  private animateEmotes = true;
   private findHitId = "";
   private hideModerated = false;
   private hideModerationActions = false;
@@ -127,6 +133,7 @@ export class MessageRing {
     textures: TextureLru,
   ) {
     this.textures = textures;
+    this.emoteTicker.subscribe(() => this.tickEmoteFrames());
   }
 
   setOnScroll(cb: (state: ScrollSnapshot) => void): void {
@@ -141,7 +148,7 @@ export class MessageRing {
     this.onNickClick = cb;
   }
 
-  /** Масштаб шрифта, timestamps и hideModerated без destroy PIXI.Application. */
+  /** Масштаб шрифта, timestamps, emotes и hideModerated без destroy PIXI.Application. */
   applyDisplay(
     fontScale: number,
     showTimestamps: boolean,
@@ -151,8 +158,17 @@ export class MessageRing {
     separateMessages = false,
     hideModerationActions = false,
     showReplyButton = false,
+    emotes?: {
+      scale?: number;
+      images?: boolean;
+      zeroWidth?: boolean;
+      animate?: boolean;
+      animateOnlyFocused?: boolean;
+    },
   ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
+    const prevAnimate = this.animateEmotes;
+    const prevImages = this.enableEmoteImages;
     this.showTimestamps = showTimestamps;
     this.hideModerated = hideModerated;
     this.timestampFormat = timestampFormat === "Disable" ? "hh:mm" : timestampFormat;
@@ -160,6 +176,14 @@ export class MessageRing {
     this.separateMessages = separateMessages;
     this.hideModerationActions = hideModerationActions;
     this.showReplyButton = showReplyButton;
+    this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
+    this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
+    this.enableZeroWidthEmotes = emotes?.zeroWidth ?? this.enableZeroWidthEmotes;
+    this.animateEmotes = emotes?.animate ?? this.animateEmotes;
+    this.emoteTicker.configure({
+      animate: this.animateEmotes,
+      onlyFocused: emotes?.animateOnlyFocused ?? false,
+    });
     this.fontSize = FONT_SIZE * scale;
     this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
     this.charWidth = CHAR_WIDTH * scale;
@@ -167,7 +191,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
-    const emoteSize = Math.max(1, this.lineHeight - 4);
+    const emoteSize = this.emotePixelSize();
     for (const slot of this.slots) {
       if (slot.msgId && slot.timestampMs) {
         slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
@@ -187,6 +211,15 @@ export class MessageRing {
           applySpriteTexture(spr, spr.texture, emoteSize);
         }
       }
+    }
+    if (
+      prevAnimate !== this.animateEmotes ||
+      prevImages !== this.enableEmoteImages
+    ) {
+      if (!this.animateEmotes) {
+        this.snapEmotesToFirstFrame();
+      }
+      this.reloadVisibleEmotes();
     }
     this.layout();
   }
@@ -459,10 +492,14 @@ export class MessageRing {
 
   private clearSlot(slot: Slot): void {
     for (const key of slot.emoteKeys) {
-      this.textures.release(key);
+      if (key) {
+        this.textures.release(key);
+      }
     }
     for (const key of slot.badgeKeys) {
-      this.textures.release(key);
+      if (key) {
+        this.textures.release(key);
+      }
     }
     slot.emoteKeys = [];
     slot.badgeKeys = [];
@@ -539,30 +576,43 @@ export class MessageRing {
       spr.texture = Texture.EMPTY;
     }
     for (const key of slot.emoteKeys) {
-      this.textures.release(key);
+      if (key) {
+        this.textures.release(key);
+      }
     }
     for (const key of slot.badgeKeys) {
-      this.textures.release(key);
-    }
-    slot.emoteKeys = [];
-    slot.badgeKeys = [];
-    for (let i = 0; i < slot.emotes.length; i += 1) {
-      const spr = slot.emotes[i];
-      const span = drawn.spans[i];
-      if (!span) {
-        continue;
+      if (key) {
+        this.textures.release(key);
       }
-      const key =
-        span.provider === "cheer"
-          ? `cheer:${span.url}`
-          : `${span.provider}:${span.emoteId}`;
-      slot.emoteKeys.push(key);
-      this.textures.acquire(key);
-      void this.textures.load(key, span.url).then((tex) => {
-        if (tex && slot.msgId === msgId) {
-          applySpriteTexture(spr, tex, this.lineHeight - 4);
+    }
+    slot.emoteKeys = new Array(slot.emotes.length).fill("");
+    slot.badgeKeys = [];
+    if (this.enableEmoteImages) {
+      for (let i = 0; i < slot.emotes.length; i += 1) {
+        const spr = slot.emotes[i];
+        const span = drawn.spans[i];
+        if (!span) {
+          continue;
         }
-      });
+        const key =
+          span.provider === "cheer"
+            ? `cheer:${span.url}`
+            : `${span.provider}:${span.emoteId}`;
+        slot.emoteKeys[i] = key;
+        this.textures.acquire(key);
+        const wantAnimate = this.animateEmotes;
+        void this.textures.load(key, span.url, wantAnimate).then((tex) => {
+          if (
+            tex &&
+            slot.msgId === msgId &&
+            this.enableEmoteImages &&
+            slot.emoteKeys[i] === key &&
+            this.animateEmotes === wantAnimate
+          ) {
+            applySpriteTexture(spr, tex, this.emotePixelSize());
+          }
+        });
+      }
     }
     for (let i = 0; i < slot.badges.length; i += 1) {
       const spr = slot.badges[i];
@@ -573,7 +623,7 @@ export class MessageRing {
       const key = `badge:${badge.url}`;
       slot.badgeKeys.push(key);
       this.textures.acquire(key);
-      void this.textures.load(key, badge.url).then((tex) => {
+      void this.textures.load(key, badge.url, false).then((tex) => {
         if (tex && slot.msgId === msgId) {
           applySpriteTexture(spr, tex, this.badgeSize);
         }
@@ -739,14 +789,16 @@ export class MessageRing {
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
+    const wrapOpts = this.wrapOpts();
     const lines = wrapBody(
       slot.bodyRaw,
       maxBodyChars(this.app.screen.width, bodyX, this.charWidth),
       slot.spansRaw,
+      wrapOpts,
     );
     slot.wrapLines = lines;
     slot.lineCount = lines.length;
-    slot.body.text = renderWrapped(slot.bodyRaw, lines, slot.spansRaw);
+    slot.body.text = renderWrapped(slot.bodyRaw, lines, slot.spansRaw, wrapOpts);
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
@@ -756,20 +808,31 @@ export class MessageRing {
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
+    const emoteSize = this.emotePixelSize();
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
-      if (!span) {
+      if (!span || !this.enableEmoteImages) {
         spr.visible = false;
         continue;
       }
-      if (span.zeroWidth && hasPrev) {
+      const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
+      if (zw && hasPrev) {
         spr.visible = true;
         spr.x = prevX;
         spr.y = prevY;
+        if (spr.texture !== Texture.EMPTY) {
+          applySpriteTexture(spr, spr.texture, emoteSize);
+        }
         continue;
       }
-      const pos = indexToLineCol(slot.bodyRaw, lines, span.start, slot.spansRaw);
+      const pos = indexToLineCol(
+        slot.bodyRaw,
+        lines,
+        span.start,
+        slot.spansRaw,
+        wrapOpts,
+      );
       if (!pos) {
         spr.visible = false;
         continue;
@@ -777,6 +840,9 @@ export class MessageRing {
       spr.visible = true;
       spr.x = bodyX + pos.col * this.charWidth;
       spr.y = 1 + pos.line * this.lineHeight;
+      if (spr.texture !== Texture.EMPTY) {
+        applySpriteTexture(spr, spr.texture, emoteSize);
+      }
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
@@ -820,6 +886,7 @@ export class MessageRing {
 
   private paintMentions(slot: Slot, bodyX: number): void {
     slot.mentions.clear();
+    const wrapOpts = this.wrapOpts();
     for (const span of slot.mentionSpans) {
       for (const line of slot.wrapLines) {
         const a = Math.max(span.start, line.start);
@@ -827,12 +894,19 @@ export class MessageRing {
         if (a >= b) {
           continue;
         }
-        const start = indexToLineCol(slot.bodyRaw, slot.wrapLines, a, slot.spansRaw);
+        const start = indexToLineCol(
+          slot.bodyRaw,
+          slot.wrapLines,
+          a,
+          slot.spansRaw,
+          wrapOpts,
+        );
         const end = indexToLineCol(
           slot.bodyRaw,
           slot.wrapLines,
           Math.max(a, b - 1),
           slot.spansRaw,
+          wrapOpts,
         );
         if (!start || !end || start.line !== end.line) {
           continue;
@@ -986,7 +1060,14 @@ export class MessageRing {
     }
     const col = Math.floor((local.x - slot.body.x) / this.charWidth);
     const line = Math.floor(local.y / this.lineHeight);
-    const idx = lineColToIndex(slot.bodyRaw, slot.wrapLines, line, col, slot.spansRaw);
+    const idx = lineColToIndex(
+      slot.bodyRaw,
+      slot.wrapLines,
+      line,
+      col,
+      slot.spansRaw,
+      this.wrapOpts(),
+    );
     if (idx === null) {
       return undefined;
     }
@@ -1041,6 +1122,127 @@ export class MessageRing {
   isReplyButtonEnabled(): boolean {
     return this.showReplyButton;
   }
+
+  private emotePixelSize(): number {
+    return Math.max(1, Math.round((this.lineHeight - 4) * this.emoteScale));
+  }
+
+  private wrapOpts(): WrapOptions {
+    const images = this.enableEmoteImages;
+    const emoteMinCols =
+      images && this.charWidth > 0
+        ? Math.max(1, Math.ceil(this.emotePixelSize() / this.charWidth))
+        : 0;
+    return {
+      emoteMinCols,
+      maskEmotes: images,
+      enableZeroWidth: images && this.enableZeroWidthEmotes,
+    };
+  }
+
+  private reloadVisibleEmotes(): void {
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (!slot.msgId) {
+        continue;
+      }
+      for (const key of slot.emoteKeys) {
+        if (key) {
+          this.textures.release(key);
+        }
+      }
+      slot.emoteKeys = new Array(slot.emotes.length).fill("");
+      for (const spr of slot.emotes) {
+        spr.visible = false;
+        spr.texture = Texture.EMPTY;
+      }
+      if (!this.enableEmoteImages) {
+        continue;
+      }
+      const msgId = slot.msgId;
+      for (let e = 0; e < slot.emotes.length; e += 1) {
+        const spr = slot.emotes[e];
+        const span = slot.spansRaw[e];
+        if (!span) {
+          continue;
+        }
+        const key =
+          span.provider === "cheer"
+            ? `cheer:${span.url}`
+            : `${span.provider}:${span.emoteId}`;
+        slot.emoteKeys[e] = key;
+        this.textures.acquire(key);
+        const wantAnimate = this.animateEmotes;
+        void this.textures.load(key, span.url, wantAnimate).then((tex) => {
+          if (
+            tex &&
+            slot.msgId === msgId &&
+            this.enableEmoteImages &&
+            slot.emoteKeys[e] === key &&
+            this.animateEmotes === wantAnimate
+          ) {
+            applySpriteTexture(spr, tex, this.emotePixelSize());
+          }
+        });
+      }
+    }
+  }
+
+  private snapEmotesToFirstFrame(): void {
+    const size = this.emotePixelSize();
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      for (let e = 0; e < slot.emotes.length; e += 1) {
+        const key = slot.emoteKeys[e];
+        if (!key) {
+          continue;
+        }
+        const spr = slot.emotes[e];
+        const tex = this.textures.frameAt(key, 0) ?? this.textures.get(key);
+        if (tex && spr.visible) {
+          applySpriteTexture(spr, tex, size);
+        }
+      }
+    }
+  }
+
+  private tickEmoteFrames(): void {
+    if (!this.ready || !this.animateEmotes || !this.enableEmoteImages) {
+      return;
+    }
+    const pos = this.emoteTicker.position();
+    const size = this.emotePixelSize();
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (!slot.root.visible) {
+        continue;
+      }
+      for (let e = 0; e < slot.emotes.length; e += 1) {
+        const key = slot.emoteKeys[e];
+        if (!key || !this.textures.isAnimated(key)) {
+          continue;
+        }
+        const spr = slot.emotes[e];
+        if (!spr.visible) {
+          continue;
+        }
+        const tex = this.textures.frameAt(key, pos);
+        if (tex && spr.texture !== tex) {
+          applySpriteTexture(spr, tex, size);
+        }
+      }
+    }
+  }
+}
+
+function clampEmoteScale(raw: number): number {
+  if (!Number.isFinite(raw)) {
+    return 1;
+  }
+  return Math.min(2, Math.max(0.5, raw));
 }
 
 function eventLogin(event: ChatEvent): string {

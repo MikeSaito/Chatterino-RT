@@ -4,6 +4,7 @@ import {
   renderWrapped,
   wrapBody,
 } from "../src/chat/wrap.ts";
+import { resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
 
 const text = "Kappa cvHazmat extra";
 const emotes = [
@@ -50,4 +51,57 @@ if (inner !== 2) {
 const narrow = wrapBody(text, 6, emotes);
 if (narrow.length < 2) {
   throw new Error("width 6 should wrap after stacked emote and its trailing space");
+}
+
+const wide = wrapBody(text, 80, emotes, { emoteMinCols: 8 });
+const widePos = indexToLineCol(text, wide, 15, emotes, { emoteMinCols: 8 });
+if (!widePos || widePos.col !== 9) {
+  throw new Error(`emoteMinCols 8 should place extra at col 9, got ${JSON.stringify(widePos)}`);
+}
+const wideMask = renderWrapped(text, wide, emotes, { emoteMinCols: 8 });
+if (wideMask.length !== 14) {
+  throw new Error(`masked line with emoteMinCols 8 should be 14, got ${wideMask.length}`);
+}
+
+const noMask = renderWrapped(text, lines, emotes, { maskEmotes: false });
+if (!noMask.includes("Kappa") || !noMask.includes("cvHazmat")) {
+  throw new Error("maskEmotes false must keep emote codes visible");
+}
+
+// Как ring.wrapOpts: images off ⇒ ZW off, иначе visual ≠ bitmap length.
+const imagesOff = { maskEmotes: false, enableZeroWidth: false } as const;
+const imagesOffLines = wrapBody(text, 80, emotes, imagesOff);
+const imagesOffMask = renderWrapped(text, imagesOffLines, emotes, imagesOff);
+const imagesOffExtra = indexToLineCol(text, imagesOffLines, 15, emotes, imagesOff);
+if (!imagesOffExtra || imagesOffExtra.col !== 15) {
+  throw new Error(
+    `images-off wrap must keep ZW columns, got ${JSON.stringify(imagesOffExtra)}`,
+  );
+}
+if (imagesOffMask.length !== text.length) {
+  throw new Error(
+    `images-off mask length must equal text (${text.length}), got ${imagesOffMask.length}`,
+  );
+}
+
+const noZw = wrapBody(text, 80, emotes, { enableZeroWidth: false });
+const noZwRender = renderWrapped(text, noZw, emotes, { enableZeroWidth: false });
+if (!noZwRender.includes(" ") || noZwRender.length <= 11) {
+  throw new Error("ZW off should reserve columns for overlay code");
+}
+const noZwExtra = indexToLineCol(text, noZw, 15, emotes, { enableZeroWidth: false });
+if (!noZwExtra || noZwExtra.col !== 15) {
+  throw new Error(`ZW off extra at col 15, got ${JSON.stringify(noZwExtra)}`);
+}
+
+const twitch =
+  "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0";
+if (
+  resolveEmoteUrl(twitch, false) !==
+  "https://static-cdn.jtvnw.net/emoticons/v2/25/static/dark/1.0"
+) {
+  throw new Error("animate off must rewrite Twitch default→static");
+}
+if (resolveEmoteUrl(twitch, true) !== twitch) {
+  throw new Error("animate on must keep Twitch URL");
 }

@@ -1,15 +1,145 @@
 import { Texture } from "pixi.js";
 import { TEXTURE_LRU_LIMIT } from "../constants";
+import { resolveEmoteUrl } from "./emoteUrl";
+
+export { resolveEmoteUrl } from "./emoteUrl";
 
 const ATTEMPTS = 3;
+/** Как Chatterino GIF_FRAME_LENGTH (мс). */
+export const GIF_FRAME_LENGTH = 20;
+
+export type EmoteFrameSet = {
+  frames: Texture[];
+  delays: number[];
+  total: number;
+};
+
+type ImageDecoderInstance = {
+  decode: (options: { frameIndex: number }) => Promise<{
+    image: VideoFrame;
+    duration?: number;
+  }>;
+  tracks: {
+    ready: Promise<void>;
+    selectedTrack: { frameCount: number } | null;
+  };
+  close: () => void;
+};
+
+type ImageDecoderCtor = new (init: {
+  data: BufferSource;
+  type: string;
+  preferAnimation?: boolean;
+}) => ImageDecoderInstance;
+
+function imageDecoderCtor(): ImageDecoderCtor | null {
+  const g = globalThis as unknown as { ImageDecoder?: ImageDecoderCtor };
+  return typeof g.ImageDecoder === "function" ? g.ImageDecoder : null;
+}
+
+export class EmoteFrameTicker {
+  private positionMs = 0;
+  private timer: number | null = null;
+  private animate = true;
+  private onlyFocused = false;
+  private readonly listeners = new Set<() => void>();
+  private focusBound = false;
+
+  configure(opts: { animate: boolean; onlyFocused: boolean }): void {
+    this.animate = opts.animate;
+    this.onlyFocused = opts.onlyFocused;
+    this.bindFocus();
+    this.syncTimer();
+  }
+
+  position(): number {
+    return this.positionMs;
+  }
+
+  subscribe(cb: () => void): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+
+  destroy(): void {
+    this.stopTimer();
+    this.listeners.clear();
+    if (this.focusBound) {
+      window.removeEventListener("focus", this.onFocusChange);
+      window.removeEventListener("blur", this.onFocusChange);
+      document.removeEventListener("visibilitychange", this.onFocusChange);
+      this.focusBound = false;
+    }
+  }
+
+  private readonly onFocusChange = (): void => {
+    this.syncTimer();
+  };
+
+  private bindFocus(): void {
+    if (this.focusBound) {
+      return;
+    }
+    window.addEventListener("focus", this.onFocusChange);
+    window.addEventListener("blur", this.onFocusChange);
+    document.addEventListener("visibilitychange", this.onFocusChange);
+    this.focusBound = true;
+  }
+
+  private shouldRun(): boolean {
+    if (!this.animate) {
+      return false;
+    }
+    if (!this.onlyFocused) {
+      return true;
+    }
+    return document.visibilityState === "visible" && document.hasFocus();
+  }
+
+  private syncTimer(): void {
+    if (this.shouldRun()) {
+      this.startTimer();
+    } else {
+      this.stopTimer();
+    }
+  }
+
+  private startTimer(): void {
+    if (this.timer !== null) {
+      return;
+    }
+    this.timer = window.setInterval(() => {
+      this.positionMs += GIF_FRAME_LENGTH;
+      for (const cb of this.listeners) {
+        cb();
+      }
+    }, GIF_FRAME_LENGTH);
+  }
+
+  private stopTimer(): void {
+    if (this.timer === null) {
+      return;
+    }
+    window.clearInterval(this.timer);
+    this.timer = null;
+  }
+}
 
 export class TextureLru {
   private readonly map = new Map<string, Texture>();
   private readonly urls = new Map<string, string>();
+  private readonly modes = new Map<string, boolean>();
+  private readonly frameSets = new Map<string, EmoteFrameSet>();
   private readonly refs = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<Texture | null>>();
+  private readonly generation = new Map<string, number>();
+  private readonly maxEntries: number;
 
-  constructor(private readonly max = TEXTURE_LRU_LIMIT) {}
+  constructor(max = TEXTURE_LRU_LIMIT) {
+    this.maxEntries = max;
+  }
 
   get(id: string): Texture | undefined {
     const hit = this.map.get(id);
@@ -18,6 +148,30 @@ export class TextureLru {
       this.map.set(id, hit);
     }
     return hit;
+  }
+
+  frameSet(id: string): EmoteFrameSet | undefined {
+    return this.frameSets.get(id);
+  }
+
+  frameAt(id: string, positionMs: number): Texture | undefined {
+    const set = this.frameSets.get(id);
+    if (!set || set.frames.length <= 1) {
+      return this.get(id);
+    }
+    let t = positionMs % set.total;
+    for (let i = 0; i < set.frames.length; i += 1) {
+      t -= set.delays[i];
+      if (t < 0) {
+        return set.frames[i];
+      }
+    }
+    return set.frames[0];
+  }
+
+  isAnimated(id: string): boolean {
+    const set = this.frameSets.get(id);
+    return !!set && set.frames.length > 1;
   }
 
   acquire(id: string): void {
@@ -34,32 +188,62 @@ export class TextureLru {
     this.evict();
   }
 
-  async load(id: string, url: string): Promise<Texture | null> {
+  async load(id: string, url: string, animate: boolean): Promise<Texture | null> {
+    const resolved = resolveEmoteUrl(url, animate);
     const cached = this.get(id);
-    if (cached && this.urls.get(id) === url) {
+    if (
+      cached &&
+      this.urls.get(id) === resolved &&
+      this.modes.get(id) === animate
+    ) {
       return cached;
     }
     const pending = this.inflight.get(id);
-    if (pending && this.urls.get(id) === url) {
+    if (
+      pending &&
+      this.urls.get(id) === resolved &&
+      this.modes.get(id) === animate
+    ) {
       return pending;
     }
-    const job = loadTexture(url)
-      .then((tex) => {
-        this.inflight.delete(id);
-        const prev = this.map.get(id);
-        this.urls.set(id, url);
-        this.set(id, tex);
-        if (prev && prev !== tex && prev !== Texture.EMPTY) {
-          prev.destroy(true);
+    const token = (this.generation.get(id) ?? 0) + 1;
+    this.generation.set(id, token);
+    this.urls.set(id, resolved);
+    this.modes.set(id, animate);
+    const job = loadTextureSet(resolved, animate)
+      .then((set) => {
+        if (this.inflight.get(id) === job) {
+          this.inflight.delete(id);
         }
-        return tex;
+        if (this.generation.get(id) !== token) {
+          destroyFrameSet(set, null);
+          return null;
+        }
+        const prev = this.map.get(id);
+        const prevSet = this.frameSets.get(id);
+        this.set(id, set.frames[0]);
+        this.frameSets.set(id, set);
+        if (prev && prev !== set.frames[0] && prev !== Texture.EMPTY) {
+          if (!prevSet || !prevSet.frames.includes(prev)) {
+            prev.destroy(true);
+          }
+        }
+        if (prevSet) {
+          destroyFrameSet(prevSet, set);
+        }
+        return set.frames[0];
       })
       .catch(() => {
-        this.inflight.delete(id);
+        if (this.inflight.get(id) === job) {
+          this.inflight.delete(id);
+        }
+        if (this.generation.get(id) === token) {
+          this.urls.delete(id);
+          this.modes.delete(id);
+        }
         return null;
       });
     this.inflight.set(id, job);
-    this.urls.set(id, url);
     return job;
   }
 
@@ -72,7 +256,7 @@ export class TextureLru {
   }
 
   private evict(): void {
-    while (this.map.size > this.max) {
+    while (this.map.size > this.maxEntries) {
       let victim: string | undefined;
       for (const key of this.map.keys()) {
         if ((this.refs.get(key) ?? 0) === 0) {
@@ -84,16 +268,32 @@ export class TextureLru {
         break;
       }
       const dropped = this.map.get(victim);
+      const droppedSet = this.frameSets.get(victim);
       this.map.delete(victim);
       this.urls.delete(victim);
-      if (dropped && dropped !== Texture.EMPTY) {
+      this.modes.delete(victim);
+      this.frameSets.delete(victim);
+      if (droppedSet) {
+        destroyFrameSet(droppedSet, null);
+      } else if (dropped && dropped !== Texture.EMPTY) {
         dropped.destroy(true);
       }
     }
   }
 }
 
-async function loadTexture(url: string): Promise<Texture> {
+function destroyFrameSet(set: EmoteFrameSet, keep: EmoteFrameSet | null): void {
+  for (const tex of set.frames) {
+    if (keep && keep.frames.includes(tex)) {
+      continue;
+    }
+    if (tex !== Texture.EMPTY) {
+      tex.destroy(true);
+    }
+  }
+}
+
+async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrameSet> {
   let delay = 200;
   let last: unknown = new Error("texture load failed");
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
@@ -102,9 +302,17 @@ async function loadTexture(url: string): Promise<Texture> {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      const blob = await res.blob();
-      const bitmap = await createImageBitmap(blob);
-      return Texture.from(bitmap);
+      const buf = await res.arrayBuffer();
+      const mime = sniffMime(res.headers.get("content-type"), url);
+      if (animate) {
+        const decoded = await decodeAnimated(buf, mime);
+        if (decoded) {
+          return decoded;
+        }
+      }
+      const bitmap = await createImageBitmap(new Blob([buf], { type: mime }));
+      const tex = Texture.from(bitmap);
+      return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
       last = err;
       if (attempt + 1 < ATTEMPTS) {
@@ -114,6 +322,72 @@ async function loadTexture(url: string): Promise<Texture> {
     }
   }
   throw last;
+}
+
+async function decodeAnimated(
+  buf: ArrayBuffer,
+  mime: string,
+): Promise<EmoteFrameSet | null> {
+  const Ctor = imageDecoderCtor();
+  if (!Ctor) {
+    return null;
+  }
+  let decoder: ImageDecoderInstance | null = null;
+  const frames: Texture[] = [];
+  const delays: number[] = [];
+  try {
+    decoder = new Ctor({ data: buf, type: mime, preferAnimation: true });
+    await decoder.tracks.ready;
+    const track = decoder.tracks.selectedTrack;
+    if (!track || track.frameCount <= 1) {
+      return null;
+    }
+    let total = 0;
+    for (let i = 0; i < track.frameCount; i += 1) {
+      const { image, duration } = await decoder.decode({ frameIndex: i });
+      try {
+        const bitmap = await createImageBitmap(image);
+        frames.push(Texture.from(bitmap));
+      } finally {
+        image.close();
+      }
+      const ms = Math.max(GIF_FRAME_LENGTH, Math.round((duration ?? 0) / 1000));
+      delays.push(ms);
+      total += ms;
+    }
+    if (frames.length <= 1) {
+      destroyFrameSet({ frames, delays, total: GIF_FRAME_LENGTH }, null);
+      return null;
+    }
+    return { frames, delays, total: Math.max(total, GIF_FRAME_LENGTH) };
+  } catch {
+    if (frames.length > 0) {
+      destroyFrameSet({ frames, delays, total: GIF_FRAME_LENGTH }, null);
+    }
+    return null;
+  } finally {
+    decoder?.close();
+  }
+}
+
+function sniffMime(header: string | null, url: string): string {
+  if (header && header !== "application/octet-stream") {
+    const base = header.split(";")[0]?.trim();
+    if (base) {
+      return base;
+    }
+  }
+  const lower = url.toLowerCase();
+  if (lower.endsWith(".gif") || lower.includes(".gif?")) {
+    return "image/gif";
+  }
+  if (lower.endsWith(".webp") || lower.includes(".webp?")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".png") || lower.includes(".png?")) {
+    return "image/png";
+  }
+  return "image/png";
 }
 
 function sleep(ms: number): Promise<void> {

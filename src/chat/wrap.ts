@@ -9,6 +9,22 @@ export type WrapEmote = {
   zeroWidth?: boolean;
 };
 
+/** Опции переноса под Size / Enable / Zero-width. */
+export type WrapOptions = {
+  /** Мин. колонок на non-ZW эмодзи: max(codeLen, emoteMinCols). */
+  emoteMinCols?: number;
+  /** false: коды эмодзи видимы в тексте (Enable images off). */
+  maskEmotes?: boolean;
+  /** false: zeroWidth игнорируется. */
+  enableZeroWidth?: boolean;
+};
+
+type WrapCtx = {
+  emoteMinCols: number;
+  maskEmotes: boolean;
+  enableZeroWidth: boolean;
+};
+
 const WRAP_MAX_LINES = 48;
 
 type GraphemeSegmenter = {
@@ -28,11 +44,21 @@ const graphemeSegmenter: GraphemeSegmenter | null = (() => {
   return new intl.Segmenter(undefined, { granularity: "grapheme" });
 })();
 
+function ctxFrom(opts?: WrapOptions): WrapCtx {
+  return {
+    emoteMinCols: Math.max(0, Math.floor(opts?.emoteMinCols ?? 0)),
+    maskEmotes: opts?.maskEmotes !== false,
+    enableZeroWidth: opts?.enableZeroWidth !== false,
+  };
+}
+
 export function wrapBody(
   text: string,
   maxChars: number,
   emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
 ): WrapLine[] {
+  const ctx = ctxFrom(opts);
   const width = Math.max(1, Math.floor(maxChars));
   const n = text.length;
   if (n === 0) {
@@ -40,7 +66,7 @@ export function wrapBody(
   }
   const lines: WrapLine[] = [];
   for (const para of hardParagraphs(text)) {
-    wrapParagraph(text, para.start, para.end, width, emotes, lines);
+    wrapParagraph(text, para.start, para.end, width, emotes, lines, ctx);
     if (lines.length >= WRAP_MAX_LINES) {
       break;
     }
@@ -59,8 +85,10 @@ export function renderWrapped(
   text: string,
   lines: readonly WrapLine[],
   emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
 ): string {
-  return lines.map((line) => maskSlice(text, line.start, line.end, emotes)).join("\n");
+  const ctx = ctxFrom(opts);
+  return lines.map((line) => maskSlice(text, line.start, line.end, emotes, ctx)).join("\n");
 }
 
 export function indexToLineCol(
@@ -68,11 +96,13 @@ export function indexToLineCol(
   lines: readonly WrapLine[],
   index: number,
   emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
 ): { line: number; col: number } | null {
+  const ctx = ctxFrom(opts);
   for (let line = 0; line < lines.length; line += 1) {
     const row = lines[line];
     if (index >= row.start && index < row.end) {
-      return { line, col: visualWidth(text, row.start, index, emotes) };
+      return { line, col: visualWidth(text, row.start, index, emotes, ctx) };
     }
   }
   return null;
@@ -84,7 +114,9 @@ export function lineColToIndex(
   line: number,
   col: number,
   emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
 ): number | null {
+  const ctx = ctxFrom(opts);
   if (line < 0 || line >= lines.length) {
     return null;
   }
@@ -92,17 +124,17 @@ export function lineColToIndex(
   let visual = 0;
   let i = row.start;
   while (i < row.end) {
-    const next = nextUnit(text, i, row.end);
-    const width = unitWidth(i, emotes, next - i);
+    const step = advanceUnit(text, i, row.end, emotes, ctx);
+    const width = step.width;
     if (width === 0) {
-      i = next;
+      i = step.next;
       continue;
     }
     if (col >= visual && col < visual + width) {
       return i;
     }
     visual += width;
-    i = next;
+    i = step.next;
   }
   return null;
 }
@@ -128,6 +160,7 @@ function wrapParagraph(
   width: number,
   emotes: readonly WrapEmote[],
   lines: WrapLine[],
+  ctx: WrapCtx,
 ): void {
   let i = from;
   if (from === to) {
@@ -137,10 +170,10 @@ function wrapParagraph(
     return;
   }
   while (i < to && lines.length < WRAP_MAX_LINES) {
-    let end = takeWidth(text, i, to, width, emotes);
+    let end = takeWidth(text, i, to, width, emotes, ctx);
     if (end < to) {
-      end = snapBeforeEmote(i, end, emotes);
-      end = snapWord(text, i, end, emotes);
+      end = snapBeforeEmote(i, end, emotes, ctx);
+      end = snapWord(text, i, end, emotes, ctx);
     }
     if (end <= i) {
       end = Math.min(to, nextUtf16(text, i));
@@ -175,19 +208,20 @@ function takeWidth(
   limit: number,
   width: number,
   emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
 ): number {
   let used = 0;
   let end = start;
   let i = start;
   while (i < limit) {
-    const next = nextUnit(text, i, limit);
-    const w = unitWidth(i, emotes, next - i);
+    const step = advanceUnit(text, i, limit, emotes, ctx);
+    const w = step.width;
     if (w > 0 && used + w > width && used > 0) {
       break;
     }
     used += w;
-    end = next;
-    i = next;
+    end = step.next;
+    i = step.next;
   }
   if (end === start) {
     return Math.min(limit, nextUtf16(text, start));
@@ -200,13 +234,14 @@ function visualWidth(
   start: number,
   end: number,
   emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
 ): number {
   let used = 0;
   let i = start;
   while (i < end) {
-    const next = nextUnit(text, i, end);
-    used += unitWidth(i, emotes, next - i);
-    i = next;
+    const step = advanceUnit(text, i, end, emotes, ctx);
+    used += step.width;
+    i = step.next;
   }
   return used;
 }
@@ -216,20 +251,40 @@ function maskSlice(
   start: number,
   end: number,
   emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
 ): string {
-  const chars = text.slice(start, end).split("");
+  if (!ctx.maskEmotes) {
+    return text.slice(start, end).replace(/[\r\n]/g, " ");
+  }
   const kept: string[] = [];
-  for (let i = 0; i < chars.length; i += 1) {
-    const abs = start + i;
-    if (collapsed(emotes, abs)) {
+  let i = start;
+  while (i < end) {
+    if (collapsed(emotes, i, ctx)) {
+      i = nextUtf16(text, i);
       continue;
     }
-    const code = chars[i].charCodeAt(0);
-    if (code === 10 || code === 13 || inEmote(emotes, abs)) {
+    const span = emoteAt(emotes, i, ctx);
+    if (span && i === span.start) {
+      const cols = emoteCols(span, ctx);
+      for (let c = 0; c < cols; c += 1) {
+        kept.push(" ");
+      }
+      i = span.end;
+      continue;
+    }
+    if (span) {
+      i = span.end;
+      continue;
+    }
+    const code = text.charCodeAt(i);
+    if (code === 10 || code === 13) {
       kept.push(" ");
+      i += 1;
       continue;
     }
-    kept.push(chars[i]);
+    const next = nextUnit(text, i, end);
+    kept.push(text.slice(i, next));
+    i = next;
   }
   return kept.join("");
 }
@@ -238,10 +293,11 @@ function snapBeforeEmote(
   lineStart: number,
   end: number,
   emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
 ): number {
   let snapped = end;
   for (const span of emotes) {
-    if (span.zeroWidth) {
+    if (isZeroWidth(span, ctx)) {
       continue;
     }
     if (span.start > lineStart && span.start < snapped && span.end > snapped) {
@@ -256,13 +312,56 @@ function snapWord(
   start: number,
   end: number,
   emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
 ): number {
   for (let k = end - 1; k > start; k -= 1) {
-    if (text.charCodeAt(k) === 32 && !collapsed(emotes, k)) {
+    if (text.charCodeAt(k) === 32 && !collapsed(emotes, k, ctx)) {
       return k + 1;
     }
   }
   return end;
+}
+
+function advanceUnit(
+  text: string,
+  i: number,
+  limit: number,
+  emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
+): { next: number; width: number } {
+  if (collapsed(emotes, i, ctx)) {
+    return { next: Math.min(limit, nextUtf16(text, i)), width: 0 };
+  }
+  const span = emoteAt(emotes, i, ctx);
+  if (span && i === span.start) {
+    return { next: Math.min(limit, span.end), width: emoteCols(span, ctx) };
+  }
+  if (span) {
+    return { next: Math.min(limit, span.end), width: 0 };
+  }
+  const next = nextUnit(text, i, limit);
+  return { next, width: next - i };
+}
+
+function emoteCols(span: WrapEmote, ctx: WrapCtx): number {
+  const codeLen = Math.max(1, span.end - span.start);
+  return Math.max(codeLen, ctx.emoteMinCols);
+}
+
+function emoteAt(
+  emotes: readonly WrapEmote[],
+  index: number,
+  ctx: WrapCtx,
+): WrapEmote | undefined {
+  for (const span of emotes) {
+    if (isZeroWidth(span, ctx)) {
+      continue;
+    }
+    if (index >= span.start && index < span.end) {
+      return span;
+    }
+  }
+  return undefined;
 }
 
 function nextUnit(text: string, i: number, limit: number): number {
@@ -300,11 +399,18 @@ function utf16Fit(text: string, n: number): number {
   return n;
 }
 
-function unitWidth(index: number, emotes: readonly WrapEmote[], raw: number): number {
-  return collapsed(emotes, index) ? 0 : raw;
+function isZeroWidth(span: WrapEmote, ctx: WrapCtx): boolean {
+  return ctx.enableZeroWidth && span.zeroWidth === true;
 }
 
-function collapsed(emotes: readonly WrapEmote[], index: number): boolean {
+function collapsed(
+  emotes: readonly WrapEmote[],
+  index: number,
+  ctx: WrapCtx,
+): boolean {
+  if (!ctx.enableZeroWidth) {
+    return false;
+  }
   for (let i = 0; i < emotes.length; i += 1) {
     const span = emotes[i];
     if (span.zeroWidth !== true) {
@@ -316,10 +422,4 @@ function collapsed(emotes: readonly WrapEmote[], index: number): boolean {
     }
   }
   return false;
-}
-
-function inEmote(emotes: readonly WrapEmote[], index: number): boolean {
-  return emotes.some(
-    (span) => span.zeroWidth !== true && index >= span.start && index < span.end,
-  );
 }
