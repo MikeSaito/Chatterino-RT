@@ -35,6 +35,7 @@ import {
   sanitizeFontFamily,
 } from "./chatFont";
 import type { ThemePixiFills } from "../shell/theme";
+import type { LastReadPattern } from "../shell/lastRead";
 import {
   clipNick,
   indexToLineCol,
@@ -138,6 +139,10 @@ export class MessageRing {
   private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
+  private showLastRead = false;
+  private lastReadPattern: LastReadPattern = "Solid";
+  private lastReadColor = 0x7f2026;
+  private lastReadMsgId = "";
   private pauseMouse = false;
   private pauseKey = false;
   private pauseFollowIntent = false;
@@ -186,6 +191,47 @@ export class MessageRing {
     cb: (ctx: SlotContext, ev: FederatedPointerEvent) => void,
   ): void {
     this.onNickRightClick = cb;
+  }
+
+  configureLastReadIndicator(opts: {
+    enabled: boolean;
+    pattern: LastReadPattern;
+    color: number;
+  }): void {
+    this.showLastRead = opts.enabled;
+    this.lastReadPattern = opts.pattern;
+    this.lastReadColor = opts.color;
+    if (!opts.enabled) {
+      this.lastReadMsgId = "";
+    }
+    if (!this.ready) {
+      return;
+    }
+    this.repaintHighlights();
+  }
+
+  /** Capture newest message id when leaving the app (stock updateLastReadMessage). */
+  markLastReadAtBottom(): void {
+    if (!this.showLastRead || this.occupied === 0) {
+      return;
+    }
+    const idx = (this.head - 1 + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const id = this.slots[idx]?.msgId ?? "";
+    if (id === this.lastReadMsgId) {
+      return;
+    }
+    this.lastReadMsgId = id;
+    if (this.ready) {
+      this.repaintHighlights();
+    }
+  }
+
+  private repaintHighlights(): void {
+    for (const slot of this.slots) {
+      if (slot.msgId) {
+        this.paintHighlight(slot);
+      }
+    }
   }
 
   configureScrollBehaviour(opts: {
@@ -700,6 +746,7 @@ export class MessageRing {
   private clearSlots(): void {
     this.occupied = 0;
     this.head = 0;
+    this.lastReadMsgId = "";
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
@@ -1129,20 +1176,20 @@ export class MessageRing {
     const w = this.app.screen.width;
     if (this.findHitId && slot.msgId === this.findHitId) {
       slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
-      return;
-    }
-    const parsed = parseHighlight(slot.highlightColor);
-    if (parsed) {
-      slot.highlight.rect(0, 0, w, h).fill({ color: parsed.color, alpha: parsed.alpha });
-      return;
-    }
-    if (this.alternateMessages && slot.startRow % 2 === 1) {
-      slot.highlight
-        .rect(0, 0, w, h)
-        .fill({
-          color: this.themeFills.alternate,
-          alpha: this.themeFills.alternateAlpha,
-        });
+    } else {
+      const parsed = parseHighlight(slot.highlightColor);
+      if (parsed) {
+        slot.highlight
+          .rect(0, 0, w, h)
+          .fill({ color: parsed.color, alpha: parsed.alpha });
+      } else if (this.alternateMessages && slot.startRow % 2 === 1) {
+        slot.highlight
+          .rect(0, 0, w, h)
+          .fill({
+            color: this.themeFills.alternate,
+            alpha: this.themeFills.alternateAlpha,
+          });
+      }
     }
     if (this.separateMessages) {
       slot.highlight
@@ -1150,6 +1197,31 @@ export class MessageRing {
         .lineTo(w, h - 0.5)
         .stroke({ width: 1, color: this.themeFills.separator, alpha: 0.9 });
     }
+    if (
+      this.showLastRead &&
+      this.lastReadMsgId &&
+      slot.msgId === this.lastReadMsgId
+    ) {
+      this.paintLastReadLine(slot.highlight, w, h);
+    }
+  }
+
+  private paintLastReadLine(gfx: Graphics, w: number, h: number): void {
+    const y = h - 0.5;
+    const color = this.lastReadColor;
+    if (this.lastReadPattern === "Solid") {
+      gfx.moveTo(0, y).lineTo(w, y).stroke({ width: 1, color, alpha: 1 });
+      return;
+    }
+    const dash = 4;
+    const gap = 3;
+    let x = 0;
+    while (x < w) {
+      const x2 = Math.min(w, x + dash);
+      gfx.moveTo(x, y).lineTo(x2, y);
+      x += dash + gap;
+    }
+    gfx.stroke({ width: 1, color, alpha: 1 });
   }
 
   private paintDisabled(slot: Slot): void {

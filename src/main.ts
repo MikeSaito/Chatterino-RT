@@ -237,6 +237,17 @@ async function boot(): Promise<void> {
   });
   const ipc = bindChatIpc(ring);
   chatIpc = ipc;
+  // Stock WindowDeactivate ≈ tab away / minimize. Prefer visibility hidden so
+  // iframe player focus and in-window dialogs do not move the last-read line.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") {
+      return;
+    }
+    if (!settingsModal.hidden || !searchModal.hidden) {
+      return;
+    }
+    ring.markLastReadAtBottom();
+  });
   const chatFindCtl = bindSearchPopup({
     ring,
     modal: searchModal,

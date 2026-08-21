@@ -13,6 +13,10 @@ import {
   resolveThemePreset,
   subscribeSystemTheme,
 } from "../theme";
+import {
+  parseLastReadColor,
+  parseLastReadPattern,
+} from "../lastRead";
 import { setChatAppBackground } from "../../pixi/app";
 import {
   configureStreamerMode,
@@ -244,6 +248,11 @@ function paintRuntime(
     smoothScrolling: data.knobs["appearance.enableSmoothScrolling"] !== false,
     smoothScrollingNewMessages:
       data.knobs["appearance.enableSmoothScrollingNewMessages"] === true,
+  });
+  ring.configureLastReadIndicator({
+    enabled: data.knobs["appearance.showLastMessageIndicator"] === true,
+    pattern: parseLastReadPattern(data.knobs["appearance.lastMessagePattern"]),
+    color: parseLastReadColor(data.knobs["appearance.lastMessageColor"]),
   });
   onDisplay?.(data);
 }
