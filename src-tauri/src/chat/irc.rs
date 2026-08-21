@@ -803,7 +803,20 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
                 let extra = attach_third_party(text, emote_spans, &cat, channel);
                 emote_spans.extend(extra);
             }
-            let extra = attach_emoji(text, emote_spans);
+            let emoji_set = shared
+                .settings
+                .lock()
+                .ok()
+                .and_then(|inner| {
+                    inner
+                        .data
+                        .knobs
+                        .get("emotes.emojiSet")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "Twitter".into());
+            let extra = attach_emoji(text, emote_spans, &emoji_set);
             emote_spans.extend(extra);
             if let Ok(cat) = shared.badges.lock() {
                 resolve_badge_urls(badges, &cat, channel);

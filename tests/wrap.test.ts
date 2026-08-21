@@ -4,7 +4,7 @@ import {
   renderWrapped,
   wrapBody,
 } from "../src/chat/wrap.ts";
-import { resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
+import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
 
 const text = "Kappa cvHazmat extra";
 const emotes = [
@@ -104,6 +104,26 @@ if (
 }
 if (resolveEmoteUrl(twitch, true) !== twitch) {
   throw new Error("animate on must keep Twitch URL");
+}
+
+const emojiTw = resolveEmojiUrl("1f600", "Twitter");
+if (!emojiTw.includes("/twitter/64/1f600.png")) {
+  throw new Error(`twitter emoji url, got ${emojiTw}`);
+}
+const emojiGo = resolveEmojiUrl("1f600", "Google");
+if (!emojiGo.includes("/google/64/1f600.png") || emojiGo.includes("/twitter/")) {
+  throw new Error(`google emoji url, got ${emojiGo}`);
+}
+if (resolveEmojiUrl("1f600", "nope").includes("/twitter/64/") === false) {
+  throw new Error("unknown emoji set must fall back to Twitter");
+}
+const fbMissing = resolveEmojiUrl("00a9-fe0f", "Facebook");
+if (!fbMissing.includes("/twitter/64/00a9-fe0f.png")) {
+  throw new Error(`facebook missing must use twitter, got ${fbMissing}`);
+}
+const appleMissing = resolveEmojiUrl("2640-fe0f", "Apple");
+if (!appleMissing.includes("/twitter/64/2640-fe0f.png")) {
+  throw new Error(`apple missing must use twitter, got ${appleMissing}`);
 }
 
 const mentionText = "hi @verylongusernameok bye";

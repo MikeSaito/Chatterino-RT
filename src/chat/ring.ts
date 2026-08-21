@@ -18,6 +18,7 @@ import {
   MESSAGE_POOL_SIZE,
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
+import { resolveEmojiUrl } from "./emoteUrl";
 import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -156,6 +157,7 @@ export class MessageRing {
   private enableEmoteImages = true;
   private enableZeroWidthEmotes = true;
   private removeSpacesBetweenEmotes = false;
+  private emojiSet = "Twitter";
   private animateEmotes = true;
   private findHitId = "";
   private hideModerated = false;
@@ -534,11 +536,13 @@ export class MessageRing {
       animate?: boolean;
       animateOnlyFocused?: boolean;
       removeSpaces?: boolean;
+      emojiSet?: string;
     },
   ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
     const prevAnimate = this.animateEmotes;
     const prevImages = this.enableEmoteImages;
+    const prevEmojiSet = this.emojiSet;
     this.showTimestamps = showTimestamps;
     this.hideModerated = hideModerated;
     this.timestampFormat = timestampFormat === "Disable" ? "hh:mm" : timestampFormat;
@@ -551,6 +555,7 @@ export class MessageRing {
     this.enableZeroWidthEmotes = emotes?.zeroWidth ?? this.enableZeroWidthEmotes;
     this.removeSpacesBetweenEmotes =
       emotes?.removeSpaces ?? this.removeSpacesBetweenEmotes;
+    this.emojiSet = normalizeEmojiSet(emotes?.emojiSet ?? this.emojiSet);
     this.animateEmotes = emotes?.animate ?? this.animateEmotes;
     this.emoteTicker.configure({
       animate: this.animateEmotes,
@@ -588,7 +593,8 @@ export class MessageRing {
     }
     if (
       prevAnimate !== this.animateEmotes ||
-      prevImages !== this.enableEmoteImages
+      prevImages !== this.enableEmoteImages ||
+      prevEmojiSet !== this.emojiSet
     ) {
       if (!this.animateEmotes) {
         this.snapEmotesToFirstFrame();
@@ -1147,7 +1153,8 @@ export class MessageRing {
         slot.emoteKeys[i] = key;
         this.textures.acquire(key);
         const wantAnimate = this.animateEmotes;
-        void this.textures.load(key, span.url, wantAnimate).then((tex) => {
+        const url = this.emoteLoadUrl(span);
+        void this.textures.load(key, url, wantAnimate).then((tex) => {
           if (
             tex &&
             slot.msgId === msgId &&
@@ -1957,6 +1964,13 @@ export class MessageRing {
     return Math.max(1, Math.round((this.lineHeight - 4) * this.emoteScale));
   }
 
+  private emoteLoadUrl(span: EmoteSpan): string {
+    if (span.provider === "emoji") {
+      return resolveEmojiUrl(span.emoteId, this.emojiSet);
+    }
+    return span.url;
+  }
+
   private wrapOpts(
     slot?: Slot,
     maskMentions?: readonly MentionSpan[],
@@ -2014,7 +2028,8 @@ export class MessageRing {
         slot.emoteKeys[e] = key;
         this.textures.acquire(key);
         const wantAnimate = this.animateEmotes;
-        void this.textures.load(key, span.url, wantAnimate).then((tex) => {
+        const url = this.emoteLoadUrl(span);
+        void this.textures.load(key, url, wantAnimate).then((tex) => {
           if (
             tex &&
             slot.msgId === msgId &&
@@ -2149,6 +2164,20 @@ function formatTime(ms: number, format: string): string {
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
+}
+
+function normalizeEmojiSet(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  if (key === "facebook") {
+    return "Facebook";
+  }
+  if (key === "apple") {
+    return "Apple";
+  }
+  if (key === "google") {
+    return "Google";
+  }
+  return "Twitter";
 }
 
 function clearchatText(login: string | undefined, durationSec: number | undefined): string {

@@ -235,6 +235,7 @@ function paintRuntime(
       animate: data.knobs["emotes.animateEmotes"] !== false,
       animateOnlyFocused: data.knobs["appearance.animationsWhenFocused"] === true,
       removeSpaces: data.knobs["emotes.removeSpacesBetweenEmotes"] === true,
+      emojiSet: String(data.knobs["emotes.emojiSet"] ?? "Twitter"),
     },
   );
   const root = document.documentElement;
