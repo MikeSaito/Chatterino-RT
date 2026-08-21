@@ -1820,6 +1820,20 @@ export const SETTINGS_PAGES: PageDef[] = [
             "",
             "self color #RRGGBB",
           ),
+          cb(
+            "enable-self-message-highlight",
+            "highlighting.enableSelfMessageHighlight",
+            "Highlight your own messages",
+            false,
+            "self message own",
+          ),
+          txt(
+            "self-message-highlight-color",
+            "highlighting.selfMessageHighlightColor",
+            "Self message highlight color",
+            "",
+            "self message color #RRGGBB",
+          ),
         ],
       },
       {

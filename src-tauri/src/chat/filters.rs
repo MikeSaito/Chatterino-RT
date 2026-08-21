@@ -19,6 +19,8 @@ const MAX_LIST: usize = 200;
 const MAX_PATTERN: usize = 200;
 const MAX_FILE_BYTES: usize = 256 * 1024;
 pub const SELF_HIGHLIGHT_COLOR: &str = "#7f3f4980";
+/// Stock FALLBACK_SELF_MESSAGE_HIGHLIGHT_COLOR.
+pub const SELF_MESSAGE_HIGHLIGHT_COLOR: &str = "#0076DD73";
 /// Stock FALLBACK_COLOR_SUBSCRIPTION.
 pub const SUB_HIGHLIGHT_COLOR: &str = "#C466FF64";
 /// Stock FALLBACK_COLOR_REDEEMED.
@@ -322,6 +324,9 @@ pub(crate) struct HighlightSoundCtx {
     pub enable_self_sound: bool,
     /// Raw color from `highlighting.selfHighlightColor` (empty → fallback).
     pub self_highlight_color: String,
+    /// Stock self-message highlight (own outgoing messages).
+    pub enable_self_message: bool,
+    pub self_message_color: String,
     /// pattern → (play_sound, raw color)
     pub phrase_sound: Vec<(String, bool, String)>,
     /// username → (play_sound, raw color)
@@ -333,6 +338,8 @@ impl Default for HighlightSoundCtx {
         Self {
             enable_self_sound: true,
             self_highlight_color: String::new(),
+            enable_self_message: false,
+            self_message_color: String::new(),
             phrase_sound: Vec::new(),
             user_sound: Vec::new(),
         }
@@ -347,16 +354,22 @@ impl HighlightSoundCtx {
                 ..Self::default()
             };
         };
-        let enable_self_sound = settings
-            .data
-            .knobs
+        let knobs = &settings.data.knobs;
+        let enable_self_sound = knobs
             .get("highlighting.enableSelfHighlightSound")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let self_highlight_color = settings
-            .data
-            .knobs
+        let self_highlight_color = knobs
             .get("highlighting.selfHighlightColor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let enable_self_message = knobs
+            .get("highlighting.enableSelfMessageHighlight")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let self_message_color = knobs
+            .get("highlighting.selfMessageHighlightColor")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -377,6 +390,8 @@ impl HighlightSoundCtx {
         Self {
             enable_self_sound,
             self_highlight_color,
+            enable_self_message,
+            self_message_color,
             phrase_sound,
             user_sound,
         }
@@ -389,11 +404,11 @@ struct HighlightHit {
     sound: bool,
 }
 
-/// Accept `#RRGGBB` / `#RRGGBBAA`; empty or invalid → stock fallback.
-pub(crate) fn resolve_highlight_color(raw: &str) -> String {
+/// Accept `#RRGGBB` / `#RRGGBBAA`; empty or invalid → `fallback`.
+pub(crate) fn resolve_highlight_color_or(raw: &str, fallback: &str) -> String {
     let t = raw.trim();
     if t.is_empty() {
-        return SELF_HIGHLIGHT_COLOR.to_string();
+        return fallback.to_string();
     }
     let body = t.strip_prefix('#').unwrap_or(t);
     let ok = matches!(body.len(), 6 | 8)
@@ -401,8 +416,13 @@ pub(crate) fn resolve_highlight_color(raw: &str) -> String {
     if ok {
         format!("#{body}")
     } else {
-        SELF_HIGHLIGHT_COLOR.to_string()
+        fallback.to_string()
     }
+}
+
+/// Phrase / self-nick / user row colors → stock self-highlight fallback.
+pub(crate) fn resolve_highlight_color(raw: &str) -> String {
+    resolve_highlight_color_or(raw, SELF_HIGHLIGHT_COLOR)
 }
 
 fn highlight_hit(
@@ -413,6 +433,15 @@ fn highlight_hit(
     self_login: Option<&str>,
 ) -> HighlightHit {
     let self_msg = is_self(login, self_login);
+    if self_msg && sound.enable_self_message {
+        return HighlightHit {
+            color: Some(resolve_highlight_color_or(
+                &sound.self_message_color,
+                SELF_MESSAGE_HIGHLIGHT_COLOR,
+            )),
+            sound: false,
+        };
+    }
     if !self_msg {
         if filters.enable_self_highlight {
             if let Some(me) = self_login {
@@ -1188,6 +1217,85 @@ mod tests {
         match ev {
             ChatEvent::Privmsg { highlight_color, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some("#DEADBE"));
+            }
+            _ => panic!("privmsg"),
+        }
+    }
+
+    #[test]
+    fn self_message_highlight_when_enabled() {
+        let filters = Filters {
+            highlight_phrases: vec!["hello".into()],
+            enable_self_highlight: true,
+            ..Filters::default()
+        };
+        let mut off = privmsg("mike", "hello world");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &mut off,
+            Some("mike"),
+        );
+        match off {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert!(highlight_color.is_none(), "own msg not phrase-highlighted");
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut on = privmsg("mike", "hello world");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                enable_self_message: true,
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut on,
+            Some("mike"),
+        );
+        match on {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(
+                    highlight_color.as_deref(),
+                    Some(SELF_MESSAGE_HIGHLIGHT_COLOR)
+                );
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut custom = privmsg("mike", "hi");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                enable_self_message: true,
+                self_message_color: "#11223344".into(),
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut custom,
+            Some("mike"),
+        );
+        match custom {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11223344"));
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut other = privmsg("ann", "hey");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                enable_self_message: true,
+                user_sound: vec![("ann".into(), false, "#AABBCC".into())],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut other,
+            Some("mike"),
+        );
+        match other {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#AABBCC"));
             }
             _ => panic!("privmsg"),
         }
