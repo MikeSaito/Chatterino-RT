@@ -6,6 +6,7 @@ use tauri::AppHandle;
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::complete;
+use super::constants::MAX_PENDING_OUT;
 use super::filters::{self, Filters};
 use super::settings::DisplaySettings;
 use super::spans::allowed_chat_url;
@@ -246,20 +247,24 @@ pub async fn chat_send(
             payload = prepare_duplicate_message(&payload);
         }
     }
-    send_cmd(
+    if !state.try_reserve_outbound(MAX_PENDING_OUT) {
+        return Err(ApiError::invalid(
+            "очередь отправки полна, подождите подключения",
+        ));
+    }
+    if let Err(err) = send_cmd(
         &state,
         IrcCmd::Privmsg {
             channel: channel.clone(),
-            text: payload.clone(),
+            text: payload,
             reply_to,
         },
     )
-    .await?;
-    let mut last = state
-        .last_sent
-        .lock()
-        .map_err(|_| ApiError::internal("lock"))?;
-    last.insert(channel, payload);
+    .await
+    {
+        state.release_outbound(1);
+        return Err(err);
+    }
     Ok(())
 }
 

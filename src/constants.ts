@@ -8,6 +8,8 @@ export const MENTION_SLOTS_PER_ROW = 8;
 export const BADGE_SLOTS_PER_ROW = 8;
 export const BADGE_SIZE = 18;
 export const TEXTURE_LRU_LIMIT = 256;
+/** Hard cap on decoded GIF/WebP animation frames per emote (VRAM bound). */
+export const MAX_GIF_FRAMES = 48;
 export const LINE_HEIGHT = 22;
 export const FONT_SIZE = 15;
 export const CHAR_WIDTH = 8.4;

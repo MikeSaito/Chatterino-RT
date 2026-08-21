@@ -6,6 +6,8 @@ pub const MESSAGE_POOL_SIZE: usize = SCROLLBACK_LIMIT;
 pub const EMOTE_SLOTS_PER_ROW: usize = 12;
 pub const BADGE_SLOTS_PER_ROW: usize = 8;
 pub const TEXTURE_LRU_LIMIT: usize = 256;
+/// Outbound PRIVMSG queue cap while IRC is reconnecting / room not joined yet.
+pub const MAX_PENDING_OUT: usize = 32;
 
 const _: () = {
     assert!(MESSAGE_POOL_SIZE == SCROLLBACK_LIMIT);

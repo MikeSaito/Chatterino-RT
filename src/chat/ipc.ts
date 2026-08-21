@@ -47,6 +47,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   let retryTimer: number | undefined;
   let resubscribing = false;
   let opBusy = false;
+  let unlistenPipe: (() => void) | null = null;
   const queued: ChatBatch[] = [];
   const ops: Op[] = [];
 
@@ -290,6 +291,12 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
 
   void listen(CHAT_PIPE_EVENT, () => {
     onBadPipe();
+  }).then((unlisten) => {
+    if (stopped) {
+      unlisten();
+      return;
+    }
+    unlistenPipe = unlisten;
   });
 
   return {
@@ -324,6 +331,10 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer);
         retryTimer = undefined;
+      }
+      if (unlistenPipe) {
+        unlistenPipe();
+        unlistenPipe = null;
       }
     },
     active: () => active,

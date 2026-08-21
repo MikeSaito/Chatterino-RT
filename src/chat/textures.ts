@@ -1,5 +1,5 @@
 import { Texture } from "pixi.js";
-import { TEXTURE_LRU_LIMIT } from "../constants";
+import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
 import { resolveEmoteUrl } from "./emoteUrl";
 
 export { resolveEmoteUrl } from "./emoteUrl";
@@ -221,7 +221,10 @@ export class TextureLru {
         }
         const prev = this.map.get(id);
         const prevSet = this.frameSets.get(id);
-        this.set(id, set.frames[0]);
+        if (!this.set(id, set.frames[0])) {
+          destroyFrameSet(set, null);
+          return null;
+        }
         this.frameSets.set(id, set);
         if (prev && prev !== set.frames[0] && prev !== Texture.EMPTY) {
           if (!prevSet || !prevSet.frames.includes(prev)) {
@@ -247,12 +250,44 @@ export class TextureLru {
     return job;
   }
 
-  private set(id: string, texture: Texture): void {
+  clear(): void {
+    for (const id of [...this.map.keys()]) {
+      this.dropEntry(id);
+    }
+    this.inflight.clear();
+    this.generation.clear();
+    this.refs.clear();
+  }
+
+  /** Insert only if under hard LRU cap; unpinned entries are evicted first. */
+  private set(id: string, texture: Texture): boolean {
     if (this.map.has(id)) {
       this.map.delete(id);
+      this.map.set(id, texture);
+      this.evict();
+      return true;
+    }
+    this.evict();
+    if (this.map.size >= this.maxEntries) {
+      return false;
     }
     this.map.set(id, texture);
-    this.evict();
+    return true;
+  }
+
+  private dropEntry(victim: string): void {
+    const dropped = this.map.get(victim);
+    const droppedSet = this.frameSets.get(victim);
+    this.map.delete(victim);
+    this.urls.delete(victim);
+    this.modes.delete(victim);
+    this.frameSets.delete(victim);
+    this.generation.delete(victim);
+    if (droppedSet) {
+      destroyFrameSet(droppedSet, null);
+    } else if (dropped && dropped !== Texture.EMPTY) {
+      dropped.destroy(true);
+    }
   }
 
   private evict(): void {
@@ -267,17 +302,7 @@ export class TextureLru {
       if (!victim) {
         break;
       }
-      const dropped = this.map.get(victim);
-      const droppedSet = this.frameSets.get(victim);
-      this.map.delete(victim);
-      this.urls.delete(victim);
-      this.modes.delete(victim);
-      this.frameSets.delete(victim);
-      if (droppedSet) {
-        destroyFrameSet(droppedSet, null);
-      } else if (dropped && dropped !== Texture.EMPTY) {
-        dropped.destroy(true);
-      }
+      this.dropEntry(victim);
     }
   }
 }
@@ -342,8 +367,9 @@ async function decodeAnimated(
     if (!track || track.frameCount <= 1) {
       return null;
     }
+    const frameCount = Math.min(track.frameCount, MAX_GIF_FRAMES);
     let total = 0;
-    for (let i = 0; i < track.frameCount; i += 1) {
+    for (let i = 0; i < frameCount; i += 1) {
       const { image, duration } = await decoder.decode({ frameIndex: i });
       try {
         const bitmap = await createImageBitmap(image);

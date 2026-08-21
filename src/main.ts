@@ -37,14 +37,15 @@ import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constant
 import type { AuthInfo, ChatStatus } from "./chat/types";
 
 let chatIpc: ChatIpc | null = null;
+let teardownChat: (() => void) | null = null;
 
 window.addEventListener("DOMContentLoaded", () => {
   void boot();
 });
 
 window.addEventListener("beforeunload", () => {
-  chatIpc?.stop();
-  destroyChatApp();
+  teardownChat?.();
+  teardownChat = null;
 });
 
 async function boot(): Promise<void> {
@@ -174,8 +175,16 @@ async function boot(): Promise<void> {
   });
 
   const app = await createChatApp(canvas, canvasHost);
-  const ring = new MessageRing(app, new TextureLru());
+  const textures = new TextureLru();
+  const ring = new MessageRing(app, textures);
   await ring.init();
+  teardownChat = () => {
+    chatIpc?.stop();
+    chatIpc = null;
+    ring.destroy();
+    textures.clear();
+    destroyChatApp();
+  };
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");

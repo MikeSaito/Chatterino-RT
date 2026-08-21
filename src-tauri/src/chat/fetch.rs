@@ -170,7 +170,7 @@ fn collect_bttv(value: &Value, map: &mut std::collections::HashMap<String, Emote
     for item in arr {
         let id = item.get("id").and_then(Value::as_str).unwrap_or("");
         let code = item.get("code").and_then(Value::as_str).unwrap_or("");
-        if id.is_empty() || code.is_empty() {
+        if !safe_object_id(id) || code.is_empty() || code.len() > 100 {
             continue;
         }
         map.insert(
@@ -195,19 +195,21 @@ fn collect_ffz_sets(value: &Value, map: &mut std::collections::HashMap<String, E
         for item in emotes {
             let id = item.get("id").map(|v| v.to_string()).unwrap_or_default();
             let code = item.get("name").and_then(Value::as_str).unwrap_or("");
-            if code.is_empty() {
+            if id.is_empty() || id.len() > 32 || code.is_empty() || code.len() > 100 {
                 continue;
             }
-            let url = item
+            if !id.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let Some(url) = item
                 .get("urls")
                 .and_then(Value::as_object)
                 .and_then(|u| u.get("1").or_else(|| u.get("2")).or_else(|| u.get("4")))
                 .and_then(Value::as_str)
-                .map(abs_url)
-                .unwrap_or_default();
-            if url.is_empty() {
+                .and_then(allowed_ffz_url)
+            else {
                 continue;
-            }
+            };
             map.insert(
                 code.to_string(),
                 EmoteDef {
@@ -333,6 +335,23 @@ fn abs_url(raw: &str) -> String {
     }
 }
 
+fn allowed_ffz_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    match parsed.host_str() {
+        Some("cdn.frankerfacez.com") | Some("cdn.frankerfacez.net") => {
+            Some(parsed.as_str().to_string())
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +387,51 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         collect_7tv_set(&sample_7tv(0), &mut map);
         assert!(!map.get("cvHazmat").expect("emote").zero_width);
+    }
+
+    #[test]
+    fn ffz_rejects_foreign_host() {
+        let evil = serde_json::json!({
+            "sets": {
+                "1": {
+                    "emoticons": [{
+                        "id": 42,
+                        "name": "Kappa",
+                        "urls": { "1": "https://evil.example/x.png" }
+                    }]
+                }
+            }
+        });
+        let mut map = std::collections::HashMap::new();
+        collect_ffz_sets(&evil, &mut map);
+        assert!(map.is_empty());
+        let ok = serde_json::json!({
+            "sets": {
+                "1": {
+                    "emoticons": [{
+                        "id": 42,
+                        "name": "Kappa",
+                        "urls": { "1": "//cdn.frankerfacez.com/emote/42/1" }
+                    }]
+                }
+            }
+        });
+        collect_ffz_sets(&ok, &mut map);
+        assert_eq!(
+            map.get("Kappa").map(|d| d.url.as_str()),
+            Some("https://cdn.frankerfacez.com/emote/42/1")
+        );
+    }
+
+    #[test]
+    fn bttv_rejects_bad_id() {
+        let evil = serde_json::json!([{
+            "id": "../x",
+            "code": "Evil"
+        }]);
+        let mut map = std::collections::HashMap::new();
+        collect_bttv(&evil, &mut map);
+        assert!(map.is_empty());
     }
 
     #[test]

@@ -87,19 +87,19 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                             Some(IrcCmd::PartChannel(ch)) => {
                                 wanted.remove(&ch);
                                 last_error = None;
-                                pending_out.retain(|(c, _, _)| c != &ch);
+                                release_pending_channel(&mut pending_out, &ch, &shared);
                             }
                             Some(IrcCmd::Part) => {
                                 wanted.clear();
                                 last_error = None;
-                                pending_out.clear();
+                                clear_pending_out(&mut pending_out, &shared);
                             }
                             Some(IrcCmd::Privmsg {
                                 channel,
                                 text,
                                 reply_to,
                             }) => {
-                                pending_out.push_back((channel, text, reply_to));
+                                enqueue_pending_out(&mut pending_out, channel, text, reply_to);
                             }
                             Some(IrcCmd::Relogin) => {
                                 backoff = Duration::from_secs(1);
@@ -198,14 +198,14 @@ async fn connect_session(
                         in_rooms.clear();
                         loaded_room.clear();
                         *last_error = None;
-                        pending_out.clear();
+                        clear_pending_out(pending_out, shared);
                         emit_status(app, ChatConnState::Connected, None, None);
                     }
                     Some(IrcCmd::PartChannel(ch)) => {
                         wanted.remove(&ch);
                         in_rooms.remove(&ch);
                         loaded_room.remove(&ch);
-                        pending_out.retain(|(c, _, _)| c != &ch);
+                        release_pending_channel(pending_out, &ch, shared);
                         let _ = send_line(&mut write, &format!("PART #{ch}")).await;
                         if let Ok(mut hub) = shared.hub.lock() {
                             hub.set_joined(&ch, false);
@@ -262,12 +262,13 @@ async fn connect_session(
                         text,
                         reply_to,
                     }) => {
-                        pending_out.push_back((channel, text, reply_to));
+                        enqueue_pending_out(pending_out, channel, text, reply_to);
                         if flush_outgoing(
                             &mut write,
                             wanted,
                             &in_rooms,
                             pending_out,
+                            shared,
                         )
                         .await
                         .is_err()
@@ -311,6 +312,7 @@ async fn connect_session(
                                         wanted,
                                         &in_rooms,
                                         pending_out,
+                                        shared,
                                     )
                                     .await
                                     .is_err()
@@ -344,7 +346,7 @@ async fn connect_session(
                                     wanted.remove(&channel);
                                     in_rooms.remove(&channel);
                                     loaded_room.remove(&channel);
-                                    pending_out.retain(|(c, _, _)| c != &channel);
+                                    release_pending_channel(pending_out, &channel, shared);
                                     if let Ok(mut cat) = shared.catalog.lock() {
                                         cat.drop_channel(&channel);
                                     }
@@ -438,6 +440,7 @@ async fn flush_outgoing<S>(
     wanted: &HashSet<String>,
     in_rooms: &HashSet<String>,
     pending: &mut VecDeque<(String, String, Option<String>)>,
+    shared: &Shared,
 ) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
@@ -445,6 +448,7 @@ where
     let mut rest = VecDeque::new();
     while let Some((channel, text, reply_to)) = pending.pop_front() {
         if !wanted.contains(&channel) {
+            shared.release_outbound(1);
             continue;
         }
         if !in_rooms.contains(&channel) {
@@ -460,6 +464,10 @@ where
             rest.append(pending);
             *pending = rest;
             return Err(());
+        }
+        shared.release_outbound(1);
+        if let Ok(mut last) = shared.last_sent.lock() {
+            last.insert(channel, text);
         }
     }
     *pending = rest;
@@ -703,6 +711,15 @@ fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBat
                 "chat batch encode failed for channel {}",
                 batch.channel_id
             );
+            let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
+            shared.note_undelivered(&batch.channel_id, n);
+            let _ = app.emit(
+                "chat:pipe",
+                ChatPipe {
+                    ok: false,
+                    channel: Some(batch.channel_id.clone()),
+                },
+            );
         }
         super::state::BatchSend::NoSubscriber => {
             let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
@@ -716,6 +733,35 @@ fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBat
             );
         }
     }
+}
+
+fn enqueue_pending_out(
+    pending_out: &mut VecDeque<(String, String, Option<String>)>,
+    channel: String,
+    text: String,
+    reply_to: Option<String>,
+) {
+    // Capacity reserved in chat_send via try_reserve_outbound.
+    pending_out.push_back((channel, text, reply_to));
+}
+
+fn clear_pending_out(
+    pending_out: &mut VecDeque<(String, String, Option<String>)>,
+    shared: &Shared,
+) {
+    let n = pending_out.len();
+    pending_out.clear();
+    shared.release_outbound(n);
+}
+
+fn release_pending_channel(
+    pending_out: &mut VecDeque<(String, String, Option<String>)>,
+    channel: &str,
+    shared: &Shared,
+) {
+    let before = pending_out.len();
+    pending_out.retain(|(c, _, _)| c != channel);
+    shared.release_outbound(before.saturating_sub(pending_out.len()));
 }
 
 pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &str) {

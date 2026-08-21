@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
@@ -97,6 +97,8 @@ pub struct Shared {
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
     /// Last successfully sent outbound PRIVMSG text per channel login.
     pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    /// Reserved outbound PRIVMSG slots (chat_send → wire flush).
+    pub outbound_pending: Arc<AtomicUsize>,
 }
 
 pub enum BatchSend {
@@ -130,7 +132,35 @@ impl Shared {
             settings: Arc::new(Mutex::new(SettingsInner::default())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            outbound_pending: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    pub fn try_reserve_outbound(&self, max: usize) -> bool {
+        loop {
+            let cur = self.outbound_pending.load(Ordering::Acquire);
+            if cur >= max {
+                return false;
+            }
+            if self
+                .outbound_pending
+                .compare_exchange(cur, cur + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return true;
+            }
+        }
+    }
+
+    pub fn release_outbound(&self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let _ = self
+            .outbound_pending
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |cur| {
+                Some(cur.saturating_sub(n))
+            });
     }
 
     pub fn set_batch_channel(&self, channel: Channel<Vec<u8>>) -> Result<(), ()> {

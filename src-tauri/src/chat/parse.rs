@@ -408,6 +408,9 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
             };
             let Ok(start_cp) = a.parse::<usize>() else { continue };
             let Ok(end_cp) = b.parse::<usize>() else { continue };
+            if !safe_twitch_emote_id(id) {
+                continue;
+            }
             let start = scalar_to_utf16(text, start_cp) as u32;
             let end = scalar_to_utf16(text, end_cp.saturating_add(1)) as u32;
             spans.push(EmoteSpan {
@@ -422,6 +425,15 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
     }
     spans.sort_by_key(|s| s.start);
     spans
+}
+
+pub fn safe_twitch_emote_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && !id.contains("..")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 pub fn twitch_emote_url(id: &str) -> String {

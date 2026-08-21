@@ -15,7 +15,7 @@ use url::Url;
 use super::cheers::{CheerCatalog, CheerSet, CheerTier};
 use super::emotes::{Catalog, EmoteDef};
 use super::hub::Hub;
-use super::parse::twitch_emote_url;
+use super::parse::{safe_twitch_emote_id, twitch_emote_url};
 use super::types::Badge;
 
 const ATTEMPTS: u32 = 3;
@@ -303,15 +303,6 @@ pub fn parse_chat_emotes(value: &Value) -> HashMap<String, EmoteDef> {
         );
     }
     map
-}
-
-fn safe_twitch_emote_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && !id.contains("..")
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 pub fn parse_badge_sets(value: &Value) -> BadgeMap {

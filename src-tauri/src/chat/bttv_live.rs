@@ -10,6 +10,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::emotes::EmoteDef;
+use super::fetch::safe_object_id;
 use super::state::{BttvCmd, Shared};
 
 const BTTV_WS: &str = "wss://sockets.betterttv.net/ws";
@@ -295,7 +296,7 @@ pub fn apply_event(shared: &Shared, root: &Value) {
             let emote = data.get("emote").unwrap_or(&Value::Null);
             let id = emote.get("id").and_then(Value::as_str).unwrap_or("");
             let code = emote.get("code").and_then(Value::as_str).unwrap_or("");
-            if id.is_empty() || code.is_empty() {
+            if !safe_object_id(id) || code.is_empty() || code.len() > 100 {
                 return;
             }
             let def = EmoteDef {
