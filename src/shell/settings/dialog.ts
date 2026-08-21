@@ -21,6 +21,7 @@ import {
   parseBoldScale,
   parseUsernameDisplayMode,
 } from "../nickStyle";
+import { applyWindowTopMost } from "../windowTopMost";
 import { setChatAppBackground } from "../../pixi/app";
 import {
   configureStreamerMode,
@@ -270,6 +271,7 @@ function paintRuntime(
   ring.configureReplyContext({
     hide: data.knobs["appearance.hideReplyContext"] === true,
   });
+  applyWindowTopMost(data.knobs["appearance.windowTopMost"] === true);
   onDisplay?.(data);
 }
 
