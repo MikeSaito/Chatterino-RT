@@ -1849,6 +1849,32 @@ export const SETTINGS_PAGES: PageDef[] = [
           ),
         ],
       },
+      {
+        title: "Extra message kinds",
+        knobs: [
+          cb(
+            "enable-sub-highlight",
+            "highlighting.enableSubHighlight",
+            "Highlight subscriptions / resubs / gifts",
+            true,
+            "sub resub gift scrollbar",
+          ),
+          cb(
+            "enable-first-message-highlight",
+            "highlighting.enableFirstMessageHighlight",
+            "Highlight first messages in a channel",
+            true,
+            "first-msg scrollbar",
+          ),
+          cb(
+            "enable-redeemed-highlight",
+            "highlighting.enableRedeemedHighlight",
+            "Highlight redeemed channel point messages",
+            true,
+            "redeem reward scrollbar",
+          ),
+        ],
+      },
     ],
   },
   {

@@ -120,6 +120,15 @@ pub enum ChatEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_text: Option<String>,
         action: bool,
+        /// IRC `first-msg=1`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        first_msg: bool,
+        /// Channel point redemption id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_reward_id: Option<String>,
+        /// IRC `msg-id` tag (e.g. `highlighted-message`), not message `id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        system_msg_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         highlight_color: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -147,6 +156,9 @@ pub enum ChatEvent {
         system_text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         login: Option<String>,
+        /// IRC `msg-id` (sub / resub / subgift / …).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        msg_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         privmsg: Option<Box<ChatEvent>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -451,6 +463,9 @@ mod tests {
             reply_to_display_name: None,
             reply_to_text: None,
             action: false,
+            first_msg: false,
+            custom_reward_id: None,
+            system_msg_id: None,
             highlight_color: None,
             highlight_sound: false,
         };

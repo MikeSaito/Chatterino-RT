@@ -111,6 +111,9 @@ mod tests {
             reply_to_display_name: None,
             reply_to_text: None,
             action: false,
+            first_msg: false,
+            custom_reward_id: None,
+            system_msg_id: None,
             highlight_color: None,
         highlight_sound: false,
         }
@@ -180,6 +183,7 @@ mod tests {
             timestamp_ms: 1,
             system_text: "ann subscribed".into(),
             login: Some("ann".into()),
+            msg_id: None,
             privmsg: Some(Box::new(privmsg("inner-body", "ann", "hello sub"))),
             highlight_color: None,
         highlight_sound: false,

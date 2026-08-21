@@ -44,6 +44,9 @@ export type ChatEvent =
       replyToLogin?: string;
       replyToText?: string;
       action: boolean;
+      firstMsg?: boolean;
+      customRewardId?: string;
+      systemMsgId?: string;
       highlightColor?: string;
       highlightSound?: boolean;
     }
@@ -66,6 +69,7 @@ export type ChatEvent =
       timestampMs: number;
       systemText: string;
       login?: string;
+      msgId?: string;
       privmsg?: ChatEvent;
       highlightColor?: string;
       highlightSound?: boolean;

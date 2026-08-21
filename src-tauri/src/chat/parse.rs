@@ -116,9 +116,14 @@ fn parse_privmsg(
             reply_to_display_name: tags.get("reply-parent-display-name"),
             reply_to_text: tags.get("reply-parent-msg-body"),
             action,
+            first_msg: tags.get("first-msg").as_deref() == Some("1"),
+            custom_reward_id: tags
+                .get("custom-reward-id")
+                .filter(|s| !s.is_empty()),
+            system_msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
             text,
             highlight_color: None,
-        highlight_sound: false,
+            highlight_sound: false,
         },
         channel,
     }
@@ -193,8 +198,11 @@ fn parse_usernotice(
             reply_to_display_name: tags.get("reply-parent-display-name"),
             reply_to_text: tags.get("reply-parent-msg-body"),
             action: false,
+            first_msg: false,
+            custom_reward_id: None,
+            system_msg_id: None,
             highlight_color: None,
-        highlight_sound: false,
+            highlight_sound: false,
         })
     });
     ParsedLine::Event {
@@ -204,9 +212,10 @@ fn parse_usernotice(
             timestamp_ms: tags.timestamp(now_ms),
             system_text,
             login,
+            msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
             privmsg: attached,
             highlight_color: None,
-        highlight_sound: false,
+            highlight_sound: false,
         },
         channel,
     }
@@ -845,5 +854,41 @@ mod tests {
         shift_emote_spans_back(&mut spans, 5);
         assert_eq!(spans[0].start, 0);
         assert_eq!(spans[0].end, 5);
+    }
+
+    #[test]
+    fn parses_first_msg_reward_and_usernotice_msg_id() {
+        match parse_line(
+            "@badge-info=;badges=;color=;display-name=Ann;emotes=;first-msg=1;id=m1;mod=0;msg-id=highlighted-message;custom-reward-id=rew1;room-id=1;subscriber=0;tmi-sent-ts=10;user-id=9;user-type= :ann!ann@ann.tmi.twitch.tv PRIVMSG #xqc :hi",
+            1,
+        ) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Privmsg {
+                        first_msg,
+                        custom_reward_id,
+                        system_msg_id,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(first_msg);
+                assert_eq!(custom_reward_id.as_deref(), Some("rew1"));
+                assert_eq!(system_msg_id.as_deref(), Some("highlighted-message"));
+            }
+            other => panic!("{other:?}"),
+        }
+        match parse_line(
+            "@badge-info=;badges=;color=;display-name=Ann;emotes=;id=u1;login=ann;msg-id=resub;room-id=1;subscriber=1;system-msg=ann\\ssubscribed;tmi-sent-ts=10;user-id=9;user-type= :tmi.twitch.tv USERNOTICE #xqc",
+            2,
+        ) {
+            ParsedLine::Event {
+                event: ChatEvent::Usernotice { msg_id, .. },
+                ..
+            } => {
+                assert_eq!(msg_id.as_deref(), Some("resub"));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }
