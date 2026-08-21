@@ -206,7 +206,19 @@ pub async fn chat_send(
     #[allow(non_snake_case)]
     replyToId: Option<String>,
 ) -> Result<(), ApiError> {
-    let payload = format_outgoing(&text)?;
+    let mut payload = format_outgoing(&text)?;
+    let allow_dup = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        settings
+            .data
+            .knobs
+            .get("behaviour.allowDuplicateMessages")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true)
+    };
     let reply_to = match replyToId.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
@@ -225,15 +237,30 @@ pub async fn chat_send(
             "нужен вход Twitch, чтобы отправлять сообщения",
         ));
     }
+    if allow_dup {
+        let last = state
+            .last_sent
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        if last.get(&channel).map(|s| s.as_str()) == Some(payload.as_str()) {
+            payload = prepare_duplicate_message(&payload);
+        }
+    }
     send_cmd(
         &state,
         IrcCmd::Privmsg {
-            channel,
-            text: payload,
+            channel: channel.clone(),
+            text: payload.clone(),
             reply_to,
         },
     )
-    .await
+    .await?;
+    let mut last = state
+        .last_sent
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    last.insert(channel, payload);
+    Ok(())
 }
 
 #[tauri::command]
@@ -449,6 +476,39 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_string())
 }
 
+/// Chatterino MAGIC_MESSAGE_SUFFIX: space + U+034F (CGJ).
+const MAGIC_MESSAGE_SUFFIX: &str = " \u{034f}";
+
+/// When the same payload is resent, Twitch may drop it; mutate like stock.
+pub fn prepare_duplicate_message(message: &str) -> String {
+    let bytes = message.as_bytes();
+    if bytes.is_empty() {
+        return format!("{message}{MAGIC_MESSAGE_SUFFIX}");
+    }
+    let ignore_first = matches!(bytes[0], b'/' | b'.');
+    let mut space_index: Option<usize> = None;
+    let mut seen = 0u8;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b' ' {
+            seen += 1;
+            if !ignore_first || seen >= 2 {
+                space_index = Some(i);
+                break;
+            }
+        }
+    }
+    match space_index {
+        Some(i) => {
+            let mut out = String::with_capacity(message.len() + 1);
+            out.push_str(&message[..i]);
+            out.push_str("  ");
+            out.push_str(&message[i + 1..]);
+            out
+        }
+        None => format!("{message}{MAGIC_MESSAGE_SUFFIX}"),
+    }
+}
+
 fn validate_msg_id(id: &str) -> Result<String, ApiError> {
     if id.is_empty() || id.len() > 64 {
         return Err(ApiError::invalid("некорректный id ответа"));
@@ -521,6 +581,27 @@ mod tests {
         assert!(format_outgoing("/nope").is_err());
         let long = format!("/me {}", "a".repeat(500));
         assert!(format_outgoing(&long).is_err());
+    }
+
+    #[test]
+    fn duplicate_prep_magic_and_double_space() {
+        assert_eq!(
+            prepare_duplicate_message("hello"),
+            format!("hello{MAGIC_MESSAGE_SUFFIX}")
+        );
+        assert_eq!(prepare_duplicate_message("hello world"), "hello  world");
+        assert_eq!(
+            prepare_duplicate_message("/ban target reason"),
+            "/ban target  reason"
+        );
+        assert_eq!(
+            prepare_duplicate_message("/me"),
+            format!("/me{MAGIC_MESSAGE_SUFFIX}")
+        );
+        assert_eq!(
+            prepare_duplicate_message(".timeout user 1s"),
+            ".timeout user  1s"
+        );
     }
 
     #[test]

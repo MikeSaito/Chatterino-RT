@@ -846,6 +846,19 @@ button:disabled {
   align-items: flex-end;
 }
 
+#composer[hidden] {
+  display: none;
+}
+
+#composer-field {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 #emote-open {
   flex-shrink: 0;
   width: 36px;
@@ -860,6 +873,41 @@ button:disabled {
   resize: none;
   min-height: 40px;
   max-height: 72px;
+  width: 100%;
+}
+
+#composer.is-overflow #composer-input {
+  border-color: #e05555;
+}
+
+#composer-length {
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--c-muted);
+  line-height: 1;
+  padding-right: 2px;
+}
+
+#composer-length.is-over {
+  color: #e05555;
+  font-weight: 600;
+}
+
+#composer-input.is-self-pulse {
+  animation: composer-self-pulse 0.45s ease-out;
+}
+
+@keyframes composer-self-pulse {
+  0% {
+    background-color: color-mix(in srgb, #3cba54 35%, var(--c-input-bg));
+  }
+  100% {
+    background-color: var(--c-input-bg);
+  }
+}
+
+#chat-scroll-thumb.is-hidden-thumb {
+  visibility: hidden;
 }
 
 #usercard-modal {

@@ -64,13 +64,16 @@
             <form id="composer">
               <label class="sr-only" for="composer-input">сообщение</label>
               <button type="button" id="emote-open" title="Emotes">☺</button>
-              <textarea
-                id="composer-input"
-                name="message"
-                rows="2"
-                maxlength="500"
-                spellcheck="false"
-              ></textarea>
+              <div id="composer-field">
+                <textarea
+                  id="composer-input"
+                  name="message"
+                  rows="2"
+                  maxlength="500"
+                  spellcheck="false"
+                ></textarea>
+                <span id="composer-length" hidden aria-live="polite">0</span>
+              </div>
               <button
                 id="composer-send"
                 type="submit"

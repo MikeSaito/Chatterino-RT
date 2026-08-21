@@ -95,6 +95,8 @@ pub struct Shared {
     pub session: Arc<Mutex<SessionInner>>,
     pub settings: Arc<Mutex<SettingsInner>>,
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
+    /// Last successfully sent outbound PRIVMSG text per channel login.
+    pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 pub enum BatchSend {
@@ -127,6 +129,7 @@ impl Shared {
             session: Arc::new(Mutex::new(SessionInner::default())),
             settings: Arc::new(Mutex::new(SettingsInner::default())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
+            last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 

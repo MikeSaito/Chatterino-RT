@@ -14,6 +14,12 @@ import {
   resolveAction,
   type HotkeyAction,
 } from "./shell/hotkeys";
+import {
+  bindComposerChrome,
+  defaultComposerChrome,
+  parseMessageOverflow,
+  type ComposerChromeOpts,
+} from "./shell/composerUi";
 import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
@@ -51,6 +57,7 @@ async function boot(): Promise<void> {
   const composer = document.querySelector<HTMLFormElement>("#composer");
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
   const composerSend = document.querySelector<HTMLButtonElement>("#composer-send");
+  const composerLength = document.querySelector<HTMLElement>("#composer-length");
   const replyBar = document.querySelector<HTMLElement>("#reply-bar");
   const replyLabel = document.querySelector<HTMLElement>("#reply-label");
   const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
@@ -86,6 +93,7 @@ async function boot(): Promise<void> {
     !composer ||
     !composerInput ||
     !composerSend ||
+    !composerLength ||
     !replyBar ||
     !replyLabel ||
     !replyCancel ||
@@ -125,6 +133,14 @@ async function boot(): Promise<void> {
   const pasteEl = authPaste;
   const importBtn = authImport;
   const completeBox = completeList;
+  let composerOpts: ComposerChromeOpts = defaultComposerChrome();
+  const composerChrome = bindComposerChrome({
+    form: composer,
+    input: messageInput,
+    lengthEl: composerLength,
+    replyBar: replyBarEl,
+    getOpts: () => composerOpts,
+  });
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
     if (!li || !completeBox.contains(li)) {
@@ -162,6 +178,18 @@ async function boot(): Promise<void> {
         replyBtn.hidden = true;
         replyHover = null;
       }
+      composerOpts = {
+        showEmptyInput: data.knobs["appearance.showEmptyInput"] !== false,
+        showMessageLength: data.knobs["appearance.showMessageLength"] === true,
+        overflow: parseMessageOverflow(data.knobs["appearance.messageOverflow"]),
+        pulseOnSelf:
+          data.knobs["appearance.pulseTextInputOnSelfMessage"] === true,
+      };
+      composerChrome.sync();
+      scrollThumb.classList.toggle(
+        "is-hidden-thumb",
+        data.knobs["appearance.hideScrollbarThumb"] === true,
+      );
     },
   });
   bindScrollChrome({
@@ -484,6 +512,34 @@ async function boot(): Promise<void> {
     if (!applyingComplete) {
       clearComplete();
     }
+    composerChrome.sync();
+  });
+
+  window.addEventListener("keydown", (ev) => {
+    if (!composer.hidden || !lastAuth.canSend || sending) {
+      return;
+    }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) {
+      return;
+    }
+    if (ev.key.length !== 1) {
+      return;
+    }
+    const t = ev.target as HTMLElement | null;
+    if (
+      t &&
+      !composer.contains(t) &&
+      (t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.isContentEditable)
+    ) {
+      return;
+    }
+    ev.preventDefault();
+    messageInput.value = ev.key;
+    composer.hidden = false;
+    messageInput.focus();
+    composerChrome.sync();
   });
 
   messageInput.addEventListener("blur", () => {
@@ -580,12 +636,14 @@ async function boot(): Promise<void> {
     const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
     replyLabelEl.textContent = `Ответ @${login}: ${preview}`;
     replyBarEl.hidden = false;
+    composerChrome.sync();
   }
 
   function clearReply(): void {
     replyTarget = null;
     replyLabelEl.textContent = "";
     replyBarEl.hidden = true;
+    composerChrome.sync();
   }
 
   function applyAuth(info: AuthInfo): void {
@@ -624,6 +682,7 @@ async function boot(): Promise<void> {
     sendBtn.title = lastAuth.canSend
       ? ""
       : "Нужен вход Twitch и активный канал";
+    composerChrome.sync();
   }
 
   async function startLogin(): Promise<void> {
@@ -805,6 +864,7 @@ async function boot(): Promise<void> {
       messageInput.value = "";
       clearComplete();
       clearReply();
+      composerChrome.pulse();
     } catch (err) {
       statusEl.textContent = formatError(err);
     } finally {
@@ -979,6 +1039,10 @@ function formatError(err: unknown): string {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const composer = target.closest("#composer");
+  if (composer instanceof HTMLElement && composer.hidden) {
     return false;
   }
   if (target.isContentEditable) {
