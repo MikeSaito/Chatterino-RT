@@ -298,16 +298,103 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     if inner.path.as_os_str().is_empty() {
         return Err(ApiError::internal("каталог конфигурации не инициализирован"));
     }
+    let prev_flags = super::fetch::EmoteProviderFlags::from_knobs(&inner.data.knobs);
     save_file(&inner.path, &clean).map_err(|e| ApiError::internal(&e))?;
     inner.data = clean.clone();
     drop(inner);
+    let flags = super::fetch::EmoteProviderFlags::from_knobs(&clean.knobs);
     let bttv_live = clean
         .knobs
         .get("emotes.enableBTTVLiveUpdates")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     shared.notify_bttv(super::state::BttvCmd::SetEnabled(bttv_live));
+    shared.notify_event(super::state::EventCmd::SetEnabled(flags.seventv_event_api));
+    if prev_flags.catalog_reload_key() != flags.catalog_reload_key() {
+        spawn_emote_catalog_reload(shared);
+    }
     Ok(clean)
+}
+
+fn spawn_emote_catalog_reload(shared: &Shared) {
+    let shared = shared.clone();
+    tauri::async_runtime::spawn(async move {
+        let flags = super::fetch::EmoteProviderFlags::from_shared(&shared);
+        let Ok(set_id) = super::fetch::load_globals(&shared.catalog, flags).await else {
+            return;
+        };
+        if flags.seventv_global {
+            if let Some(set_id) = set_id {
+                shared.notify_event(super::state::EventCmd::SetGlobal { set_id });
+            }
+        } else {
+            shared.notify_event(super::state::EventCmd::ClearGlobal);
+        }
+        let active = shared
+            .hub
+            .lock()
+            .ok()
+            .and_then(|h| h.active.clone());
+        let Some(login) = active else {
+            return;
+        };
+        let room_id = shared
+            .snapshot_bttv_wanted()
+            .channel
+            .filter(|c| c.login == login)
+            .map(|c| c.room_id);
+        let Some(room_id) = room_id else {
+            if let Ok(mut cat) = shared.catalog.lock() {
+                if !flags.bttv_channel {
+                    cat.purge_channel(&login, "bttv");
+                }
+                if !flags.ffz_channel {
+                    cat.purge_channel(&login, "ffz");
+                }
+                if !flags.seventv_channel {
+                    cat.purge_channel(&login, "7tv");
+                }
+            }
+            if !flags.seventv_channel {
+                shared.notify_event(super::state::EventCmd::ClearChannel);
+            }
+            return;
+        };
+        let token = super::auth::oauth_token(&shared);
+        let client_id = super::auth::resolved_client_id(&shared);
+        let stv = super::fetch::load_channel(
+            &shared.catalog,
+            &shared.badges,
+            &shared.cheers,
+            &shared.hub,
+            &login,
+            &room_id,
+            token.as_deref(),
+            &client_id,
+            flags,
+        )
+        .await;
+        let still = shared
+            .hub
+            .lock()
+            .ok()
+            .and_then(|h| h.active.clone())
+            .is_some_and(|ch| ch == login);
+        if !still {
+            return;
+        }
+        if flags.seventv_channel {
+            if let Some((set_id, user_id)) = stv {
+                shared.notify_event(super::state::EventCmd::SetChannel {
+                    login,
+                    set_id,
+                    user_id,
+                });
+            }
+        } else {
+            shared.notify_event(super::state::EventCmd::ClearChannel);
+        }
+    });
 }
 
 pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {

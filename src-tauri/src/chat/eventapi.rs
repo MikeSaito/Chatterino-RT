@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::emotes::{Catalog, SetScope};
-use super::fetch::{self, parse_active_emote};
+use super::fetch::{self, parse_active_emote, EmoteProviderFlags};
 use super::state::{EventCmd, EventWanted, Shared};
 
 const EVENT_URL: &str = "wss://events.7tv.io/v3";
@@ -31,6 +31,14 @@ const MAX_WS_FRAME: usize = 64 * 1024;
 const MAX_SET_CHANGES: usize = 512;
 
 pub fn start(shared: Shared) -> Result<(), String> {
+    let enabled = EmoteProviderFlags::from_shared(&shared).seventv_event_api;
+    {
+        let mut wanted = shared
+            .event_wanted
+            .lock()
+            .map_err(|e| e.to_string())?;
+        wanted.enabled = enabled;
+    }
     let (tx, rx) = mpsc::unbounded_channel::<EventCmd>();
     {
         let mut slot = shared.event_tx.lock().map_err(|e| e.to_string())?;
@@ -51,6 +59,14 @@ async fn run_loop(shared: Shared, mut rx: mpsc::UnboundedReceiver<EventCmd>) {
     loop {
         if shutting_down(&shared) {
             break;
+        }
+        let wanted = shared.snapshot_event_wanted();
+        if !wanted.enabled {
+            match rx.recv().await {
+                None | Some(EventCmd::Shutdown) => break,
+                Some(cmd) => shared.apply_event_cmd(&cmd),
+            }
+            continue;
         }
         match connect_session(&shared, &mut rx).await {
             SessionEnd::Shutdown => break,
@@ -120,6 +136,10 @@ async fn connect_session(
                 if shutting_down(shared) {
                     let _ = send_ws(&mut write, Message::Close(None)).await;
                     return SessionEnd::Shutdown;
+                }
+                if !shared.snapshot_event_wanted().enabled {
+                    let _ = send_ws(&mut write, Message::Close(None)).await;
+                    return SessionEnd::Reconnect { wait: false };
                 }
                 if last_hb.elapsed() > heartbeat * 3 {
                     let _ = send_ws(&mut write, Message::Close(None)).await;
@@ -224,11 +244,15 @@ async fn connect_session(
 }
 
 fn handle_dispatch(shared: &Shared, data: &Value) -> bool {
+    if !shared.snapshot_event_wanted().enabled {
+        return false;
+    }
     let kind = data.get("type").and_then(Value::as_str).unwrap_or("");
     match kind {
         "emote_set.update" => {
+            let flags = EmoteProviderFlags::from_shared(shared);
             if let Ok(mut cat) = shared.catalog.lock() {
-                apply_emote_set_update(&mut cat, data);
+                apply_emote_set_update(&mut cat, data, flags);
             }
             false
         }
@@ -238,6 +262,10 @@ fn handle_dispatch(shared: &Shared, data: &Value) -> bool {
 }
 
 fn apply_user_set_switch(shared: &Shared, data: &Value) -> bool {
+    let flags = EmoteProviderFlags::from_shared(shared);
+    if !flags.seventv_channel {
+        return false;
+    }
     let wanted = shared.snapshot_event_wanted();
     let Some(ch) = wanted.channel.as_ref() else {
         return false;
@@ -278,8 +306,9 @@ fn apply_user_set_switch(shared: &Shared, data: &Value) -> bool {
     }
     let catalog = shared.catalog.clone();
     let hub = shared.hub.clone();
+    let show_unlisted = flags.show_unlisted_7tv;
     tauri::async_runtime::spawn(async move {
-        fill_switched_set(catalog, hub, login, new_set).await;
+        fill_switched_set(catalog, hub, login, new_set, show_unlisted).await;
     });
     true
 }
@@ -289,8 +318,9 @@ async fn fill_switched_set(
     hub: std::sync::Arc<std::sync::Mutex<super::hub::Hub>>,
     login: String,
     new_set: String,
+    show_unlisted: bool,
 ) {
-    let Some(incoming) = fetch::load_7tv_set(&new_set).await else {
+    let Some(incoming) = fetch::load_7tv_set(&new_set, show_unlisted).await else {
         return;
     };
     {
@@ -316,7 +346,11 @@ pub(crate) fn hello_interval_ms(data: &Value) -> Option<u64> {
         .filter(|ms| *ms >= 1_000 && *ms <= 120_000)
 }
 
-pub(crate) fn apply_emote_set_update(catalog: &mut Catalog, data: &Value) -> bool {
+pub(crate) fn apply_emote_set_update(
+    catalog: &mut Catalog,
+    data: &Value,
+    flags: EmoteProviderFlags,
+) -> bool {
     let body = data.get("body").unwrap_or(data);
     let Some(set_id) = body.get("id").and_then(Value::as_str) else {
         return false;
@@ -324,14 +358,27 @@ pub(crate) fn apply_emote_set_update(catalog: &mut Catalog, data: &Value) -> boo
     let Some(scope) = catalog.scope_for_set(set_id).cloned() else {
         return false;
     };
+    let allowed = match &scope {
+        SetScope::Global => flags.seventv_global,
+        SetScope::Channel(_) => flags.seventv_channel,
+    };
+    if !allowed {
+        return false;
+    }
+    let show_unlisted = flags.show_unlisted_7tv;
     let mut changed = false;
-    changed |= apply_pushed(catalog, &scope, body.get("pushed"));
-    changed |= apply_updated(catalog, &scope, body.get("updated"));
+    changed |= apply_pushed(catalog, &scope, body.get("pushed"), show_unlisted);
+    changed |= apply_updated(catalog, &scope, body.get("updated"), show_unlisted);
     changed |= apply_pulled(catalog, &scope, body.get("pulled"));
     changed
 }
 
-fn apply_pushed(catalog: &mut Catalog, scope: &SetScope, arr: Option<&Value>) -> bool {
+fn apply_pushed(
+    catalog: &mut Catalog,
+    scope: &SetScope,
+    arr: Option<&Value>,
+    show_unlisted: bool,
+) -> bool {
     let Some(items) = change_items(arr) else {
         return false;
     };
@@ -343,7 +390,7 @@ fn apply_pushed(catalog: &mut Catalog, scope: &SetScope, arr: Option<&Value>) ->
         let Some(value) = item.get("value") else {
             continue;
         };
-        let Some((name, def)) = parse_active_emote(value) else {
+        let Some((name, def)) = parse_active_emote(value, show_unlisted) else {
             continue;
         };
         catalog.upsert_7tv(scope, name, def);
@@ -374,7 +421,12 @@ fn apply_pulled(catalog: &mut Catalog, scope: &SetScope, arr: Option<&Value>) ->
     changed
 }
 
-fn apply_updated(catalog: &mut Catalog, scope: &SetScope, arr: Option<&Value>) -> bool {
+fn apply_updated(
+    catalog: &mut Catalog,
+    scope: &SetScope,
+    arr: Option<&Value>,
+    show_unlisted: bool,
+) -> bool {
     let Some(items) = change_items(arr) else {
         return false;
     };
@@ -391,7 +443,7 @@ fn apply_updated(catalog: &mut Catalog, scope: &SetScope, arr: Option<&Value>) -
         let Some(value) = item.get("value") else {
             continue;
         };
-        let Some((name, def)) = parse_active_emote(value) else {
+        let Some((name, def)) = parse_active_emote(value, show_unlisted) else {
             continue;
         };
         if !old_name.is_empty() && old_name != name {
@@ -460,12 +512,14 @@ where
 {
     let mut want_sets = std::collections::HashSet::new();
     let mut want_users = std::collections::HashSet::new();
-    if let Some(id) = wanted.global_set.as_ref() {
-        want_sets.insert(id.clone());
-    }
-    if let Some(ch) = wanted.channel.as_ref() {
-        want_sets.insert(ch.set_id.clone());
-        want_users.insert(ch.user_id.clone());
+    if wanted.enabled {
+        if let Some(id) = wanted.global_set.as_ref() {
+            want_sets.insert(id.clone());
+        }
+        if let Some(ch) = wanted.channel.as_ref() {
+            want_sets.insert(ch.set_id.clone());
+            want_users.insert(ch.user_id.clone());
+        }
     }
     let unsub_sets: Vec<String> = live_sets.difference(&want_sets).cloned().collect();
     let unsub_users: Vec<String> = live_users.difference(&want_users).cloned().collect();
@@ -562,7 +616,7 @@ mod tests {
                 "pushed": [{ "key": "emotes", "value": active_emote("cvHazmat", 1) }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data));
+        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         let def = cat.lookup("xqc", "cvHazmat").expect("inserted");
         assert!(def.zero_width);
         assert_eq!(def.provider, "7tv");
@@ -588,7 +642,7 @@ mod tests {
                 "pulled": [{ "key": "emotes", "old_value": { "id": "abc", "name": "cvHazmat" } }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data));
+        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         assert!(cat.lookup("xqc", "cvHazmat").is_none());
     }
 
@@ -616,7 +670,7 @@ mod tests {
                 }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data));
+        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         assert!(cat.lookup("xqc", "oldName").is_none());
         assert!(cat.lookup("xqc", "newName").is_some());
     }
@@ -631,7 +685,7 @@ mod tests {
                 "pushed": [{ "key": "emotes", "value": active_emote("cvHazmat", 1) }]
             }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data));
+        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         assert!(cat.lookup("xqc", "cvHazmat").is_none());
     }
 
@@ -712,7 +766,7 @@ mod tests {
                 }]
             }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data));
+        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         assert!(cat.lookup("xqc", "oldName").is_some());
         assert!(cat.lookup("xqc", "newName").is_none());
     }
@@ -732,7 +786,7 @@ mod tests {
             "type": "emote_set.update",
             "body": { "id": "set1", "pushed": pushed }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data));
+        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
         assert!(cat.lookup("xqc", "e0").is_none());
     }
 }

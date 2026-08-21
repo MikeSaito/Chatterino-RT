@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::emotes::EmoteDef;
-use super::fetch::safe_object_id;
+use super::fetch::{safe_object_id, EmoteProviderFlags};
 use super::state::{BttvCmd, Shared};
 
 const BTTV_WS: &str = "wss://sockets.betterttv.net/ws";
@@ -267,6 +267,9 @@ fn handle_text(shared: &Shared, text: &str) {
 pub fn apply_event(shared: &Shared, root: &Value) {
     let wanted = shared.snapshot_bttv_wanted();
     if !wanted.enabled {
+        return;
+    }
+    if !EmoteProviderFlags::from_shared(shared).bttv_channel {
         return;
     }
     let Some(channel) = wanted.channel.as_ref() else {

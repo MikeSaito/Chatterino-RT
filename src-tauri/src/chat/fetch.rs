@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -7,32 +8,128 @@ use super::cheers::CheerCatalog;
 use super::emotes::{Catalog, EmoteDef, SetScope};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
+use super::state::Shared;
 
 const ATTEMPTS: u32 = 3;
 
-pub async fn load_globals(catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>) -> Option<String> {
+/// Show-provider knobs (defaults match Settings catalog / Chatterino).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmoteProviderFlags {
+    pub bttv_global: bool,
+    pub bttv_channel: bool,
+    pub ffz_global: bool,
+    pub ffz_channel: bool,
+    pub seventv_global: bool,
+    pub seventv_channel: bool,
+    pub show_unlisted_7tv: bool,
+    pub seventv_event_api: bool,
+}
+
+impl Default for EmoteProviderFlags {
+    fn default() -> Self {
+        Self {
+            bttv_global: true,
+            bttv_channel: true,
+            ffz_global: true,
+            ffz_channel: true,
+            seventv_global: true,
+            seventv_channel: true,
+            show_unlisted_7tv: false,
+            seventv_event_api: true,
+        }
+    }
+}
+
+impl EmoteProviderFlags {
+    pub fn from_knobs(knobs: &BTreeMap<String, Value>) -> Self {
+        Self {
+            bttv_global: knob_bool(knobs, "emotes.enableBTTVGlobalEmotes", true),
+            bttv_channel: knob_bool(knobs, "emotes.enableBTTVChannelEmotes", true),
+            ffz_global: knob_bool(knobs, "emotes.enableFFZGlobalEmotes", true),
+            ffz_channel: knob_bool(knobs, "emotes.enableFFZChannelEmotes", true),
+            seventv_global: knob_bool(knobs, "emotes.enableSevenTVGlobalEmotes", true),
+            seventv_channel: knob_bool(knobs, "emotes.enableSevenTVChannelEmotes", true),
+            show_unlisted_7tv: knob_bool(knobs, "emotes.showUnlistedSevenTVEmotes", false),
+            seventv_event_api: knob_bool(knobs, "emotes.enableSevenTVEventAPI", true),
+        }
+    }
+
+    pub fn from_shared(shared: &Shared) -> Self {
+        shared
+            .settings
+            .lock()
+            .ok()
+            .map(|inner| Self::from_knobs(&inner.data.knobs))
+            .unwrap_or_default()
+    }
+
+    /// Knobs that require Catalog HTTP reload (not EventAPI enable alone).
+    pub fn catalog_reload_key(self) -> (bool, bool, bool, bool, bool, bool, bool) {
+        (
+            self.bttv_global,
+            self.bttv_channel,
+            self.ffz_global,
+            self.ffz_channel,
+            self.seventv_global,
+            self.seventv_channel,
+            self.show_unlisted_7tv,
+        )
+    }
+}
+
+fn knob_bool(knobs: &BTreeMap<String, Value>, key: &str, default: bool) -> bool {
+    knobs
+        .get(key)
+        .and_then(Value::as_bool)
+        .unwrap_or(default)
+}
+
+pub async fn load_globals(
+    catalog: &std::sync::Arc<std::sync::Mutex<Catalog>>,
+    flags: EmoteProviderFlags,
+) -> Result<Option<String>, ()> {
+    let gen = {
+        let Ok(mut cat) = catalog.lock() else {
+            return Err(());
+        };
+        cat.bump_global_load()
+    };
     let client = http_client();
     let mut map = std::collections::HashMap::new();
-    if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await {
-        collect_bttv(&list, &mut map);
+    if flags.bttv_global {
+        if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await
+        {
+            collect_bttv(&list, &mut map);
+        }
     }
-    if let Ok(v) = get_json(&client, "https://api.frankerfacez.com/v1/set/global").await {
-        collect_ffz_sets(&v, &mut map);
+    if flags.ffz_global {
+        if let Ok(v) = get_json(&client, "https://api.frankerfacez.com/v1/set/global").await {
+            collect_ffz_sets(&v, &mut map);
+        }
     }
     let mut global_set_id = None;
-    if let Ok(v) = get_json(&client, "https://7tv.io/v3/emote-sets/global").await {
-        global_set_id = object_id(v.get("id"));
-        collect_7tv_set(&v, &mut map);
-    }
-    if let Ok(mut cat) = catalog.lock() {
-        for (k, v) in map {
-            cat.insert_global(k, v);
-        }
-        if let Some(id) = global_set_id.as_ref() {
-            cat.bind_set(id.clone(), SetScope::Global);
+    if flags.seventv_global {
+        if let Ok(v) = get_json(&client, "https://7tv.io/v3/emote-sets/global").await {
+            global_set_id = object_id(v.get("id"));
+            collect_7tv_set(&v, &mut map, flags.show_unlisted_7tv);
         }
     }
-    global_set_id
+    let Ok(mut cat) = catalog.lock() else {
+        return Err(());
+    };
+    if cat.global_load_gen() != gen {
+        return Err(());
+    }
+    cat.purge_global("bttv");
+    cat.purge_global("ffz");
+    cat.purge_global("7tv");
+    for (k, v) in map {
+        cat.insert_global(k, v);
+    }
+    if let Some(id) = global_set_id.as_ref() {
+        cat.bind_set(id.clone(), SetScope::Global);
+    }
+    Ok(global_set_id)
 }
 
 pub async fn load_channel(
@@ -44,6 +141,7 @@ pub async fn load_channel(
     room_id: &str,
     token: Option<&str>,
     client_id: &str,
+    flags: EmoteProviderFlags,
 ) -> Option<(String, String)> {
     let gen = {
         let Ok(h) = hub.lock() else {
@@ -59,28 +157,34 @@ pub async fn load_channel(
     };
     let client = http_client();
     let mut map = std::collections::HashMap::new();
-    let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
-    if let Ok(v) = get_json(&client, &bttv_url).await {
-        if let Some(arr) = v.get("channelEmotes") {
-            collect_bttv(arr, &mut map);
-        }
-        if let Some(arr) = v.get("sharedEmotes") {
-            collect_bttv(arr, &mut map);
+    if flags.bttv_channel {
+        let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
+        if let Ok(v) = get_json(&client, &bttv_url).await {
+            if let Some(arr) = v.get("channelEmotes") {
+                collect_bttv(arr, &mut map);
+            }
+            if let Some(arr) = v.get("sharedEmotes") {
+                collect_bttv(arr, &mut map);
+            }
         }
     }
-    let ffz_url = format!("https://api.frankerfacez.com/v1/room/{login}");
-    if let Ok(v) = get_json(&client, &ffz_url).await {
-        collect_ffz_sets(&v, &mut map);
+    if flags.ffz_channel {
+        let ffz_url = format!("https://api.frankerfacez.com/v1/room/{login}");
+        if let Ok(v) = get_json(&client, &ffz_url).await {
+            collect_ffz_sets(&v, &mut map);
+        }
     }
     let mut seventv = None;
-    let stv_url = format!("https://7tv.io/v3/users/twitch/{room_id}");
-    if let Ok(v) = get_json(&client, &stv_url).await {
-        let user_id = object_id(v.get("id"));
-        if let Some(set) = v.get("emote_set") {
-            let set_id = object_id(set.get("id"));
-            collect_7tv_set(set, &mut map);
-            if let (Some(set_id), Some(user_id)) = (set_id, user_id) {
-                seventv = Some((set_id, user_id));
+    if flags.seventv_channel {
+        let stv_url = format!("https://7tv.io/v3/users/twitch/{room_id}");
+        if let Ok(v) = get_json(&client, &stv_url).await {
+            let user_id = object_id(v.get("id"));
+            if let Some(set) = v.get("emote_set") {
+                let set_id = object_id(set.get("id"));
+                collect_7tv_set(set, &mut map, flags.show_unlisted_7tv);
+                if let (Some(set_id), Some(user_id)) = (set_id, user_id) {
+                    seventv = Some((set_id, user_id));
+                }
             }
         }
     }
@@ -89,11 +193,11 @@ pub async fn load_channel(
         if cat.load_gen() != gen {
             return;
         }
-        if !map.is_empty() {
-            cat.replace_channel(login.to_string(), map);
-        }
+        cat.replace_channel_third_party(login, map);
         if let Some((set_id, _)) = seventv.as_ref() {
             cat.bind_set(set_id.clone(), SetScope::Channel(login.to_string()));
+        } else {
+            cat.purge_channel(login, "7tv");
         }
         applied = true;
     });
@@ -115,7 +219,10 @@ pub async fn load_channel(
     seventv
 }
 
-pub async fn load_7tv_set(set_id: &str) -> Option<std::collections::HashMap<String, EmoteDef>> {
+pub async fn load_7tv_set(
+    set_id: &str,
+    show_unlisted: bool,
+) -> Option<std::collections::HashMap<String, EmoteDef>> {
     if !safe_object_id(set_id) {
         return None;
     }
@@ -123,7 +230,7 @@ pub async fn load_7tv_set(set_id: &str) -> Option<std::collections::HashMap<Stri
     let url = format!("https://7tv.io/v3/emote-sets/{set_id}");
     let v = get_json(&client, &url).await.ok()?;
     let mut map = std::collections::HashMap::new();
-    collect_7tv_set(&v, &mut map);
+    collect_7tv_set(&v, &mut map, show_unlisted);
     Some(map)
 }
 
@@ -223,22 +330,33 @@ fn collect_ffz_sets(value: &Value, map: &mut std::collections::HashMap<String, E
     }
 }
 
-fn collect_7tv_set(value: &Value, map: &mut std::collections::HashMap<String, EmoteDef>) {
+fn collect_7tv_set(
+    value: &Value,
+    map: &mut std::collections::HashMap<String, EmoteDef>,
+    show_unlisted: bool,
+) {
     let emotes = value.get("emotes").and_then(Value::as_array);
     let Some(emotes) = emotes else { return };
     for item in emotes {
-        if let Some((name, def)) = parse_active_emote(item) {
+        if let Some((name, def)) = parse_active_emote(item, show_unlisted) {
             map.insert(name, def);
         }
     }
 }
 
-pub(crate) fn parse_active_emote(item: &Value) -> Option<(String, EmoteDef)> {
+pub(crate) fn parse_active_emote(item: &Value, show_unlisted: bool) -> Option<(String, EmoteDef)> {
     let name = item.get("name").and_then(Value::as_str).unwrap_or("");
     if name.is_empty() || name.len() > 100 {
         return None;
     }
     let data = item.get("data")?;
+    let listed = data
+        .get("listed")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if !listed && !show_unlisted {
+        return None;
+    }
     let id = data.get("id").and_then(Value::as_str).unwrap_or("");
     if !safe_object_id(id) {
         return None;
@@ -376,7 +494,7 @@ mod tests {
     #[test]
     fn seventv_flags_bit0_is_zero_width() {
         let mut map = std::collections::HashMap::new();
-        collect_7tv_set(&sample_7tv(1), &mut map);
+        collect_7tv_set(&sample_7tv(1), &mut map, false);
         let def = map.get("cvHazmat").expect("emote");
         assert!(def.zero_width);
         assert_eq!(def.provider, "7tv");
@@ -385,7 +503,7 @@ mod tests {
     #[test]
     fn seventv_flags_unset_is_not_zero_width() {
         let mut map = std::collections::HashMap::new();
-        collect_7tv_set(&sample_7tv(0), &mut map);
+        collect_7tv_set(&sample_7tv(0), &mut map, false);
         assert!(!map.get("cvHazmat").expect("emote").zero_width);
     }
 
@@ -448,7 +566,7 @@ mod tests {
                 }
             }
         });
-        assert!(parse_active_emote(&evil).is_none());
+        assert!(parse_active_emote(&evil, false).is_none());
         let js = serde_json::json!({
             "id": "abc",
             "name": "cvHazmat",
@@ -460,13 +578,13 @@ mod tests {
                 }
             }
         });
-        assert!(parse_active_emote(&js).is_none());
+        assert!(parse_active_emote(&js, false).is_none());
         let missing = serde_json::json!({
             "id": "abc",
             "name": "cvHazmat",
             "flags": 0
         });
-        assert!(parse_active_emote(&missing).is_none());
+        assert!(parse_active_emote(&missing, false).is_none());
         let bad_id = serde_json::json!({
             "name": "cvHazmat",
             "data": {
@@ -477,6 +595,37 @@ mod tests {
                 }
             }
         });
-        assert!(parse_active_emote(&bad_id).is_none());
+        assert!(parse_active_emote(&bad_id, false).is_none());
+    }
+
+    #[test]
+    fn seventv_unlisted_respects_flag() {
+        let item = serde_json::json!({
+            "name": "Hidden",
+            "flags": 0,
+            "data": {
+                "id": "abc",
+                "listed": false,
+                "host": {
+                    "url": "//cdn.7tv.app/emote/abc",
+                    "files": [{"name": "1x.webp"}]
+                }
+            }
+        });
+        assert!(parse_active_emote(&item, false).is_none());
+        assert!(parse_active_emote(&item, true).is_some());
+    }
+
+    #[test]
+    fn provider_flags_defaults_when_knobs_absent() {
+        let flags = EmoteProviderFlags::from_knobs(&BTreeMap::new());
+        assert!(flags.bttv_global);
+        assert!(flags.bttv_channel);
+        assert!(flags.ffz_global);
+        assert!(flags.ffz_channel);
+        assert!(flags.seventv_global);
+        assert!(flags.seventv_channel);
+        assert!(!flags.show_unlisted_7tv);
+        assert!(flags.seventv_event_api);
     }
 }

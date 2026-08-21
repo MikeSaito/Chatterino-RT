@@ -39,6 +39,8 @@ pub enum EventCmd {
         user_id: String,
     },
     ClearChannel,
+    ClearGlobal,
+    SetEnabled(bool),
     Shutdown,
 }
 
@@ -50,10 +52,21 @@ pub enum BttvCmd {
     Shutdown,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventWanted {
+    pub enabled: bool,
     pub global_set: Option<String>,
     pub channel: Option<EventChannelWanted>,
+}
+
+impl Default for EventWanted {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            global_set: None,
+            channel: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,7 +213,7 @@ impl Shared {
             .lock()
             .ok()
             .map(|w| w.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(EventWanted::default)
     }
 
     pub fn apply_event_cmd(&self, cmd: &EventCmd) {
@@ -233,6 +246,16 @@ impl Shared {
             EventCmd::ClearChannel => {
                 if let Ok(mut wanted) = self.event_wanted.lock() {
                     wanted.channel = None;
+                }
+            }
+            EventCmd::ClearGlobal => {
+                if let Ok(mut wanted) = self.event_wanted.lock() {
+                    wanted.global_set = None;
+                }
+            }
+            EventCmd::SetEnabled(enabled) => {
+                if let Ok(mut wanted) = self.event_wanted.lock() {
+                    wanted.enabled = *enabled;
                 }
             }
             EventCmd::Shutdown => {

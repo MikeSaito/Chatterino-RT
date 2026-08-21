@@ -1036,7 +1036,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
       cb(
         "7tv-live",
         "emotes.enableSevenTVEventAPI",
-        "Enable 7TV live emote updates (requires restart)",
+        "Enable 7TV live emote updates",
         true,
         "seventv",
       ),

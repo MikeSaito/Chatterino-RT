@@ -38,8 +38,15 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 }
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
-    if let Some(set_id) = fetch::load_globals(&shared.catalog).await {
-        shared.notify_event(EventCmd::SetGlobal { set_id });
+    let flags = fetch::EmoteProviderFlags::from_shared(&shared);
+    if let Ok(set_id) = fetch::load_globals(&shared.catalog, flags).await {
+        if flags.seventv_global {
+            if let Some(set_id) = set_id {
+                shared.notify_event(EventCmd::SetGlobal { set_id });
+            }
+        } else {
+            shared.notify_event(EventCmd::ClearGlobal);
+        }
     }
     let mut wanted: HashSet<String> = HashSet::new();
     let mut last_error: Option<String> = None;
@@ -918,6 +925,7 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
     let room_for_bttv = room_id.clone();
+    let flags = fetch::EmoteProviderFlags::from_shared(shared);
     tauri::async_runtime::spawn(async move {
         let stv = fetch::load_channel(
             &cat,
@@ -928,6 +936,7 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
             &room_id,
             token.as_deref(),
             &client_id,
+            flags,
         )
         .await;
         let still = hub
@@ -938,12 +947,16 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
         if !still {
             return;
         }
-        if let Some((set_id, user_id)) = stv {
-            events.notify_event(EventCmd::SetChannel {
-                login: login.clone(),
-                set_id,
-                user_id,
-            });
+        if flags.seventv_channel {
+            if let Some((set_id, user_id)) = stv {
+                events.notify_event(EventCmd::SetChannel {
+                    login: login.clone(),
+                    set_id,
+                    user_id,
+                });
+            }
+        } else {
+            events.notify_event(EventCmd::ClearChannel);
         }
         events.notify_bttv(BttvCmd::SetChannel {
             login,

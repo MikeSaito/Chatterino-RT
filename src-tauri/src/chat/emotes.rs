@@ -20,6 +20,7 @@ pub struct Catalog {
     channel: std::collections::HashMap<String, std::collections::HashMap<String, EmoteDef>>,
     set_scope: std::collections::HashMap<String, SetScope>,
     load_gen: u64,
+    global_load_gen: u64,
 }
 
 impl Catalog {
@@ -30,6 +31,15 @@ impl Catalog {
 
     pub fn load_gen(&self) -> u64 {
         self.load_gen
+    }
+
+    pub fn bump_global_load(&mut self) -> u64 {
+        self.global_load_gen = self.global_load_gen.wrapping_add(1);
+        self.global_load_gen
+    }
+
+    pub fn global_load_gen(&self) -> u64 {
+        self.global_load_gen
     }
 
     pub fn insert_global(&mut self, code: String, def: EmoteDef) {
@@ -58,12 +68,49 @@ impl Catalog {
         self.channel.insert(channel, map);
     }
 
+    /// Replace third-party channel emotes while keeping existing Twitch entries.
+    pub fn replace_channel_third_party(
+        &mut self,
+        channel: &str,
+        incoming: std::collections::HashMap<String, EmoteDef>,
+    ) {
+        let mut next = incoming;
+        if let Some(prev) = self.channel.get(channel) {
+            for (code, def) in prev {
+                if def.provider == "twitch" {
+                    next.entry(code.clone()).or_insert_with(|| def.clone());
+                }
+            }
+        }
+        self.channel.insert(channel.to_string(), next);
+    }
+
     pub fn drop_channel(&mut self, channel: &str) {
         self.channel.remove(channel);
         self.set_scope.retain(|_, scope| match scope {
             SetScope::Global => true,
             SetScope::Channel(ch) => ch != channel,
         });
+    }
+
+    /// Remove all emotes of `provider` from the global map (Twitch globals untouched).
+    pub fn purge_global(&mut self, provider: &str) {
+        self.global.retain(|_, d| d.provider != provider);
+        if provider == "7tv" {
+            self.set_scope
+                .retain(|_, scope| !matches!(scope, SetScope::Global));
+        }
+    }
+
+    /// Remove all emotes of `provider` from one channel map.
+    pub fn purge_channel(&mut self, channel: &str, provider: &str) {
+        if let Some(map) = self.channel.get_mut(channel) {
+            map.retain(|_, d| d.provider != provider);
+        }
+        if provider == "7tv" {
+            let scope = SetScope::Channel(channel.to_string());
+            self.set_scope.retain(|_, s| s != &scope);
+        }
     }
 
     pub fn clear_channels(&mut self) {
@@ -431,6 +478,64 @@ mod tests {
         assert_eq!(cat.scope_for_set("gid"), Some(&SetScope::Global));
         cat.clear_channels();
         assert_eq!(cat.scope_for_set("gid"), Some(&SetScope::Global));
+    }
+
+    #[test]
+    fn purge_provider_leaves_others() {
+        let mut cat = Catalog::default();
+        cat.insert_global("Kappa".into(), def("25", "twitch", false));
+        cat.insert_global("Wide".into(), def("b", "bttv", false));
+        cat.insert_global("Hand".into(), def("f", "ffz", false));
+        let mut map = std::collections::HashMap::new();
+        map.insert("ChanB".into(), def("cb", "bttv", false));
+        map.insert("ChanF".into(), def("cf", "ffz", false));
+        cat.replace_channel("xqc".into(), map);
+        cat.bind_set("gset".into(), SetScope::Global);
+        cat.bind_set("cset".into(), SetScope::Channel("xqc".into()));
+
+        cat.purge_global("bttv");
+        assert!(cat.lookup("xqc", "Wide").is_none());
+        assert_eq!(
+            cat.lookup("xqc", "Kappa").map(|d| d.provider.as_str()),
+            Some("twitch")
+        );
+        assert_eq!(
+            cat.lookup("xqc", "Hand").map(|d| d.provider.as_str()),
+            Some("ffz")
+        );
+
+        cat.purge_channel("xqc", "ffz");
+        assert!(cat.lookup("xqc", "ChanF").is_none());
+        assert_eq!(
+            cat.lookup("xqc", "ChanB").map(|d| d.provider.as_str()),
+            Some("bttv")
+        );
+
+        cat.purge_global("7tv");
+        assert!(cat.scope_for_set("gset").is_none());
+        cat.purge_channel("xqc", "7tv");
+        assert!(cat.scope_for_set("cset").is_none());
+    }
+
+    #[test]
+    fn replace_channel_third_party_keeps_twitch() {
+        let mut cat = Catalog::default();
+        let mut map = std::collections::HashMap::new();
+        map.insert("Pog".into(), def("b", "bttv", false));
+        map.insert("Kappa".into(), def("25", "twitch", false));
+        cat.replace_channel("xqc".into(), map);
+        let mut incoming = std::collections::HashMap::new();
+        incoming.insert("Hand".into(), def("f", "ffz", false));
+        cat.replace_channel_third_party("xqc", incoming);
+        assert_eq!(
+            cat.lookup("xqc", "Kappa").map(|d| d.provider.as_str()),
+            Some("twitch")
+        );
+        assert_eq!(
+            cat.lookup("xqc", "Hand").map(|d| d.provider.as_str()),
+            Some("ffz")
+        );
+        assert!(cat.lookup("xqc", "Pog").is_none());
     }
 
     #[test]
