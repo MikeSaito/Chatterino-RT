@@ -234,6 +234,7 @@ function paintRuntime(
       zeroWidth: data.knobs["emotes.enableZeroWidthEmotes"] !== false,
       animate: data.knobs["emotes.animateEmotes"] !== false,
       animateOnlyFocused: data.knobs["appearance.animationsWhenFocused"] === true,
+      removeSpaces: data.knobs["emotes.removeSpacesBetweenEmotes"] === true,
     },
   );
   const root = document.documentElement;

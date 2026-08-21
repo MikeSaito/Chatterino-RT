@@ -155,6 +155,7 @@ export class MessageRing {
   private emoteScale = 1;
   private enableEmoteImages = true;
   private enableZeroWidthEmotes = true;
+  private removeSpacesBetweenEmotes = false;
   private animateEmotes = true;
   private findHitId = "";
   private hideModerated = false;
@@ -532,6 +533,7 @@ export class MessageRing {
       zeroWidth?: boolean;
       animate?: boolean;
       animateOnlyFocused?: boolean;
+      removeSpaces?: boolean;
     },
   ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
@@ -547,6 +549,8 @@ export class MessageRing {
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
     this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
     this.enableZeroWidthEmotes = emotes?.zeroWidth ?? this.enableZeroWidthEmotes;
+    this.removeSpacesBetweenEmotes =
+      emotes?.removeSpaces ?? this.removeSpacesBetweenEmotes;
     this.animateEmotes = emotes?.animate ?? this.animateEmotes;
     this.emoteTicker.configure({
       animate: this.animateEmotes,
@@ -1971,6 +1975,7 @@ export class MessageRing {
       emoteMinCols,
       maskEmotes: images,
       enableZeroWidth: images && this.enableZeroWidthEmotes,
+      removeSpacesBetweenEmotes: images && this.removeSpacesBetweenEmotes,
       maskMentions: mentions,
     };
   }

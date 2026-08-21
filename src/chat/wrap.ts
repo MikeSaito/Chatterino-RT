@@ -22,6 +22,8 @@ export type WrapOptions = {
   maskEmotes?: boolean;
   /** false: zeroWidth игнорируется. */
   enableZeroWidth?: boolean;
+  /** Схлопнуть один ASCII space между соседними non-ZW эмодзи (stock removeSpacesBetweenEmotes). */
+  removeSpacesBetweenEmotes?: boolean;
   /** Диапазоны mention: в renderWrapped заменить пробелами (overlay BitmapText). */
   maskMentions?: readonly WrapRange[];
 };
@@ -30,7 +32,15 @@ type WrapCtx = {
   emoteMinCols: number;
   maskEmotes: boolean;
   enableZeroWidth: boolean;
+  removeSpacesBetweenEmotes: boolean;
   maskMentions: readonly WrapRange[];
+  /** Готовые строки: hug только если оба non-ZW на одной линии (stock same-line). */
+  lines?: readonly WrapLine[];
+};
+
+type WrapBudget = {
+  used: number;
+  width: number;
 };
 
 const WRAP_MAX_LINES = 48;
@@ -58,6 +68,7 @@ function ctxFrom(opts?: WrapOptions): WrapCtx {
     maskEmotes: opts?.maskEmotes !== false,
     maskMentions: opts?.maskMentions ?? [],
     enableZeroWidth: opts?.enableZeroWidth !== false,
+    removeSpacesBetweenEmotes: opts?.removeSpacesBetweenEmotes === true,
   };
 }
 
@@ -97,6 +108,7 @@ export function renderWrapped(
   opts?: WrapOptions,
 ): string {
   const ctx = ctxFrom(opts);
+  ctx.lines = lines;
   return lines.map((line) => maskSlice(text, line.start, line.end, emotes, ctx)).join("\n");
 }
 
@@ -108,6 +120,7 @@ export function indexToLineCol(
   opts?: WrapOptions,
 ): { line: number; col: number } | null {
   const ctx = ctxFrom(opts);
+  ctx.lines = lines;
   for (let line = 0; line < lines.length; line += 1) {
     const row = lines[line];
     if (index >= row.start && index < row.end) {
@@ -126,6 +139,7 @@ export function lineColToIndex(
   opts?: WrapOptions,
 ): number | null {
   const ctx = ctxFrom(opts);
+  ctx.lines = lines;
   if (line < 0 || line >= lines.length) {
     return null;
   }
@@ -224,7 +238,7 @@ function takeWidth(
   let end = start;
   let i = start;
   while (i < limit) {
-    const step = advanceUnit(text, i, limit, emotes, ctx);
+    const step = advanceUnit(text, i, limit, emotes, ctx, { used, width });
     const w = step.width;
     if (w > 0 && used + w > width && used > 0) {
       break;
@@ -299,7 +313,7 @@ function maskSlice(
       i = next;
       continue;
     }
-    if (collapsed(emotes, i, ctx)) {
+    if (collapsed(text, emotes, i, ctx)) {
       i = nextUtf16(text, i);
       continue;
     }
@@ -381,7 +395,7 @@ function snapWord(
   ctx: WrapCtx,
 ): number {
   for (let k = end - 1; k > start; k -= 1) {
-    if (text.charCodeAt(k) === 32 && !collapsed(emotes, k, ctx)) {
+    if (text.charCodeAt(k) === 32 && !collapsed(text, emotes, k, ctx)) {
       return k + 1;
     }
   }
@@ -394,8 +408,9 @@ function advanceUnit(
   limit: number,
   emotes: readonly WrapEmote[],
   ctx: WrapCtx,
+  budget?: WrapBudget,
 ): { next: number; width: number } {
-  if (collapsed(emotes, i, ctx)) {
+  if (collapsed(text, emotes, i, ctx, budget)) {
     return { next: Math.min(limit, nextUtf16(text, i)), width: 0 };
   }
   const span = emoteAt(emotes, i, ctx);
@@ -469,11 +484,105 @@ function isZeroWidth(span: WrapEmote, ctx: WrapCtx): boolean {
   return ctx.enableZeroWidth && span.zeroWidth === true;
 }
 
-function collapsed(
+function hugPrevNonZw(
+  emotes: readonly WrapEmote[],
+  spaceIndex: number,
+  ctx: WrapCtx,
+): WrapEmote | undefined {
+  for (const span of emotes) {
+    if (!isZeroWidth(span, ctx) && span.end === spaceIndex) {
+      return span;
+    }
+  }
+  if (!ctx.enableZeroWidth) {
+    return undefined;
+  }
+  for (let i = 0; i < emotes.length; i += 1) {
+    const span = emotes[i];
+    if (span.zeroWidth !== true || span.end !== spaceIndex) {
+      continue;
+    }
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (!isZeroWidth(emotes[j], ctx)) {
+        return emotes[j];
+      }
+    }
+  }
+  return undefined;
+}
+
+function hugNextNonZw(
+  emotes: readonly WrapEmote[],
+  spaceIndex: number,
+  ctx: WrapCtx,
+): WrapEmote | undefined {
+  for (const span of emotes) {
+    if (!isZeroWidth(span, ctx) && span.start === spaceIndex + 1) {
+      return span;
+    }
+  }
+  return undefined;
+}
+
+function emotesShareLine(
+  prev: WrapEmote,
+  next: WrapEmote,
+  lines: readonly WrapLine[],
+): boolean {
+  for (const line of lines) {
+    if (
+      prev.start >= line.start &&
+      prev.end <= line.end &&
+      next.start >= line.start &&
+      next.end <= line.end
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Один ASCII space между non-ZW (или после ZW-слоя на base) — stock removeSpacesBetweenEmotes. */
+function hugSpace(
+  text: string,
   emotes: readonly WrapEmote[],
   index: number,
   ctx: WrapCtx,
+  budget?: WrapBudget,
 ): boolean {
+  if (!ctx.removeSpacesBetweenEmotes || !ctx.maskEmotes) {
+    return false;
+  }
+  if (index < 0 || index >= text.length || text.charCodeAt(index) !== 32) {
+    return false;
+  }
+  const prev = hugPrevNonZw(emotes, index, ctx);
+  const next = hugNextNonZw(emotes, index, ctx);
+  if (!prev || !next) {
+    return false;
+  }
+  if (ctx.lines && ctx.lines.length > 0) {
+    if (!emotesShareLine(prev, next, ctx.lines)) {
+      return false;
+    }
+  } else if (budget) {
+    if (budget.used + emoteCols(next, ctx) > budget.width) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function collapsed(
+  text: string,
+  emotes: readonly WrapEmote[],
+  index: number,
+  ctx: WrapCtx,
+  budget?: WrapBudget,
+): boolean {
+  if (hugSpace(text, emotes, index, ctx, budget)) {
+    return true;
+  }
   if (!ctx.enableZeroWidth) {
     return false;
   }

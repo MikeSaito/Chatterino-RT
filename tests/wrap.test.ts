@@ -134,5 +134,128 @@ if (mid) {
   throw new Error("snapBeforeMention must keep short @login on one line");
 }
 
+const hugText = "Kappa PogChamp";
+const hugEmotes = [
+  { start: 0, end: 5, zeroWidth: false },
+  { start: 6, end: 14, zeroWidth: false },
+];
+const hugOff = wrapBody(hugText, 80, hugEmotes);
+const hugOffMask = renderWrapped(hugText, hugOff, hugEmotes);
+const hugOffSecond = indexToLineCol(hugText, hugOff, 6, hugEmotes);
+if (!hugOffSecond || hugOffSecond.col !== 6) {
+  throw new Error(
+    `hug off: second emote at col 6, got ${JSON.stringify(hugOffSecond)}`,
+  );
+}
+if (hugOffMask.length !== hugText.length) {
+  throw new Error(
+    `hug off mask length ${hugOffMask.length} != ${hugText.length}`,
+  );
+}
+
+const hugOnOpts = { removeSpacesBetweenEmotes: true } as const;
+const hugOn = wrapBody(hugText, 80, hugEmotes, hugOnOpts);
+const hugOnMask = renderWrapped(hugText, hugOn, hugEmotes, hugOnOpts);
+const hugOnSecond = indexToLineCol(hugText, hugOn, 6, hugEmotes, hugOnOpts);
+if (!hugOnSecond || hugOnSecond.col !== 5) {
+  throw new Error(
+    `hug on: second emote at col 5, got ${JSON.stringify(hugOnSecond)}`,
+  );
+}
+if (hugOnMask.length !== hugText.length - 1) {
+  throw new Error(
+    `hug on mask should drop one space (${hugText.length - 1}), got ${hugOnMask.length}`,
+  );
+}
+const hugHit = lineColToIndex(hugText, hugOn, 0, 5, hugEmotes, hugOnOpts);
+if (hugHit !== 6) {
+  throw new Error(`hug on col 5 should map to PogChamp start, got ${hugHit}`);
+}
+
+const doubleText = "Kappa  PogChamp";
+const doubleEmotes = [
+  { start: 0, end: 5, zeroWidth: false },
+  { start: 7, end: 15, zeroWidth: false },
+];
+const doubleOpts = { removeSpacesBetweenEmotes: true } as const;
+const doubleLines = wrapBody(doubleText, 80, doubleEmotes, doubleOpts);
+const doubleSecond = indexToLineCol(
+  doubleText,
+  doubleLines,
+  7,
+  doubleEmotes,
+  doubleOpts,
+);
+if (!doubleSecond || doubleSecond.col !== 7) {
+  throw new Error(
+    `double space: no hug when gap>1, second at col 7, got ${JSON.stringify(doubleSecond)}`,
+  );
+}
+
+const hugZwText = "Kappa cvHazmat PogChamp";
+const hugZwEmotes = [
+  { start: 0, end: 5, zeroWidth: false },
+  { start: 6, end: 14, zeroWidth: true },
+  { start: 15, end: 23, zeroWidth: false },
+];
+const hugZwOpts = { removeSpacesBetweenEmotes: true } as const;
+const hugZwLines = wrapBody(hugZwText, 80, hugZwEmotes, hugZwOpts);
+const hugZwPos = indexToLineCol(hugZwText, hugZwLines, 15, hugZwEmotes, hugZwOpts);
+if (!hugZwPos || hugZwPos.col !== 5) {
+  throw new Error(
+    `ZW layer: hug space after stack, Pog at col 5, got ${JSON.stringify(hugZwPos)}`,
+  );
+}
+const hugZwMask = renderWrapped(hugZwText, hugZwLines, hugZwEmotes, hugZwOpts);
+if (hugZwMask.includes("cvHazmat")) {
+  throw new Error("hug must not break ZW collapse");
+}
+
+const hugWrapOpts = {
+  removeSpacesBetweenEmotes: true,
+  emoteMinCols: 7,
+} as const;
+const hugWrapText = "Kappa PogChamp";
+const hugWrapEmotes = [
+  { start: 0, end: 5, zeroWidth: false },
+  { start: 6, end: 14, zeroWidth: false },
+];
+const hugWrapLines = wrapBody(hugWrapText, 10, hugWrapEmotes, hugWrapOpts);
+if (hugWrapLines.length < 2) {
+  throw new Error("narrow wrap should put second emote on next line");
+}
+const hugWrapMask = renderWrapped(hugWrapText, hugWrapLines, hugWrapEmotes, hugWrapOpts);
+const hugWrapFirst = hugWrapMask.split("\n")[0] ?? "";
+if (hugWrapFirst.length !== 8) {
+  throw new Error(
+    `same-line: first line keeps trailing space (7+1=8), got ${hugWrapFirst.length}`,
+  );
+}
+const hugWrapSecond = indexToLineCol(
+  hugWrapText,
+  hugWrapLines,
+  6,
+  hugWrapEmotes,
+  hugWrapOpts,
+);
+if (!hugWrapSecond || hugWrapSecond.line !== 1 || hugWrapSecond.col !== 0) {
+  throw new Error(
+    `wrapped second emote at line1 col0, got ${JSON.stringify(hugWrapSecond)}`,
+  );
+}
+
+const hugImagesOff = {
+  removeSpacesBetweenEmotes: true,
+  maskEmotes: false,
+  enableZeroWidth: false,
+} as const;
+const hugOffLines = wrapBody(hugText, 80, hugEmotes, hugImagesOff);
+const hugOffPos = indexToLineCol(hugText, hugOffLines, 6, hugEmotes, hugImagesOff);
+if (!hugOffPos || hugOffPos.col !== 6) {
+  throw new Error(
+    `images off must not hug spaces, got ${JSON.stringify(hugOffPos)}`,
+  );
+}
+
 console.log("wrap tests ok");
 
