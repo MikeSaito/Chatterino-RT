@@ -110,6 +110,10 @@ type Slot = {
   nickLogin: string;
   nickDisplay: string;
   useNickStyle: boolean;
+  replyToLogin: string;
+  isAction: boolean;
+  /** Символы до reply/action prefix + copyText (system lead у usernotice). */
+  leadLen: number;
 };
 
 type Drawn = {
@@ -118,6 +122,8 @@ type Drawn = {
   nickColor: number;
   body: string;
   copyText: string;
+  /** Длина lead до reply/action/@-prefix (0 для обычного privmsg). */
+  leadLen: number;
   spans: EmoteSpan[];
   links: LinkSpan[];
   mentions: MentionSpan[];
@@ -167,6 +173,7 @@ export class MessageRing {
   private boldUsernames = true;
   private colorUsernames = true;
   private readonly nickColorCache = new NickColorCache(500);
+  private hideReplyContext = false;
   private pauseMouse = false;
   private pauseKey = false;
   private pauseFollowIntent = false;
@@ -307,6 +314,23 @@ export class MessageRing {
     this.colorUsernames = color;
     if (!this.ready) {
       return;
+    }
+    this.layout();
+  }
+
+  configureReplyContext(opts: { hide: boolean }): void {
+    const hide = opts.hide === true;
+    if (hide === this.hideReplyContext) {
+      return;
+    }
+    this.hideReplyContext = hide;
+    if (!this.ready) {
+      return;
+    }
+    for (const slot of this.slots) {
+      if (slot.msgId) {
+        this.reapplyReplyPrefix(slot);
+      }
     }
     this.layout();
   }
@@ -849,6 +873,9 @@ export class MessageRing {
         nickLogin: "",
         nickDisplay: "",
         useNickStyle: false,
+        replyToLogin: "",
+        isAction: false,
+        leadLen: 0,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -869,6 +896,11 @@ export class MessageRing {
   reset(): void {
     this.resetSlots();
     this.layout();
+  }
+
+  destroy(): void {
+    this.emoteTicker.destroy();
+    this.clearSlots();
   }
 
   applySnapshot(events: ChatEvent[]): void {
@@ -998,6 +1030,9 @@ export class MessageRing {
     slot.nickLogin = "";
     slot.nickDisplay = "";
     slot.useNickStyle = false;
+    slot.replyToLogin = "";
+    slot.isAction = false;
+    slot.leadLen = 0;
     slot.highlight.clear();
     slot.mentions.clear();
     slot.disabledGfx.clear();
@@ -1049,8 +1084,24 @@ export class MessageRing {
     }
     slot.bodyRaw = drawn.body;
     slot.copyText = drawn.copyText;
-    slot.replyToId =
-      event.kind === "privmsg" && event.replyToId ? event.replyToId : "";
+    slot.leadLen = drawn.leadLen;
+    if (event.kind === "privmsg") {
+      slot.replyToId = event.replyToId ?? "";
+      slot.replyToLogin = event.replyToLogin ?? "";
+      slot.isAction = event.action === true;
+    } else if (
+      event.kind === "usernotice" &&
+      event.privmsg &&
+      event.privmsg.kind === "privmsg"
+    ) {
+      slot.replyToId = event.privmsg.replyToId ?? "";
+      slot.replyToLogin = event.privmsg.replyToLogin ?? "";
+      slot.isAction = event.privmsg.action === true;
+    } else {
+      slot.replyToId = "";
+      slot.replyToLogin = "";
+      slot.isAction = false;
+    }
     slot.timestampMs = event.timestampMs;
     slot.spansRaw = drawn.spans;
     slot.linkSpans = drawn.links;
@@ -1122,12 +1173,35 @@ export class MessageRing {
     }
   }
 
+  /** Пересобрать @reply / * prefix при смене hideReplyContext без полного rewrite события. */
+  private reapplyReplyPrefix(slot: Slot): void {
+    const core = slot.copyText;
+    const lead = slot.bodyRaw.slice(0, Math.max(0, slot.leadLen));
+    const newReply =
+      !this.hideReplyContext && slot.replyToLogin
+        ? `@${slot.replyToLogin} `
+        : "";
+    const newAction = slot.isAction ? "* " : "";
+    const newBefore = `${lead}${newReply}${newAction}`;
+    const oldBeforeLen = Math.max(0, slot.bodyRaw.length - core.length);
+    const delta = newBefore.length - oldBeforeLen;
+    if (delta === 0 && slot.bodyRaw === `${newBefore}${core}`) {
+      return;
+    }
+    slot.bodyRaw = `${newBefore}${core}`;
+    if (delta !== 0) {
+      slot.spansRaw = shiftSpans(slot.spansRaw, delta);
+      slot.linkSpans = shiftSpans(slot.linkSpans, delta);
+      slot.mentionSpans = shiftSpans(slot.mentionSpans, delta);
+    }
+  }
+
   private line(event: ChatEvent): Drawn {
     const time = formatTime(event.timestampMs, this.timestampFormat);
     switch (event.kind) {
       case "privmsg": {
         let prefix = "";
-        if (event.replyToLogin) {
+        if (!this.hideReplyContext && event.replyToLogin) {
           prefix += `@${event.replyToLogin} `;
         }
         if (event.action) {
@@ -1149,6 +1223,7 @@ export class MessageRing {
           }),
           body: `${prefix}${event.text}`,
           copyText: event.text,
+          leadLen: 0,
           spans: shiftSpans(event.emoteSpans ?? [], shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
           mentions: shiftSpans(event.mentionSpans ?? [], shift),
@@ -1164,17 +1239,19 @@ export class MessageRing {
         let badges: Badge[] = [];
         let highlightColor = "";
         let copyText = event.systemText;
+        let leadLen = 0;
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
           let innerPrefix = "";
-          if (inner.replyToLogin) {
+          if (!this.hideReplyContext && inner.replyToLogin) {
             innerPrefix += `@${inner.replyToLogin} `;
           }
           if (inner.action) {
             innerPrefix += "* ";
           }
           const sep = body.length > 0 ? " " : "";
-          const shift = body.length + sep.length + innerPrefix.length;
+          leadLen = body.length + sep.length;
+          const shift = leadLen + innerPrefix.length;
           body += `${sep}${innerPrefix}${inner.text}`;
           copyText = inner.text;
           spans = shiftSpans(inner.emoteSpans ?? [], shift);
@@ -1191,6 +1268,7 @@ export class MessageRing {
           nickColor: this.themeFills.nickFallback,
           body,
           copyText,
+          leadLen,
           spans,
           links,
           mentions,
@@ -1205,6 +1283,7 @@ export class MessageRing {
           nickColor: this.themeFills.nickFallback,
           body: clearchatText(event.targetLogin, event.durationSec),
           copyText: clearchatText(event.targetLogin, event.durationSec),
+          leadLen: 0,
           spans: [],
           links: [],
           mentions: [],
@@ -1218,6 +1297,7 @@ export class MessageRing {
           nickColor: this.themeFills.nickFallback,
           body: `emote:${event.emoteOnly} subs:${event.subsOnly} slow:${event.slowSec}`,
           copyText: "",
+          leadLen: 0,
           spans: [],
           links: [],
           mentions: [],
@@ -1231,6 +1311,7 @@ export class MessageRing {
           nickColor: this.themeFills.nickFallback,
           body: event.text,
           copyText: event.text,
+          leadLen: 0,
           spans: [],
           links: [],
           mentions: [],
@@ -1244,6 +1325,7 @@ export class MessageRing {
           nickColor: this.themeFills.nickFallback,
           body: event.kind,
           copyText: "",
+          leadLen: 0,
           spans: [],
           links: [],
           mentions: [],

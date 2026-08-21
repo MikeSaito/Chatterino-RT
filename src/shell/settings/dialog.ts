@@ -267,6 +267,9 @@ function paintRuntime(
     bold: data.knobs["appearance.boldUsernames"] !== false,
     color: data.knobs["appearance.colorUsernames"] !== false,
   });
+  ring.configureReplyContext({
+    hide: data.knobs["appearance.hideReplyContext"] === true,
+  });
   onDisplay?.(data);
 }
 
