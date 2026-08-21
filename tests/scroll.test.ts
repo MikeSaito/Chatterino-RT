@@ -1,6 +1,8 @@
 import {
   ScrollModel,
   wheelDeltaRows,
+  easeOutCubic,
+  SMOOTH_SCROLL_MS,
   type LaidSlot,
 } from "../src/chat/scroll.ts";
 
@@ -217,6 +219,56 @@ function assert(cond: boolean, msg: string): void {
   // Unpause resume: goToBottom (ring followIntent) returns to live.
   m.goToBottom();
   assert(m.atBottom && m.desired === 8, "manual goToBottom resumes bottom");
+}
+
+{
+  assert(Math.abs(easeOutCubic(0)) < 1e-9, "ease 0");
+  assert(Math.abs(easeOutCubic(1) - 1) < 1e-9, "ease 1");
+  assert(easeOutCubic(0.5) > 0.5, "easeOutCubic past midpoint");
+
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  m.applyLayout(20, 4, slots([["a", 20]]), undefined);
+  assert(m.desired === 16 && m.current === 16, "snap at bottom");
+  m.setDesired(4, true);
+  assert(m.isAnimating(), "setDesired animated starts tween");
+  assert(m.desired === 4, "desired target 4");
+  assert(Math.abs(m.current - 16) < 1e-3, "current still at start");
+  m.tick(0);
+  m.tick(SMOOTH_SCROLL_MS / 2);
+  assert(m.current < 16 && m.current > 4, `mid tween current ${m.current}`);
+  m.tick(SMOOTH_SCROLL_MS);
+  assert(!m.isAnimating(), "tween done");
+  assert(Math.abs(m.current - 4) < 1e-3, `end at 4, got ${m.current}`);
+
+  m.setDesired(10, true);
+  m.tick(0);
+  m.setDesired(2, true);
+  assert(m.isAnimating(), "retarget keeps animating");
+  m.tick(1000);
+  m.tick(1000 + SMOOTH_SCROLL_MS);
+  assert(Math.abs(m.current - 2) < 1e-3, `retarget ends at 2, got ${m.current}`);
+
+  m.setDesired(8, false);
+  assert(!m.isAnimating() && Math.abs(m.current - 8) < 1e-3, "snap setDesired");
+
+  m.configureSmooth({ enabled: true, newMessages: true });
+  m.goToBottom(true);
+  assert(m.isAnimating() || Math.abs(m.current - m.desired) < 1e-3, "goToBottom anim or already there");
+  m.tick(2000);
+  m.tick(2000 + SMOOTH_SCROLL_MS);
+  assert(m.atBottom && Math.abs(m.current - m.desired) < 1e-3, "goToBottom settles");
+
+  m.configureSmooth({ enabled: false, newMessages: true });
+  m.setDesired(2, false);
+  m.goToBottom();
+  assert(!m.isAnimating() && Math.abs(m.current - m.desired) < 1e-3, "newMessages needs smoothEnabled");
+
+  m.configureSmooth({ enabled: true, newMessages: false });
+  m.applyLayout(20, 4, slots([["a", 20]]), undefined);
+  assert(!m.isAnimating() && m.current === m.desired, "first layout snaps");
+  m.applyLayout(24, 4, slots([["a", 24]]), undefined);
+  assert(!m.isAnimating() && m.current === m.desired, "follow without newMessages snaps");
 }
 
 console.log("scroll tests ok");

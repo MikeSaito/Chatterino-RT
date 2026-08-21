@@ -227,6 +227,9 @@ function paintRuntime(
     pauseOnHoverSec: Number.isFinite(hoverRaw) ? hoverRaw : 0,
     pauseModifier: String(data.knobs["behaviour.pauseChatModifier"] ?? "None"),
     wheelMultiplier: Number.isFinite(multRaw) ? multRaw : 1,
+    smoothScrolling: data.knobs["appearance.enableSmoothScrolling"] !== false,
+    smoothScrollingNewMessages:
+      data.knobs["appearance.enableSmoothScrollingNewMessages"] === true,
   });
   onDisplay?.(data);
 }

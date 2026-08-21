@@ -144,6 +144,7 @@ export class MessageRing {
   private pauseModifier: PauseModifier = "None";
   private wheelMultiplier = 1;
   private hoverPauseTimer = 0;
+  private scrollRaf = 0;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
@@ -172,6 +173,8 @@ export class MessageRing {
     pauseOnHoverSec: number;
     pauseModifier: string;
     wheelMultiplier: number;
+    smoothScrolling?: boolean;
+    smoothScrollingNewMessages?: boolean;
   }): void {
     const sec = Number(opts.pauseOnHoverSec);
     this.pauseOnHoverSec = Number.isFinite(sec) ? sec : 0;
@@ -187,6 +190,10 @@ export class MessageRing {
     this.wheelMultiplier = Number.isFinite(mult)
       ? Math.min(2, Math.max(0.5, mult))
       : 1;
+    this.scroll.configureSmooth({
+      enabled: opts.smoothScrolling !== false,
+      newMessages: opts.smoothScrollingNewMessages === true,
+    });
     let cleared = false;
     if (Math.abs(this.pauseOnHoverSec) < 0.001 && this.pauseMouse) {
       this.clearHoverPause();
@@ -199,6 +206,11 @@ export class MessageRing {
     if (cleared) {
       this.resumeFollowIfPinned();
     }
+  }
+
+  /** Keyboard / page scroll: animate when smooth scrolling enabled. */
+  isSmoothScrolling(): boolean {
+    return this.scroll.isSmoothEnabled();
   }
 
   isPaused(): boolean {
@@ -275,15 +287,13 @@ export class MessageRing {
     if (this.pauseFollowIntent) {
       this.pauseFollowIntent = false;
       this.scroll.goToBottom();
-      this.applyStageY();
-      this.notifyScroll();
+      this.afterScrollChange();
       return;
     }
     const snap = this.scroll.snapshot();
     if (snap.overflow && snap.desired >= snap.bottom - 1e-3) {
       this.scroll.goToBottom();
-      this.applyStageY();
-      this.notifyScroll();
+      this.afterScrollChange();
     }
   }
 
@@ -444,15 +454,13 @@ export class MessageRing {
   goToBottom(): void {
     this.pauseFollowIntent = false;
     this.scroll.goToBottom();
-    this.applyStageY();
-    this.notifyScroll();
+    this.afterScrollChange();
   }
 
-  setDesired(rows: number): void {
+  setDesired(rows: number, animated = false): void {
     this.pauseFollowIntent = false;
-    this.scroll.setDesired(rows);
-    this.applyStageY();
-    this.notifyScroll();
+    this.scroll.setDesired(rows, animated);
+    this.afterScrollChange();
   }
 
   /** Прыжок к сообщению в кольце; подсветка hit. false если id нет в пуле. */
@@ -477,9 +485,8 @@ export class MessageRing {
     }
     // Go to message даже если hideModerated скрыл слот в ленте
     this.findHitId = id;
-    this.scroll.setDesired(target.startRow);
-    this.applyStageY();
-    this.notifyScroll();
+    this.scroll.setDesired(target.startRow, false);
+    this.afterScrollChange();
     if (prevSlot && prevSlot !== target) {
       this.paintHighlight(prevSlot);
     }
@@ -512,12 +519,11 @@ export class MessageRing {
     const rows =
       wheelDeltaRows(ev.deltaY, ev.deltaMode, this.lineHeight, this.scroll.viewRows) *
       this.wheelMultiplier;
-    this.scroll.wheel(rows);
+    this.scroll.wheel(rows, true);
     if (!this.isPaused()) {
       this.pauseFollowIntent = false;
     }
-    this.applyStageY();
-    this.notifyScroll();
+    this.afterScrollChange();
   }
 
   async init(): Promise<void> {
@@ -1170,8 +1176,37 @@ export class MessageRing {
       resolved,
       this.isPaused(),
     );
+    this.afterScrollChange();
+  }
+
+  private afterScrollChange(): void {
     this.applyStageY();
     this.notifyScroll();
+    this.ensureScrollTick();
+  }
+
+  private ensureScrollTick(): void {
+    if (!this.scroll.isAnimating()) {
+      if (this.scrollRaf !== 0) {
+        cancelAnimationFrame(this.scrollRaf);
+        this.scrollRaf = 0;
+      }
+      return;
+    }
+    if (this.scrollRaf !== 0) {
+      return;
+    }
+    const step = (now: number): void => {
+      const cont = this.scroll.tick(now);
+      this.applyStageY();
+      this.notifyScroll();
+      if (cont) {
+        this.scrollRaf = requestAnimationFrame(step);
+      } else {
+        this.scrollRaf = 0;
+      }
+    };
+    this.scrollRaf = requestAnimationFrame(step);
   }
 
   private laidSlots(): LaidSlot[] {

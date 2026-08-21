@@ -15,7 +15,7 @@ export function bindScrollChrome(opts: {
     track.classList.toggle("idle", !state.overflow);
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", String(state.bottom));
-    track.setAttribute("aria-valuenow", String(state.desired));
+    track.setAttribute("aria-valuenow", String(state.current));
     jump.hidden = state.atBottom;
     layoutThumb(state);
     onScroll?.(state);
@@ -31,7 +31,7 @@ export function bindScrollChrome(opts: {
     const ratio = Math.min(1, state.viewRows / state.contentRows);
     const thumbH = Math.max(16, trackH * ratio);
     const travel = Math.max(0, trackH - thumbH);
-    const t = state.bottom <= 0 ? 1 : state.desired / state.bottom;
+    const t = state.bottom <= 0 ? 1 : state.current / state.bottom;
     thumb.style.height = `${thumbH}px`;
     thumb.style.transform = `translateY(${t * travel}px)`;
   };
@@ -125,9 +125,10 @@ export function bindScrollChrome(opts: {
 
   track.addEventListener("keydown", (ev) => {
     const state = ring.scrollSnapshot();
+    const anim = ring.isSmoothScrolling();
     if (ev.key === "Home") {
       ev.preventDefault();
-      ring.setDesired(0);
+      ring.setDesired(0, anim);
       return;
     }
     if (ev.key === "End") {
@@ -137,22 +138,22 @@ export function bindScrollChrome(opts: {
     }
     if (ev.key === "ArrowUp") {
       ev.preventDefault();
-      ring.setDesired(state.desired - 1);
+      ring.setDesired(state.desired - 1, anim);
       return;
     }
     if (ev.key === "ArrowDown") {
       ev.preventDefault();
-      ring.setDesired(state.desired + 1);
+      ring.setDesired(state.desired + 1, anim);
       return;
     }
     if (ev.key === "PageUp") {
       ev.preventDefault();
-      ring.setDesired(state.desired - state.viewRows);
+      ring.setDesired(state.desired - state.viewRows, anim);
       return;
     }
     if (ev.key === "PageDown") {
       ev.preventDefault();
-      ring.setDesired(state.desired + state.viewRows);
+      ring.setDesired(state.desired + state.viewRows, anim);
     }
   });
 }

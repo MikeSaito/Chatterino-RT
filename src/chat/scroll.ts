@@ -14,6 +14,8 @@ export type LaidSlot = {
 
 export type ScrollSnapshot = {
   desired: number;
+  /** Display position (smooth); thumb paint uses this. */
+  current: number;
   bottom: number;
   atBottom: boolean;
   overflow: boolean;
@@ -22,12 +24,38 @@ export type ScrollSnapshot = {
 };
 
 const EPS = 1e-3;
+export const SMOOTH_SCROLL_MS = 150;
+
+export function easeOutCubic(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return 1 - (1 - x) ** 3;
+}
 
 export class ScrollModel {
   desired = 0;
+  current = 0;
   atBottom = true;
   contentRows = 0;
   viewRows = 0;
+
+  private smoothEnabled = true;
+  private smoothNewMessages = false;
+  private animating = false;
+  private animFrom = 0;
+  private animTo = 0;
+  private animStart = 0;
+
+  configureSmooth(opts: { enabled: boolean; newMessages: boolean }): void {
+    this.smoothEnabled = opts.enabled;
+    this.smoothNewMessages = opts.newMessages;
+    if (!this.smoothEnabled) {
+      this.snapCurrent();
+    }
+  }
+
+  isSmoothEnabled(): boolean {
+    return this.smoothEnabled;
+  }
 
   bottom(): number {
     return Math.max(0, this.contentRows - this.viewRows);
@@ -37,9 +65,14 @@ export class ScrollModel {
     return this.contentRows > this.viewRows + EPS;
   }
 
+  isAnimating(): boolean {
+    return this.animating;
+  }
+
   snapshot(): ScrollSnapshot {
     return {
       desired: this.desired,
+      current: this.current,
       bottom: this.bottom(),
       atBottom: this.atBottom,
       overflow: this.overflow(),
@@ -50,29 +83,70 @@ export class ScrollModel {
 
   reset(): void {
     this.desired = 0;
+    this.current = 0;
     this.atBottom = true;
     this.contentRows = 0;
     this.viewRows = 0;
+    this.animating = false;
   }
 
-  goToBottom(): void {
+  goToBottom(animated?: boolean): void {
     this.atBottom = true;
     this.desired = this.bottom();
+    this.finish(true);
+    const anim = (animated ?? this.smoothNewMessages) && this.smoothEnabled;
+    this.startOrRetarget(anim);
   }
 
-  setDesired(value: number): void {
+  setDesired(value: number, animated = false): void {
     this.atBottom = false;
     this.desired = value;
     this.finish();
+    this.startOrRetarget(animated && this.smoothEnabled);
   }
 
-  wheel(deltaRows: number): void {
+  wheel(deltaRows: number, animated = false): void {
     if (!this.overflow()) {
       this.atBottom = true;
       this.desired = 0;
+      this.startOrRetarget(false);
       return;
     }
-    this.setDesired(this.desired + deltaRows);
+    this.setDesired(this.desired + deltaRows, animated);
+  }
+
+  private startOrRetarget(animated: boolean): void {
+    if (!animated) {
+      this.snapCurrent();
+      return;
+    }
+    this.animFrom = this.current;
+    this.animTo = this.desired;
+    this.animStart = -1;
+    this.animating = Math.abs(this.animTo - this.animFrom) > EPS;
+    if (!this.animating) {
+      this.current = this.desired;
+    }
+  }
+
+  /** Advance tween; returns true if still animating. */
+  tick(now: number): boolean {
+    if (!this.animating) {
+      this.current = this.desired;
+      return false;
+    }
+    if (this.animStart < 0) {
+      this.animStart = now;
+    }
+    const t = (now - this.animStart) / SMOOTH_SCROLL_MS;
+    if (t >= 1) {
+      this.current = this.desired;
+      this.animating = false;
+      return false;
+    }
+    const e = easeOutCubic(t);
+    this.current = this.animFrom + (this.animTo - this.animFrom) * e;
+    return true;
   }
 
   captureAnchor(slots: readonly LaidSlot[]): ScrollAnchor | undefined {
@@ -106,6 +180,7 @@ export class ScrollModel {
     paused = false,
   ): void {
     const prevBottom = this.bottom();
+    const prevContent = this.contentRows;
     const wasFollowing = this.atBottom;
     this.contentRows = Math.max(0, contentRows);
     this.viewRows = Math.max(0, viewRows);
@@ -123,6 +198,7 @@ export class ScrollModel {
         this.desired = prevBottom;
       }
       this.finish(false);
+      this.startOrRetarget(false);
       return;
     }
     if (!this.atBottom && anchor) {
@@ -135,13 +211,32 @@ export class ScrollModel {
       }
     }
     this.finish(true);
+    const grewWhileFollowing =
+      wasFollowing &&
+      this.atBottom &&
+      this.smoothNewMessages &&
+      this.smoothEnabled &&
+      prevContent > 0 &&
+      Math.abs(this.current - this.desired) > EPS;
+    if (grewWhileFollowing) {
+      this.startOrRetarget(true);
+    } else if (this.animating && this.smoothEnabled && !this.atBottom) {
+      this.startOrRetarget(true);
+    } else {
+      this.snapCurrent();
+    }
   }
 
   stageY(lineHeight: number): number {
     if (!this.overflow()) {
       return 0;
     }
-    return -this.desired * lineHeight;
+    return -this.current * lineHeight;
+  }
+
+  private snapCurrent(): void {
+    this.animating = false;
+    this.current = this.desired;
   }
 
   private finish(allowSnapToBottom = true): void {
