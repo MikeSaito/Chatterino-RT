@@ -13,10 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   BADGE_SIZE,
   BADGE_SLOTS_PER_ROW,
-  CHAR_WIDTH,
   EMOTE_SLOTS_PER_ROW,
-  FONT_SIZE,
-  LINE_HEIGHT,
   MESSAGE_POOL_SIZE,
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
@@ -28,6 +25,15 @@ import {
   type ScrollAnchor,
   type ScrollSnapshot,
 } from "./scroll";
+import {
+  atlasFontSize,
+  clampChatFontSize,
+  clampChatFontWeight,
+  measureFontMetrics,
+  qtWeightToCss,
+  qtWeightToPixi,
+  sanitizeFontFamily,
+} from "./chatFont";
 import {
   clipNick,
   indexToLineCol,
@@ -112,9 +118,14 @@ export class MessageRing {
   private ready = false;
   private showTimestamps = true;
   private timestampFormat = "hh:mm";
-  private fontSize = FONT_SIZE;
-  private lineHeight = LINE_HEIGHT;
-  private charWidth = CHAR_WIDTH;
+  private chatFontFamily = "Segoe UI";
+  private chatFontSize = 10;
+  private chatFontWeight = 50;
+  private fontScale = 1;
+  private atlasDesignSize = 0;
+  private fontSize = 10;
+  private lineHeight = Math.ceil(10 * (22 / 15));
+  private charWidth = 10 * 0.56;
   private badgeSize = BADGE_SIZE;
   private emoteScale = 1;
   private enableEmoteImages = true;
@@ -276,6 +287,33 @@ export class MessageRing {
     }
   }
 
+  /** Chat font knobs (family / size / Qt weight). Zoom applied via applyDisplay. */
+  configureChatFont(opts: {
+    family: string;
+    size: number;
+    weight: number;
+  }): void {
+    const family = sanitizeFontFamily(opts.family);
+    const size = clampChatFontSize(opts.size);
+    const weight = clampChatFontWeight(opts.weight);
+    const changed =
+      family !== this.chatFontFamily ||
+      size !== this.chatFontSize ||
+      weight !== this.chatFontWeight;
+    this.chatFontFamily = family;
+    this.chatFontSize = size;
+    this.chatFontWeight = weight;
+    if (!changed && this.atlasDesignSize > 0) {
+      return;
+    }
+    this.reinstallChatFont();
+    this.refreshFontMetrics();
+    if (!this.ready) {
+      return;
+    }
+    this.applyFontStylesToSlots(true);
+  }
+
   /** Масштаб шрифта, timestamps, emotes и hideModerated без destroy PIXI.Application. */
   applyDisplay(
     fontScale: number,
@@ -312,22 +350,24 @@ export class MessageRing {
       animate: this.animateEmotes,
       onlyFocused: emotes?.animateOnlyFocused ?? false,
     });
-    this.fontSize = FONT_SIZE * scale;
-    this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
-    this.charWidth = CHAR_WIDTH * scale;
+    this.fontScale = scale;
+    const neededAtlas = atlasFontSize(this.chatFontSize);
+    let atlasRebuilt = false;
+    if (this.atlasDesignSize < neededAtlas || this.atlasDesignSize === 0) {
+      this.reinstallChatFont();
+      atlasRebuilt = true;
+    }
+    this.refreshFontMetrics();
     this.badgeSize = Math.max(8, Math.round(BADGE_SIZE * scale));
     if (!this.ready) {
       return;
     }
+    this.applyFontStylesToSlots(atlasRebuilt);
     const emoteSize = this.emotePixelSize();
     for (const slot of this.slots) {
       if (slot.msgId && slot.timestampMs) {
         slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
       }
-      slot.time.style.fontSize = this.fontSize;
-      slot.nick.style.fontSize = this.fontSize;
-      slot.body.style.fontSize = this.fontSize;
-      slot.body.style.lineHeight = this.lineHeight;
       for (const spr of slot.badges) {
         spr.y = (this.lineHeight - this.badgeSize) / 2;
         if (spr.visible && spr.texture !== Texture.EMPTY) {
@@ -350,6 +390,51 @@ export class MessageRing {
       this.reloadVisibleEmotes();
     }
     this.layout();
+  }
+
+  private refreshFontMetrics(): void {
+    const effective = this.chatFontSize * this.fontScale;
+    this.fontSize = effective;
+    const metrics = measureFontMetrics(
+      this.chatFontFamily,
+      qtWeightToCss(this.chatFontWeight),
+      effective,
+    );
+    this.charWidth = metrics.charWidth;
+    this.lineHeight = metrics.lineHeight;
+  }
+
+  private applyFontStylesToSlots(forceDirty: boolean): void {
+    for (const slot of this.slots) {
+      slot.time.style.fontSize = this.fontSize;
+      slot.nick.style.fontSize = this.fontSize;
+      slot.body.style.fontSize = this.fontSize;
+      slot.body.style.lineHeight = this.lineHeight;
+      if (forceDirty) {
+        dirtyBitmapText(slot.time);
+        dirtyBitmapText(slot.nick);
+        dirtyBitmapText(slot.body);
+      }
+    }
+  }
+
+  private reinstallChatFont(): void {
+    const atlasSize = atlasFontSize(this.chatFontSize);
+    BitmapFont.uninstall("ChatFont");
+    BitmapFont.install({
+      name: "ChatFont",
+      style: {
+        fontFamily: this.chatFontFamily,
+        fontSize: atlasSize,
+        fontWeight: qtWeightToPixi(this.chatFontWeight),
+        fill: "#efeff1",
+      },
+      chars: [
+        ["\u0020", "\u007e"],
+        ["\u0400", "\u04FF"],
+      ],
+    });
+    this.atlasDesignSize = atlasSize;
   }
 
   scrollSnapshot(): ScrollSnapshot {
@@ -439,7 +524,8 @@ export class MessageRing {
     if (this.ready) {
       return;
     }
-    this.installChatFont();
+    this.reinstallChatFont();
+    this.refreshFontMetrics();
     const stage = this.app.stage;
     stage.eventMode = "static";
     for (let i = 0; i < MESSAGE_POOL_SIZE; i += 1) {
@@ -1116,22 +1202,6 @@ export class MessageRing {
     this.onScroll?.(this.scroll.snapshot());
   }
 
-  private installChatFont(): void {
-    // Один atlas на жизнь окна: glyphs при max scale, BitmapText fontSize масштабирует вниз.
-    BitmapFont.install({
-      name: "ChatFont",
-      style: {
-        fontFamily: "Consolas, Cascadia Mono, monospace",
-        fontSize: FONT_SIZE * 2,
-        fill: "#efeff1",
-      },
-      chars: [
-        ["\u0020", "\u007e"],
-        ["\u0400", "\u04FF"],
-      ],
-    });
-  }
-
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
       this.onNickClick({
@@ -1384,6 +1454,13 @@ function clampEmoteScale(raw: number): number {
     return 1;
   }
   return Math.min(2, Math.max(0.5, raw));
+}
+
+/** Force BitmapText GPU rebuild after BitmapFont.uninstall (same text/size skips update). */
+function dirtyBitmapText(bt: BitmapText): void {
+  const prev = bt.text;
+  bt.text = prev.length > 0 ? "" : " ";
+  bt.text = prev;
 }
 
 function eventLogin(event: ChatEvent): string {

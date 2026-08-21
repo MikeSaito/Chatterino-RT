@@ -189,6 +189,13 @@ function paintRuntime(
   const hideMod =
     data.knobs["appearance.hideModerationActions"] === true ||
     (sm.active && sm.hideModActions);
+  const fontSizeRaw = Number(data.knobs["appearance.chatFontSize"] ?? 10);
+  const fontWeightRaw = Number(data.knobs["appearance.chatFontWeight"] ?? 50);
+  ring.configureChatFont({
+    family: String(data.knobs["appearance.chatFontFamily"] ?? "Segoe UI"),
+    size: Number.isFinite(fontSizeRaw) ? fontSizeRaw : 10,
+    weight: Number.isFinite(fontWeightRaw) ? fontWeightRaw : 50,
+  });
   ring.applyDisplay(
     data.fontScale,
     data.showTimestamps,
