@@ -118,6 +118,30 @@ export function measureFontMetrics(
   return { charWidth, lineHeight };
 }
 
+/** Canvas advance for an arbitrary string (column widths; not M-grid). */
+export function measureTextWidth(
+  family: string,
+  cssWeight: number,
+  fontSizePx: number,
+  text: string,
+): number {
+  if (!text) {
+    return 0;
+  }
+  const size = Math.max(1, fontSizePx);
+  if (typeof document === "undefined") {
+    return text.length * size * 0.56;
+  }
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return text.length * size * 0.56;
+  }
+  ctx.font = `${cssWeight} ${size}px ${cssFontFamily(family)}`;
+  const w = ctx.measureText(text).width;
+  return w > 0 ? w : text.length * size * 0.56;
+}
+
 /** Atlas raster size: base size at max zoom (4x). */
 export function atlasFontSize(baseSize: number): number {
   return Math.max(8, Math.ceil(clampChatFontSize(baseSize) * 4));

@@ -32,6 +32,7 @@ import {
   clampChatFontSize,
   clampChatFontWeight,
   measureFontMetrics,
+  measureTextWidth,
   qtWeightToCss,
   qtWeightToPixi,
   sanitizeFontFamily,
@@ -591,17 +592,17 @@ export class MessageRing {
     });
     this.fontScale = scale;
     const neededAtlas = atlasFontSize(this.chatFontSize);
-    let atlasRebuilt = false;
     if (this.atlasDesignSize < neededAtlas || this.atlasDesignSize === 0) {
       this.reinstallChatFont();
-      atlasRebuilt = true;
     }
     this.refreshFontMetrics();
     this.badgeSize = Math.max(8, Math.round(BADGE_SIZE * scale));
     if (!this.ready) {
       return;
     }
-    this.applyFontStylesToSlots(atlasRebuilt);
+    // Zoom changes fontSize without atlas rebuild; BitmapText skips GPU update
+    // unless forced — nicks vanish and column gaps drift from stale glyphs.
+    this.applyFontStylesToSlots(true);
     const emoteSize = this.emotePixelSize();
     for (const slot of this.slots) {
       if (slot.msgId && slot.timestampMs) {
@@ -1378,11 +1379,17 @@ export class MessageRing {
   }
 
   private paintClip(slot: Slot): void {
+    const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
     const timeSample = this.showTimestamps
       ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
       : "";
     const timeW = this.showTimestamps
-      ? Math.max(5, timeSample.length) * this.charWidth + TIME_GAP
+      ? measureTextWidth(
+          this.chatFontFamily,
+          qtWeightToCss(this.chatFontWeight),
+          this.fontSize,
+          timeSample,
+        ) + gap
       : 0;
     slot.time.x = 0;
     slot.time.visible = this.showTimestamps;
@@ -1403,12 +1410,20 @@ export class MessageRing {
     const paneW = this.app.screen.width;
     const nickMaxPx = Math.max(
       8,
-      paneW - timeW - badgeBand - TIME_GAP - 8 - MIN_BODY_CHARS * this.charWidth,
+      paneW - timeW - badgeBand - gap - 8 - MIN_BODY_CHARS * this.charWidth,
     );
     const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.nickCharWidth));
     slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
-    const nickW = Math.max(slot.nick.text.length * this.nickCharWidth, 8);
-    const bodyX = timeW + badgeBand + nickW + TIME_GAP;
+    const nickW = Math.max(
+      measureTextWidth(
+        this.chatFontFamily,
+        qtWeightToCss(this.nickBoldScale),
+        this.fontSize,
+        slot.nick.text,
+      ),
+      8,
+    );
+    const bodyX = timeW + badgeBand + nickW + gap;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
@@ -1885,7 +1900,15 @@ export class MessageRing {
       return false;
     }
     const local = ev.getLocalPosition(slot.root);
-    const nickW = Math.max(slot.nick.text.length * this.nickCharWidth, 8);
+    const nickW = Math.max(
+      measureTextWidth(
+        this.chatFontFamily,
+        qtWeightToCss(this.nickBoldScale),
+        this.fontSize,
+        slot.nick.text,
+      ),
+      8,
+    );
     return (
       local.x >= slot.nick.x &&
       local.x < slot.nick.x + nickW &&
