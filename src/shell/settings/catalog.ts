@@ -1813,6 +1813,13 @@ export const SETTINGS_PAGES: PageDef[] = [
             true,
             "self sound ping",
           ),
+          txt(
+            "self-highlight-color",
+            "highlighting.selfHighlightColor",
+            "Self highlight color",
+            "",
+            "self color #RRGGBB",
+          ),
         ],
       },
       {
