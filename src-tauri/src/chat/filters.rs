@@ -12,13 +12,17 @@ use tauri::{AppHandle, Manager};
 use regex::Regex;
 
 use super::auth;
+use super::spans::decorate_text_spans;
 use super::state::Shared;
-use super::types::{Badge, ChatEvent};
+use super::types::{Badge, ChatEvent, EmoteSpan};
 
 const FILTERS_FILE: &str = "filters.json";
 const MAX_LIST: usize = 200;
 const MAX_PATTERN: usize = 200;
 const MAX_FILE_BYTES: usize = 256 * 1024;
+/// Stock processIgnorePhrases iteration cap.
+const MAX_IGNORE_REPLACEMENTS: usize = 128;
+const TOO_MANY_REPLACEMENTS: &str = "Too many replacements - check your ignores!";
 pub const SELF_HIGHLIGHT_COLOR: &str = "#7f3f4980";
 /// Stock FALLBACK_SELF_MESSAGE_HIGHLIGHT_COLOR.
 pub const SELF_MESSAGE_HIGHLIGHT_COLOR: &str = "#0076DD73";
@@ -129,6 +133,11 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
     ) {
         return true;
     }
+    let ignore_replaces = match shared.ignore_replace_rules.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => Vec::new(),
+    };
+    apply_ignore_replacements(event, &ignore_replaces);
     let sound_ctx = match shared.highlight_sound.lock() {
         Ok(inner) => inner.clone(),
         Err(_) => HighlightSoundCtx::default(),
@@ -186,6 +195,17 @@ pub fn refresh_ignore_user_rules(shared: &Shared) {
         Err(_) => Vec::new(),
     };
     if let Ok(mut slot) = shared.ignore_user_rules.lock() {
+        *slot = rules;
+    }
+}
+
+/// Rebuild cached Ignores Messages replacement rules after settings change.
+pub fn refresh_ignore_replace_rules(shared: &Shared) {
+    let rules = match shared.settings.lock() {
+        Ok(inner) => ignore_replace_rules_from_settings(&inner.data),
+        Err(_) => Vec::new(),
+    };
+    if let Ok(mut slot) = shared.ignore_replace_rules.lock() {
         *slot = rules;
     }
 }
@@ -490,6 +510,375 @@ pub fn ignore_block_rules_from_settings(data: &super::settings::AppSettings) -> 
             )
         })
         .collect()
+}
+
+/// Non-block Ignores Messages rows: pattern → replacement on message text.
+#[derive(Debug, Clone)]
+pub(crate) struct ReplaceRule {
+    pub pattern: String,
+    pub replacement: String,
+    pub is_regex: bool,
+    pub case_sensitive: bool,
+    pub compiled: Option<Regex>,
+}
+
+impl ReplaceRule {
+    fn from_row(
+        pattern: String,
+        replacement: String,
+        is_regex: bool,
+        case_sensitive: bool,
+    ) -> Self {
+        let compiled = if is_regex {
+            regex::RegexBuilder::new(&pattern)
+                .case_insensitive(!case_sensitive)
+                .unicode(true)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        Self {
+            pattern,
+            replacement,
+            is_regex,
+            case_sensitive,
+            compiled,
+        }
+    }
+}
+
+/// Rows from Ignores Messages with `block == false` and non-empty pattern.
+pub fn ignore_replace_rules_from_settings(
+    data: &super::settings::AppSettings,
+) -> Vec<ReplaceRule> {
+    data.ignore_messages
+        .iter()
+        .filter(|r| !r.block && !r.pattern.trim().is_empty())
+        .map(|r| {
+            ReplaceRule::from_row(
+                r.pattern.clone(),
+                r.replacement.clone(),
+                r.regex,
+                r.case_sensitive,
+            )
+        })
+        .collect()
+}
+
+/// Apply ignore-message replacements to Privmsg text (and nested Usernotice body).
+pub(crate) fn apply_ignore_replacements(event: &mut ChatEvent, rules: &[ReplaceRule]) {
+    if rules.is_empty() {
+        return;
+    }
+    match event {
+        ChatEvent::Privmsg {
+            text,
+            emote_spans,
+            link_spans,
+            mention_spans,
+            ..
+        } => {
+            if apply_replacements_to_body(text, emote_spans, rules) {
+                let (links, mentions) = decorate_text_spans(text, emote_spans);
+                *link_spans = links;
+                *mention_spans = mentions;
+            }
+        }
+        ChatEvent::Usernotice { privmsg, .. } => {
+            if let Some(inner) = privmsg.as_deref_mut() {
+                apply_ignore_replacements(inner, rules);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Returns true if `text` / emote spans were mutated.
+fn apply_replacements_to_body(
+    text: &mut String,
+    emote_spans: &mut Vec<EmoteSpan>,
+    rules: &[ReplaceRule],
+) -> bool {
+    let mut changed = false;
+    let mut total: usize = 0;
+    for rule in rules {
+        if rule.pattern.is_empty() {
+            continue;
+        }
+        if rule.is_regex {
+            let Some(re) = rule.compiled.as_ref() else {
+                continue;
+            };
+            match apply_regex_replacements(text, emote_spans, re, &rule.replacement, &mut total) {
+                ReplaceOutcome::Changed => changed = true,
+                ReplaceOutcome::TooMany => return true,
+                ReplaceOutcome::Unchanged => {}
+            }
+        } else {
+            match apply_literal_replacements(
+                text,
+                emote_spans,
+                &rule.pattern,
+                &rule.replacement,
+                rule.case_sensitive,
+                &mut total,
+            ) {
+                ReplaceOutcome::Changed => changed = true,
+                ReplaceOutcome::TooMany => return true,
+                ReplaceOutcome::Unchanged => {}
+            }
+        }
+    }
+    changed
+}
+
+enum ReplaceOutcome {
+    Unchanged,
+    Changed,
+    TooMany,
+}
+
+fn apply_regex_replacements(
+    text: &mut String,
+    emote_spans: &mut Vec<EmoteSpan>,
+    re: &Regex,
+    replacement_tpl: &str,
+    total: &mut usize,
+) -> ReplaceOutcome {
+    let mut changed = false;
+    let mut search_from = 0usize;
+    loop {
+        let (abs_start, abs_end, dest, match_empty) = {
+            let Some(caps) = re.captures(&text[search_from..]) else {
+                break;
+            };
+            let m = caps.get(0).expect("full match");
+            let abs_start = search_from + m.start();
+            let abs_end = search_from + m.end();
+            let match_empty = m.as_str().is_empty();
+            let dest = expand_ignore_replacement(&caps, replacement_tpl);
+            (abs_start, abs_end, dest, match_empty)
+        };
+        let matched = text[abs_start..abs_end].to_string();
+        patch_emote_spans(emote_spans, text, abs_start, abs_end, &matched, &dest);
+        text.replace_range(abs_start..abs_end, &dest);
+        changed = true;
+        *total += 1;
+        if *total >= MAX_IGNORE_REPLACEMENTS {
+            *text = TOO_MANY_REPLACEMENTS.to_string();
+            emote_spans.clear();
+            return ReplaceOutcome::TooMany;
+        }
+        search_from = abs_start + dest.len();
+        if search_from > text.len() {
+            break;
+        }
+        // Empty match: advance one char only when replacement did not already move past it.
+        if match_empty && dest.is_empty() {
+            if let Some(ch) = text[search_from..].chars().next() {
+                search_from += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+    if changed {
+        ReplaceOutcome::Changed
+    } else {
+        ReplaceOutcome::Unchanged
+    }
+}
+
+/// Stock-style `\1` / `\12` and plan `$1` / `${1}` capture refs; other `$` stay literal.
+fn expand_ignore_replacement(caps: &regex::Captures<'_>, tpl: &str) -> String {
+    let bytes = tpl.as_bytes();
+    let mut out = String::with_capacity(tpl.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' && i + 1 < bytes.len() {
+            if let Some((n, consumed)) = parse_group_ref(&bytes[i + 1..], caps.len()) {
+                if let Some(m) = caps.get(n) {
+                    out.push_str(m.as_str());
+                }
+                i += 1 + consumed;
+                continue;
+            }
+            out.push('\\');
+            i += 1;
+            continue;
+        }
+        if b == b'$' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'$' {
+                out.push('$');
+                i += 2;
+                continue;
+            }
+            if bytes[i + 1] == b'{' {
+                if let Some(end) = bytes[i + 2..].iter().position(|&c| c == b'}') {
+                    let inner = &bytes[i + 2..i + 2 + end];
+                    if let Ok(n) = std::str::from_utf8(inner).unwrap_or("").parse::<usize>() {
+                        if n < caps.len() {
+                            if let Some(m) = caps.get(n) {
+                                out.push_str(m.as_str());
+                            }
+                            i += 3 + end;
+                            continue;
+                        }
+                    }
+                }
+            } else if let Some((n, consumed)) = parse_group_ref(&bytes[i + 1..], caps.len()) {
+                if let Some(m) = caps.get(n) {
+                    out.push_str(m.as_str());
+                }
+                i += 1 + consumed;
+                continue;
+            }
+            out.push('$');
+            i += 1;
+            continue;
+        }
+        let ch = tpl[i..].chars().next().expect("utf8");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Parse 1–2 digit group index in `1..=caps_len-1`. Returns (index, bytes_consumed).
+fn parse_group_ref(bytes: &[u8], caps_len: usize) -> Option<(usize, usize)> {
+    if caps_len <= 1 || bytes.is_empty() || !bytes[0].is_ascii_digit() || bytes[0] == b'0' {
+        return None;
+    }
+    let max = caps_len - 1;
+    let d1 = (bytes[0] - b'0') as usize;
+    if bytes.len() >= 2 && bytes[1].is_ascii_digit() {
+        let two = d1 * 10 + (bytes[1] - b'0') as usize;
+        if (1..=max).contains(&two) {
+            return Some((two, 2));
+        }
+    }
+    if d1 <= max {
+        Some((d1, 1))
+    } else {
+        None
+    }
+}
+
+fn apply_literal_replacements(
+    text: &mut String,
+    emote_spans: &mut Vec<EmoteSpan>,
+    pattern: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    total: &mut usize,
+) -> ReplaceOutcome {
+    if pattern.is_empty() {
+        return ReplaceOutcome::Unchanged;
+    }
+    let mut changed = false;
+    let mut search_from = 0usize;
+    while let Some((abs_start, abs_end)) =
+        find_literal(text, pattern, search_from, case_sensitive)
+    {
+        let matched = text[abs_start..abs_end].to_string();
+        patch_emote_spans(emote_spans, text, abs_start, abs_end, &matched, replacement);
+        text.replace_range(abs_start..abs_end, replacement);
+        changed = true;
+        *total += 1;
+        if *total >= MAX_IGNORE_REPLACEMENTS {
+            *text = TOO_MANY_REPLACEMENTS.to_string();
+            emote_spans.clear();
+            return ReplaceOutcome::TooMany;
+        }
+        search_from = abs_start + replacement.len();
+        if search_from > text.len() {
+            break;
+        }
+    }
+    if changed {
+        ReplaceOutcome::Changed
+    } else {
+        ReplaceOutcome::Unchanged
+    }
+}
+
+fn find_literal(
+    hay: &str,
+    needle: &str,
+    from_byte: usize,
+    case_sensitive: bool,
+) -> Option<(usize, usize)> {
+    if from_byte > hay.len() || needle.is_empty() {
+        return None;
+    }
+    let rest = &hay[from_byte..];
+    if case_sensitive {
+        let rel = rest.find(needle)?;
+        let start = from_byte + rel;
+        return Some((start, start + needle.len()));
+    }
+    let needle_chars: Vec<char> = needle.chars().collect();
+    let hay_chars: Vec<(usize, char)> = rest.char_indices().collect();
+    if needle_chars.len() > hay_chars.len() {
+        return None;
+    }
+    let last = hay_chars.len() - needle_chars.len();
+    for i in 0..=last {
+        let slice: Vec<char> = hay_chars[i..i + needle_chars.len()]
+            .iter()
+            .map(|(_, c)| *c)
+            .collect();
+        if eq_ignore_case(&slice, &needle_chars) {
+            let start = from_byte + hay_chars[i].0;
+            let end = if i + needle_chars.len() < hay_chars.len() {
+                from_byte + hay_chars[i + needle_chars.len()].0
+            } else {
+                hay.len()
+            };
+            return Some((start, end));
+        }
+    }
+    None
+}
+
+fn utf16_len(s: &str) -> u32 {
+    s.chars().map(|c| c.len_utf16() as u32).sum()
+}
+
+fn byte_to_utf16(s: &str, byte: usize) -> u32 {
+    utf16_len(&s[..byte.min(s.len())])
+}
+
+fn patch_emote_spans(
+    spans: &mut Vec<EmoteSpan>,
+    full: &str,
+    byte_start: usize,
+    byte_end: usize,
+    matched: &str,
+    replacement: &str,
+) {
+    let u_start = byte_to_utf16(full, byte_start);
+    let u_end = u_start + utf16_len(matched);
+    let delta = utf16_len(replacement) as i64 - utf16_len(matched) as i64;
+    spans.retain_mut(|s| {
+        if s.end <= u_start {
+            return true;
+        }
+        if s.start >= u_end {
+            let ns = s.start as i64 + delta;
+            let ne = s.end as i64 + delta;
+            if ns < 0 || ne < 0 || ns >= ne {
+                return false;
+            }
+            s.start = ns as u32;
+            s.end = ne as u32;
+            return true;
+        }
+        // Overlaps replaced range — drop.
+        false
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -2165,6 +2554,233 @@ mod tests {
             &privmsg("x", "cached"),
             Some("me")
         ));
+    }
+
+    #[test]
+    fn ignore_messages_replacement_literal_regex_and_spans() {
+        let mut ev = privmsg("bob", "buy Spam now");
+        apply_ignore_replacements(
+            &mut ev,
+            &[ReplaceRule::from_row(
+                "Spam".into(),
+                "***".into(),
+                false,
+                true,
+            )],
+        );
+        match &ev {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "buy *** now"),
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut miss = privmsg("bob", "buy spam now");
+        apply_ignore_replacements(
+            &mut miss,
+            &[ReplaceRule::from_row(
+                "Spam".into(),
+                "***".into(),
+                false,
+                true,
+            )],
+        );
+        match &miss {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "buy spam now"),
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut re_ev = privmsg("bob", "code abc123 end");
+        apply_ignore_replacements(
+            &mut re_ev,
+            &[ReplaceRule::from_row(
+                r"([a-z]+)(\d+)".into(),
+                "$2:$1".into(),
+                true,
+                false,
+            )],
+        );
+        match &re_ev {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "code 123:abc end"),
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut stock_ref = privmsg("bob", "code abc123 end");
+        apply_ignore_replacements(
+            &mut stock_ref,
+            &[ReplaceRule::from_row(
+                r"([a-z]+)(\d+)".into(),
+                r"\2:\1".into(),
+                true,
+                false,
+            )],
+        );
+        match &stock_ref {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "code 123:abc end"),
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut dollar_lit = privmsg("bob", "cost 10");
+        apply_ignore_replacements(
+            &mut dollar_lit,
+            &[ReplaceRule::from_row(
+                r"(\d+)".into(),
+                "price $5".into(),
+                true,
+                false,
+            )],
+        );
+        match &dollar_lit {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "cost price $5"),
+            _ => panic!("expected privmsg"),
+        }
+
+        let invalid = ReplaceRule::from_row("(".into(), "x".into(), true, false);
+        assert!(invalid.compiled.is_none());
+        let mut inv = privmsg("bob", "hello (");
+        apply_ignore_replacements(&mut inv, &[invalid]);
+        match &inv {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "hello ("),
+            _ => panic!("expected privmsg"),
+        }
+
+        // Block rows are not loaded as replace rules.
+        let only_block = ignore_replace_rules_from_settings(&super::super::settings::AppSettings {
+            ignore_messages: vec![super::super::settings::IgnoreMessageRow {
+                pattern: "spam".into(),
+                regex: false,
+                case_sensitive: false,
+                block: true,
+                replacement: "***".into(),
+            }],
+            ..super::super::settings::AppSettings::default()
+        });
+        assert!(only_block.is_empty());
+
+        let mut empty_repl = privmsg("bob", "drop this word");
+        apply_ignore_replacements(
+            &mut empty_repl,
+            &[ReplaceRule::from_row(
+                "this ".into(),
+                String::new(),
+                false,
+                false,
+            )],
+        );
+        match &empty_repl {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "drop word"),
+            _ => panic!("expected privmsg"),
+        }
+
+        // Self messages are still replaced (stock applies to all).
+        let mut self_ev = privmsg("me", "hide spam please");
+        apply_ignore_replacements(
+            &mut self_ev,
+            &[ReplaceRule::from_row(
+                "spam".into(),
+                "###".into(),
+                false,
+                false,
+            )],
+        );
+        match &self_ev {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "hide ### please"),
+            _ => panic!("expected privmsg"),
+        }
+
+        // Emote after replaced prefix shifts; overlapping emote is dropped.
+        let mut with_emote = privmsg("bob", "hello Kappa world");
+        if let ChatEvent::Privmsg { emote_spans, .. } = &mut with_emote {
+            emote_spans.push(EmoteSpan {
+                start: 6,
+                end: 11,
+                emote_id: "25".into(),
+                provider: "twitch".into(),
+                url: String::new(),
+                zero_width: false,
+            });
+        }
+        apply_ignore_replacements(
+            &mut with_emote,
+            &[ReplaceRule::from_row(
+                "hello".into(),
+                "hi".into(),
+                false,
+                false,
+            )],
+        );
+        match &with_emote {
+            ChatEvent::Privmsg {
+                text, emote_spans, ..
+            } => {
+                assert_eq!(text, "hi Kappa world");
+                assert_eq!(emote_spans.len(), 1);
+                assert_eq!(emote_spans[0].start, 3);
+                assert_eq!(emote_spans[0].end, 8);
+            }
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut drop_emote = privmsg("bob", "say Kappa please");
+        if let ChatEvent::Privmsg { emote_spans, .. } = &mut drop_emote {
+            emote_spans.push(EmoteSpan {
+                start: 4,
+                end: 9,
+                emote_id: "25".into(),
+                provider: "twitch".into(),
+                url: String::new(),
+                zero_width: false,
+            });
+        }
+        apply_ignore_replacements(
+            &mut drop_emote,
+            &[ReplaceRule::from_row(
+                "Kappa".into(),
+                "X".into(),
+                false,
+                true,
+            )],
+        );
+        match &drop_emote {
+            ChatEvent::Privmsg {
+                text, emote_spans, ..
+            } => {
+                assert_eq!(text, "say X please");
+                assert!(emote_spans.is_empty());
+            }
+            _ => panic!("expected privmsg"),
+        }
+
+        let mut many = privmsg("bob", &"x".repeat(130));
+        apply_ignore_replacements(
+            &mut many,
+            &[ReplaceRule::from_row("x".into(), "y".into(), false, false)],
+        );
+        match &many {
+            ChatEvent::Privmsg { text, .. } => {
+                assert_eq!(text, TOO_MANY_REPLACEMENTS);
+            }
+            _ => panic!("expected privmsg"),
+        }
+
+        let shared = super::super::state::Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.data.ignore_messages = vec![super::super::settings::IgnoreMessageRow {
+                pattern: "secret".into(),
+                regex: false,
+                case_sensitive: false,
+                block: false,
+                replacement: "[redacted]".into(),
+            }];
+        }
+        refresh_ignore_replace_rules(&shared);
+        let rules = shared.ignore_replace_rules.lock().unwrap().clone();
+        assert_eq!(rules.len(), 1);
+        let mut cached = privmsg("bob", "has secret data");
+        apply_ignore_replacements(&mut cached, &rules);
+        match &cached {
+            ChatEvent::Privmsg { text, .. } => assert_eq!(text, "has [redacted] data"),
+            _ => panic!("expected privmsg"),
+        }
     }
 
     #[test]

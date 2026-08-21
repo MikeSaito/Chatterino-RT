@@ -289,6 +289,10 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     if let Ok(mut slot) = shared.ignore_block_rules.lock() {
         *slot = ignore_rules;
     }
+    let ignore_replaces = super::filters::ignore_replace_rules_from_settings(&inner.data);
+    if let Ok(mut slot) = shared.ignore_replace_rules.lock() {
+        *slot = ignore_replaces;
+    }
     let ignore_users = super::filters::ignore_user_rules_from_settings(&inner.data);
     if let Ok(mut slot) = shared.ignore_user_rules.lock() {
         *slot = ignore_users;
@@ -324,6 +328,10 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     let ignore_rules = super::filters::ignore_block_rules_from_settings(&inner.data);
     if let Ok(mut slot) = shared.ignore_block_rules.lock() {
         *slot = ignore_rules;
+    }
+    let ignore_replaces = super::filters::ignore_replace_rules_from_settings(&inner.data);
+    if let Ok(mut slot) = shared.ignore_replace_rules.lock() {
+        *slot = ignore_replaces;
     }
     let ignore_users = super::filters::ignore_user_rules_from_settings(&inner.data);
     if let Ok(mut slot) = shared.ignore_user_rules.lock() {
