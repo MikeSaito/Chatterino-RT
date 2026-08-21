@@ -57,6 +57,7 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "CLEARMSG" => parse_clearmsg(&tags, &params, now_ms),
         "USERNOTICE" => parse_usernotice(&tags, &params, trailing.as_deref(), now_ms),
         "ROOMSTATE" => parse_roomstate(&tags, &params, now_ms),
+        "USERSTATE" => parse_userstate(&tags, &params, now_ms),
         "NOTICE" => parse_notice(&tags, &params, trailing.as_deref(), now_ms),
         "RECONNECT" => ParsedLine::Reconnect,
         "JOIN" => parse_membership(false, prefix.as_deref(), &params),
@@ -222,6 +223,23 @@ fn parse_roomstate(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
             subs_only: tags.get("subs-only").map(|v| v == "1"),
             slow_sec: tags.get("slow").and_then(|s| s.parse().ok()),
             followers_only: tags.get("followers-only").and_then(|s| s.parse().ok()),
+        },
+        channel,
+    }
+}
+
+fn parse_userstate(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
+    let channel = channel_from_params(params);
+    if channel.is_empty() {
+        return ParsedLine::Ignore;
+    }
+    ParsedLine::Event {
+        room_id: tags.get("room-id"),
+        event: ChatEvent::Userstate {
+            id: synthetic_id("u", now_ms, &channel),
+            timestamp_ms: now_ms,
+            badges: parse_badges(tags.get("badges").as_deref()),
+            is_mod_tag: tags.get("mod").as_deref() == Some("1"),
         },
         channel,
     }

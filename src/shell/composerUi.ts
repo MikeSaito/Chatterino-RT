@@ -1,4 +1,4 @@
-/** Composer chrome knobs: empty visibility, length, overflow, pulse. */
+/** Composer chrome knobs: empty visibility, length, overflow, pulse, send-wait. */
 
 export const MAX_CHAT_CHARS = 500;
 
@@ -15,6 +15,7 @@ export function parseMessageOverflow(raw: unknown): MessageOverflow {
 export type ComposerChromeOpts = {
   showEmptyInput: boolean;
   showMessageLength: boolean;
+  showSendWaitTimer: boolean;
   overflow: MessageOverflow;
   pulseOnSelf: boolean;
 };
@@ -23,6 +24,7 @@ export function defaultComposerChrome(): ComposerChromeOpts {
   return {
     showEmptyInput: true,
     showMessageLength: false,
+    showSendWaitTimer: false,
     overflow: "Highlight",
     pulseOnSelf: false,
   };
@@ -32,13 +34,16 @@ export function bindComposerChrome(opts: {
   form: HTMLFormElement;
   input: HTMLTextAreaElement;
   lengthEl: HTMLElement;
+  waitEl: HTMLElement;
   replyBar: HTMLElement;
   getOpts: () => ComposerChromeOpts;
 }): {
   sync: () => void;
   pulse: () => void;
+  setWaitText: (text: string) => void;
 } {
-  const { form, input, lengthEl, replyBar, getOpts } = opts;
+  const { form, input, lengthEl, waitEl, replyBar, getOpts } = opts;
+  let waitText = "";
 
   const sync = (): void => {
     const cfg = getOpts();
@@ -63,6 +68,15 @@ export function bindComposerChrome(opts: {
     lengthEl.textContent = String(count);
     lengthEl.classList.toggle("is-over", over);
     form.classList.toggle("is-overflow", cfg.overflow === "Highlight" && over);
+
+    const showWait = cfg.showSendWaitTimer && waitText.length > 0;
+    waitEl.hidden = !showWait;
+    waitEl.textContent = waitText;
+  };
+
+  const setWaitText = (text: string): void => {
+    waitText = text;
+    sync();
   };
 
   const pulse = (): void => {
@@ -81,5 +95,5 @@ export function bindComposerChrome(opts: {
     }
   });
 
-  return { sync, pulse };
+  return { sync, pulse, setWaitText };
 }

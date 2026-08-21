@@ -80,6 +80,13 @@ export type ChatEvent =
       followersOnly?: number;
     }
   | {
+      kind: "userstate";
+      id: string;
+      timestampMs: number;
+      badges: Badge[];
+      isModTag?: boolean;
+    }
+  | {
       kind: "notice";
       id: string;
       timestampMs: number;

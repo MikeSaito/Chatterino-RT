@@ -20,6 +20,7 @@ pub mod parse;
 pub mod pending;
 pub mod room_modes;
 pub mod scrollback;
+pub mod send_wait;
 pub mod session;
 pub mod settings;
 pub mod spans;

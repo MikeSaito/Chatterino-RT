@@ -859,6 +859,15 @@ button:disabled {
   gap: 2px;
 }
 
+#composer-meta {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 0;
+}
+
 #emote-open {
   flex-shrink: 0;
   width: 36px;
@@ -881,7 +890,13 @@ button:disabled {
 }
 
 #composer-length {
-  align-self: flex-end;
+  font-size: 11px;
+  color: var(--c-muted);
+  line-height: 1;
+  padding-right: 2px;
+}
+
+#composer-wait {
   font-size: 11px;
   color: var(--c-muted);
   line-height: 1;

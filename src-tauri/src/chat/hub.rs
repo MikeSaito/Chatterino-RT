@@ -37,14 +37,31 @@ impl Hub {
         self.joined.contains(channel)
     }
 
-    pub fn ingest(&mut self, channel: &str, event: ChatEvent) -> Option<ChatBatch> {
+    pub fn ingest(
+        &mut self,
+        channel: &str,
+        event: ChatEvent,
+        self_login: Option<&str>,
+    ) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
             if self.buffers.contains_key(channel) {
-                self.buffer(channel).push_scrollback_only(event);
+                self.buffer(channel)
+                    .push_scrollback_only(event, self_login);
             }
             return None;
         }
-        self.buffer(channel).ingest(event)
+        self.buffer(channel).ingest(event, self_login)
+    }
+
+    /// Poll all buffers for changed send-wait labels.
+    pub fn poll_send_waits(&mut self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (ch, buf) in self.buffers.iter_mut() {
+            if let Some(text) = buf.poll_send_wait() {
+                out.push((ch.clone(), text));
+            }
+        }
+        out
     }
 
     pub fn flush_all(&mut self) -> Vec<ChatBatch> {
@@ -74,12 +91,17 @@ impl Hub {
         }
     }
 
-    pub fn drop_channel(&mut self, channel: &str) {
+    pub fn drop_channel(&mut self, channel: &str) -> Option<String> {
+        let clear = self
+            .buffers
+            .get_mut(channel)
+            .and_then(|b| b.clear_send_wait_for_drop());
         self.buffers.remove(channel);
         self.joined.remove(channel);
         if self.active.as_deref() == Some(channel) {
             self.active = None;
         }
+        clear
     }
 
     pub fn clear_all(&mut self) {
@@ -114,8 +136,8 @@ mod tests {
     fn ingest_ignores_unknown_inactive() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
-        assert!(hub.ingest("xqc", notice("1")).is_none());
-        assert!(hub.ingest("other", notice("nope")).is_none());
+        assert!(hub.ingest("xqc", notice("1"), None).is_none());
+        assert!(hub.ingest("other", notice("nope"), None).is_none());
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
@@ -126,7 +148,7 @@ mod tests {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         hub.buffer("lirik");
-        hub.ingest("lirik", notice("a"));
+        hub.ingest("lirik", notice("a"), None);
         hub.set_active(Some("lirik".into()));
         let snap = hub.snapshot("lirik").unwrap();
         assert_eq!(snap.events.len(), 1);

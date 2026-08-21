@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::complete;
@@ -117,7 +117,15 @@ pub async fn chat_leave(
     }
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        hub.drop_channel(&normalized);
+        if let Some(text) = hub.drop_channel(&normalized) {
+            let _ = app.emit(
+                "chat:send-wait",
+                super::types::ChatSendWait {
+                    channel_id: normalized.clone(),
+                    text,
+                },
+            );
+        }
     }
     let _ = super::session::forget_open(&state, &normalized);
     let next = if left_was_active {

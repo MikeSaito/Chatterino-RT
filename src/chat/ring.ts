@@ -962,8 +962,8 @@ export class MessageRing {
         return;
       }
     }
-    if (event.kind === "roomstate") {
-      // Legacy raw roomstate in old snapshots — skip; live path emits Notice.
+    if (event.kind === "roomstate" || event.kind === "userstate") {
+      // Legacy raw roomstate / userstate in old snapshots — skip; live path side-effects only.
       return;
     }
     const slot = this.slots[this.head];
@@ -1302,11 +1302,12 @@ export class MessageRing {
           highlightColor: "",
         };
       case "roomstate":
+      case "userstate":
         return {
           time,
           nick: "*",
           nickColor: this.themeFills.nickFallback,
-          body: `emote:${event.emoteOnly} subs:${event.subsOnly} slow:${event.slowSec}`,
+          body: "",
           copyText: "",
           leadLen: 0,
           spans: [],

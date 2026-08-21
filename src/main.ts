@@ -33,7 +33,7 @@ import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import { tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
+import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus } from "./chat/types";
 
 let chatIpc: ChatIpc | null = null;
@@ -67,6 +67,7 @@ async function boot(): Promise<void> {
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
   const composerSend = document.querySelector<HTMLButtonElement>("#composer-send");
   const composerLength = document.querySelector<HTMLElement>("#composer-length");
+  const composerWait = document.querySelector<HTMLElement>("#composer-wait");
   const replyBar = document.querySelector<HTMLElement>("#reply-bar");
   const replyLabel = document.querySelector<HTMLElement>("#reply-label");
   const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
@@ -103,6 +104,7 @@ async function boot(): Promise<void> {
     !composerInput ||
     !composerSend ||
     !composerLength ||
+    !composerWait ||
     !replyBar ||
     !replyLabel ||
     !replyCancel ||
@@ -143,10 +145,12 @@ async function boot(): Promise<void> {
   const importBtn = authImport;
   const completeBox = completeList;
   let composerOpts: ComposerChromeOpts = defaultComposerChrome();
+  const sendWaitByChannel = new Map<string, string>();
   const composerChrome = bindComposerChrome({
     form: composer,
     input: messageInput,
     lengthEl: composerLength,
+    waitEl: composerWait,
     replyBar: replyBarEl,
     getOpts: () => composerOpts,
   });
@@ -204,6 +208,8 @@ async function boot(): Promise<void> {
       composerOpts = {
         showEmptyInput: data.knobs["appearance.showEmptyInput"] !== false,
         showMessageLength: data.knobs["appearance.showMessageLength"] === true,
+        showSendWaitTimer:
+          data.knobs["appearance.showSendWaitTimer"] === true,
         overflow: parseMessageOverflow(data.knobs["appearance.messageOverflow"]),
         pulseOnSelf:
           data.knobs["appearance.pulseTextInputOnSelfMessage"] === true,
@@ -249,6 +255,11 @@ async function boot(): Promise<void> {
     },
   });
   const ipc = bindChatIpc(ring);
+
+  function applySendWaitForActive(): void {
+    const ch = ipc.active().toLowerCase();
+    composerChrome.setWaitText(ch ? (sendWaitByChannel.get(ch) ?? "") : "");
+  }
   chatIpc = ipc;
   // Stock WindowDeactivate ≈ tab away / minimize. Prefer visibility hidden so
   // iframe player focus and in-window dialogs do not move the last-read line.
@@ -564,11 +575,28 @@ async function boot(): Promise<void> {
     const focus = ev.payload.active || "";
     if (ev.payload.dropped) {
       channels.remove(ev.payload.dropped);
+      sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
     }
     channels.syncOpen(open, focus);
     channelQueue.push({ kind: "sync", name: focus });
     if (!channelBusy) {
       drainChannelQueue();
+    }
+  });
+
+  await listen<{ channelId: string; text: string }>(CHAT_SEND_WAIT_EVENT, (ev) => {
+    const ch = ev.payload.channelId?.trim().toLowerCase() ?? "";
+    const text = ev.payload.text ?? "";
+    if (!ch) {
+      return;
+    }
+    if (text) {
+      sendWaitByChannel.set(ch, text);
+    } else {
+      sendWaitByChannel.delete(ch);
+    }
+    if (ipc.active().toLowerCase() === ch) {
+      composerChrome.setWaitText(text);
     }
   });
 
@@ -977,6 +1005,7 @@ async function boot(): Promise<void> {
       mountedChannel = joined;
     }
     chatFindCtl.onChannelChanged();
+    applySendWaitForActive();
   }
 
   function drainChannelQueue(): void {
@@ -1014,6 +1043,7 @@ async function boot(): Promise<void> {
           mountedChannel = "";
         }
         chatFindCtl.onChannelChanged();
+        applySendWaitForActive();
       }
     } catch (err) {
       holdStatus = true;
@@ -1043,6 +1073,7 @@ async function boot(): Promise<void> {
     try {
       const next = await ipc.leave(name);
       channels.remove(name);
+      sendWaitByChannel.delete(name.toLowerCase());
       if (!next) {
         titleEl.textContent = "";
         channelInput.value = "";
@@ -1051,12 +1082,14 @@ async function boot(): Promise<void> {
           mountedChannel = "";
         }
         chatFindCtl.onChannelChanged();
+        applySendWaitForActive();
         return;
       }
       if (leftActive) {
         applyMounted(next);
       } else {
         channels.paint(ipc.active());
+        applySendWaitForActive();
       }
     } catch (err) {
       holdStatus = true;

@@ -38,6 +38,14 @@ pub struct ChatPipe {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatSendWait {
+    pub channel_id: String,
+    /// Empty clears the composer countdown for this channel.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRooms {
     pub active: Option<String>,
     pub open: Vec<String>,
@@ -161,6 +169,16 @@ pub enum ChatEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         followers_only: Option<i32>,
     },
+    /// USERSTATE: not shown in scrollback; clears send-wait when high rate limit.
+    #[serde(rename = "userstate", rename_all = "camelCase")]
+    Userstate {
+        id: String,
+        timestamp_ms: u64,
+        badges: Vec<Badge>,
+        /// Twitch `mod=1` tag (badges sometimes omit moderator).
+        #[serde(default)]
+        is_mod_tag: bool,
+    },
     #[serde(rename = "notice", rename_all = "camelCase")]
     Notice {
         id: String,
@@ -177,6 +195,7 @@ impl ChatEvent {
             | ChatEvent::Clearmsg { id, .. }
             | ChatEvent::Usernotice { id, .. }
             | ChatEvent::Roomstate { id, .. }
+            | ChatEvent::Userstate { id, .. }
             | ChatEvent::Notice { id, .. } => id,
         }
     }
@@ -246,6 +265,7 @@ impl ChatEvent {
                 needle_lower,
             ),
             ChatEvent::Clearmsg { .. } => false,
+            ChatEvent::Userstate { .. } => false,
         }
     }
 }
@@ -379,6 +399,14 @@ impl ChatEvent {
             ChatEvent::Clearmsg { .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
                 timestamp_ms: 0,
+                nick: "*".into(),
+                login: String::new(),
+                text: String::new(),
+                color: "#adadc0".into(),
+            },
+            ChatEvent::Userstate { timestamp_ms, .. } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
                 nick: "*".into(),
                 login: String::new(),
                 text: String::new(),

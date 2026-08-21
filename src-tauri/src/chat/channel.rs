@@ -1,12 +1,14 @@
 use super::pending::Pending;
 use super::room_modes::RoomModes;
 use super::scrollback::Scrollback;
+use super::send_wait::{self, SendWait};
 use super::types::{ChatBatch, ChatEvent};
 
 pub struct ChannelBuf {
     pub scrollback: Scrollback,
     pub pending: Pending,
     room_modes: Option<RoomModes>,
+    send_wait: SendWait,
 }
 
 impl ChannelBuf {
@@ -15,24 +17,42 @@ impl ChannelBuf {
             scrollback: Scrollback::new(),
             pending: Pending::new(channel_id),
             room_modes: None,
+            send_wait: SendWait::default(),
         }
     }
 
-    /// ROOMSTATE: merge channel modes only (notices come from Twitch NOTICE). Drop from scrollback.
+    /// ROOMSTATE / USERSTATE: merge or send-wait side effects; drop from scrollback.
     fn expand(&mut self, event: ChatEvent) -> Vec<ChatEvent> {
-        if matches!(&event, ChatEvent::Roomstate { .. }) {
-            let base = self.room_modes.unwrap_or_default();
-            if let Some(next) = base.merge_event(&event) {
-                self.room_modes = Some(next);
+        match &event {
+            ChatEvent::Roomstate { .. } => {
+                let base = self.room_modes.unwrap_or_default();
+                if let Some(next) = base.merge_event(&event) {
+                    if next.slow_sec == 0 {
+                        self.send_wait.clear();
+                    }
+                    self.room_modes = Some(next);
+                }
+                return Vec::new();
             }
-            return Vec::new();
+            ChatEvent::Userstate {
+                badges,
+                is_mod_tag,
+                ..
+            } => {
+                if send_wait::has_high_rate_limit(badges) || *is_mod_tag {
+                    self.send_wait.clear();
+                }
+                return Vec::new();
+            }
+            _ => {}
         }
         vec![event]
     }
 
-    pub fn ingest(&mut self, event: ChatEvent) -> Option<ChatBatch> {
+    pub fn ingest(&mut self, event: ChatEvent, self_login: Option<&str>) -> Option<ChatBatch> {
         let mut flushed: Option<ChatBatch> = None;
         for item in self.expand(event) {
+            self.note_send_wait(&item, self_login);
             if let Some(batch) = self.ingest_one(item) {
                 flushed = Some(merge_batches(flushed, batch));
             }
@@ -41,10 +61,16 @@ impl ChannelBuf {
     }
 
     /// Inactive channel: keep scrollback + room mode state, no live pending.
-    pub fn push_scrollback_only(&mut self, event: ChatEvent) {
+    pub fn push_scrollback_only(&mut self, event: ChatEvent, self_login: Option<&str>) {
         for item in self.expand(event) {
+            self.note_send_wait(&item, self_login);
             self.scrollback.push(item);
         }
+    }
+
+    fn note_send_wait(&mut self, event: &ChatEvent, self_login: Option<&str>) {
+        let slow = self.room_modes.map(|m| m.slow_sec).unwrap_or(0);
+        send_wait::apply_event(&mut self.send_wait, event, self_login, slow);
     }
 
     fn ingest_one(&mut self, event: ChatEvent) -> Option<ChatBatch> {
@@ -75,6 +101,16 @@ impl ChannelBuf {
             events: self.scrollback.snapshot(),
         }
     }
+
+    /// Changed wait label for `chat:send-wait` (empty string clears UI).
+    pub fn poll_send_wait(&mut self) -> Option<String> {
+        self.send_wait.poll_emit()
+    }
+
+    /// On channel drop: clear timer and emit "" if UI had a countdown.
+    pub fn clear_send_wait_for_drop(&mut self) -> Option<String> {
+        self.send_wait.clear_for_drop()
+    }
 }
 
 fn merge_batches(prev: Option<ChatBatch>, next: ChatBatch) -> ChatBatch {
@@ -93,7 +129,7 @@ fn merge_batches(prev: Option<ChatBatch>, next: ChatBatch) -> ChatBatch {
 mod tests {
     use super::*;
     use crate::chat::constants::BATCH_MAX_MESSAGES;
-    use crate::chat::types::ChatEvent;
+    use crate::chat::types::{Badge, ChatEvent};
 
     fn notice(id: &str) -> ChatEvent {
         ChatEvent::Notice {
@@ -107,12 +143,12 @@ mod tests {
     fn snapshot_flushes_pending_and_advances_seq() {
         let mut hub = crate::chat::hub::Hub::default();
         hub.set_active(Some("xqc".into()));
-        hub.ingest("xqc", notice("1"));
+        hub.ingest("xqc", notice("1"), None);
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.seq, 1);
         assert_eq!(snap.events.len(), 1);
         assert!(hub.buffer("xqc").flush().is_none());
-        hub.ingest("xqc", notice("2"));
+        hub.ingest("xqc", notice("2"), None);
         let live = hub.flush_all();
         assert_eq!(live[0].seq, 2);
         assert_eq!(live[0].events.len(), 1);
@@ -123,7 +159,7 @@ mod tests {
     fn ingest_keeps_overflow_in_scrollback_not_dropped() {
         let mut buf = ChannelBuf::new("xqc");
         for i in 0..(BATCH_MAX_MESSAGES + 2) {
-            let _ = buf.ingest(notice(&i.to_string()));
+            let _ = buf.ingest(notice(&i.to_string()), None);
         }
         assert!(buf.scrollback.len() >= BATCH_MAX_MESSAGES);
     }
@@ -131,14 +167,17 @@ mod tests {
     #[test]
     fn roomstate_not_pushed_to_scrollback() {
         let mut buf = ChannelBuf::new("xqc");
-        let _ = buf.ingest(ChatEvent::Roomstate {
-            id: "r1".into(),
-            timestamp_ms: 1,
-            emote_only: Some(true),
-            subs_only: None,
-            slow_sec: None,
-            followers_only: None,
-        });
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r1".into(),
+                timestamp_ms: 1,
+                emote_only: Some(true),
+                subs_only: None,
+                slow_sec: None,
+                followers_only: None,
+            },
+            None,
+        );
         let snap = buf.snapshot_batch("xqc");
         assert!(snap.events.is_empty());
         assert_eq!(buf.room_modes.map(|m| m.emote_only), Some(true));
@@ -147,24 +186,170 @@ mod tests {
     #[test]
     fn partial_roomstate_preserves_prior_flags() {
         let mut buf = ChannelBuf::new("xqc");
-        let _ = buf.ingest(ChatEvent::Roomstate {
-            id: "r1".into(),
-            timestamp_ms: 1,
-            emote_only: Some(true),
-            subs_only: Some(false),
-            slow_sec: Some(0),
-            followers_only: Some(-1),
-        });
-        let _ = buf.ingest(ChatEvent::Roomstate {
-            id: "r2".into(),
-            timestamp_ms: 2,
-            emote_only: None,
-            subs_only: None,
-            slow_sec: Some(30),
-            followers_only: None,
-        });
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r1".into(),
+                timestamp_ms: 1,
+                emote_only: Some(true),
+                subs_only: Some(false),
+                slow_sec: Some(0),
+                followers_only: Some(-1),
+            },
+            None,
+        );
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r2".into(),
+                timestamp_ms: 2,
+                emote_only: None,
+                subs_only: None,
+                slow_sec: Some(30),
+                followers_only: None,
+            },
+            None,
+        );
         let modes = buf.room_modes.expect("modes");
         assert!(modes.emote_only);
         assert_eq!(modes.slow_sec, 30);
+    }
+
+    #[test]
+    fn own_privmsg_starts_slow_wait() {
+        let mut buf = ChannelBuf::new("xqc");
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r".into(),
+                timestamp_ms: 1,
+                emote_only: None,
+                subs_only: None,
+                slow_sec: Some(10),
+                followers_only: None,
+            },
+            Some("me"),
+        );
+        let _ = buf.ingest(
+            ChatEvent::Privmsg {
+                id: "p".into(),
+                timestamp_ms: 2,
+                user_id: "1".into(),
+                login: "me".into(),
+                display_name: "Me".into(),
+                color: "#fff".into(),
+                badges: vec![],
+                text: "hi".into(),
+                emote_spans: vec![],
+                link_spans: vec![],
+                mention_spans: vec![],
+                bits: None,
+                reply_to_id: None,
+                reply_to_login: None,
+                reply_to_display_name: None,
+                reply_to_text: None,
+                action: false,
+                highlight_color: None,
+                highlight_sound: false,
+            },
+            Some("me"),
+        );
+        let text = buf.poll_send_wait().expect("wait");
+        assert!(text.contains('s') || text.contains('m'), "{text}");
+    }
+
+    #[test]
+    fn slow_zero_clears_wait() {
+        let mut buf = ChannelBuf::new("xqc");
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r1".into(),
+                timestamp_ms: 1,
+                emote_only: None,
+                subs_only: None,
+                slow_sec: Some(30),
+                followers_only: None,
+            },
+            Some("me"),
+        );
+        let _ = buf.ingest(
+            ChatEvent::Privmsg {
+                id: "p".into(),
+                timestamp_ms: 2,
+                user_id: "1".into(),
+                login: "me".into(),
+                display_name: "Me".into(),
+                color: "#fff".into(),
+                badges: vec![],
+                text: "hi".into(),
+                emote_spans: vec![],
+                link_spans: vec![],
+                mention_spans: vec![],
+                bits: None,
+                reply_to_id: None,
+                reply_to_login: None,
+                reply_to_display_name: None,
+                reply_to_text: None,
+                action: false,
+                highlight_color: None,
+                highlight_sound: false,
+            },
+            Some("me"),
+        );
+        assert!(buf.poll_send_wait().is_some());
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r2".into(),
+                timestamp_ms: 3,
+                emote_only: None,
+                subs_only: None,
+                slow_sec: Some(0),
+                followers_only: None,
+            },
+            Some("me"),
+        );
+        assert_eq!(buf.poll_send_wait().as_deref(), Some(""));
+    }
+
+    #[test]
+    fn mod_badge_skips_slow_wait() {
+        let mut buf = ChannelBuf::new("xqc");
+        let _ = buf.ingest(
+            ChatEvent::Roomstate {
+                id: "r".into(),
+                timestamp_ms: 1,
+                emote_only: None,
+                subs_only: None,
+                slow_sec: Some(10),
+                followers_only: None,
+            },
+            Some("me"),
+        );
+        let _ = buf.ingest(
+            ChatEvent::Privmsg {
+                id: "p".into(),
+                timestamp_ms: 2,
+                user_id: "1".into(),
+                login: "me".into(),
+                display_name: "Me".into(),
+                color: "#fff".into(),
+                badges: vec![Badge {
+                    set: "moderator".into(),
+                    version: "1".into(),
+                    url: None,
+                }],
+                text: "hi".into(),
+                emote_spans: vec![],
+                link_spans: vec![],
+                mention_spans: vec![],
+                bits: None,
+                reply_to_id: None,
+                reply_to_login: None,
+                reply_to_display_name: None,
+                reply_to_text: None,
+                action: false,
+                highlight_color: None,
+                highlight_sound: false,
+            },
+            Some("me"),
+        );
+        assert!(buf.poll_send_wait().is_none());
     }
 }

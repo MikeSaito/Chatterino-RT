@@ -18,7 +18,7 @@ use super::parse::{
 };
 use super::spans::{decorate_text_spans_ex, FindMentions};
 use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
-use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatStatus};
+use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatSendWait, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
 const CLIENT_PING: Duration = Duration::from_secs(30);
@@ -180,6 +180,7 @@ async fn connect_session(
         tokio::select! {
             _ = ticker.tick() => {
                 flush_emit(app, shared);
+                emit_send_waits(app, shared);
                 if pong_deadline.is_some_and(|d| Instant::now() >= d) {
                     return SessionEnd::Reconnect { wait: true };
                 }
@@ -374,7 +375,15 @@ async fn connect_session(
                                         .ok()
                                         .is_some_and(|h| h.active.as_deref() == Some(channel.as_str()));
                                     if let Ok(mut hub) = shared.hub.lock() {
-                                        hub.drop_channel(&channel);
+                                        if let Some(text) = hub.drop_channel(&channel) {
+                                            let _ = app.emit(
+                                                "chat:send-wait",
+                                                ChatSendWait {
+                                                    channel_id: channel.clone(),
+                                                    text,
+                                                },
+                                            );
+                                        }
                                     }
                                     let _ = crate::chat::session::forget_open(shared, &channel);
                                     if was_active {
@@ -612,14 +621,14 @@ fn dispatch_line(
                 return LineAction::None;
             }
             decorate_event(&mut event, shared, &channel);
-            let batch = shared
-                .hub
-                .lock()
-                .ok()
-                .and_then(|mut hub| hub.ingest(&channel, event));
+            let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
+            let batch = shared.hub.lock().ok().and_then(|mut hub| {
+                hub.ingest(&channel, event, self_login.as_deref())
+            });
             if let Some(batch) = batch {
                 deliver_batch(app, shared, &batch);
             }
+            emit_send_waits(app, shared);
             if let Some(msg) = failed {
                 LineAction::JoinFailed {
                     channel,
@@ -700,6 +709,21 @@ fn emit_status(app: &AppHandle, state: ChatConnState, channel: Option<&str>, mes
             message: message.map(str::to_string),
         },
     );
+}
+
+fn emit_send_waits(app: &AppHandle, shared: &Shared) {
+    let updates = shared
+        .hub
+        .lock()
+        .ok()
+        .map(|mut hub| hub.poll_send_waits())
+        .unwrap_or_default();
+    for (channel_id, text) in updates {
+        let _ = app.emit(
+            "chat:send-wait",
+            ChatSendWait { channel_id, text },
+        );
+    }
 }
 
 fn flush_emit(app: &AppHandle, shared: &Shared) {
