@@ -116,7 +116,17 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
         Ok(inner) => inner.clone(),
         Err(_) => Vec::new(),
     };
-    if should_drop(&filters, &ignore_blocks, event, self_login.as_deref()) {
+    let ignore_users = match shared.ignore_user_rules.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => Vec::new(),
+    };
+    if should_drop(
+        &filters,
+        &ignore_users,
+        &ignore_blocks,
+        event,
+        self_login.as_deref(),
+    ) {
         return true;
     }
     let sound_ctx = match shared.highlight_sound.lock() {
@@ -169,6 +179,17 @@ pub fn refresh_highlight_blacklist(shared: &Shared) {
     }
 }
 
+/// Rebuild cached Ignores Users drop rules after settings change.
+pub fn refresh_ignore_user_rules(shared: &Shared) {
+    let rules = match shared.settings.lock() {
+        Ok(inner) => ignore_user_rules_from_settings(&inner.data),
+        Err(_) => Vec::new(),
+    };
+    if let Ok(mut slot) = shared.ignore_user_rules.lock() {
+        *slot = rules;
+    }
+}
+
 pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
     Ok(Filters {
         enable_self_highlight: raw.enable_self_highlight,
@@ -181,6 +202,7 @@ pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
 
 pub(crate) fn should_drop(
     filters: &Filters,
+    ignore_users: &[BlacklistRule],
     ignore_blocks: &[PhraseRule],
     event: &ChatEvent,
     self_login: Option<&str>,
@@ -191,6 +213,9 @@ pub(crate) fn should_drop(
             return false;
         }
         if filters.ignore_logins.iter().any(|item| item.eq_ignore_ascii_case(login)) {
+            return true;
+        }
+        if login_is_blacklisted(login, ignore_users) {
             return true;
         }
     }
@@ -497,6 +522,15 @@ impl BlacklistRule {
 /// Rows from Highlights Blacklisted Users table (non-empty username).
 pub fn blacklist_rules_from_settings(data: &super::settings::AppSettings) -> Vec<BlacklistRule> {
     data.highlight_blacklist
+        .iter()
+        .filter(|r| !r.username.trim().is_empty())
+        .map(|r| BlacklistRule::from_row(r.username.clone(), r.regex))
+        .collect()
+}
+
+/// Rows from Ignores Users table (non-empty username) — drop matching logins.
+pub fn ignore_user_rules_from_settings(data: &super::settings::AppSettings) -> Vec<BlacklistRule> {
+    data.ignore_users
         .iter()
         .filter(|r| !r.username.trim().is_empty())
         .map(|r| BlacklistRule::from_row(r.username.clone(), r.regex))
@@ -1008,10 +1042,10 @@ mod tests {
             ignore_logins: vec!["spam".into()],
             ..Filters::default()
         };
-        assert!(should_drop(&filters, &[], &privmsg("spam", "hi"), Some("me")));
-        assert!(should_drop(&filters, &[], &privmsg("SPAM", "hi"), Some("me")));
-        assert!(!should_drop(&filters, &[], &privmsg("spam", "hi"), Some("spam")));
-        assert!(!should_drop(&filters, &[], &privmsg("ok", "hi"), Some("me")));
+        assert!(should_drop(&filters, &[], &[], &privmsg("spam", "hi"), Some("me")));
+        assert!(should_drop(&filters, &[], &[], &privmsg("SPAM", "hi"), Some("me")));
+        assert!(!should_drop(&filters, &[], &[], &privmsg("spam", "hi"), Some("spam")));
+        assert!(!should_drop(&filters, &[], &[], &privmsg("ok", "hi"), Some("me")));
     }
 
     #[test]
@@ -1023,16 +1057,18 @@ mod tests {
         assert!(should_drop(
             &filters,
             &[],
+            &[],
             &privmsg("x", "please buy followers now"),
             Some("me")
         ));
         assert!(!should_drop(
             &filters,
             &[],
+            &[],
             &privmsg("me", "please buy followers now"),
             Some("me")
         ));
-        assert!(!should_drop(&filters, &[], &privmsg("x", "buyfollowers"), Some("me")));
+        assert!(!should_drop(&filters, &[], &[], &privmsg("x", "buyfollowers"), Some("me")));
     }
 
     #[test]
@@ -2022,7 +2058,7 @@ mod tests {
             ..Filters::default()
         };
         let ev = privmsg("spam", "hi");
-        assert!(should_drop(&filters, &[], &ev, Some("me")));
+        assert!(should_drop(&filters, &[], &[], &ev, Some("me")));
         let mut pending = Pending::new("xqc");
         assert_eq!(pending.seq(), 0);
         assert!(pending.take_batch().is_none());
@@ -2034,12 +2070,14 @@ mod tests {
         let case_row = PhraseRule::from_row("Spam".into(), false, String::new(), false, true);
         assert!(should_drop(
             &filters,
+            &[],
             &[case_row.clone()],
             &privmsg("x", "buy Spam now"),
             Some("me")
         ));
         assert!(!should_drop(
             &filters,
+            &[],
             &[case_row],
             &privmsg("x", "buy spam now"),
             Some("me")
@@ -2048,12 +2086,14 @@ mod tests {
         let re = PhraseRule::from_row(r"\bspam\b".into(), false, String::new(), true, false);
         assert!(should_drop(
             &filters,
+            &[],
             &[re.clone()],
             &privmsg("x", "no Spam here"),
             Some("me")
         ));
         assert!(!should_drop(
             &filters,
+            &[],
             &[re],
             &privmsg("x", "spammer alert"),
             Some("me")
@@ -2063,6 +2103,7 @@ mod tests {
         assert!(invalid.compiled.is_none());
         assert!(!should_drop(
             &filters,
+            &[],
             &[invalid],
             &privmsg("x", "("),
             Some("me")
@@ -2081,6 +2122,7 @@ mod tests {
         assert!(no_block.is_empty());
         assert!(!should_drop(
             &filters,
+            &[],
             &no_block,
             &privmsg("x", "spam"),
             Some("me")
@@ -2088,6 +2130,7 @@ mod tests {
 
         assert!(!should_drop(
             &filters,
+            &[],
             &[PhraseRule::plain("spam", false, "")],
             &privmsg("me", "spam"),
             Some("me")
@@ -2110,14 +2153,101 @@ mod tests {
         assert!(rules[0].compiled.is_some());
         assert!(should_drop(
             &filters,
+            &[],
             &rules,
             &privmsg("x", "has cache here"),
             Some("me")
         ));
         assert!(!should_drop(
             &filters,
+            &[],
             &rules,
             &privmsg("x", "cached"),
+            Some("me")
+        ));
+    }
+
+    #[test]
+    fn ignore_users_drop_login_match() {
+        let filters = Filters::default();
+        let exact = BlacklistRule::from_row("ann".into(), false);
+        assert!(should_drop(
+            &filters,
+            &[exact.clone()],
+            &[],
+            &privmsg("ann", "hello"),
+            Some("me")
+        ));
+        assert!(should_drop(
+            &filters,
+            &[exact.clone()],
+            &[],
+            &privmsg("ANN", "hello"),
+            Some("me")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &[exact],
+            &[],
+            &privmsg("ann", "hello"),
+            Some("ann")
+        ));
+        // Match is by login only, not message body.
+        assert!(!should_drop(
+            &filters,
+            &[BlacklistRule::from_row("ann".into(), false)],
+            &[],
+            &privmsg("bob", "please ask ann later"),
+            Some("me")
+        ));
+
+        let re = BlacklistRule::from_row(r"^bot_.*".into(), true);
+        assert!(re.compiled.is_some());
+        assert!(should_drop(
+            &filters,
+            &[re],
+            &[],
+            &privmsg("bot_spam", "hi"),
+            Some("me")
+        ));
+
+        let invalid = BlacklistRule::from_row("(".into(), true);
+        assert!(invalid.compiled.is_none());
+        assert!(!should_drop(
+            &filters,
+            &[invalid],
+            &[],
+            &privmsg("ann", "hi"),
+            Some("me")
+        ));
+
+        let empty = ignore_user_rules_from_settings(&super::super::settings::AppSettings {
+            ignore_users: vec![super::super::settings::HighlightBlacklistRow {
+                username: "  ".into(),
+                regex: false,
+            }],
+            ..super::super::settings::AppSettings::default()
+        });
+        assert!(empty.is_empty());
+
+        let shared = super::super::state::Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.data.ignore_users = vec![super::super::settings::HighlightBlacklistRow {
+                username: "nightbot".into(),
+                regex: false,
+            }];
+        }
+        refresh_ignore_user_rules(&shared);
+        let rules = shared.ignore_user_rules.lock().unwrap().clone();
+        assert_eq!(rules.len(), 1);
+        assert!(login_is_blacklisted("NightBot", &rules));
+        assert!(!login_is_blacklisted("bob", &rules));
+        assert!(should_drop(
+            &filters,
+            &rules,
+            &[],
+            &privmsg("nightbot", "cmd"),
             Some("me")
         ));
     }

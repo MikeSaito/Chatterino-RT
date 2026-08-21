@@ -124,6 +124,7 @@ function filtersFromSettings(data: AppSettings): Filters {
   return {
     enableSelfHighlight: data.enableSelfHighlight,
     ignoreLogins: data.ignoreUsers
+      .filter((row) => row.regex !== true)
       .map((row) => String(row.username ?? "").trim())
       .filter(Boolean),
     ignorePhrases: data.ignoreMessages

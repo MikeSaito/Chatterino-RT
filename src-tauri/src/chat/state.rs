@@ -111,6 +111,8 @@ pub struct Shared {
     pub highlight_sound: Arc<Mutex<HighlightSoundCtx>>,
     /// Compiled Ignores Messages block rules; refreshed on settings load/replace.
     pub ignore_block_rules: Arc<Mutex<Vec<PhraseRule>>>,
+    /// Compiled Ignores Users drop rules; refreshed on settings load/replace.
+    pub ignore_user_rules: Arc<Mutex<Vec<BlacklistRule>>>,
     /// Compiled Highlights Blacklisted Users rules; refreshed on settings load/replace.
     pub highlight_blacklist: Arc<Mutex<Vec<BlacklistRule>>>,
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
@@ -151,6 +153,7 @@ impl Shared {
             settings: Arc::new(Mutex::new(SettingsInner::default())),
             highlight_sound: Arc::new(Mutex::new(HighlightSoundCtx::default())),
             ignore_block_rules: Arc::new(Mutex::new(Vec::new())),
+            ignore_user_rules: Arc::new(Mutex::new(Vec::new())),
             highlight_blacklist: Arc::new(Mutex::new(Vec::new())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
