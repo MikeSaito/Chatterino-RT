@@ -114,8 +114,10 @@ export type Filters = {
   highlightLogins: string[];
 };
 
+/** @deprecated use AppSettings from settings/dialog; kept for narrow display fields */
 export type DisplaySettings = {
   fontScale: number;
   showTimestamps: boolean;
   hideModerated: boolean;
+  timestampFormat?: string;
 };

@@ -202,6 +202,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub ignore_messages: Vec<IgnoreMessageRow>,
     #[serde(default)]
+    pub ignore_users: Vec<HighlightBlacklistRow>,
+    #[serde(default)]
     pub filters: Vec<FilterRow>,
     #[serde(default)]
     pub hotkeys: Vec<HotkeyRow>,
@@ -228,6 +230,7 @@ impl Default for AppSettings {
             highlight_badges: Vec::new(),
             highlight_blacklist: Vec::new(),
             ignore_messages: Vec::new(),
+            ignore_users: Vec::new(),
             filters: Vec::new(),
             hotkeys: Vec::new(),
             mod_actions: Vec::new(),
@@ -369,6 +372,7 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         || raw.highlight_badges.len() > MAX_TABLE_ROWS
         || raw.highlight_blacklist.len() > MAX_TABLE_ROWS
         || raw.ignore_messages.len() > MAX_TABLE_ROWS
+        || raw.ignore_users.len() > MAX_TABLE_ROWS
         || raw.filters.len() > MAX_TABLE_ROWS
         || raw.hotkeys.len() > MAX_TABLE_ROWS
         || raw.mod_actions.len() > MAX_TABLE_ROWS
@@ -407,6 +411,9 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     for row in &mut raw.ignore_messages {
         trim_cell(&mut row.pattern)?;
         trim_cell(&mut row.replacement)?;
+    }
+    for row in &mut raw.ignore_users {
+        trim_cell(&mut row.username)?;
     }
     for row in &mut raw.filters {
         trim_cell(&mut row.name)?;

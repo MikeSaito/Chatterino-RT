@@ -8,7 +8,10 @@ import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { bindSearchPopup } from "./shell/chatFind";
-import { bindSettingsDialog } from "./shell/settingsDialog";
+import { bindSettingsDialog } from "./shell/settings/dialog";
+import { bindUserCard } from "./shell/userCard";
+import { bindReplyThread } from "./shell/replyThread";
+import { bindEmotePopup } from "./shell/emotePopup";
 import { tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus } from "./chat/types";
@@ -55,6 +58,10 @@ async function boot(): Promise<void> {
   const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
   const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
   const searchModal = document.querySelector<HTMLElement>("#search-modal");
+  const usercardModal = document.querySelector<HTMLElement>("#usercard-modal");
+  const replythreadModal = document.querySelector<HTMLElement>("#replythread-modal");
+  const emotepopupModal = document.querySelector<HTMLElement>("#emotepopup-modal");
+  const emoteOpen = document.querySelector<HTMLButtonElement>("#emote-open");
   if (
     !canvas ||
     !pane ||
@@ -85,7 +92,11 @@ async function boot(): Promise<void> {
     !authImport ||
     !settingsModal ||
     !settingsOpen ||
-    !searchModal
+    !searchModal ||
+    !usercardModal ||
+    !replythreadModal ||
+    !emotepopupModal ||
+    !emoteOpen
   ) {
     return;
   }
@@ -162,6 +173,40 @@ async function boot(): Promise<void> {
       hideContextMenu();
     },
   });
+  const userCard = bindUserCard({
+    modal: usercardModal,
+    settingsModal,
+    searchModal,
+    activeChannel: () => ipc.active(),
+  });
+  const replyThread = bindReplyThread({
+    modal: replythreadModal,
+    settingsModal,
+    activeChannel: () => ipc.active(),
+    onReply: (id, login, text) => {
+      setReply(id, login, text);
+      messageInput.focus();
+    },
+  });
+  const emotePopup = bindEmotePopup({
+    modal: emotepopupModal,
+    settingsModal,
+    insertEmote: (code) => {
+      const start = messageInput.selectionStart ?? messageInput.value.length;
+      const end = messageInput.selectionEnd ?? start;
+      const before = messageInput.value.slice(0, start);
+      const after = messageInput.value.slice(end);
+      const padL = before.length > 0 && !before.endsWith(" ") ? " " : "";
+      const padR = after.length > 0 && !after.startsWith(" ") ? " " : "";
+      messageInput.value = `${before}${padL}${code}${padR}${after}`;
+      const caret = before.length + padL.length + code.length + padR.length;
+      messageInput.setSelectionRange(caret, caret);
+      messageInput.focus();
+    },
+  });
+  emoteOpen.addEventListener("click", () => {
+    emotePopup.open();
+  });
   let mountedChannel = "";
   let holdStatus = false;
   let sending = false;
@@ -221,12 +266,28 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
     }
+    if (action === "copy-link" && target.linkUrl) {
+      void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
+      return;
+    }
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
       setReply(target.msgId, target.login, target.text);
       messageInput.focus();
       return;
     }
+    if (action === "thread" && target.msgId && target.login && !target.disabled) {
+      replyThread.open({
+        rootId: target.replyToId || target.msgId,
+        login: target.login,
+        text: target.text,
+      });
+      return;
+    }
     if (action === "user" && target.login) {
+      userCard.open({ login: target.login, nick: target.nick || target.login });
+      return;
+    }
+    if (action === "open-twitch" && target.login) {
       void invoke("open_chat_link", {
         url: `https://www.twitch.tv/${target.login}`,
       }).catch(() => undefined);
@@ -353,12 +414,24 @@ async function boot(): Promise<void> {
   function openContextMenu(ctx: SlotContext): void {
     contextTarget = ctx;
     const replyBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="reply"]');
+    const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
+    const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
+    const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
     }
+    if (threadBtn) {
+      threadBtn.hidden = !ctx.msgId || ctx.disabled;
+    }
     if (userBtn) {
       userBtn.hidden = !ctx.login;
+    }
+    if (twitchBtn) {
+      twitchBtn.hidden = !ctx.login;
+    }
+    if (copyLinkBtn) {
+      copyLinkBtn.hidden = !ctx.linkUrl;
     }
     contextMenuEl.hidden = false;
     const pad = 8;

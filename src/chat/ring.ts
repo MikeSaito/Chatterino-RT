@@ -49,6 +49,8 @@ export type SlotContext = {
   clientX: number;
   clientY: number;
   disabled: boolean;
+  replyToId: string;
+  linkUrl: string;
 };
 
 type Slot = {
@@ -69,6 +71,8 @@ type Slot = {
   bodyRaw: string;
   nickRaw: string;
   copyText: string;
+  replyToId: string;
+  timestampMs: number;
   spansRaw: EmoteSpan[];
   linkSpans: LinkSpan[];
   mentionSpans: MentionSpan[];
@@ -103,12 +107,15 @@ export class MessageRing {
   private head = 0;
   private ready = false;
   private showTimestamps = true;
+  private timestampFormat = "hh:mm";
   private fontSize = FONT_SIZE;
   private lineHeight = LINE_HEIGHT;
   private charWidth = CHAR_WIDTH;
   private badgeSize = BADGE_SIZE;
   private findHitId = "";
   private hideModerated = false;
+  private alternateMessages = false;
+  private separateMessages = false;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
 
@@ -128,10 +135,20 @@ export class MessageRing {
   }
 
   /** Масштаб шрифта, timestamps и hideModerated без destroy PIXI.Application. */
-  applyDisplay(fontScale: number, showTimestamps: boolean, hideModerated = false): void {
+  applyDisplay(
+    fontScale: number,
+    showTimestamps: boolean,
+    hideModerated = false,
+    timestampFormat = "hh:mm",
+    alternateMessages = false,
+    separateMessages = false,
+  ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
     this.showTimestamps = showTimestamps;
     this.hideModerated = hideModerated;
+    this.timestampFormat = timestampFormat === "Disable" ? "hh:mm" : timestampFormat;
+    this.alternateMessages = alternateMessages;
+    this.separateMessages = separateMessages;
     this.fontSize = FONT_SIZE * scale;
     this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
     this.charWidth = CHAR_WIDTH * scale;
@@ -141,6 +158,9 @@ export class MessageRing {
     }
     const emoteSize = Math.max(1, this.lineHeight - 4);
     for (const slot of this.slots) {
+      if (slot.msgId && slot.timestampMs) {
+        slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
+      }
       slot.time.style.fontSize = this.fontSize;
       slot.nick.style.fontSize = this.fontSize;
       slot.body.style.fontSize = this.fontSize;
@@ -307,6 +327,8 @@ export class MessageRing {
         bodyRaw: "",
         nickRaw: "",
         copyText: "",
+        replyToId: "",
+        timestampMs: 0,
         spansRaw: [],
         linkSpans: [],
         mentionSpans: [],
@@ -436,6 +458,8 @@ export class MessageRing {
     slot.bodyRaw = "";
     slot.nickRaw = "";
     slot.copyText = "";
+    slot.replyToId = "";
+    slot.timestampMs = 0;
     slot.spansRaw = [];
     slot.linkSpans = [];
     slot.mentionSpans = [];
@@ -478,6 +502,9 @@ export class MessageRing {
     slot.nick.tint = drawn.nickColor;
     slot.bodyRaw = drawn.body;
     slot.copyText = drawn.copyText;
+    slot.replyToId =
+      event.kind === "privmsg" && event.replyToId ? event.replyToId : "";
+    slot.timestampMs = event.timestampMs;
     slot.spansRaw = drawn.spans;
     slot.linkSpans = drawn.links;
     slot.mentionSpans = drawn.mentions;
@@ -536,7 +563,7 @@ export class MessageRing {
   }
 
   private line(event: ChatEvent): Drawn {
-    const time = formatTime(event.timestampMs);
+    const time = formatTime(event.timestampMs, this.timestampFormat);
     switch (event.kind) {
       case "privmsg": {
         let prefix = "";
@@ -658,7 +685,12 @@ export class MessageRing {
   }
 
   private paintClip(slot: Slot): void {
-    const timeW = this.showTimestamps ? 5 * this.charWidth + TIME_GAP : 0;
+    const timeSample = this.showTimestamps
+      ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
+      : "";
+    const timeW = this.showTimestamps
+      ? Math.max(5, timeSample.length) * this.charWidth + TIME_GAP
+      : 0;
     slot.time.x = 0;
     slot.time.visible = this.showTimestamps;
     const badgeN = slot.badgesRaw.length;
@@ -738,12 +770,22 @@ export class MessageRing {
     const w = this.app.screen.width;
     if (this.findHitId && slot.msgId === this.findHitId) {
       slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
-    }
-    const parsed = parseHighlight(slot.highlightColor);
-    if (!parsed) {
       return;
     }
-    slot.highlight.rect(0, 0, w, h).fill({ color: parsed.color, alpha: parsed.alpha });
+    const parsed = parseHighlight(slot.highlightColor);
+    if (parsed) {
+      slot.highlight.rect(0, 0, w, h).fill({ color: parsed.color, alpha: parsed.alpha });
+      return;
+    }
+    if (this.alternateMessages && slot.startRow % 2 === 1) {
+      slot.highlight.rect(0, 0, w, h).fill({ color: 0xffffff, alpha: 0.04 });
+    }
+    if (this.separateMessages) {
+      slot.highlight
+        .moveTo(0, h - 0.5)
+        .lineTo(w, h - 0.5)
+        .stroke({ width: 1, color: 0x2a2a2d, alpha: 0.9 });
+    }
   }
 
   private paintDisabled(slot: Slot): void {
@@ -877,6 +919,8 @@ export class MessageRing {
       clientX: ev.clientX,
       clientY: ev.clientY,
       disabled: slot.disabled,
+      replyToId: slot.replyToId,
+      linkUrl: this.linkAt(slot, ev) ?? "",
     });
   }
 
@@ -915,12 +959,44 @@ function eventLogin(event: ChatEvent): string {
   return "";
 }
 
-function formatTime(ms: number): string {
+function formatTime(ms: number, format: string): string {
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) {
     return "--:--";
   }
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const h24 = d.getHours();
+  const h12 = h24 % 12 || 12;
+  const ampm = h24 < 12 ? "am" : "pm";
+  const mm = pad2(d.getMinutes());
+  const ss = pad2(d.getSeconds());
+  const zzz = String(d.getMilliseconds()).padStart(3, "0");
+  switch (format) {
+    case "h:mm":
+      return `${h24}:${mm}`;
+    case "h:mm a":
+      return `${h12}:${mm} ${ampm}`;
+    case "hh:mm a":
+      return `${pad2(h12)}:${mm} ${ampm}`;
+    case "h:mm:ss":
+      return `${h24}:${mm}:${ss}`;
+    case "hh:mm:ss":
+      return `${pad2(h24)}:${mm}:${ss}`;
+    case "h:mm:ss a":
+      return `${h12}:${mm}:${ss} ${ampm}`;
+    case "hh:mm:ss a":
+      return `${pad2(h12)}:${mm}:${ss} ${ampm}`;
+    case "h:mm:ss.zzz":
+      return `${h24}:${mm}:${ss}.${zzz}`;
+    case "hh:mm:ss.zzz":
+      return `${pad2(h24)}:${mm}:${ss}.${zzz}`;
+    case "h:mm:ss.zzz a":
+      return `${h12}:${mm}:${ss}.${zzz} ${ampm}`;
+    case "hh:mm:ss.zzz a":
+      return `${pad2(h12)}:${mm}:${ss}.${zzz} ${ampm}`;
+    case "hh:mm":
+    default:
+      return `${pad2(h24)}:${mm}`;
+  }
 }
 
 function pad2(n: number): string {

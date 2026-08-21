@@ -549,6 +549,16 @@ const IGNORE_MESSAGES_TABLE: TableDef = {
   },
 };
 
+const IGNORE_USERS_TABLE: TableDef = {
+  id: "ignore-users",
+  path: "ignoreUsers",
+  columns: [
+    { key: "username", label: "Username", type: "text" },
+    { key: "regex", label: "Enable regex", type: "checkbox" },
+  ],
+  blankRow: { username: "", regex: false },
+};
+
 const FILTERS_TABLE: TableDef = {
   id: "filters",
   path: "filters",
@@ -1773,6 +1783,18 @@ export const SETTINGS_PAGES: PageDef[] = [
     ],
     sections: [
       {
+        title: "Self",
+        knobs: [
+          cb(
+            "enable-self-highlight",
+            "__wired.enableSelfHighlight",
+            "Highlight messages containing your name",
+            true,
+            "self nick username",
+          ),
+        ],
+      },
+      {
         title: "Default sound",
         knobs: [
           lab(
@@ -1822,6 +1844,7 @@ export const SETTINGS_PAGES: PageDef[] = [
       {
         id: "users",
         label: "Users",
+        table: IGNORE_USERS_TABLE,
         sections: [
           {
             title: "Twitch blocked users",
@@ -1842,7 +1865,7 @@ export const SETTINGS_PAGES: PageDef[] = [
               lab(
                 "blocked-users-list",
                 "__label.twitchBlockedUsers",
-                "List of blocked users",
+                "List of blocked users (Twitch block list is separate from ignore table above)",
                 "",
               ),
             ],
@@ -2211,6 +2234,7 @@ export function defaultAppSettingsTables(): {
   highlightBadges: [];
   highlightBlacklist: [];
   ignoreMessages: [];
+  ignoreUsers: [];
   filters: [];
   hotkeys: [];
   modActions: [];
@@ -2225,6 +2249,7 @@ export function defaultAppSettingsTables(): {
     highlightBadges: [],
     highlightBlacklist: [],
     ignoreMessages: [],
+    ignoreUsers: [],
     filters: [],
     hotkeys: [],
     modActions: [],
