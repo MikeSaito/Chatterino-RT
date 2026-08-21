@@ -20,7 +20,8 @@
         "frame-src": "https://player.twitch.tv https://embed.twitch.tv",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self'",
-        "worker-src": "'self' blob:"
+        "worker-src": "'self' blob:",
+        "media-src": "'self' blob:"
       },
       "devCsp": {
         "default-src": "'self' customprotocol: asset: http://localhost:1420",
@@ -29,7 +30,8 @@
         "frame-src": "https://player.twitch.tv https://embed.twitch.tv",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'",
-        "worker-src": "'self' blob: http://localhost:1420"
+        "worker-src": "'self' blob: http://localhost:1420",
+        "media-src": "'self' blob: http://localhost:1420"
       }
     },
     "windows": [

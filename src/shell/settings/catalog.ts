@@ -1792,16 +1792,24 @@ export const SETTINGS_PAGES: PageDef[] = [
             true,
             "self nick username",
           ),
+          cb(
+            "enable-self-highlight-sound",
+            "highlighting.enableSelfHighlightSound",
+            "Play sound when your name is mentioned",
+            true,
+            "self sound ping",
+          ),
         ],
       },
       {
         title: "Default sound",
         knobs: [
-          lab(
+          txt(
             "highlight-default-sound",
             "highlighting.pathHighlightSound",
             "Default sound",
             "",
+            "sound path wav",
           ),
           btn(
             "highlight-sound-change",

@@ -4,7 +4,8 @@ mod security;
 use chat::commands::{
     auth_import, auth_logout, auth_start, auth_status, chat_complete, chat_join, chat_leave,
     chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, filters_get, filters_set,
-    open_chat_link, session_get, settings_get, settings_set,
+    highlight_sound_pick, highlight_sound_read, open_chat_link, session_get, settings_get,
+    settings_set,
 };
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use tauri::Manager;
@@ -44,7 +45,9 @@ pub fn run() {
             filters_get,
             filters_set,
             settings_get,
-            settings_set
+            settings_set,
+            highlight_sound_read,
+            highlight_sound_pick
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

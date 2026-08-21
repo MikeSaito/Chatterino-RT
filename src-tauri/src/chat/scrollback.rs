@@ -111,6 +111,7 @@ mod tests {
             reply_to_text: None,
             action: false,
             highlight_color: None,
+        highlight_sound: false,
         }
     }
 
@@ -180,6 +181,7 @@ mod tests {
             login: Some("ann".into()),
             privmsg: Some(Box::new(privmsg("inner-body", "ann", "hello sub"))),
             highlight_color: None,
+        highlight_sound: false,
         });
         assert_eq!(q.search_ids("hello"), vec!["inner-body".to_string()]);
     }

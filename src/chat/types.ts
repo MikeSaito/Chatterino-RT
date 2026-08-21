@@ -45,6 +45,7 @@ export type ChatEvent =
       replyToText?: string;
       action: boolean;
       highlightColor?: string;
+      highlightSound?: boolean;
     }
   | {
       kind: "clearchat";
@@ -67,6 +68,7 @@ export type ChatEvent =
       login?: string;
       privmsg?: ChatEvent;
       highlightColor?: string;
+      highlightSound?: boolean;
     }
   | {
       kind: "roomstate";

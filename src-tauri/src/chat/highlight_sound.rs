@@ -1,0 +1,170 @@
+//! Read/pick highlight sound files for WebView playback.
+
+use std::fs;
+use std::path::{Component, Path};
+
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use serde::Serialize;
+
+use super::commands::ApiError;
+use super::state::Shared;
+
+const MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundFile {
+    pub mime: String,
+    pub data: String,
+}
+
+pub fn path_from_settings(shared: &Shared) -> Result<String, ApiError> {
+    let path = shared
+        .settings
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?
+        .data
+        .knobs
+        .get("highlighting.pathHighlightSound")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return Err(ApiError::invalid("путь звука не задан"));
+    }
+    Ok(path)
+}
+
+pub fn read_configured(shared: &Shared, override_path: Option<String>) -> Result<SoundFile, ApiError> {
+    let settings_path = shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("highlighting.pathHighlightSound")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+    let pending = shared
+        .pending_highlight_sound
+        .lock()
+        .ok()
+        .and_then(|g| g.clone());
+    let path = match override_path {
+        Some(p) => {
+            let p = p.trim().to_string();
+            if p.is_empty() {
+                return Err(ApiError::invalid("путь звука не задан"));
+            }
+            let allowed = settings_path.as_deref() == Some(p.as_str())
+                || pending.as_deref() == Some(p.as_str());
+            if !allowed {
+                return Err(ApiError::invalid("путь звука не разрешён"));
+            }
+            p
+        }
+        None => settings_path.ok_or_else(|| ApiError::invalid("путь звука не задан"))?,
+    };
+    read_path(&path)
+}
+
+pub fn pick_path(shared: &Shared) -> Result<String, ApiError> {
+    let file = rfd::FileDialog::new()
+        .add_filter("Audio", &["wav", "ogg", "mp3"])
+        .set_title("Highlight sound")
+        .pick_file()
+        .ok_or_else(|| ApiError::invalid("файл не выбран"))?;
+    let path = file
+        .to_str()
+        .ok_or_else(|| ApiError::invalid("недопустимый путь"))?
+        .to_string();
+    let _ = read_path(&path)?;
+    if let Ok(mut slot) = shared.pending_highlight_sound.lock() {
+        *slot = Some(path.clone());
+    }
+    Ok(path)
+}
+
+pub fn read_path(raw: &str) -> Result<SoundFile, ApiError> {
+    let path = Path::new(raw);
+    if !path.is_absolute() {
+        return Err(ApiError::invalid("нужен абсолютный путь к файлу"));
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(ApiError::invalid("недопустимый путь"));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "mp3" => "audio/mpeg",
+        _ => return Err(ApiError::invalid("формат: wav, ogg или mp3")),
+    };
+    let meta = fs::metadata(path).map_err(|_| ApiError::invalid("файл не найден"))?;
+    if !meta.is_file() {
+        return Err(ApiError::invalid("это не файл"));
+    }
+    if meta.len() == 0 || meta.len() > MAX_BYTES {
+        return Err(ApiError::invalid("размер файла: 1 байт – 2 МиБ"));
+    }
+    let bytes = fs::read(path).map_err(|e| ApiError::internal(&e.to_string()))?;
+    Ok(SoundFile {
+        mime: mime.into(),
+        data: B64.encode(bytes),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn rejects_relative_and_parent() {
+        assert!(read_path("ping.wav").is_err());
+        assert!(read_path(r"C:\foo\..\bar.wav").is_err());
+    }
+
+    #[test]
+    fn reads_small_wav() {
+        let dir = std::env::temp_dir().join(format!("hl-sound-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("t.wav");
+        {
+            let mut f = fs::File::create(&path).unwrap();
+            f.write_all(b"RIFF....WAVEfmt ").unwrap();
+        }
+        let out = read_path(path.to_str().unwrap()).unwrap();
+        assert_eq!(out.mime, "audio/wav");
+        assert!(!out.data.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn override_requires_pending_or_settings() {
+        let shared = Shared::new();
+        assert!(read_configured(&shared, Some(r"C:\nowhere\x.wav".into())).is_err());
+        *shared.pending_highlight_sound.lock().unwrap() = Some(r"C:\tmp\a.wav".into());
+        // Still fails: file missing, but path is allowed past gate — create temp
+        let dir = std::env::temp_dir().join(format!("hl-sound-allow-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("ok.wav");
+        fs::write(&path, b"RIFF....WAVEfmt ").unwrap();
+        let p = path.to_str().unwrap().to_string();
+        *shared.pending_highlight_sound.lock().unwrap() = Some(p.clone());
+        assert!(read_configured(&shared, Some(p)).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

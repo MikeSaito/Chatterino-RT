@@ -111,6 +111,8 @@ pub enum ChatEvent {
         action: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         highlight_color: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        highlight_sound: bool,
     },
     #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
@@ -138,6 +140,8 @@ pub enum ChatEvent {
         privmsg: Option<Box<ChatEvent>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         highlight_color: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        highlight_sound: bool,
     },
     #[serde(rename = "roomstate", rename_all = "camelCase")]
     Roomstate {
@@ -416,6 +420,7 @@ mod tests {
             reply_to_text: None,
             action: false,
             highlight_color: None,
+            highlight_sound: false,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["kind"], "privmsg");

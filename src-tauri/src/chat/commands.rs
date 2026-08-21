@@ -377,6 +377,21 @@ pub fn settings_set(
 }
 
 #[tauri::command]
+pub fn highlight_sound_read(
+    state: tauri::State<'_, Shared>,
+    path: Option<String>,
+) -> Result<super::highlight_sound::SoundFile, ApiError> {
+    super::highlight_sound::read_configured(&state, path)
+}
+
+#[tauri::command]
+pub fn highlight_sound_pick(
+    state: tauri::State<'_, Shared>,
+) -> Result<String, ApiError> {
+    super::highlight_sound::pick_path(&state)
+}
+
+#[tauri::command]
 pub fn open_chat_link(url: String) -> Result<(), ApiError> {
     let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
         code: "invalid_input".into(),

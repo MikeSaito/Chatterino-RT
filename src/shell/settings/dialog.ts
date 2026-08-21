@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing } from "../../chat/ring";
 import type { Filters } from "../../chat/types";
+import { configureHighlightSound } from "../highlightSound";
 import {
   SETTINGS_PAGES,
   ZOOM_LEVELS,
@@ -169,6 +170,10 @@ function applyDisplay(
   );
   const root = document.documentElement;
   root.style.setProperty("--chat-ui-scale", String(data.fontScale));
+  configureHighlightSound({
+    alwaysPlay: data.knobs["highlighting.highlightAlwaysPlaySound"] === true,
+    path: String(data.knobs["highlighting.pathHighlightSound"] ?? ""),
+  });
   onDisplay?.(data);
 }
 
@@ -206,6 +211,37 @@ export function bindSettingsDialog(opts: {
   let saving = false;
   let loadReady = false;
 
+  const handleSettingsAction = async (path: string): Promise<void> => {
+    if (path === "__action.highlightSoundChange") {
+      try {
+        const picked = await invoke<string>("highlight_sound_pick");
+        const input = knobInputs.get("highlighting.pathHighlightSound");
+        if (input instanceof HTMLInputElement) {
+          input.value = picked;
+        }
+        statusEl.textContent = "";
+        schedulePreview();
+      } catch (e) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not pick sound file.";
+        statusEl.textContent = msg;
+      }
+      return;
+    }
+    if (path === "__action.highlightSoundClear") {
+      const input = knobInputs.get("highlighting.pathHighlightSound");
+      if (input instanceof HTMLInputElement) {
+        input.value = "";
+      }
+      statusEl.textContent = "";
+      schedulePreview();
+      return;
+    }
+    statusEl.textContent = "This action is not available in Chatterino RT yet.";
+  };
+
   const setAppInert = (inert: boolean): void => {
     if (!appRoot) {
       return;
@@ -232,8 +268,9 @@ export function bindSettingsDialog(opts: {
       btn.className = "settings-action-btn";
       btn.textContent = knob.label;
       btn.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      btn.dataset.path = knob.path;
       btn.addEventListener("click", () => {
-        statusEl.textContent = "This action is not available in Chatterino RT yet.";
+        void handleSettingsAction(knob.path);
       });
       block.append(btn);
       return;

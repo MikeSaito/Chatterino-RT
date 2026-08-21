@@ -48,6 +48,7 @@ mod tests {
                     reply_to_text: None,
                     action: false,
                     highlight_color: None,
+                highlight_sound: false,
                 },
                 ChatEvent::Roomstate {
                     id: "r".into(),

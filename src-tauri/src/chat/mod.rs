@@ -13,6 +13,7 @@ pub mod eventapi;
 pub mod filters;
 pub mod fetch;
 pub mod helix;
+pub mod highlight_sound;
 pub mod hub;
 pub mod irc;
 pub mod parse;

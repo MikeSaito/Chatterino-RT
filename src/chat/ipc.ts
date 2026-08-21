@@ -4,6 +4,7 @@ import { CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
 import { decodeBatch } from "./batchDecode";
 import type { ChatBatch } from "./types";
 import type { MessageRing } from "./ring";
+import { notifyHighlightSounds } from "../shell/highlightSound";
 
 export type ChatIpc = {
   join: (channel: string, focus?: boolean) => Promise<string>;
@@ -94,6 +95,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     }
     lastSeq = batch.seq;
     ring.pushMany(batch.events);
+    notifyHighlightSounds(batch.events);
   };
 
   const scheduleRetry = () => {

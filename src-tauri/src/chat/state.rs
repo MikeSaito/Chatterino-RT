@@ -94,6 +94,7 @@ pub struct Shared {
     pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
     pub session: Arc<Mutex<SessionInner>>,
     pub settings: Arc<Mutex<SettingsInner>>,
+    pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
 }
 
 pub enum BatchSend {
@@ -125,6 +126,7 @@ impl Shared {
             batch_tx: Arc::new(Mutex::new(None)),
             session: Arc::new(Mutex::new(SessionInner::default())),
             settings: Arc::new(Mutex::new(SettingsInner::default())),
+            pending_highlight_sound: Arc::new(Mutex::new(None)),
         }
     }
 
