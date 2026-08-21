@@ -37,6 +37,11 @@ import {
 import type { ThemePixiFills } from "../shell/theme";
 import type { LastReadPattern } from "../shell/lastRead";
 import {
+  formatUsername,
+  resolveNickColor,
+  type UsernameDisplayMode,
+} from "../shell/nickStyle";
+import {
   clipNick,
   indexToLineCol,
   lineColToIndex,
@@ -94,6 +99,12 @@ type Slot = {
   disabled: boolean;
   /** System/timeout-like: не гасить при room CLEARCHAT (как MessageFlag::System). */
   system: boolean;
+  /** Author nick chrome (privmsg); empty → system / fallback. */
+  nickUserId: string;
+  nickColorRaw: string;
+  nickLogin: string;
+  nickDisplay: string;
+  useNickStyle: boolean;
 };
 
 type Drawn = {
@@ -128,6 +139,7 @@ export class MessageRing {
   private fontSize = 10;
   private lineHeight = Math.ceil(10 * (22 / 15));
   private charWidth = 10 * 0.56;
+  private nickCharWidth = 10 * 0.56;
   private badgeSize = BADGE_SIZE;
   private emoteScale = 1;
   private enableEmoteImages = true;
@@ -143,6 +155,10 @@ export class MessageRing {
   private lastReadPattern: LastReadPattern = "Solid";
   private lastReadColor = 0x7f2026;
   private lastReadMsgId = "";
+  private colorizeNicknames = true;
+  private usernameDisplayMode: UsernameDisplayMode = "UsernameAndLocalizedName";
+  private nickBoldScale = 63;
+  private nickAtlasDesignSize = 0;
   private pauseMouse = false;
   private pauseKey = false;
   private pauseFollowIntent = false;
@@ -232,6 +248,45 @@ export class MessageRing {
         this.paintHighlight(slot);
       }
     }
+  }
+
+  configureNickStyle(opts: {
+    colorize: boolean;
+    mode: UsernameDisplayMode;
+    boldScale: number;
+  }): void {
+    const bold = Math.min(999, Math.max(1, Math.round(opts.boldScale)));
+    const boldChanged = bold !== this.nickBoldScale;
+    this.colorizeNicknames = opts.colorize;
+    this.usernameDisplayMode = opts.mode;
+    this.nickBoldScale = bold;
+    if (!this.ready) {
+      return;
+    }
+    if (boldChanged || this.nickAtlasDesignSize === 0) {
+      this.reinstallNickFont();
+    }
+    this.refreshFontMetrics();
+    for (const slot of this.slots) {
+      slot.nick.style.fontFamily = "ChatNickFont";
+      slot.nick.style.fontSize = this.fontSize;
+      if (slot.useNickStyle) {
+        slot.nickRaw = formatUsername({
+          login: slot.nickLogin,
+          displayName: slot.nickDisplay,
+          mode: this.usernameDisplayMode,
+        });
+        slot.nick.text = slot.nickRaw;
+        slot.nick.tint = resolveNickColor({
+          color: slot.nickColorRaw,
+          userId: slot.nickUserId,
+          colorize: this.colorizeNicknames,
+          fallback: this.themeFills.nickFallback,
+        });
+      }
+      dirtyBitmapText(slot.nick);
+    }
+    this.layout();
   }
 
   configureScrollBehaviour(opts: {
@@ -372,7 +427,14 @@ export class MessageRing {
       slot.time.style.fill = this.themeFills.timestamp;
       slot.body.style.fill = this.themeFills.body;
       slot.nick.style.fill = 0xffffff;
-      if (!slot.msgId) {
+      if (slot.useNickStyle) {
+        slot.nick.tint = resolveNickColor({
+          color: slot.nickColorRaw,
+          userId: slot.nickUserId,
+          colorize: this.colorizeNicknames,
+          fallback: this.themeFills.nickFallback,
+        });
+      } else if (!slot.msgId) {
         slot.nick.tint = this.themeFills.nickFallback;
       }
       dirtyBitmapText(slot.time);
@@ -496,11 +558,18 @@ export class MessageRing {
     );
     this.charWidth = metrics.charWidth;
     this.lineHeight = metrics.lineHeight;
+    const nickMetrics = measureFontMetrics(
+      this.chatFontFamily,
+      qtWeightToCss(this.nickBoldScale),
+      effective,
+    );
+    this.nickCharWidth = nickMetrics.charWidth;
   }
 
   private applyFontStylesToSlots(forceDirty: boolean): void {
     for (const slot of this.slots) {
       slot.time.style.fontSize = this.fontSize;
+      slot.nick.style.fontFamily = "ChatNickFont";
       slot.nick.style.fontSize = this.fontSize;
       slot.body.style.fontSize = this.fontSize;
       slot.body.style.lineHeight = this.lineHeight;
@@ -530,6 +599,26 @@ export class MessageRing {
       ],
     });
     this.atlasDesignSize = atlasSize;
+    this.reinstallNickFont();
+  }
+
+  private reinstallNickFont(): void {
+    const atlasSize = atlasFontSize(this.chatFontSize);
+    BitmapFont.uninstall("ChatNickFont");
+    BitmapFont.install({
+      name: "ChatNickFont",
+      style: {
+        fontFamily: this.chatFontFamily,
+        fontSize: atlasSize,
+        fontWeight: qtWeightToPixi(this.nickBoldScale),
+        fill: "#ffffff",
+      },
+      chars: [
+        ["\u0020", "\u007e"],
+        ["\u0400", "\u04FF"],
+      ],
+    });
+    this.nickAtlasDesignSize = atlasSize;
   }
 
   scrollSnapshot(): ScrollSnapshot {
@@ -641,7 +730,7 @@ export class MessageRing {
       const nick = new BitmapText({
         text: "",
         style: {
-          fontFamily: "ChatFont",
+          fontFamily: "ChatNickFont",
           fontSize: this.fontSize,
           fill: 0xffffff,
         },
@@ -702,6 +791,11 @@ export class MessageRing {
         highlightColor: "",
         disabled: false,
         system: false,
+        nickUserId: "",
+        nickColorRaw: "",
+        nickLogin: "",
+        nickDisplay: "",
+        useNickStyle: false,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -846,6 +940,11 @@ export class MessageRing {
     slot.highlightColor = "";
     slot.disabled = false;
     slot.system = false;
+    slot.nickUserId = "";
+    slot.nickColorRaw = "";
+    slot.nickLogin = "";
+    slot.nickDisplay = "";
+    slot.useNickStyle = false;
     slot.highlight.clear();
     slot.mentions.clear();
     slot.disabledGfx.clear();
@@ -877,6 +976,19 @@ export class MessageRing {
     slot.nickRaw = drawn.nick;
     slot.nick.text = drawn.nick;
     slot.nick.tint = drawn.nickColor;
+    if (event.kind === "privmsg") {
+      slot.useNickStyle = true;
+      slot.nickUserId = event.userId;
+      slot.nickColorRaw = event.color;
+      slot.nickLogin = event.login;
+      slot.nickDisplay = event.displayName || event.login;
+    } else {
+      slot.useNickStyle = false;
+      slot.nickUserId = "";
+      slot.nickColorRaw = "";
+      slot.nickLogin = "";
+      slot.nickDisplay = "";
+    }
     slot.bodyRaw = drawn.body;
     slot.copyText = drawn.copyText;
     slot.replyToId =
@@ -966,8 +1078,17 @@ export class MessageRing {
         const shift = prefix.length;
         return {
           time,
-          nick: event.displayName || event.login,
-          nickColor: parseColor(event.color),
+          nick: formatUsername({
+            login: event.login,
+            displayName: event.displayName || event.login,
+            mode: this.usernameDisplayMode,
+          }),
+          nickColor: resolveNickColor({
+            color: event.color,
+            userId: event.userId,
+            colorize: this.colorizeNicknames,
+            fallback: this.themeFills.nickFallback,
+          }),
           body: `${prefix}${event.text}`,
           copyText: event.text,
           spans: shiftSpans(event.emoteSpans ?? [], shift),
@@ -1102,9 +1223,9 @@ export class MessageRing {
       8,
       paneW - timeW - badgeBand - TIME_GAP - 8 - MIN_BODY_CHARS * this.charWidth,
     );
-    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.charWidth));
+    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.nickCharWidth));
     slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
-    const nickW = Math.max(slot.nick.text.length * this.charWidth, 8);
+    const nickW = Math.max(slot.nick.text.length * this.nickCharWidth, 8);
     const bodyX = timeW + badgeBand + nickW + TIME_GAP;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
@@ -1441,7 +1562,7 @@ export class MessageRing {
       return false;
     }
     const local = ev.getLocalPosition(slot.root);
-    const nickW = Math.max(slot.nick.text.length * this.charWidth, 8);
+    const nickW = Math.max(slot.nick.text.length * this.nickCharWidth, 8);
     return (
       local.x >= slot.nick.x &&
       local.x < slot.nick.x + nickW &&
@@ -1741,14 +1862,6 @@ function badgesWithUrl(badges: Badge[]): Badge[] {
     }
   }
   return out;
-}
-
-function parseColor(color: string): number {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(color);
-  if (!m) {
-    return 0xbf94ff;
-  }
-  return Number.parseInt(m[1], 16);
 }
 
 function parseHighlight(raw: string): { color: number; alpha: number } | undefined {

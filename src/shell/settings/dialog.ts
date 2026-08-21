@@ -17,6 +17,10 @@ import {
   parseLastReadColor,
   parseLastReadPattern,
 } from "../lastRead";
+import {
+  parseBoldScale,
+  parseUsernameDisplayMode,
+} from "../nickStyle";
 import { setChatAppBackground } from "../../pixi/app";
 import {
   configureStreamerMode,
@@ -253,6 +257,11 @@ function paintRuntime(
     enabled: data.knobs["appearance.showLastMessageIndicator"] === true,
     pattern: parseLastReadPattern(data.knobs["appearance.lastMessagePattern"]),
     color: parseLastReadColor(data.knobs["appearance.lastMessageColor"]),
+  });
+  ring.configureNickStyle({
+    colorize: data.knobs["appearance.colorizeNicknames"] !== false,
+    mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),
+    boldScale: parseBoldScale(data.knobs["appearance.boldScale"]),
   });
   onDisplay?.(data);
 }
