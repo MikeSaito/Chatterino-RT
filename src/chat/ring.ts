@@ -140,6 +140,9 @@ export class MessageRing {
   private readonly laidBuf: LaidSlot[] = [];
   private occupied = 0;
   private head = 0;
+  private highlightMarksGen = 0;
+  private highlightMarksCache: string[] = [];
+  private highlightMarksCacheGen = -1;
   private ready = false;
   private showTimestamps = true;
   private timestampFormat = "hh:mm";
@@ -211,6 +214,31 @@ export class MessageRing {
 
   setOnScroll(cb: (state: ScrollSnapshot) => void): void {
     this.onScroll = cb;
+  }
+
+  /** Highlight colors in scrollback order (empty string = no mark). Stock 1:1 with messages. */
+  highlightMarks(): string[] {
+    if (this.highlightMarksCacheGen === this.highlightMarksGen) {
+      return this.highlightMarksCache;
+    }
+    const out: string[] = [];
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      out.push(slot.msgId ? slot.highlightColor : "");
+    }
+    this.highlightMarksCache = out;
+    this.highlightMarksCacheGen = this.highlightMarksGen;
+    return out;
+  }
+
+  /** Cheap stamp for scrollUi: skip rebuild when gen and track height unchanged. */
+  highlightMarksGeneration(): number {
+    return this.highlightMarksGen;
+  }
+
+  private bumpHighlightMarks(): void {
+    this.highlightMarksGen += 1;
   }
 
   setOnContextMenu(cb: (ctx: SlotContext) => void): void {
@@ -939,6 +967,7 @@ export class MessageRing {
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
+    this.bumpHighlightMarks();
   }
 
   private resetSlots(): void {
@@ -972,6 +1001,7 @@ export class MessageRing {
     if (this.occupied < MESSAGE_POOL_SIZE) {
       this.occupied += 1;
     }
+    this.bumpHighlightMarks();
   }
 
   /** Soft-delete: MessageFlag::Disabled, слот остаётся (Chatterino Channel). */

@@ -194,6 +194,26 @@ async function boot(): Promise<void> {
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;
   let lastPointerY = 0;
+  const scrollChrome = bindScrollChrome({
+    ring,
+    host: canvasHost,
+    track: scrollTrack,
+    thumb: scrollThumb,
+    jump: jumpBottom,
+    onScroll: () => {
+      if (!replyBtn || replyBtn.hidden || !replyHover) {
+        return;
+      }
+      const anchor = ring.replyAnchorAt(0, lastPointerY);
+      if (!anchor || anchor.msgId !== replyHover.msgId) {
+        replyBtn.hidden = true;
+        replyHover = null;
+        return;
+      }
+      const hostRect = canvasHost.getBoundingClientRect();
+      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
+    },
+  });
   const settingsCtl = bindSettingsDialog({
     ring,
     openBtn: settingsOpen,
@@ -219,6 +239,9 @@ async function boot(): Promise<void> {
         "is-hidden-thumb",
         data.knobs["appearance.hideScrollbarThumb"] === true,
       );
+      scrollChrome.setHideHighlights(
+        data.knobs["appearance.hideScrollbarHighlights"] === true,
+      );
       nickRclick = {
         behavior: parseUsernameRclickAction(
           data.knobs["behaviour.usernameRightClickBehavior"],
@@ -232,26 +255,6 @@ async function boot(): Promise<void> {
       };
       mentionUsersWithComma =
         data.knobs["behaviour.mentionUsersWithComma"] !== false;
-    },
-  });
-  bindScrollChrome({
-    ring,
-    host: canvasHost,
-    track: scrollTrack,
-    thumb: scrollThumb,
-    jump: jumpBottom,
-    onScroll: () => {
-      if (!replyBtn || replyBtn.hidden || !replyHover) {
-        return;
-      }
-      const anchor = ring.replyAnchorAt(0, lastPointerY);
-      if (!anchor || anchor.msgId !== replyHover.msgId) {
-        replyBtn.hidden = true;
-        replyHover = null;
-        return;
-      }
-      const hostRect = canvasHost.getBoundingClientRect();
-      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
     },
   });
   const ipc = bindChatIpc(ring);

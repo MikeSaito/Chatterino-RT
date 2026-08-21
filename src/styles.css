@@ -748,6 +748,23 @@ button:disabled {
   visibility: hidden;
 }
 
+#chat-scroll-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#chat-scroll-marks .chat-scroll-mark {
+  position: absolute;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+#chat-scroll.is-hidden-marks #chat-scroll-marks {
+  display: none;
+}
+
 #chat-scroll-thumb {
   position: absolute;
   left: 2px;
@@ -755,6 +772,7 @@ button:disabled {
   border-radius: 3px;
   background: var(--c-scroll-thumb);
   pointer-events: none;
+  z-index: 1;
 }
 
 #chat-jump-bottom {

@@ -277,5 +277,13 @@ if (!hugOffPos || hugOffPos.col !== 6) {
   );
 }
 
+import { isScrollbarMarkColor } from "../src/chat/scrollUi.ts";
+if (!isScrollbarMarkColor("#7f3f4980") || !isScrollbarMarkColor("#aabbcc")) {
+  throw new Error("scrollbar mark color must accept #RRGGBB(AA)");
+}
+if (isScrollbarMarkColor("red") || isScrollbarMarkColor("#fff")) {
+  throw new Error("scrollbar mark color must reject non-hex CSS names / short hex");
+}
+
 console.log("wrap tests ok");
 

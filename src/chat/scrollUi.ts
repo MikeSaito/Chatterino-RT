@@ -8,8 +8,14 @@ export function bindScrollChrome(opts: {
   thumb: HTMLElement;
   jump: HTMLButtonElement;
   onScroll?: (state: ScrollSnapshot) => void;
-}): void {
+}): {
+  setHideHighlights: (hide: boolean) => void;
+} {
   const { ring, host, track, thumb, jump, onScroll } = opts;
+  const marksLayer = track.querySelector<HTMLElement>("#chat-scroll-marks");
+  let hideHighlights = false;
+  let marksGen = -1;
+  let marksTrackH = -1;
 
   const paint = (state: ScrollSnapshot): void => {
     track.classList.toggle("idle", !state.overflow);
@@ -18,6 +24,7 @@ export function bindScrollChrome(opts: {
     track.setAttribute("aria-valuenow", String(state.current));
     jump.hidden = state.atBottom;
     layoutThumb(state);
+    paintMarks(state);
     onScroll?.(state);
   };
 
@@ -34,6 +41,69 @@ export function bindScrollChrome(opts: {
     const t = state.bottom <= 0 ? 1 : state.current / state.bottom;
     thumb.style.height = `${thumbH}px`;
     thumb.style.transform = `translateY(${t * travel}px)`;
+  };
+
+  const clearMarks = (): void => {
+    marksGen = -1;
+    marksTrackH = -1;
+    marksLayer?.replaceChildren();
+  };
+
+  const paintMarks = (state: ScrollSnapshot): void => {
+    if (!marksLayer) {
+      return;
+    }
+    if (hideHighlights || !state.overflow) {
+      clearMarks();
+      return;
+    }
+    const trackH = track.clientHeight;
+    const trackW = track.clientWidth;
+    if (trackH <= 0 || trackW <= 0) {
+      clearMarks();
+      return;
+    }
+    const gen = ring.highlightMarksGeneration();
+    if (gen === marksGen && trackH === marksTrackH) {
+      return;
+    }
+    const colors = ring.highlightMarks();
+    const n = colors.length;
+    if (n === 0) {
+      clearMarks();
+      return;
+    }
+    marksGen = gen;
+    marksTrackH = trackH;
+    const markH = Math.max(2, Math.ceil(trackH / n));
+    const markW = Math.max(2, Math.floor(trackW / 4));
+    const left = Math.max(0, Math.floor((trackW - markW) / 2));
+    const needed: HTMLElement[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const color = colors[i]?.trim() ?? "";
+      if (!color || !isScrollbarMarkColor(color)) {
+        continue;
+      }
+      const el = document.createElement("div");
+      el.className = "chat-scroll-mark";
+      el.style.left = `${left}px`;
+      el.style.width = `${markW}px`;
+      el.style.top = `${(i / n) * trackH}px`;
+      el.style.height = `${markH}px`;
+      el.style.backgroundColor = color;
+      needed.push(el);
+    }
+    marksLayer.replaceChildren(...needed);
+  };
+
+  const setHideHighlights = (hide: boolean): void => {
+    hideHighlights = hide;
+    track.classList.toggle("is-hidden-marks", hide);
+    if (hide) {
+      clearMarks();
+    } else {
+      paintMarks(ring.scrollSnapshot());
+    }
   };
 
   ring.setOnScroll(paint);
@@ -156,4 +226,11 @@ export function bindScrollChrome(opts: {
       ring.setDesired(state.desired + state.viewRows, anim);
     }
   });
+
+  return { setHideHighlights };
+}
+
+/** Accept same #RRGGBB / #RRGGBBAA as ring row highlights. */
+export function isScrollbarMarkColor(raw: string): boolean {
+  return /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(raw);
 }
