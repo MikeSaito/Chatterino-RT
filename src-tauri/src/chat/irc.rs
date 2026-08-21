@@ -13,7 +13,9 @@ use super::emoji::attach_emoji;
 use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
 use super::helix::resolve_badge_urls;
-use super::parse::{parse_line, ParsedLine};
+use super::parse::{
+    parse_line, shift_emote_spans_back, strip_leading_reply_mention, ParsedLine,
+};
 use super::spans::{decorate_text_spans_ex, FindMentions};
 use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatStatus};
@@ -773,8 +775,17 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             mention_spans,
             badges,
             bits,
+            reply_to_display_name,
             ..
         } => {
+            maybe_strip_reply_mention(
+                shared,
+                text,
+                emote_spans,
+                link_spans,
+                mention_spans,
+                reply_to_display_name.as_deref(),
+            );
             if let Some(n) = *bits {
                 if let Ok(cat) = shared.cheers.lock() {
                     let extra = attach_cheers(text, emote_spans, &cat, channel, n);
@@ -833,6 +844,46 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
         }
         _ => {}
     }
+}
+
+fn maybe_strip_reply_mention(
+    shared: &Shared,
+    text: &mut String,
+    emote_spans: &mut Vec<super::types::EmoteSpan>,
+    link_spans: &mut Vec<super::types::LinkSpan>,
+    mention_spans: &mut Vec<super::types::MentionSpan>,
+    display_name: Option<&str>,
+) {
+    let Some(name) = display_name.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let (strip_on, hide_ctx) = shared
+        .settings
+        .lock()
+        .ok()
+        .map(|inner| {
+            let knobs = &inner.data.knobs;
+            let strip = knobs
+                .get("appearance.stripReplyMention")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let hide = knobs
+                .get("appearance.hideReplyContext")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            (strip, hide)
+        })
+        .unwrap_or((true, false));
+    if !strip_on || hide_ctx {
+        return;
+    }
+    let Some((rest, offset)) = strip_leading_reply_mention(text, name) else {
+        return;
+    };
+    *text = rest;
+    shift_emote_spans_back(emote_spans, offset);
+    link_spans.clear();
+    mention_spans.clear();
 }
 
 fn credentials(shared: &Shared) -> (String, Option<String>) {

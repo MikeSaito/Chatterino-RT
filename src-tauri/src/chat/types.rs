@@ -106,6 +106,9 @@ pub enum ChatEvent {
         reply_to_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_login: Option<String>,
+        /// Parent display-name for stripReplyMention (stock); not required by UI.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply_to_display_name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reply_to_text: Option<String>,
         action: bool,
@@ -417,6 +420,7 @@ mod tests {
             bits: None,
             reply_to_id: None,
             reply_to_login: None,
+            reply_to_display_name: None,
             reply_to_text: None,
             action: false,
             highlight_color: None,

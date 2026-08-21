@@ -112,6 +112,7 @@ fn parse_privmsg(
             reply_to_login: tags
                 .get("reply-parent-user-login")
                 .or_else(|| tags.get("reply-parent-display-name")),
+            reply_to_display_name: tags.get("reply-parent-display-name"),
             reply_to_text: tags.get("reply-parent-msg-body"),
             action,
             text,
@@ -188,6 +189,7 @@ fn parse_usernotice(
             reply_to_login: tags
                 .get("reply-parent-user-login")
                 .or_else(|| tags.get("reply-parent-display-name")),
+            reply_to_display_name: tags.get("reply-parent-display-name"),
             reply_to_text: tags.get("reply-parent-msg-body"),
             action: false,
             highlight_color: None,
@@ -425,6 +427,41 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
     }
     spans.sort_by_key(|s| s.start);
     spans
+}
+
+/// Stock stripLeadingReplyMention — UTF-16 offset of stripped `@displayName `.
+pub fn strip_leading_reply_mention(text: &str, display_name: &str) -> Option<(String, u32)> {
+    if display_name.is_empty() {
+        return None;
+    }
+    let name_u16 = utf16_units(display_name);
+    if utf16_units(text) <= 1 + name_u16 {
+        return None;
+    }
+    let prefix = format!("@{display_name} ");
+    if !text.starts_with(&prefix) {
+        return None;
+    }
+    let rest = text[prefix.len()..].to_string();
+    Some((rest, utf16_units(&prefix) as u32))
+}
+
+pub fn shift_emote_spans_back(spans: &mut Vec<EmoteSpan>, offset: u32) {
+    if offset == 0 {
+        return;
+    }
+    spans.retain_mut(|s| {
+        if s.end <= offset {
+            return false;
+        }
+        s.start = s.start.saturating_sub(offset);
+        s.end -= offset;
+        s.start < s.end
+    });
+}
+
+fn utf16_units(s: &str) -> usize {
+    s.chars().map(|c| c.len_utf16()).sum()
 }
 
 pub fn safe_twitch_emote_id(id: &str) -> bool {
@@ -689,6 +726,7 @@ mod tests {
                 event: ChatEvent::Privmsg {
                     reply_to_id,
                     reply_to_login,
+                    reply_to_display_name,
                     reply_to_text,
                     link_spans,
                     mention_spans,
@@ -699,6 +737,7 @@ mod tests {
             } => {
                 assert_eq!(reply_to_id.as_deref(), Some("p0"));
                 assert_eq!(reply_to_login.as_deref(), Some("ann"));
+                assert_eq!(reply_to_display_name.as_deref(), Some("Ann"));
                 assert_eq!(reply_to_text.as_deref(), Some("hi there"));
                 assert_eq!(text, "see https://example.com @bob");
                 assert_eq!(link_spans.len(), 1);
@@ -767,5 +806,26 @@ mod tests {
             parse_line(":tmi.twitch.tv 366 justinfan1 #xqc :End of /NAMES list", 21),
             ParsedLine::Ignore
         ));
+    }
+
+    #[test]
+    fn strip_leading_reply_mention_stock() {
+        let (rest, off) = strip_leading_reply_mention("@Ann hello", "Ann").unwrap();
+        assert_eq!(rest, "hello");
+        assert_eq!(off, 5);
+        assert!(strip_leading_reply_mention("@Ann", "Ann").is_none());
+        assert!(strip_leading_reply_mention("@ann hello", "Ann").is_none());
+        assert!(strip_leading_reply_mention("hello Ann", "Ann").is_none());
+        let mut spans = vec![EmoteSpan {
+            start: 5,
+            end: 10,
+            emote_id: "25".into(),
+            provider: "twitch".into(),
+            url: "x".into(),
+            zero_width: false,
+        }];
+        shift_emote_spans_back(&mut spans, 5);
+        assert_eq!(spans[0].start, 0);
+        assert_eq!(spans[0].end, 5);
     }
 }

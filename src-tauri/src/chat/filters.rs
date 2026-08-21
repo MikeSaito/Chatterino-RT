@@ -528,6 +528,7 @@ mod tests {
             bits: None,
             reply_to_id: None,
             reply_to_login: None,
+            reply_to_display_name: None,
             reply_to_text: None,
             action: false,
             highlight_color: None,
