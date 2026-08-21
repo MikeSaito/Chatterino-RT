@@ -6,7 +6,7 @@ use chat::commands::{
     chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, filters_get, filters_set,
     open_chat_link, session_get, settings_get, settings_set,
 };
-use chat::state::{EventCmd, IrcCmd, Shared};
+use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,6 +21,7 @@ pub fn run() {
             chat::session::init(app.handle(), &shared)?;
             chat::settings::init(app.handle(), &shared)?;
             chat::eventapi::start(shared.clone())?;
+            chat::bttv_live::start(shared.clone())?;
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
@@ -56,6 +57,7 @@ pub fn run() {
                         }
                     }
                     state.notify_event(EventCmd::Shutdown);
+                    state.notify_bttv(BttvCmd::Shutdown);
                 }
             }
         });

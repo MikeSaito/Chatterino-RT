@@ -15,7 +15,7 @@ use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
 use super::spans::decorate_text_spans;
-use super::state::{EventCmd, IrcCmd, Shared};
+use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatStatus};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
@@ -237,7 +237,17 @@ async fn connect_session(
                                 .is_some_and(|h| h.active.as_deref() == Some(ch.as_str()));
                             if is_active {
                                 if let Some(id) = loaded_room.get(&ch).cloned() {
-                                    spawn_channel_assets(shared, ch.clone(), id);
+                                    let has_map = shared
+                                        .catalog
+                                        .lock()
+                                        .ok()
+                                        .is_some_and(|c| c.has_channel(&ch));
+                                    let bttv_ok = shared.snapshot_bttv_wanted().channel.as_ref().is_some_and(
+                                        |c| c.login == ch && c.room_id == id,
+                                    );
+                                    if !(has_map && bttv_ok) {
+                                        spawn_channel_assets(shared, ch.clone(), id);
+                                    }
                                 }
                             }
                             continue;
@@ -358,6 +368,7 @@ async fn connect_session(
                                     let _ = crate::chat::session::forget_open(shared, &channel);
                                     if was_active {
                                         shared.notify_event(EventCmd::ClearChannel);
+                                        shared.notify_bttv(BttvCmd::ClearChannel);
                                         let next_focus = crate::chat::session::preferred_focus(shared);
                                         if let Some(ch) = next_focus {
                                             if let Ok(mut hub) = shared.hub.lock() {
@@ -780,8 +791,9 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
     let events = shared.clone();
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
+    let room_for_bttv = room_id.clone();
     tauri::async_runtime::spawn(async move {
-        if let Some((set_id, user_id)) = fetch::load_channel(
+        let stv = fetch::load_channel(
             &cat,
             &badges,
             &cheers,
@@ -791,21 +803,26 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
             token.as_deref(),
             &client_id,
         )
-        .await
-        {
-            let still = hub
-                .lock()
-                .ok()
-                .and_then(|h| h.active.clone())
-                .is_some_and(|ch| ch == login);
-            if still {
-                events.notify_event(EventCmd::SetChannel {
-                    login,
-                    set_id,
-                    user_id,
-                });
-            }
+        .await;
+        let still = hub
+            .lock()
+            .ok()
+            .and_then(|h| h.active.clone())
+            .is_some_and(|ch| ch == login);
+        if !still {
+            return;
         }
+        if let Some((set_id, user_id)) = stv {
+            events.notify_event(EventCmd::SetChannel {
+                login: login.clone(),
+                set_id,
+                user_id,
+            });
+        }
+        events.notify_bttv(BttvCmd::SetChannel {
+            login,
+            room_id: room_for_bttv,
+        });
     });
 }
 

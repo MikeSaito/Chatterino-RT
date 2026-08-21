@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod batch;
+pub mod bttv_live;
 pub mod channel;
 pub mod chatters;
 pub mod commands;

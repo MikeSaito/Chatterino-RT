@@ -42,6 +42,14 @@ pub enum EventCmd {
     Shutdown,
 }
 
+#[derive(Debug, Clone)]
+pub enum BttvCmd {
+    SetChannel { login: String, room_id: String },
+    ClearChannel,
+    SetEnabled(bool),
+    Shutdown,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventWanted {
     pub global_set: Option<String>,
@@ -55,6 +63,18 @@ pub struct EventChannelWanted {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BttvWanted {
+    pub enabled: bool,
+    pub channel: Option<BttvChannelWanted>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BttvChannelWanted {
+    pub login: String,
+    pub room_id: String,
+}
+
 #[derive(Clone)]
 pub struct Shared {
     pub hub: Arc<Mutex<Hub>>,
@@ -65,6 +85,9 @@ pub struct Shared {
     pub event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<EventCmd>>>>,
     pub event_wanted: Arc<Mutex<EventWanted>>,
     pub event_shutdown: Arc<AtomicBool>,
+    pub bttv_tx: Arc<Mutex<Option<mpsc::UnboundedSender<BttvCmd>>>>,
+    pub bttv_wanted: Arc<Mutex<BttvWanted>>,
+    pub bttv_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
@@ -90,6 +113,12 @@ impl Shared {
             event_tx: Arc::new(Mutex::new(None)),
             event_wanted: Arc::new(Mutex::new(EventWanted::default())),
             event_shutdown: Arc::new(AtomicBool::new(false)),
+            bttv_tx: Arc::new(Mutex::new(None)),
+            bttv_wanted: Arc::new(Mutex::new(BttvWanted {
+                enabled: true,
+                channel: None,
+            })),
+            bttv_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
@@ -180,6 +209,59 @@ impl Shared {
     pub fn notify_event(&self, cmd: EventCmd) {
         self.apply_event_cmd(&cmd);
         if let Ok(guard) = self.event_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
+    pub fn snapshot_bttv_wanted(&self) -> BttvWanted {
+        self.bttv_wanted
+            .lock()
+            .ok()
+            .map(|w| w.clone())
+            .unwrap_or(BttvWanted {
+                enabled: true,
+                channel: None,
+            })
+    }
+
+    pub fn apply_bttv_cmd(&self, cmd: &BttvCmd) {
+        match cmd {
+            BttvCmd::SetChannel { login, room_id } => {
+                let Ok(hub) = self.hub.lock() else {
+                    return;
+                };
+                if hub.active.as_deref() != Some(login.as_str()) {
+                    return;
+                }
+                let Ok(mut wanted) = self.bttv_wanted.lock() else {
+                    return;
+                };
+                wanted.channel = Some(BttvChannelWanted {
+                    login: login.clone(),
+                    room_id: room_id.clone(),
+                });
+            }
+            BttvCmd::ClearChannel => {
+                if let Ok(mut wanted) = self.bttv_wanted.lock() {
+                    wanted.channel = None;
+                }
+            }
+            BttvCmd::SetEnabled(enabled) => {
+                if let Ok(mut wanted) = self.bttv_wanted.lock() {
+                    wanted.enabled = *enabled;
+                }
+            }
+            BttvCmd::Shutdown => {
+                self.bttv_shutdown.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
+    pub fn notify_bttv(&self, cmd: BttvCmd) {
+        self.apply_bttv_cmd(&cmd);
+        if let Ok(guard) = self.bttv_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }

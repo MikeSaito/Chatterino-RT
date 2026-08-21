@@ -288,6 +288,13 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     }
     save_file(&inner.path, &clean).map_err(|e| ApiError::internal(&e))?;
     inner.data = clean.clone();
+    drop(inner);
+    let bttv_live = clean
+        .knobs
+        .get("emotes.enableBTTVLiveUpdates")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    shared.notify_bttv(super::state::BttvCmd::SetEnabled(bttv_live));
     Ok(clean)
 }
 

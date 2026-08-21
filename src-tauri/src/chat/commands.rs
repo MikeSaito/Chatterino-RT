@@ -9,7 +9,7 @@ use super::complete;
 use super::filters::{self, Filters};
 use super::settings::DisplaySettings;
 use super::spans::allowed_chat_url;
-use super::state::{EventCmd, IrcCmd, Shared};
+use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use super::types::ChatBatch;
 
 const MAX_CHAT_CHARS: usize = 500;
@@ -70,6 +70,7 @@ pub async fn chat_join(
         };
         if switched {
             state.notify_event(EventCmd::ClearChannel);
+            state.notify_bttv(BttvCmd::ClearChannel);
         }
     } else {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -97,6 +98,10 @@ pub async fn chat_leave(
         hub.active.as_deref() == Some(normalized.as_str())
     };
     send_cmd(&state, IrcCmd::PartChannel(normalized.clone())).await?;
+    if left_was_active {
+        state.notify_event(EventCmd::ClearChannel);
+        state.notify_bttv(BttvCmd::ClearChannel);
+    }
     if let Ok(mut cat) = state.catalog.lock() {
         cat.drop_channel(&normalized);
     }
@@ -124,7 +129,6 @@ pub async fn chat_leave(
             .and_then(|h| h.active.clone())
     };
     if left_was_active {
-        state.notify_event(EventCmd::ClearChannel);
         if let Some(ch) = next.as_ref() {
             {
                 let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -144,6 +148,7 @@ pub async fn chat_leave(
 pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     send_cmd(&state, IrcCmd::Part).await?;
     state.notify_event(EventCmd::ClearChannel);
+    state.notify_bttv(BttvCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.clear_all();

@@ -980,7 +980,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
       cb(
         "bttv-live",
         "emotes.enableBTTVLiveUpdates",
-        "Enable BetterTTV live emote updates (requires restart)",
+        "Enable BetterTTV live emote updates",
         true,
         "bttv",
       ),

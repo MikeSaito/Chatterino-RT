@@ -79,6 +79,10 @@ impl Catalog {
             .or_else(|| self.global.get(code))
     }
 
+    pub fn has_channel(&self, channel: &str) -> bool {
+        self.channel.contains_key(channel)
+    }
+
     pub fn codes_prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
         let needle = prefix.to_ascii_lowercase();
         if needle.is_empty() {
@@ -155,6 +159,31 @@ impl Catalog {
         if map.get(name).is_some_and(|d| d.provider == "7tv") {
             map.remove(name);
         }
+    }
+
+    /// BTTV channel emote create/update (by code). Does not overwrite other providers.
+    pub fn upsert_bttv(&mut self, channel: &str, code: String, def: EmoteDef) {
+        if def.provider != "bttv" {
+            return;
+        }
+        let map = self
+            .channel
+            .entry(channel.to_string())
+            .or_default();
+        if map.get(&code).is_some_and(|d| d.provider != "bttv") {
+            return;
+        }
+        let id = def.id.clone();
+        map.retain(|c, d| !(d.provider == "bttv" && d.id == id && *c != code));
+        map.insert(code, def);
+    }
+
+    /// Remove BTTV channel emote by BetterTTV emote id.
+    pub fn remove_bttv_by_id(&mut self, channel: &str, emote_id: &str) {
+        let Some(map) = self.channel.get_mut(channel) else {
+            return;
+        };
+        map.retain(|_, d| !(d.provider == "bttv" && d.id == emote_id));
     }
 
     pub fn rename_7tv(&mut self, scope: &SetScope, old: &str, new: String) {
@@ -444,6 +473,77 @@ mod tests {
             cat.lookup("xqc", "CoolStoryBob").map(|d| d.provider.as_str()),
             Some("twitch")
         );
+    }
+
+    #[test]
+    fn upsert_bttv_renames_and_skips_other_providers() {
+        let mut cat = Catalog::default();
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "OldCode".into(),
+            EmoteDef {
+                id: "eid".into(),
+                provider: "bttv".into(),
+                url: "https://cdn.betterttv.net/emote/eid/1x".into(),
+                zero_width: false,
+            },
+        );
+        map.insert("Pog".into(), def("b", "ffz", false));
+        cat.replace_channel("xqc".into(), map);
+        cat.upsert_bttv(
+            "xqc",
+            "NewCode".into(),
+            EmoteDef {
+                id: "eid".into(),
+                provider: "bttv".into(),
+                url: "https://cdn.betterttv.net/emote/eid/1x".into(),
+                zero_width: false,
+            },
+        );
+        assert!(cat.lookup("xqc", "OldCode").is_none());
+        assert_eq!(
+            cat.lookup("xqc", "NewCode").map(|d| d.id.as_str()),
+            Some("eid")
+        );
+        cat.upsert_bttv(
+            "xqc",
+            "Pog".into(),
+            EmoteDef {
+                id: "x".into(),
+                provider: "bttv".into(),
+                url: "https://cdn.betterttv.net/emote/x/1x".into(),
+                zero_width: false,
+            },
+        );
+        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("ffz"));
+        cat.remove_bttv_by_id("xqc", "eid");
+        assert!(cat.lookup("xqc", "NewCode").is_none());
+        // Rename onto FFZ code must not delete the BTTV id entry.
+        cat.upsert_bttv(
+            "xqc",
+            "KeepMe".into(),
+            EmoteDef {
+                id: "keep".into(),
+                provider: "bttv".into(),
+                url: "https://cdn.betterttv.net/emote/keep/1x".into(),
+                zero_width: false,
+            },
+        );
+        cat.upsert_bttv(
+            "xqc",
+            "Pog".into(),
+            EmoteDef {
+                id: "keep".into(),
+                provider: "bttv".into(),
+                url: "https://cdn.betterttv.net/emote/keep/1x".into(),
+                zero_width: false,
+            },
+        );
+        assert_eq!(
+            cat.lookup("xqc", "KeepMe").map(|d| d.id.as_str()),
+            Some("keep")
+        );
+        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("ffz"));
     }
 
     #[test]
