@@ -289,6 +289,10 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     if let Ok(mut slot) = shared.ignore_block_rules.lock() {
         *slot = ignore_rules;
     }
+    let blacklist = super::filters::blacklist_rules_from_settings(&inner.data);
+    if let Ok(mut slot) = shared.highlight_blacklist.lock() {
+        *slot = blacklist;
+    }
     Ok(())
 }
 
@@ -316,6 +320,10 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     let ignore_rules = super::filters::ignore_block_rules_from_settings(&inner.data);
     if let Ok(mut slot) = shared.ignore_block_rules.lock() {
         *slot = ignore_rules;
+    }
+    let blacklist = super::filters::blacklist_rules_from_settings(&inner.data);
+    if let Ok(mut slot) = shared.highlight_blacklist.lock() {
+        *slot = blacklist;
     }
     drop(inner);
     let flags = super::fetch::EmoteProviderFlags::from_knobs(&clean.knobs);

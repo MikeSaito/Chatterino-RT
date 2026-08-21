@@ -123,8 +123,19 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
         Ok(inner) => inner.clone(),
         Err(_) => HighlightSoundCtx::default(),
     };
+    let blacklist = match shared.highlight_blacklist.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => Vec::new(),
+    };
     let kinds = HighlightKindsCtx::from_shared(shared);
-    apply_highlight(&filters, &sound_ctx, &kinds, event, self_login.as_deref());
+    apply_highlight(
+        &filters,
+        &sound_ctx,
+        &kinds,
+        &blacklist,
+        event,
+        self_login.as_deref(),
+    );
     false
 }
 
@@ -143,6 +154,17 @@ pub fn refresh_ignore_block_rules(shared: &Shared) {
         Err(_) => Vec::new(),
     };
     if let Ok(mut slot) = shared.ignore_block_rules.lock() {
+        *slot = rules;
+    }
+}
+
+/// Rebuild cached highlight-blacklist rules after settings change.
+pub fn refresh_highlight_blacklist(shared: &Shared) {
+    let rules = match shared.settings.lock() {
+        Ok(inner) => blacklist_rules_from_settings(&inner.data),
+        Err(_) => Vec::new(),
+    };
+    if let Ok(mut slot) = shared.highlight_blacklist.lock() {
         *slot = rules;
     }
 }
@@ -213,9 +235,15 @@ pub(crate) fn apply_highlight(
     filters: &Filters,
     sound: &HighlightSoundCtx,
     kinds: &HighlightKindsCtx,
+    blacklist: &[BlacklistRule],
     event: &mut ChatEvent,
     self_login: Option<&str>,
 ) {
+    if let Some(login) = event_sender_login(event) {
+        if login_is_blacklisted(login, blacklist) {
+            return;
+        }
+    }
     match event {
         ChatEvent::Privmsg {
             login,
@@ -437,6 +465,74 @@ pub fn ignore_block_rules_from_settings(data: &super::settings::AppSettings) -> 
             )
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BlacklistRule {
+    pub pattern: String,
+    pub is_regex: bool,
+    /// Compiled only when `is_regex`; None if invalid (never matches).
+    pub compiled: Option<Regex>,
+}
+
+impl BlacklistRule {
+    fn from_row(pattern: String, is_regex: bool) -> Self {
+        let compiled = if is_regex {
+            regex::RegexBuilder::new(&pattern)
+                .case_insensitive(true)
+                .unicode(true)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        Self {
+            pattern,
+            is_regex,
+            compiled,
+        }
+    }
+}
+
+/// Rows from Highlights Blacklisted Users table (non-empty username).
+pub fn blacklist_rules_from_settings(data: &super::settings::AppSettings) -> Vec<BlacklistRule> {
+    data.highlight_blacklist
+        .iter()
+        .filter(|r| !r.username.trim().is_empty())
+        .map(|r| BlacklistRule::from_row(r.username.clone(), r.regex))
+        .collect()
+}
+
+fn login_is_blacklisted(login: &str, rules: &[BlacklistRule]) -> bool {
+    if login.is_empty() || rules.is_empty() {
+        return false;
+    }
+    rules.iter().any(|rule| {
+        if rule.pattern.is_empty() {
+            return false;
+        }
+        if rule.is_regex {
+            rule.compiled
+                .as_ref()
+                .is_some_and(|re| re.is_match(login))
+        } else {
+            login.eq_ignore_ascii_case(rule.pattern.trim())
+        }
+    })
+}
+
+fn event_sender_login(event: &ChatEvent) -> Option<&str> {
+    match event {
+        ChatEvent::Privmsg { login, .. } if !login.is_empty() => Some(login.as_str()),
+        ChatEvent::Usernotice { login, privmsg, .. } => login
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or_else(|| match privmsg.as_deref() {
+                Some(ChatEvent::Privmsg { login, .. }) if !login.is_empty() => Some(login.as_str()),
+                _ => None,
+            }),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -943,7 +1039,7 @@ mod tests {
     fn self_nick_highlights_other_messages() {
         let filters = Filters::default();
         let mut ev = privmsg("xqc", "hello Mike there");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &mut ev, Some("mike"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut ev, Some("mike"));
         match ev {
             ChatEvent::Privmsg {
                 highlight_color,
@@ -960,6 +1056,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &HighlightKindsCtx::default(),
+            &[],
             &mut self_ev,
             Some("mike"),
         );
@@ -985,6 +1082,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev,
             Some("mike"),
         );
@@ -1000,6 +1098,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev2,
             Some("mike"),
         );
@@ -1024,7 +1123,7 @@ mod tests {
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "that was pog");
-        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &mut by_phrase, Some("me"));
+        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &[], &mut by_phrase, Some("me"));
         match by_phrase {
             ChatEvent::Privmsg {
                 highlight_color,
@@ -1044,6 +1143,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut silent,
             Some("me"),
         );
@@ -1052,7 +1152,7 @@ mod tests {
             _ => panic!("privmsg"),
         }
         let mut by_user = privmsg("streamer", "hey");
-        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &mut by_user, Some("me"));
+        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &[], &mut by_user, Some("me"));
         match by_user {
             ChatEvent::Privmsg { highlight_sound, .. } => assert!(highlight_sound),
             _ => panic!("privmsg"),
@@ -1068,7 +1168,7 @@ mod tests {
             ..Filters::default()
         };
         let mut by_user = privmsg("streamer", "hey");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &mut by_user, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut by_user, Some("me"));
         match by_user {
             ChatEvent::Privmsg { highlight_color, highlight_sound, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
@@ -1077,7 +1177,7 @@ mod tests {
             _ => panic!("privmsg"),
         }
         let mut by_phrase = privmsg("x", "that was pog");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &mut by_phrase, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut by_phrase, Some("me"));
         match by_phrase {
             ChatEvent::Privmsg { highlight_color, highlight_sound, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
@@ -1158,6 +1258,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut hit,
             Some("me"),
         );
@@ -1186,6 +1287,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut miss,
             Some("me"),
         );
@@ -1205,6 +1307,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut no_hl,
             Some("me"),
         );
@@ -1230,6 +1333,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut multi,
             Some("me"),
         );
@@ -1297,7 +1401,7 @@ mod tests {
             ..Filters::default()
         };
         let mut ev = usernotice("ann", "ann subscribed");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &mut ev, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut ev, Some("me"));
         match ev {
             ChatEvent::Usernotice { highlight_color, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
@@ -1317,7 +1421,7 @@ mod tests {
         if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
             *first_msg = true;
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &mut first, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut first, Some("me"));
         match &first {
             ChatEvent::Privmsg { highlight_color, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(FIRST_MSG_HIGHLIGHT_COLOR));
@@ -1328,7 +1432,7 @@ mod tests {
         if let ChatEvent::Privmsg { custom_reward_id, .. } = &mut redeem {
             *custom_reward_id = Some("abc".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &mut redeem, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut redeem, Some("me"));
         match &redeem {
             ChatEvent::Privmsg { highlight_color, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
@@ -1343,6 +1447,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &kinds,
+            &[],
             &mut highlighted,
             Some("me"),
         );
@@ -1362,7 +1467,7 @@ mod tests {
             *first_msg = true;
             *custom_reward_id = Some("abc".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &mut both, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut both, Some("me"));
         match &both {
             ChatEvent::Privmsg { highlight_color, .. } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
@@ -1377,6 +1482,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &kinds,
+            &[],
             &mut powerup,
             Some("me"),
         );
@@ -1403,6 +1509,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev,
             Some("me"),
         );
@@ -1429,6 +1536,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev,
             Some("me"),
         );
@@ -1456,7 +1564,7 @@ mod tests {
         if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
             *first_msg = true;
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &mut first, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &[], &mut first, Some("me"));
         match first {
             ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
@@ -1465,7 +1573,7 @@ mod tests {
         if let ChatEvent::Usernotice { msg_id, .. } = &mut sub {
             *msg_id = Some("sub".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &mut sub, Some("me"));
+        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &[], &mut sub, Some("me"));
         match sub {
             ChatEvent::Usernotice { highlight_color, .. } => assert!(highlight_color.is_none()),
             _ => panic!("usernotice"),
@@ -1492,6 +1600,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &kinds,
+            &[],
             &mut first,
             Some("me"),
         );
@@ -1509,6 +1618,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &kinds,
+            &[],
             &mut redeem,
             Some("me"),
         );
@@ -1526,6 +1636,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &kinds,
+            &[],
             &mut sub,
             Some("me"),
         );
@@ -1547,6 +1658,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &bad,
+            &[],
             &mut first_bad,
             Some("me"),
         );
@@ -1587,6 +1699,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut by_phrase,
             Some("me"),
         );
@@ -1601,6 +1714,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut by_user,
             Some("me"),
         );
@@ -1618,6 +1732,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut empty_color,
             Some("me"),
         );
@@ -1635,6 +1750,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut bad,
             Some("me"),
         );
@@ -1660,6 +1776,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev,
             Some("mike"),
         );
@@ -1691,6 +1808,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut by_set,
             Some("me"),
         );
@@ -1710,6 +1828,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut by_ver,
             Some("me"),
         );
@@ -1724,6 +1843,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut wrong_ver,
             Some("me"),
         );
@@ -1737,6 +1857,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut phrase_wins,
             Some("me"),
         );
@@ -1754,6 +1875,7 @@ mod tests {
             &filters,
             &sound,
             &HighlightKindsCtx::default(),
+            &[],
             &mut first,
             Some("me"),
         );
@@ -1779,6 +1901,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx::default(),
             &HighlightKindsCtx::default(),
+            &[],
             &mut off,
             Some("mike"),
         );
@@ -1796,6 +1919,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut on,
             Some("mike"),
         );
@@ -1817,6 +1941,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut custom,
             Some("mike"),
         );
@@ -1835,6 +1960,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut other,
             Some("mike"),
         );
@@ -1864,6 +1990,7 @@ mod tests {
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
+            &[],
             &mut ev,
             Some("me"),
         );
@@ -1993,5 +2120,150 @@ mod tests {
             &privmsg("x", "cached"),
             Some("me")
         ));
+    }
+
+    #[test]
+    fn highlight_blacklist_skips_color_and_sound() {
+        let filters = Filters {
+            enable_self_highlight: false,
+            highlight_phrases: vec!["hello".into()],
+            highlight_logins: vec!["streamer".into()],
+            ..Filters::default()
+        };
+        let sound = HighlightSoundCtx {
+            phrase_rules: vec![PhraseRule::plain("hello", true, "#11223344")],
+            user_sound: vec![("streamer".into(), true, "#AABBCC".into())],
+            ..HighlightSoundCtx::default()
+        };
+        let exact = BlacklistRule::from_row("ann".into(), false);
+        let mut skipped = privmsg("ann", "hello there");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[exact.clone()],
+            &mut skipped,
+            Some("me"),
+        );
+        match skipped {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
+                assert!(highlight_color.is_none());
+                assert!(!highlight_sound);
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut case_insensitive = privmsg("ANN", "hello there");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[exact],
+            &mut case_insensitive,
+            Some("me"),
+        );
+        match case_insensitive {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+
+        let re = BlacklistRule::from_row(r"^bot_.*".into(), true);
+        assert!(re.compiled.is_some());
+        let mut bot = privmsg("bot_spam", "hello");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[re],
+            &mut bot,
+            Some("me"),
+        );
+        match bot {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+
+        let invalid = BlacklistRule::from_row("(".into(), true);
+        assert!(invalid.compiled.is_none());
+        let mut still_hl = privmsg("ann", "hello");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[invalid],
+            &mut still_hl,
+            Some("me"),
+        );
+        match still_hl {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11223344"));
+            }
+            _ => panic!("privmsg"),
+        }
+
+        let empty = blacklist_rules_from_settings(&super::super::settings::AppSettings {
+            highlight_blacklist: vec![super::super::settings::HighlightBlacklistRow {
+                username: "  ".into(),
+                regex: false,
+            }],
+            ..super::super::settings::AppSettings::default()
+        });
+        assert!(empty.is_empty());
+
+        let mut other = privmsg("bob", "hello");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[BlacklistRule::from_row("ann".into(), false)],
+            &mut other,
+            Some("me"),
+        );
+        match other {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11223344"));
+                assert!(highlight_sound);
+            }
+            _ => panic!("privmsg"),
+        }
+
+        let mut first = privmsg("ann", "hi");
+        if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
+            *first_msg = true;
+        }
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &[BlacklistRule::from_row("ann".into(), false)],
+            &mut first,
+            Some("me"),
+        );
+        match first {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+
+        let shared = super::super::state::Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.data.highlight_blacklist =
+                vec![super::super::settings::HighlightBlacklistRow {
+                    username: "nightbot".into(),
+                    regex: false,
+                }];
+        }
+        refresh_highlight_blacklist(&shared);
+        let rules = shared.highlight_blacklist.lock().unwrap().clone();
+        assert_eq!(rules.len(), 1);
+        assert!(login_is_blacklisted("NightBot", &rules));
+        assert!(!login_is_blacklisted("bob", &rules));
     }
 }

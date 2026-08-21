@@ -9,7 +9,7 @@ use super::batch::encode_batch;
 use super::cheers::CheerCatalog;
 use super::chatters::Chatters;
 use super::emotes::Catalog;
-use super::filters::{FiltersInner, HighlightSoundCtx, PhraseRule};
+use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
 use super::session::SessionInner;
@@ -111,6 +111,8 @@ pub struct Shared {
     pub highlight_sound: Arc<Mutex<HighlightSoundCtx>>,
     /// Compiled Ignores Messages block rules; refreshed on settings load/replace.
     pub ignore_block_rules: Arc<Mutex<Vec<PhraseRule>>>,
+    /// Compiled Highlights Blacklisted Users rules; refreshed on settings load/replace.
+    pub highlight_blacklist: Arc<Mutex<Vec<BlacklistRule>>>,
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
     /// Last successfully sent outbound PRIVMSG text per channel login.
     pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
@@ -149,6 +151,7 @@ impl Shared {
             settings: Arc::new(Mutex::new(SettingsInner::default())),
             highlight_sound: Arc::new(Mutex::new(HighlightSoundCtx::default())),
             ignore_block_rules: Arc::new(Mutex::new(Vec::new())),
+            highlight_blacklist: Arc::new(Mutex::new(Vec::new())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
             outbound_pending: Arc::new(AtomicUsize::new(0)),
