@@ -9,6 +9,11 @@ export type WrapEmote = {
   zeroWidth?: boolean;
 };
 
+export type WrapRange = {
+  start: number;
+  end: number;
+};
+
 /** Опции переноса под Size / Enable / Zero-width. */
 export type WrapOptions = {
   /** Мин. колонок на non-ZW эмодзи: max(codeLen, emoteMinCols). */
@@ -17,12 +22,15 @@ export type WrapOptions = {
   maskEmotes?: boolean;
   /** false: zeroWidth игнорируется. */
   enableZeroWidth?: boolean;
+  /** Диапазоны mention: в renderWrapped заменить пробелами (overlay BitmapText). */
+  maskMentions?: readonly WrapRange[];
 };
 
 type WrapCtx = {
   emoteMinCols: number;
   maskEmotes: boolean;
   enableZeroWidth: boolean;
+  maskMentions: readonly WrapRange[];
 };
 
 const WRAP_MAX_LINES = 48;
@@ -48,6 +56,7 @@ function ctxFrom(opts?: WrapOptions): WrapCtx {
   return {
     emoteMinCols: Math.max(0, Math.floor(opts?.emoteMinCols ?? 0)),
     maskEmotes: opts?.maskEmotes !== false,
+    maskMentions: opts?.maskMentions ?? [],
     enableZeroWidth: opts?.enableZeroWidth !== false,
   };
 }
@@ -173,6 +182,7 @@ function wrapParagraph(
     let end = takeWidth(text, i, to, width, emotes, ctx);
     if (end < to) {
       end = snapBeforeEmote(i, end, emotes, ctx);
+      end = snapBeforeMention(i, end, ctx.maskMentions);
       end = snapWord(text, i, end, emotes, ctx);
     }
     if (end <= i) {
@@ -253,12 +263,42 @@ function maskSlice(
   emotes: readonly WrapEmote[],
   ctx: WrapCtx,
 ): string {
-  if (!ctx.maskEmotes) {
+  const mentionMask = ctx.maskMentions.length > 0;
+  if (!ctx.maskEmotes && !mentionMask) {
     return text.slice(start, end).replace(/[\r\n]/g, " ");
   }
   const kept: string[] = [];
   let i = start;
   while (i < end) {
+    if (mentionMask) {
+      const mention = mentionAt(ctx.maskMentions, i);
+      if (mention) {
+        const to = Math.min(mention.end, end);
+        if (i < to) {
+          const cols = visualWidth(text, i, to, emotes, {
+            ...ctx,
+            maskMentions: [],
+          });
+          for (let c = 0; c < cols; c += 1) {
+            kept.push(" ");
+          }
+        }
+        i = to;
+        continue;
+      }
+    }
+    if (!ctx.maskEmotes) {
+      const code = text.charCodeAt(i);
+      if (code === 10 || code === 13) {
+        kept.push(" ");
+        i += 1;
+        continue;
+      }
+      const next = nextUnit(text, i, end);
+      kept.push(text.slice(i, next));
+      i = next;
+      continue;
+    }
     if (collapsed(emotes, i, ctx)) {
       i = nextUtf16(text, i);
       continue;
@@ -289,6 +329,18 @@ function maskSlice(
   return kept.join("");
 }
 
+function mentionAt(
+  ranges: readonly WrapRange[],
+  index: number,
+): WrapRange | null {
+  for (const r of ranges) {
+    if (index >= r.start && index < r.end) {
+      return r;
+    }
+  }
+  return null;
+}
+
 function snapBeforeEmote(
   lineStart: number,
   end: number,
@@ -300,6 +352,20 @@ function snapBeforeEmote(
     if (isZeroWidth(span, ctx)) {
       continue;
     }
+    if (span.start > lineStart && span.start < snapped && span.end > snapped) {
+      snapped = span.start;
+    }
+  }
+  return snapped;
+}
+
+function snapBeforeMention(
+  lineStart: number,
+  end: number,
+  mentions: readonly WrapRange[],
+): number {
+  let snapped = end;
+  for (const span of mentions) {
     if (span.start > lineStart && span.start < snapped && span.end > snapped) {
       snapped = span.start;
     }

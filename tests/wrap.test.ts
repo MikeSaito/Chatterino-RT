@@ -105,3 +105,34 @@ if (
 if (resolveEmoteUrl(twitch, true) !== twitch) {
   throw new Error("animate on must keep Twitch URL");
 }
+
+const mentionText = "hi @verylongusernameok bye";
+const mentionSpan = { start: 3, end: 22 };
+const mentionOpts = { maskMentions: [mentionSpan] };
+const mentionLines = wrapBody(mentionText, 10, [], mentionOpts);
+const mentionMask = renderWrapped(mentionText, mentionLines, [], mentionOpts);
+if (mentionMask.includes("@") || mentionMask.includes("verylong")) {
+  throw new Error("maskMentions must replace mention with spaces");
+}
+let mentionVisual = 0;
+for (const line of mentionLines) {
+  mentionVisual += line.end - line.start;
+}
+const mentionMaskUnits = mentionMask.replace(/\n/g, "").length;
+if (mentionMaskUnits !== mentionVisual) {
+  throw new Error(
+    `maskMentions lines must match source slices (${mentionVisual}), got ${mentionMaskUnits}`,
+  );
+}
+
+const snapText = "aaaaaaaa @bob";
+const snapSpan = { start: 9, end: 13 };
+const snapOpts = { maskMentions: [snapSpan] };
+const snapLines = wrapBody(snapText, 10, [], snapOpts);
+const mid = snapLines.find((l) => l.start > snapSpan.start && l.start < snapSpan.end);
+if (mid) {
+  throw new Error("snapBeforeMention must keep short @login on one line");
+}
+
+console.log("wrap tests ok");
+

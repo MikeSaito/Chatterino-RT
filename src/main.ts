@@ -27,6 +27,7 @@ import {
   type UsernameRclickAction,
   type UsernameRclickModifier,
 } from "./shell/usernameRclick";
+import { mentionInsertText } from "./shell/mentionFormat";
 import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
@@ -153,6 +154,7 @@ async function boot(): Promise<void> {
     modBehavior: "Reply" as UsernameRclickAction,
     modifier: "Shift" as UsernameRclickModifier,
   };
+  let mentionUsersWithComma = true;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
     if (!li || !completeBox.contains(li)) {
@@ -213,6 +215,8 @@ async function boot(): Promise<void> {
           data.knobs["behaviour.usernameRightClickModifier"],
         ),
       };
+      mentionUsersWithComma =
+        data.knobs["behaviour.mentionUsersWithComma"] !== false;
     },
   });
   bindScrollChrome({
@@ -449,8 +453,9 @@ async function boot(): Promise<void> {
       return;
     }
     if (action === "Reply") {
-      if (ctx.login && ctx.msgId && !ctx.disabled) {
-        setReply(ctx.msgId, ctx.login, ctx.text);
+      const author = ctx.authorLogin || ctx.login;
+      if (author && ctx.msgId && !ctx.disabled) {
+        setReply(ctx.msgId, author, ctx.text);
         messageInput.focus();
       }
       return;
@@ -458,11 +463,19 @@ async function boot(): Promise<void> {
     if (!ctx.login) {
       return;
     }
-    const mention = `@${ctx.login} `;
     const start = messageInput.selectionStart ?? messageInput.value.length;
     const end = messageInput.selectionEnd ?? start;
     const before = messageInput.value.slice(0, start);
     const after = messageInput.value.slice(end);
+    const isFirstWord = !before.includes(" ");
+    const mention = mentionInsertText(
+      ctx.login,
+      isFirstWord,
+      mentionUsersWithComma,
+    );
+    if (!mention) {
+      return;
+    }
     messageInput.value = `${before}${mention}${after}`;
     const caret = before.length + mention.length;
     messageInput.setSelectionRange(caret, caret);

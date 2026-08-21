@@ -263,6 +263,10 @@ function paintRuntime(
     mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),
     boldScale: parseBoldScale(data.knobs["appearance.boldScale"]),
   });
+  ring.configureMentionStyle({
+    bold: data.knobs["appearance.boldUsernames"] !== false,
+    color: data.knobs["appearance.colorUsernames"] !== false,
+  });
   onDisplay?.(data);
 }
 

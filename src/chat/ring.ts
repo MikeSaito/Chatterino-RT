@@ -14,6 +14,7 @@ import {
   BADGE_SIZE,
   BADGE_SLOTS_PER_ROW,
   EMOTE_SLOTS_PER_ROW,
+  MENTION_SLOTS_PER_ROW,
   MESSAGE_POOL_SIZE,
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
@@ -41,6 +42,7 @@ import {
   resolveNickColor,
   type UsernameDisplayMode,
 } from "../shell/nickStyle";
+import { NickColorCache } from "../shell/nickColorCache";
 import {
   clipNick,
   indexToLineCol,
@@ -60,6 +62,8 @@ export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 export type SlotContext = {
   msgId: string;
   login: string;
+  /** Автор сообщения (для Reply); = login на клике по нику. */
+  authorLogin: string;
   nick: string;
   text: string;
   clientX: number;
@@ -77,6 +81,7 @@ type Slot = {
   time: BitmapText;
   nick: BitmapText;
   body: BitmapText;
+  mentionTexts: BitmapText[];
   emotes: Sprite[];
   emoteKeys: string[];
   badges: Sprite[];
@@ -159,6 +164,9 @@ export class MessageRing {
   private usernameDisplayMode: UsernameDisplayMode = "UsernameAndLocalizedName";
   private nickBoldScale = 63;
   private nickAtlasDesignSize = 0;
+  private boldUsernames = true;
+  private colorUsernames = true;
+  private readonly nickColorCache = new NickColorCache(500);
   private pauseMouse = false;
   private pauseKey = false;
   private pauseFollowIntent = false;
@@ -285,6 +293,20 @@ export class MessageRing {
         });
       }
       dirtyBitmapText(slot.nick);
+    }
+    this.layout();
+  }
+
+  configureMentionStyle(opts: { bold: boolean; color: boolean }): void {
+    const bold = opts.bold !== false;
+    const color = opts.color !== false;
+    if (bold === this.boldUsernames && color === this.colorUsernames) {
+      return;
+    }
+    this.boldUsernames = bold;
+    this.colorUsernames = color;
+    if (!this.ready) {
+      return;
     }
     this.layout();
   }
@@ -573,10 +595,16 @@ export class MessageRing {
       slot.nick.style.fontSize = this.fontSize;
       slot.body.style.fontSize = this.fontSize;
       slot.body.style.lineHeight = this.lineHeight;
+      for (const mt of slot.mentionTexts) {
+        mt.style.fontSize = this.fontSize;
+      }
       if (forceDirty) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
+        for (const mt of slot.mentionTexts) {
+          dirtyBitmapText(mt);
+        }
       }
     }
   }
@@ -752,6 +780,20 @@ export class MessageRing {
         spr.y = 1;
         emotes.push(spr);
       }
+      const mentionTexts: BitmapText[] = [];
+      for (let m = 0; m < MENTION_SLOTS_PER_ROW; m += 1) {
+        const mt = new BitmapText({
+          text: "",
+          style: {
+            fontFamily: "ChatFont",
+            fontSize: this.fontSize,
+            fill: 0xffffff,
+          },
+        });
+        mt.visible = false;
+        mt.eventMode = "none";
+        mentionTexts.push(mt);
+      }
       const badges: Sprite[] = [];
       for (let b = 0; b < BADGE_SLOTS_PER_ROW; b += 1) {
         const spr = new Sprite(Texture.EMPTY);
@@ -761,7 +803,17 @@ export class MessageRing {
         badges.push(spr);
       }
       // disabled overlay last — поверх текста/эмодзи как MessageLayout fillRect
-      root.addChild(hl, mentions, time, nick, body, ...badges, ...emotes, disabledGfx);
+      root.addChild(
+        hl,
+        mentions,
+        time,
+        nick,
+        body,
+        ...mentionTexts,
+        ...badges,
+        ...emotes,
+        disabledGfx,
+      );
       const slot: Slot = {
         root,
         highlight: hl,
@@ -770,6 +822,7 @@ export class MessageRing {
         time,
         nick,
         body,
+        mentionTexts,
         emotes,
         emoteKeys: [],
         badges,
@@ -956,6 +1009,10 @@ export class MessageRing {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
     }
+    for (const mt of slot.mentionTexts) {
+      mt.visible = false;
+      mt.text = "";
+    }
   }
 
   private write(slot: Slot, event: ChatEvent): void {
@@ -982,6 +1039,7 @@ export class MessageRing {
       slot.nickColorRaw = event.color;
       slot.nickLogin = event.login;
       slot.nickDisplay = event.displayName || event.login;
+      this.nickColorCache.set(event.login, drawn.nickColor);
     } else {
       slot.useNickStyle = false;
       slot.nickUserId = "";
@@ -1231,21 +1289,32 @@ export class MessageRing {
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const wrapOpts = this.wrapOpts();
+    const layoutOpts = this.wrapOpts(slot);
     const lines = wrapBody(
       slot.bodyRaw,
       maxBodyChars(this.app.screen.width, bodyX, this.charWidth),
       slot.spansRaw,
-      wrapOpts,
+      layoutOpts,
     );
     slot.wrapLines = lines;
     slot.lineCount = lines.length;
-    slot.body.text = renderWrapped(slot.bodyRaw, lines, slot.spansRaw, wrapOpts);
+    const overlayMentions =
+      this.boldUsernames || this.colorUsernames
+        ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
+        : [];
+    const renderOpts = this.wrapOpts(slot, overlayMentions);
+    slot.body.text = renderWrapped(
+      slot.bodyRaw,
+      lines,
+      slot.spansRaw,
+      renderOpts,
+    );
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
     this.paintHighlight(slot);
-    this.paintMentions(slot, bodyX);
+    this.paintMentions(slot, bodyX, layoutOpts);
+    this.paintMentionTexts(slot, bodyX, lines, renderOpts, overlayMentions);
     this.paintDisabled(slot);
     let prevX = 0;
     let prevY = 0;
@@ -1273,7 +1342,7 @@ export class MessageRing {
         lines,
         span.start,
         slot.spansRaw,
-        wrapOpts,
+        layoutOpts,
       );
       if (!pos) {
         spr.visible = false;
@@ -1358,9 +1427,12 @@ export class MessageRing {
       });
   }
 
-  private paintMentions(slot: Slot, bodyX: number): void {
+  private paintMentions(
+    slot: Slot,
+    bodyX: number,
+    wrapOpts: WrapOptions,
+  ): void {
     slot.mentions.clear();
-    const wrapOpts = this.wrapOpts();
     for (const span of slot.mentionSpans) {
       for (const line of slot.wrapLines) {
         const a = Math.max(span.start, line.start);
@@ -1396,6 +1468,86 @@ export class MessageRing {
           .fill({ color: 0x5c65f9, alpha: 0.35 });
       }
     }
+  }
+
+  private paintMentionTexts(
+    slot: Slot,
+    bodyX: number,
+    lines: readonly WrapLine[],
+    wrapOpts: WrapOptions,
+    overlayMentions: readonly MentionSpan[],
+  ): void {
+    for (const mt of slot.mentionTexts) {
+      mt.visible = false;
+    }
+    if (!this.boldUsernames && !this.colorUsernames) {
+      return;
+    }
+    const fontFamily = this.boldUsernames ? "ChatNickFont" : "ChatFont";
+    let used = 0;
+    for (const span of overlayMentions) {
+      for (const line of lines) {
+        if (used >= slot.mentionTexts.length) {
+          return;
+        }
+        const a = Math.max(span.start, line.start);
+        const b = Math.min(span.end, line.end);
+        if (a >= b) {
+          continue;
+        }
+        const pos = indexToLineCol(
+          slot.bodyRaw,
+          lines,
+          a,
+          slot.spansRaw,
+          wrapOpts,
+        );
+        if (!pos) {
+          continue;
+        }
+        const mt = slot.mentionTexts[used];
+        used += 1;
+        mt.text = slot.bodyRaw.slice(a, b);
+        mt.style.fontFamily = fontFamily;
+        mt.style.fontSize = this.fontSize;
+        mt.style.fill = 0xffffff;
+        const cached = this.nickColorCache.get(span.login);
+        mt.tint =
+          this.colorUsernames && cached !== undefined
+            ? cached
+            : this.themeFills.body;
+        mt.x = bodyX + pos.col * this.charWidth;
+        mt.y = pos.line * this.lineHeight;
+        mt.visible = true;
+        dirtyBitmapText(mt);
+      }
+    }
+  }
+
+  /** Mentions, для которых хватает overlay-слотов (по числу line∩span). */
+  private mentionSpansForOverlay(
+    spans: readonly MentionSpan[],
+    lines: readonly WrapLine[],
+  ): MentionSpan[] {
+    let used = 0;
+    const out: MentionSpan[] = [];
+    for (const span of spans) {
+      let frags = 0;
+      for (const line of lines) {
+        if (Math.max(span.start, line.start) < Math.min(span.end, line.end)) {
+          frags += 1;
+        }
+      }
+      if (frags === 0) {
+        continue;
+      }
+      if (used + frags > MENTION_SLOTS_PER_ROW) {
+        break;
+      }
+      used += frags;
+      out.push(span);
+    }
+    return out;
   }
 
   private layout(anchor?: ScrollAnchor): void {
@@ -1493,7 +1645,24 @@ export class MessageRing {
       this.onNickClick({
         msgId: slot.msgId,
         login: slot.login,
+        authorLogin: slot.login,
         nick: slot.nickRaw,
+        text: slot.copyText || slot.bodyRaw,
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+        disabled: slot.disabled,
+        replyToId: slot.replyToId,
+        linkUrl: "",
+      });
+      return;
+    }
+    const mentionLogin = this.mentionLoginAt(slot, ev);
+    if (mentionLogin && this.onNickClick) {
+      this.onNickClick({
+        msgId: slot.msgId,
+        login: mentionLogin,
+        authorLogin: slot.login,
+        nick: mentionLogin,
         text: slot.copyText || slot.bodyRaw,
         clientX: ev.clientX,
         clientY: ev.clientY,
@@ -1520,7 +1689,28 @@ export class MessageRing {
         {
           msgId: slot.msgId,
           login: slot.login,
+          authorLogin: slot.login,
           nick: slot.nickRaw,
+          text: slot.copyText || slot.bodyRaw,
+          clientX: ev.clientX,
+          clientY: ev.clientY,
+          disabled: slot.disabled,
+          replyToId: slot.replyToId,
+          linkUrl: "",
+        },
+        ev,
+      );
+      return;
+    }
+    const mentionLogin = this.mentionLoginAt(slot, ev);
+    if (mentionLogin && this.onNickRightClick) {
+      ev.preventDefault();
+      this.onNickRightClick(
+        {
+          msgId: slot.msgId,
+          login: mentionLogin,
+          authorLogin: slot.login,
+          nick: mentionLogin,
           text: slot.copyText || slot.bodyRaw,
           clientX: ev.clientX,
           clientY: ev.clientY,
@@ -1539,6 +1729,7 @@ export class MessageRing {
     this.onContext({
       msgId: slot.msgId,
       login: slot.login,
+      authorLogin: slot.login,
       nick: slot.nickRaw,
       text: slot.copyText || slot.bodyRaw,
       clientX: ev.clientX,
@@ -1551,6 +1742,10 @@ export class MessageRing {
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {
     if (this.nickAt(slot, ev) && slot.login) {
+      slot.root.cursor = "pointer";
+      return;
+    }
+    if (this.mentionLoginAt(slot, ev)) {
       slot.root.cursor = "pointer";
       return;
     }
@@ -1571,6 +1766,33 @@ export class MessageRing {
     );
   }
 
+  private mentionLoginAt(slot: Slot, ev: FederatedPointerEvent): string | null {
+    if (slot.mentionSpans.length === 0) {
+      return null;
+    }
+    const local = ev.getLocalPosition(slot.root);
+    if (local.x < slot.body.x || local.y < 0) {
+      return null;
+    }
+    const col = Math.floor((local.x - slot.body.x) / this.charWidth);
+    const line = Math.floor(local.y / this.lineHeight);
+    const idx = lineColToIndex(
+      slot.bodyRaw,
+      slot.wrapLines,
+      line,
+      col,
+      slot.spansRaw,
+      this.wrapOpts(slot),
+    );
+    if (idx === null) {
+      return null;
+    }
+    const hit = slot.mentionSpans.find(
+      (span) => idx >= span.start && idx < span.end,
+    );
+    return hit?.login ?? null;
+  }
+
   private linkAt(slot: Slot, ev: FederatedPointerEvent): string | undefined {
     const local = ev.getLocalPosition(slot.root);
     if (local.x < slot.body.x || local.y < 0) {
@@ -1584,7 +1806,7 @@ export class MessageRing {
       line,
       col,
       slot.spansRaw,
-      this.wrapOpts(),
+      this.wrapOpts(slot),
     );
     if (idx === null) {
       return undefined;
@@ -1645,16 +1867,25 @@ export class MessageRing {
     return Math.max(1, Math.round((this.lineHeight - 4) * this.emoteScale));
   }
 
-  private wrapOpts(): WrapOptions {
+  private wrapOpts(
+    slot?: Slot,
+    maskMentions?: readonly MentionSpan[],
+  ): WrapOptions {
     const images = this.enableEmoteImages;
     const emoteMinCols =
       images && this.charWidth > 0
         ? Math.max(1, Math.ceil(this.emotePixelSize() / this.charWidth))
         : 0;
+    const chrome = this.boldUsernames || this.colorUsernames;
+    const mentions =
+      slot && chrome && slot.mentionSpans.length > 0
+        ? (maskMentions ?? slot.mentionSpans)
+        : undefined;
     return {
       emoteMinCols,
       maskEmotes: images,
       enableZeroWidth: images && this.enableZeroWidthEmotes,
+      maskMentions: mentions,
     };
   }
 
