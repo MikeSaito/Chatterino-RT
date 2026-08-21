@@ -140,10 +140,22 @@ async function boot(): Promise<void> {
   const app = await createChatApp(canvas, canvasHost);
   const ring = new MessageRing(app, new TextureLru());
   await ring.init();
+  let autoCloseUserPopup = true;
+  const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
+  let replyHover: { msgId: string; login: string; text: string } | null = null;
+  let lastPointerY = 0;
   bindSettingsDialog({
     ring,
     openBtn: settingsOpen,
     modal: settingsModal,
+    onDisplay: (data) => {
+      autoCloseUserPopup =
+        data.knobs["behaviour.autoCloseUserPopup"] !== false;
+      if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
+        replyBtn.hidden = true;
+        replyHover = null;
+      }
+    },
   });
   bindScrollChrome({
     ring,
@@ -151,6 +163,19 @@ async function boot(): Promise<void> {
     track: scrollTrack,
     thumb: scrollThumb,
     jump: jumpBottom,
+    onScroll: () => {
+      if (!replyBtn || replyBtn.hidden || !replyHover) {
+        return;
+      }
+      const anchor = ring.replyAnchorAt(0, lastPointerY);
+      if (!anchor || anchor.msgId !== replyHover.msgId) {
+        replyBtn.hidden = true;
+        replyHover = null;
+        return;
+      }
+      const hostRect = canvasHost.getBoundingClientRect();
+      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
+    },
   });
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== "End" || !ev.ctrlKey || ev.altKey || ev.metaKey) {
@@ -178,7 +203,52 @@ async function boot(): Promise<void> {
     settingsModal,
     searchModal,
     activeChannel: () => ipc.active(),
+    autoClose: () => autoCloseUserPopup,
   });
+  if (replyBtn) {
+    canvasHost.addEventListener("pointermove", (ev) => {
+      lastPointerY = ev.clientY;
+      if (!ring.isReplyButtonEnabled()) {
+        replyBtn.hidden = true;
+        replyHover = null;
+        return;
+      }
+      const anchor = ring.replyAnchorAt(ev.clientX, ev.clientY);
+      if (!anchor) {
+        replyBtn.hidden = true;
+        replyHover = null;
+        return;
+      }
+      replyHover = {
+        msgId: anchor.msgId,
+        login: anchor.login,
+        text: anchor.text,
+      };
+      const hostRect = canvasHost.getBoundingClientRect();
+      replyBtn.hidden = false;
+      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
+      replyBtn.style.right = "28px";
+    });
+    canvasHost.addEventListener("pointerleave", () => {
+      if (replyBtn.matches(":hover")) {
+        return;
+      }
+      replyBtn.hidden = true;
+      replyHover = null;
+    });
+    replyBtn.addEventListener("pointerleave", () => {
+      replyBtn.hidden = true;
+      replyHover = null;
+    });
+    replyBtn.addEventListener("click", () => {
+      if (!replyHover) {
+        return;
+      }
+      setReply(replyHover.msgId, replyHover.login, replyHover.text);
+      messageInput.focus();
+      replyBtn.hidden = true;
+    });
+  }
   const replyThread = bindReplyThread({
     modal: replythreadModal,
     settingsModal,
@@ -247,6 +317,15 @@ async function boot(): Promise<void> {
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
   });
+  ring.setOnNickClick((ctx) => {
+    hideContextMenu();
+    userCard.open({
+      login: ctx.login,
+      nick: ctx.nick || ctx.login,
+      clientX: ctx.clientX,
+      clientY: ctx.clientY,
+    });
+  });
 
   document.addEventListener("pointerdown", (ev) => {
     if (!contextMenuEl.hidden && !contextMenuEl.contains(ev.target as Node)) {
@@ -284,7 +363,12 @@ async function boot(): Promise<void> {
       return;
     }
     if (action === "user" && target.login) {
-      userCard.open({ login: target.login, nick: target.nick || target.login });
+      userCard.open({
+        login: target.login,
+        nick: target.nick || target.login,
+        clientX: target.clientX,
+        clientY: target.clientY,
+      });
       return;
     }
     if (action === "open-twitch" && target.login) {

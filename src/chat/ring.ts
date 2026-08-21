@@ -114,10 +114,13 @@ export class MessageRing {
   private badgeSize = BADGE_SIZE;
   private findHitId = "";
   private hideModerated = false;
+  private hideModerationActions = false;
+  private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
+  private onNickClick: ((ctx: SlotContext) => void) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -134,6 +137,10 @@ export class MessageRing {
     this.onContext = cb;
   }
 
+  setOnNickClick(cb: (ctx: SlotContext) => void): void {
+    this.onNickClick = cb;
+  }
+
   /** Масштаб шрифта, timestamps и hideModerated без destroy PIXI.Application. */
   applyDisplay(
     fontScale: number,
@@ -142,6 +149,8 @@ export class MessageRing {
     timestampFormat = "hh:mm",
     alternateMessages = false,
     separateMessages = false,
+    hideModerationActions = false,
+    showReplyButton = false,
   ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
     this.showTimestamps = showTimestamps;
@@ -149,6 +158,8 @@ export class MessageRing {
     this.timestampFormat = timestampFormat === "Disable" ? "hh:mm" : timestampFormat;
     this.alternateMessages = alternateMessages;
     this.separateMessages = separateMessages;
+    this.hideModerationActions = hideModerationActions;
+    this.showReplyButton = showReplyButton;
     this.fontSize = FONT_SIZE * scale;
     this.lineHeight = Math.max(1, Math.round(LINE_HEIGHT * scale));
     this.charWidth = CHAR_WIDTH * scale;
@@ -403,6 +414,14 @@ export class MessageRing {
       } else {
         this.disableAllUserMessages();
       }
+      if (this.hideModerationActions) {
+        this.layout();
+        return;
+      }
+    }
+    if (event.kind === "roomstate") {
+      // Legacy raw roomstate in old snapshots — skip; live path emits Notice.
+      return;
     }
     const slot = this.slots[this.head];
     this.write(slot, event);
@@ -899,6 +918,20 @@ export class MessageRing {
   }
 
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
+    if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
+      this.onNickClick({
+        msgId: slot.msgId,
+        login: slot.login,
+        nick: slot.nickRaw,
+        text: slot.copyText || slot.bodyRaw,
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+        disabled: slot.disabled,
+        replyToId: slot.replyToId,
+        linkUrl: "",
+      });
+      return;
+    }
     const url = this.linkAt(slot, ev);
     if (!url) {
       return;
@@ -925,7 +958,25 @@ export class MessageRing {
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {
+    if (this.nickAt(slot, ev) && slot.login) {
+      slot.root.cursor = "pointer";
+      return;
+    }
     slot.root.cursor = this.linkAt(slot, ev) ? "pointer" : "default";
+  }
+
+  private nickAt(slot: Slot, ev: FederatedPointerEvent): boolean {
+    if (!slot.login || slot.system || !slot.nickRaw) {
+      return false;
+    }
+    const local = ev.getLocalPosition(slot.root);
+    const nickW = Math.max(slot.nick.text.length * this.charWidth, 8);
+    return (
+      local.x >= slot.nick.x &&
+      local.x < slot.nick.x + nickW &&
+      local.y >= 0 &&
+      local.y < this.lineHeight
+    );
   }
 
   private linkAt(slot: Slot, ev: FederatedPointerEvent): string | undefined {
@@ -941,6 +992,54 @@ export class MessageRing {
     }
     const hit = slot.linkSpans.find((span) => idx >= span.start && idx < span.end);
     return hit?.url;
+  }
+
+  /** Hover reply chip: screen rect of last visible privmsg under pointer, or null. */
+  replyAnchorAt(clientX: number, clientY: number): {
+    msgId: string;
+    login: string;
+    text: string;
+    top: number;
+    right: number;
+  } | null {
+    if (!this.showReplyButton || !this.ready) {
+      return null;
+    }
+    void clientX;
+    const canvas = this.app.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const localY = clientY - rect.top;
+    const stageY = this.app.stage.y;
+    const row = Math.floor((localY - stageY) / this.lineHeight);
+    if (row < 0) {
+      return null;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (!slot.msgId || slot.system || !slot.login) {
+        continue;
+      }
+      if (slot.disabled && this.hideModerated) {
+        continue;
+      }
+      const y0 = slot.startRow;
+      const y1 = slot.startRow + slot.lineCount;
+      if (row >= y0 && row < y1) {
+        return {
+          msgId: slot.msgId,
+          login: slot.login,
+          text: slot.copyText || slot.bodyRaw,
+          top: rect.top + stageY + slot.startRow * this.lineHeight,
+          right: rect.right - 8,
+        };
+      }
+    }
+    return null;
+  }
+
+  isReplyButtonEnabled(): boolean {
+    return this.showReplyButton;
   }
 }
 

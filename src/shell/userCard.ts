@@ -4,35 +4,59 @@ import type { ChatEvent } from "../chat/types";
 export type UserCardOpen = {
   login: string;
   nick: string;
+  clientX: number;
+  clientY: number;
 };
 
 /**
- * SPA UserInfoPopup: карточка пользователя без второго PIXI.
+ * SPA UserInfoPopup: плавающая карточка у курсора (DraggablePopup), без fullscreen dim.
  */
 export function bindUserCard(opts: {
   modal: HTMLElement;
   settingsModal: HTMLElement;
   searchModal: HTMLElement;
   activeChannel: () => string;
+  autoClose: () => boolean;
 }): { open: (info: UserCardOpen) => void; close: () => void } {
-  const { modal, settingsModal, searchModal, activeChannel } = opts;
+  const { modal, settingsModal, searchModal, activeChannel, autoClose } = opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
-  const backdrop = modal.querySelector<HTMLElement>("#usercard-backdrop");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
+  const pinBtn = modal.querySelector<HTMLButtonElement>("#usercard-pin");
   const nameEl = modal.querySelector<HTMLElement>("#usercard-name");
   const loginEl = modal.querySelector<HTMLElement>("#usercard-login");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
-  if (!dialog || !backdrop || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch) {
+  const head = modal.querySelector<HTMLElement>(".popup-head");
+  if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
     return { open: () => undefined, close: () => undefined };
   }
 
   let currentLogin = "";
+  let pinned = false;
+  let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const close = (): void => {
     modal.hidden = true;
     currentLogin = "";
+    pinned = false;
+    if (pinBtn) {
+      pinBtn.classList.remove("is-pinned");
+      pinBtn.title = "Pin";
+    }
     recent.replaceChildren();
+  };
+
+  const placeNear = (clientX: number, clientY: number): void => {
+    modal.hidden = false;
+    const pad = 8;
+    const w = dialog.offsetWidth || 360;
+    const h = dialog.offsetHeight || 420;
+    let left = clientX - w / 3;
+    let top = clientY - h / 5;
+    left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - h - pad));
+    dialog.style.left = `${left}px`;
+    dialog.style.top = `${top}px`;
   };
 
   const open = (info: UserCardOpen): void => {
@@ -47,7 +71,7 @@ export function bindUserCard(opts: {
     loading.className = "usercard-empty";
     loading.textContent = "Loading recent messages…";
     recent.append(loading);
-    modal.hidden = false;
+    placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
   };
 
@@ -70,9 +94,7 @@ export function bindUserCard(opts: {
       const events = Array.isArray(snap.events) ? snap.events : [];
       const hits = events
         .filter(
-          (ev) =>
-            ev.kind === "privmsg" &&
-            ev.login.toLowerCase() === login,
+          (ev) => ev.kind === "privmsg" && ev.login.toLowerCase() === login,
         )
         .slice(-40);
       if (hits.length === 0) {
@@ -116,9 +138,50 @@ export function bindUserCard(opts: {
   closeBtn.addEventListener("click", () => {
     close();
   });
-  backdrop.addEventListener("click", () => {
-    close();
+
+  if (pinBtn) {
+    pinBtn.addEventListener("click", () => {
+      pinned = !pinned;
+      pinBtn.classList.toggle("is-pinned", pinned);
+      pinBtn.title = pinned ? "Unpin" : "Pin";
+    });
+  }
+
+  head.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) {
+      return;
+    }
+    const t = ev.target as HTMLElement;
+    if (t.closest("button")) {
+      return;
+    }
+    drag = {
+      ox: ev.clientX,
+      oy: ev.clientY,
+      sx: dialog.offsetLeft,
+      sy: dialog.offsetTop,
+    };
+    head.setPointerCapture(ev.pointerId);
   });
+
+  head.addEventListener("pointermove", (ev) => {
+    if (!drag) {
+      return;
+    }
+    const left = drag.sx + (ev.clientX - drag.ox);
+    const top = drag.sy + (ev.clientY - drag.oy);
+    const pad = 4;
+    dialog.style.left = `${Math.max(pad, Math.min(left, window.innerWidth - dialog.offsetWidth - pad))}px`;
+    dialog.style.top = `${Math.max(pad, Math.min(top, window.innerHeight - dialog.offsetHeight - pad))}px`;
+  });
+
+  head.addEventListener("pointerup", () => {
+    drag = null;
+  });
+  head.addEventListener("pointercancel", () => {
+    drag = null;
+  });
+
   openTwitch.addEventListener("click", () => {
     if (!currentLogin) {
       return;
@@ -127,8 +190,20 @@ export function bindUserCard(opts: {
       url: `https://www.twitch.tv/${currentLogin}`,
     }).catch(() => undefined);
   });
+
+  document.addEventListener("pointerdown", (ev) => {
+    if (modal.hidden || pinned || !autoClose()) {
+      return;
+    }
+    const t = ev.target as Node;
+    if (dialog.contains(t)) {
+      return;
+    }
+    close();
+  });
+
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !modal.hidden) {
+    if (ev.key === "Escape" && !modal.hidden && !pinned) {
       ev.preventDefault();
       close();
     }

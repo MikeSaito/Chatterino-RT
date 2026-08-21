@@ -143,10 +143,16 @@ pub enum ChatEvent {
     Roomstate {
         id: String,
         timestamp_ms: u64,
-        emote_only: bool,
-        subs_only: bool,
-        slow_sec: u32,
-        followers_sec: u32,
+        /// Absent tag → None (partial ROOMSTATE).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emote_only: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subs_only: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slow_sec: Option<u32>,
+        /// Twitch minutes; `-1` = off. Absent → None.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        followers_only: Option<i32>,
     },
     #[serde(rename = "notice", rename_all = "camelCase")]
     Notice {
@@ -226,8 +232,12 @@ impl ChatEvent {
                 emote_only,
                 subs_only,
                 slow_sec,
+                followers_only,
                 ..
-            } => contains_ci(&roomstate_text(*emote_only, *subs_only, *slow_sec), needle_lower),
+            } => contains_ci(
+                &roomstate_text(*emote_only, *subs_only, *slow_sec, *followers_only),
+                needle_lower,
+            ),
             ChatEvent::Clearmsg { .. } => false,
         }
     }
@@ -237,8 +247,15 @@ fn contains_ci(hay: &str, needle_lower: &str) -> bool {
     hay.to_lowercase().contains(needle_lower)
 }
 
-fn roomstate_text(emote_only: bool, subs_only: bool, slow_sec: u32) -> String {
-    format!("emote:{emote_only} subs:{subs_only} slow:{slow_sec}")
+fn roomstate_text(
+    emote_only: Option<bool>,
+    subs_only: Option<bool>,
+    slow_sec: Option<u32>,
+    followers_only: Option<i32>,
+) -> String {
+    format!(
+        "emote:{emote_only:?} subs:{subs_only:?} slow:{slow_sec:?} followers:{followers_only:?}"
+    )
 }
 
 /// Row for SearchPopup-like UI (Chatterino ChannelView filter result).
@@ -342,13 +359,14 @@ impl ChatEvent {
                 emote_only,
                 subs_only,
                 slow_sec,
+                followers_only,
                 ..
             } => SearchHit {
                 id: self.search_jump_id().to_string(),
                 timestamp_ms: *timestamp_ms,
                 nick: "*".into(),
                 login: String::new(),
-                text: roomstate_text(*emote_only, *subs_only, *slow_sec),
+                text: roomstate_text(*emote_only, *subs_only, *slow_sec, *followers_only),
                 color: "#adadc0".into(),
             },
             ChatEvent::Clearmsg { .. } => SearchHit {
@@ -413,14 +431,15 @@ mod tests {
         let room = serde_json::to_value(&ChatEvent::Roomstate {
             id: "r".into(),
             timestamp_ms: 11,
-            emote_only: true,
-            subs_only: false,
-            slow_sec: 5,
-            followers_sec: 0,
+            emote_only: Some(true),
+            subs_only: Some(false),
+            slow_sec: Some(5),
+            followers_only: Some(-1),
         })
         .unwrap();
         assert_eq!(room["timestampMs"], 11);
         assert_eq!(room["emoteOnly"], true);
         assert_eq!(room["slowSec"], 5);
+        assert_eq!(room["followersOnly"], -1);
     }
 }

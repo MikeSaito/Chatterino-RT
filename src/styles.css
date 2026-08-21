@@ -713,6 +713,19 @@ button:disabled {
   font-size: 12px;
 }
 
+#chat-reply-btn {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+#chat-reply-btn[hidden] {
+  display: none;
+}
+
 #complete-list {
   margin: 0;
   padding: 4px 8px;
@@ -795,7 +808,58 @@ button:disabled {
   max-height: 72px;
 }
 
-#usercard-modal,
+#usercard-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 42;
+  pointer-events: none;
+}
+
+#usercard-modal[hidden] {
+  display: none;
+}
+
+#usercard-dialog {
+  position: absolute;
+  z-index: 1;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 16px));
+  height: min(420px, calc(100vh - 16px));
+  background: #191919;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.popup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a2a2d;
+  cursor: grab;
+  user-select: none;
+}
+
+.popup-head:active {
+  cursor: grabbing;
+}
+
+.popup-head-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+#usercard-pin.is-pinned {
+  background: #3a2a55;
+  border-color: #9147ff;
+}
+
 #replythread-modal,
 #emotepopup-modal {
   position: fixed;
@@ -807,13 +871,11 @@ button:disabled {
   padding: 16px;
 }
 
-#usercard-modal[hidden],
 #replythread-modal[hidden],
 #emotepopup-modal[hidden] {
   display: none;
 }
 
-#usercard-backdrop,
 #replythread-backdrop,
 #emotepopup-backdrop {
   position: absolute;
@@ -821,7 +883,6 @@ button:disabled {
   background: rgba(0, 0, 0, 0.45);
 }
 
-#usercard-dialog,
 #replythread-dialog,
 #emotepopup-dialog {
   position: relative;
@@ -835,11 +896,6 @@ button:disabled {
   overflow: hidden;
 }
 
-#usercard-dialog {
-  width: min(420px, 100%);
-  height: min(520px, 90vh);
-}
-
 #replythread-dialog {
   width: min(420px, 100%);
   height: min(480px, 90vh);
@@ -848,15 +904,6 @@ button:disabled {
 #emotepopup-dialog {
   width: min(300px, 100%);
   height: min(500px, 90vh);
-}
-
-.popup-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #2a2a2d;
 }
 
 .popup-head h2 {

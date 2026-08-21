@@ -72,10 +72,10 @@ export type ChatEvent =
       kind: "roomstate";
       id: string;
       timestampMs: number;
-      emoteOnly: boolean;
-      subsOnly: boolean;
-      slowSec: number;
-      followersSec: number;
+      emoteOnly?: boolean;
+      subsOnly?: boolean;
+      slowSec?: number;
+      followersOnly?: number;
     }
   | {
       kind: "notice";

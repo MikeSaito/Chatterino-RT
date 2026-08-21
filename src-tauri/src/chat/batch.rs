@@ -52,10 +52,10 @@ mod tests {
                 ChatEvent::Roomstate {
                     id: "r".into(),
                     timestamp_ms: 11,
-                    emote_only: true,
-                    subs_only: false,
-                    slow_sec: 5,
-                    followers_sec: 0,
+                    emote_only: Some(true),
+                    subs_only: Some(false),
+                    slow_sec: Some(5),
+                    followers_only: Some(-1),
                 },
                 ChatEvent::Notice {
                     id: "n".into(),

@@ -213,14 +213,10 @@ fn parse_roomstate(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
         event: ChatEvent::Roomstate {
             id: synthetic_id("r", now_ms, &channel),
             timestamp_ms: now_ms,
-            emote_only: tags.flag("emote-only"),
-            subs_only: tags.flag("subs-only"),
-            slow_sec: tags.get("slow").and_then(|s| s.parse().ok()).unwrap_or(0),
-            followers_sec: tags
-                .get("followers-only")
-                .and_then(|s| s.parse().ok())
-                .map(|v: i32| if v < 0 { 0 } else { v as u32 })
-                .unwrap_or(0),
+            emote_only: tags.get("emote-only").map(|v| v == "1"),
+            subs_only: tags.get("subs-only").map(|v| v == "1"),
+            slow_sec: tags.get("slow").and_then(|s| s.parse().ok()),
+            followers_only: tags.get("followers-only").and_then(|s| s.parse().ok()),
         },
         channel,
     }
@@ -723,7 +719,7 @@ mod tests {
                     emote_only,
                     subs_only,
                     slow_sec,
-                    followers_sec,
+                    followers_only,
                     ..
                 },
                 channel,
@@ -731,10 +727,10 @@ mod tests {
             } => {
                 assert_eq!(channel, "xqc");
                 assert_eq!(room_id.as_deref(), Some("1"));
-                assert!(emote_only);
-                assert!(!subs_only);
-                assert_eq!(slow_sec, 5);
-                assert_eq!(followers_sec, 0);
+                assert_eq!(emote_only, Some(true));
+                assert_eq!(subs_only, Some(false));
+                assert_eq!(slow_sec, Some(5));
+                assert_eq!(followers_only, Some(-1));
             }
             other => panic!("{other:?}"),
         }

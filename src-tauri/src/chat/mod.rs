@@ -16,6 +16,7 @@ pub mod hub;
 pub mod irc;
 pub mod parse;
 pub mod pending;
+pub mod room_modes;
 pub mod scrollback;
 pub mod session;
 pub mod settings;

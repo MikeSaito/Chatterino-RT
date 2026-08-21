@@ -40,7 +40,7 @@ impl Hub {
     pub fn ingest(&mut self, channel: &str, event: ChatEvent) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
             if self.buffers.contains_key(channel) {
-                self.buffer(channel).scrollback.push(event);
+                self.buffer(channel).push_scrollback_only(event);
             }
             return None;
         }

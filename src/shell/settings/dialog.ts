@@ -152,7 +152,11 @@ function migrateFiltersIntoSettings(data: AppSettings, filters: Filters): AppSet
   return next;
 }
 
-function applyDisplay(ring: MessageRing, data: AppSettings): void {
+function applyDisplay(
+  ring: MessageRing,
+  data: AppSettings,
+  onDisplay?: (data: AppSettings) => void,
+): void {
   ring.applyDisplay(
     data.fontScale,
     data.showTimestamps,
@@ -160,17 +164,21 @@ function applyDisplay(ring: MessageRing, data: AppSettings): void {
     data.timestampFormat,
     data.knobs["appearance.alternateMessages"] === true,
     data.knobs["appearance.separateMessages"] === true,
+    data.knobs["appearance.hideModerationActions"] === true,
+    data.knobs["appearance.showReplyButton"] === true,
   );
   const root = document.documentElement;
   root.style.setProperty("--chat-ui-scale", String(data.fontScale));
+  onDisplay?.(data);
 }
 
 export function bindSettingsDialog(opts: {
   ring: MessageRing;
   openBtn: HTMLButtonElement;
   modal: HTMLElement;
+  onDisplay?: (data: AppSettings) => void;
 }): void {
-  const { ring, openBtn, modal } = opts;
+  const { ring, openBtn, modal, onDisplay } = opts;
   const appRoot = document.querySelector<HTMLElement>("#app");
   const dialog = modal.querySelector<HTMLElement>("#settings-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#settings-backdrop");
@@ -589,14 +597,14 @@ export function bindSettingsDialog(opts: {
     for (const [path, api] of tableApis) {
       api.setRows(tablePathGet(data, path));
     }
-    applyDisplay(ring, data);
+    applyDisplay(ring, data, onDisplay);
   };
 
   let previewTimer = 0;
   const schedulePreview = (): void => {
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
-      applyDisplay(ring, readDraft());
+      applyDisplay(ring, readDraft(), onDisplay);
     }, 50);
   };
 
@@ -788,9 +796,9 @@ export function bindSettingsDialog(opts: {
         ...display,
         knobs: { ...defaultKnobs(), ...(display.knobs ?? {}) },
       };
-      applyDisplay(ring, merged);
+      applyDisplay(ring, merged, onDisplay);
     } catch {
-      applyDisplay(ring, emptySettings());
+      applyDisplay(ring, emptySettings(), onDisplay);
     }
   })();
 }

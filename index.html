@@ -39,6 +39,7 @@
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>
+                <button type="button" id="chat-reply-btn" hidden title="Reply">Reply</button>
                 <button id="chat-jump-bottom" type="button" hidden>вниз</button>
               </div>
               <div
@@ -91,17 +92,24 @@
       <button type="button" data-action="open-twitch">Open in browser</button>
     </menu>
     <div id="usercard-modal" hidden>
-      <div id="usercard-backdrop"></div>
-      <div id="usercard-dialog" role="dialog" aria-modal="true" aria-labelledby="usercard-name">
+      <div
+        id="usercard-dialog"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="usercard-name"
+      >
         <header class="popup-head">
           <div>
             <h2 id="usercard-name">User</h2>
             <p id="usercard-login" class="popup-sub"></p>
           </div>
-          <button type="button" id="usercard-close" title="Close">×</button>
+          <div class="popup-head-actions">
+            <button type="button" id="usercard-pin" title="Pin">Pin</button>
+            <button type="button" id="usercard-close" title="Close">×</button>
+          </div>
         </header>
         <div class="popup-actions">
-          <button type="button" id="usercard-open-twitch">Usercard</button>
+          <button type="button" id="usercard-open-twitch">Open on Twitch</button>
         </div>
         <div id="usercard-recent" aria-label="Recent messages"></div>
       </div>

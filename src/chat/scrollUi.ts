@@ -7,8 +7,9 @@ export function bindScrollChrome(opts: {
   track: HTMLElement;
   thumb: HTMLElement;
   jump: HTMLButtonElement;
+  onScroll?: (state: ScrollSnapshot) => void;
 }): void {
-  const { ring, host, track, thumb, jump } = opts;
+  const { ring, host, track, thumb, jump, onScroll } = opts;
 
   const paint = (state: ScrollSnapshot): void => {
     track.classList.toggle("idle", !state.overflow);
@@ -17,6 +18,7 @@ export function bindScrollChrome(opts: {
     track.setAttribute("aria-valuenow", String(state.desired));
     jump.hidden = state.atBottom;
     layoutThumb(state);
+    onScroll?.(state);
   };
 
   const layoutThumb = (state: ScrollSnapshot): void => {
