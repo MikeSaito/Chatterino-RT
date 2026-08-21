@@ -1516,6 +1516,10 @@ export class MessageRing {
   ): void {
     slot.mentions.clear();
     for (const span of slot.mentionSpans) {
+      // Purple highlight only for @mentions; bare findAllUsernames = text chrome only.
+      if (slot.bodyRaw.charAt(span.start) !== "@") {
+        continue;
+      }
       for (const line of slot.wrapLines) {
         const a = Math.max(span.start, line.start);
         const b = Math.min(span.end, line.end);

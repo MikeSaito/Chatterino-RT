@@ -9,10 +9,42 @@ use super::types::{EmoteSpan, LinkSpan, MentionSpan};
 use url::Url;
 
 const TRAILING: &[char] = &['>', '?', '!', '.', ',', ':', '*', '~', ')'];
+/// Stock allUsernamesMentionRegex trailing: [.,!?;:]*
+const BARE_TRAILING: &[char] = &['.', ',', '!', '?', ';', ':'];
 
-pub fn decorate_text_spans(text: &str, emotes: &[EmoteSpan]) -> (Vec<LinkSpan>, Vec<MentionSpan>) {
+/// Options for bare-login mentions (findAllUsernames).
+pub struct FindMentions<'a> {
+    pub find_all: bool,
+    pub is_chatter: &'a dyn Fn(&str) -> bool,
+}
+
+fn chatter_never(_: &str) -> bool {
+    false
+}
+
+impl FindMentions<'static> {
+    pub fn none() -> Self {
+        Self {
+            find_all: false,
+            is_chatter: &chatter_never,
+        }
+    }
+}
+
+pub fn decorate_text_spans(
+    text: &str,
+    emotes: &[EmoteSpan],
+) -> (Vec<LinkSpan>, Vec<MentionSpan>) {
+    decorate_text_spans_ex(text, emotes, FindMentions::none())
+}
+
+pub fn decorate_text_spans_ex(
+    text: &str,
+    emotes: &[EmoteSpan],
+    find: FindMentions<'_>,
+) -> (Vec<LinkSpan>, Vec<MentionSpan>) {
     let links = parse_links(text, emotes);
-    let mentions = parse_mentions(text, emotes, &links);
+    let mentions = parse_mentions(text, emotes, &links, find);
     (links, mentions)
 }
 
@@ -69,20 +101,40 @@ fn parse_links(text: &str, emotes: &[EmoteSpan]) -> Vec<LinkSpan> {
     out
 }
 
-fn parse_mentions(text: &str, emotes: &[EmoteSpan], links: &[LinkSpan]) -> Vec<MentionSpan> {
+fn parse_mentions(
+    text: &str,
+    emotes: &[EmoteSpan],
+    links: &[LinkSpan],
+    find: FindMentions<'_>,
+) -> Vec<MentionSpan> {
     let mut out = Vec::new();
     let mut utf16 = 0u32;
     for segment in text.split_inclusive(|c: char| c.is_whitespace()) {
         let word = segment.trim_end_matches(|c: char| c.is_whitespace());
-        if let Some(login) = mention_login(word) {
+        if let Some((login, span_len)) = mention_at_span(word) {
             let start = utf16;
-            let end = utf16 + 1 + utf16_str(login);
+            let end = utf16 + span_len;
             if !overlaps(emotes, start, end) && !overlaps_links(links, start, end) {
                 out.push(MentionSpan {
                     start,
                     end,
                     login: login.to_ascii_lowercase(),
                 });
+            }
+        } else if find.find_all {
+            if let Some((login, span_len)) = bare_login_span(word) {
+                let key = login.to_ascii_lowercase();
+                if (find.is_chatter)(&key) {
+                    let start = utf16;
+                    let end = utf16 + span_len;
+                    if !overlaps(emotes, start, end) && !overlaps_links(links, start, end) {
+                        out.push(MentionSpan {
+                            start,
+                            end,
+                            login: key,
+                        });
+                    }
+                }
             }
         }
         utf16 += utf16_str(segment);
@@ -110,20 +162,38 @@ fn strip_url_tail(chars: &[char], scheme_chars: usize) -> usize {
     end
 }
 
-fn mention_login(word: &str) -> Option<&str> {
+/// `@login` + optional trailing punct; span includes `@` + login.
+fn mention_at_span(word: &str) -> Option<(&str, u32)> {
     let rest = word.strip_prefix('@')?;
-    let login = rest
-        .trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
-    if login.is_empty() || login.len() > 25 {
+    let login = rest.trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+    if !valid_login_token(login) {
         return None;
     }
-    if !login
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    Some((login, 1 + utf16_str(login)))
+}
+
+/// Stock `^(\\w+)[.,!?;:]*?$` without leading @; span = login only.
+fn bare_login_span(word: &str) -> Option<(&str, u32)> {
+    if word.starts_with('@') {
         return None;
     }
-    Some(login)
+    let login = word.trim_end_matches(|c: char| BARE_TRAILING.contains(&c));
+    let after = &word[login.len()..];
+    if !after.chars().all(|c| BARE_TRAILING.contains(&c)) {
+        return None;
+    }
+    if !valid_login_token(login) {
+        return None;
+    }
+    Some((login, utf16_str(login)))
+}
+
+fn valid_login_token(login: &str) -> bool {
+    !login.is_empty()
+        && login.len() <= 25
+        && login
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn scheme_len(chars: &[char]) -> Option<usize> {
@@ -227,5 +297,54 @@ mod tests {
             &text[links[0].start as usize..links[0].end as usize],
             "https://example.com/Foo_(bar)"
         );
+    }
+
+    #[test]
+    fn find_all_bare_login_in_chatters() {
+        let text = "hi bob!";
+        let (_, off) = decorate_text_spans_ex(
+            text,
+            &[],
+            FindMentions {
+                find_all: false,
+                is_chatter: &|_| true,
+            },
+        );
+        assert!(off.is_empty());
+        let (_, none) = decorate_text_spans_ex(
+            text,
+            &[],
+            FindMentions {
+                find_all: true,
+                is_chatter: &|_| false,
+            },
+        );
+        assert!(none.is_empty());
+        let (_, hits) = decorate_text_spans_ex(
+            text,
+            &[],
+            FindMentions {
+                find_all: true,
+                is_chatter: &|l| l == "bob",
+            },
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].login, "bob");
+        assert_eq!(&text[hits[0].start as usize..hits[0].end as usize], "bob");
+    }
+
+    #[test]
+    fn find_all_skips_at_duplicate_path() {
+        let text = "@bob";
+        let (_, hits) = decorate_text_spans_ex(
+            text,
+            &[],
+            FindMentions {
+                find_all: true,
+                is_chatter: &|_| true,
+            },
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].start as usize..hits[0].end as usize], "@bob");
     }
 }

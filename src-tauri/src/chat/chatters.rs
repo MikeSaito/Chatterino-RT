@@ -105,6 +105,19 @@ impl Chatters {
             .map(|(_, display)| display.clone())
             .collect()
     }
+
+    pub fn contains(&self, channel: &str, login: &str) -> bool {
+        let key = login
+            .trim()
+            .trim_start_matches(['@', '+', '%', '~', '&'])
+            .to_ascii_lowercase();
+        if !valid_login(&key) {
+            return false;
+        }
+        self.by_channel
+            .get(channel)
+            .is_some_and(|room| room.names.contains_key(&key))
+    }
 }
 
 fn touch(order: &mut VecDeque<String>, key: &str) {
@@ -194,5 +207,15 @@ mod tests {
         crate::chat::complete::rank_prefix(&mut eve, "ev");
         assert_eq!(eve, vec!["eve".to_string()]);
         assert!(set.prefixed("xqc", "@@ev").is_empty());
+    }
+
+    #[test]
+    fn contains_login() {
+        let mut set = Chatters::default();
+        set.add("xqc", "Bob", "Bob");
+        assert!(set.contains("xqc", "bob"));
+        assert!(set.contains("xqc", "@Bob"));
+        assert!(!set.contains("xqc", "alice"));
+        assert!(!set.contains("other", "bob"));
     }
 }

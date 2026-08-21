@@ -14,7 +14,7 @@ use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{parse_line, ParsedLine};
-use super::spans::decorate_text_spans;
+use super::spans::{decorate_text_spans_ex, FindMentions};
 use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatStatus};
 
@@ -792,7 +792,36 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             }
             emote_spans.sort_by_key(|s| s.start);
             resolve_overlays(text, emote_spans);
-            let (links, mentions) = decorate_text_spans(text, emote_spans);
+            let find_all = shared
+                .settings
+                .lock()
+                .ok()
+                .and_then(|inner| {
+                    inner
+                        .data
+                        .knobs
+                        .get("appearance.findAllUsernames")
+                        .and_then(|v| v.as_bool())
+                })
+                .unwrap_or(false);
+            let (links, mentions) = if find_all {
+                let chatters = shared.chatters.lock().ok();
+                let channel_owned = channel.to_string();
+                if let Some(ref set) = chatters {
+                    decorate_text_spans_ex(
+                        text,
+                        emote_spans,
+                        FindMentions {
+                            find_all: true,
+                            is_chatter: &|login| set.contains(&channel_owned, login),
+                        },
+                    )
+                } else {
+                    decorate_text_spans_ex(text, emote_spans, FindMentions::none())
+                }
+            } else {
+                decorate_text_spans_ex(text, emote_spans, FindMentions::none())
+            };
             *link_spans = links;
             *mention_spans = mentions;
         }
