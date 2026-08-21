@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 
 use super::auth;
 use super::state::Shared;
-use super::types::ChatEvent;
+use super::types::{Badge, ChatEvent};
 
 const FILTERS_FILE: &str = "filters.json";
 const MAX_LIST: usize = 200;
@@ -21,6 +21,8 @@ const MAX_FILE_BYTES: usize = 256 * 1024;
 pub const SELF_HIGHLIGHT_COLOR: &str = "#7f3f4980";
 /// Stock FALLBACK_SELF_MESSAGE_HIGHLIGHT_COLOR.
 pub const SELF_MESSAGE_HIGHLIGHT_COLOR: &str = "#0076DD73";
+/// Stock HighlightBadge::FALLBACK_HIGHLIGHT_COLOR.
+pub const BADGE_HIGHLIGHT_COLOR: &str = "#7F3F4980";
 /// Stock FALLBACK_COLOR_SUBSCRIPTION.
 pub const SUB_HIGHLIGHT_COLOR: &str = "#C466FF64";
 /// Stock FALLBACK_COLOR_REDEEMED.
@@ -180,6 +182,7 @@ pub(crate) fn apply_highlight(
         ChatEvent::Privmsg {
             login,
             text,
+            badges,
             first_msg,
             custom_reward_id,
             system_msg_id,
@@ -187,7 +190,7 @@ pub(crate) fn apply_highlight(
             highlight_sound,
             ..
         } => {
-            let hit = highlight_hit(filters, sound, login, text, self_login);
+            let hit = highlight_hit(filters, sound, login, text, badges, self_login);
             *highlight_color = hit.color;
             *highlight_sound = hit.sound;
             if highlight_color.is_none() {
@@ -225,9 +228,9 @@ pub(crate) fn apply_highlight(
                     })
                 })
                 .unwrap_or_default();
-            let body = match privmsg.as_deref() {
-                Some(ChatEvent::Privmsg { text, .. }) => text.as_str(),
-                _ => "",
+            let (body, badges) = match privmsg.as_deref() {
+                Some(ChatEvent::Privmsg { text, badges, .. }) => (text.as_str(), badges.as_slice()),
+                _ => ("", &[][..]),
             };
             let hay = if system_text.is_empty() {
                 body.to_string()
@@ -236,7 +239,7 @@ pub(crate) fn apply_highlight(
             } else {
                 format!("{system_text} {body}")
             };
-            let hit = highlight_hit(filters, sound, &sender, &hay, self_login);
+            let hit = highlight_hit(filters, sound, &sender, &hay, badges, self_login);
             *highlight_color = hit.color.clone();
             *highlight_sound = hit.sound;
             if let Some(inner) = privmsg.as_mut() {
@@ -355,6 +358,8 @@ pub(crate) struct HighlightSoundCtx {
     pub phrase_sound: Vec<(String, bool, String)>,
     /// username → (play_sound, raw color)
     pub user_sound: Vec<(String, bool, String)>,
+    /// badge name (`set` or `set/version`, comma-separated) → (play, color)
+    pub badge_rows: Vec<(String, bool, String)>,
 }
 
 impl Default for HighlightSoundCtx {
@@ -366,6 +371,7 @@ impl Default for HighlightSoundCtx {
             self_message_color: String::new(),
             phrase_sound: Vec::new(),
             user_sound: Vec::new(),
+            badge_rows: Vec::new(),
         }
     }
 }
@@ -411,6 +417,13 @@ impl HighlightSoundCtx {
             .filter(|r| !r.username.trim().is_empty())
             .map(|r| (r.username.clone(), r.play_sound, r.color.clone()))
             .collect();
+        let badge_rows = settings
+            .data
+            .highlight_badges
+            .iter()
+            .filter(|r| !r.name.trim().is_empty())
+            .map(|r| (r.name.clone(), r.play_sound, r.color.clone()))
+            .collect();
         Self {
             enable_self_sound,
             self_highlight_color,
@@ -418,6 +431,7 @@ impl HighlightSoundCtx {
             self_message_color,
             phrase_sound,
             user_sound,
+            badge_rows,
         }
     }
 }
@@ -454,6 +468,7 @@ fn highlight_hit(
     sound: &HighlightSoundCtx,
     login: &str,
     text: &str,
+    badges: &[Badge],
     self_login: Option<&str>,
 ) -> HighlightHit {
     let self_msg = is_self(login, self_login);
@@ -525,9 +540,46 @@ fn highlight_hit(
             sound: play,
         };
     }
+    for (name, play, color) in &sound.badge_rows {
+        if badge_matches(name, badges) {
+            return HighlightHit {
+                color: Some(resolve_highlight_color_or(color, BADGE_HIGHLIGHT_COLOR)),
+                sound: *play,
+            };
+        }
+    }
     HighlightHit {
         color: None,
         sound: false,
+    }
+}
+
+/// Stock HighlightBadge::isMatch — `set`, `set/version`, or comma-separated list.
+fn badge_matches(row_name: &str, badges: &[Badge]) -> bool {
+    let name = row_name.trim();
+    if name.is_empty() || badges.is_empty() {
+        return false;
+    }
+    name.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|id| badge_id_matches(id, badges))
+}
+
+fn badge_id_matches(id: &str, badges: &[Badge]) -> bool {
+    if let Some((set, version)) = id.split_once('/') {
+        let set = set.trim();
+        let version = version.trim();
+        if set.is_empty() {
+            return false;
+        }
+        badges.iter().any(|b| {
+            b.set.eq_ignore_ascii_case(set) && b.version.eq_ignore_ascii_case(version)
+        })
+    } else {
+        badges
+            .iter()
+            .any(|b| b.set.eq_ignore_ascii_case(id))
     }
 }
 
@@ -710,7 +762,25 @@ mod tests {
             custom_reward_id: None,
             system_msg_id: None,
             highlight_color: None,
-        highlight_sound: false,
+            highlight_sound: false,
+        }
+    }
+
+    fn with_badges(mut ev: ChatEvent, badges: Vec<Badge>) -> ChatEvent {
+        if let ChatEvent::Privmsg {
+            badges: slot, ..
+        } = &mut ev
+        {
+            *slot = badges;
+        }
+        ev
+    }
+
+    fn badge(set: &str, version: &str) -> Badge {
+        Badge {
+            set: set.into(),
+            version: version.into(),
+            url: None,
         }
     }
 
@@ -1331,6 +1401,102 @@ mod tests {
             }
             _ => panic!("privmsg"),
         }
+    }
+
+    #[test]
+    fn badge_highlight_match_and_priority() {
+        let filters = Filters {
+            enable_self_highlight: false,
+            highlight_phrases: vec!["hello".into()],
+            ..Filters::default()
+        };
+        let sound = HighlightSoundCtx {
+            badge_rows: vec![
+                ("moderator".into(), true, "#AABBCCDD".into()),
+                ("subscriber/12".into(), false, String::new()),
+            ],
+            phrase_sound: vec![("hello".into(), false, "#01020304".into())],
+            ..HighlightSoundCtx::default()
+        };
+        let mut by_set = with_badges(privmsg("ann", "hi"), vec![badge("moderator", "1")]);
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &mut by_set,
+            Some("me"),
+        );
+        match by_set {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
+                assert_eq!(highlight_color.as_deref(), Some("#AABBCCDD"));
+                assert!(highlight_sound);
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut by_ver = with_badges(privmsg("ann", "hi"), vec![badge("subscriber", "12")]);
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &mut by_ver,
+            Some("me"),
+        );
+        match by_ver {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some(BADGE_HIGHLIGHT_COLOR));
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut wrong_ver = with_badges(privmsg("ann", "hi"), vec![badge("subscriber", "1")]);
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &mut wrong_ver,
+            Some("me"),
+        );
+        match wrong_ver {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+        let mut phrase_wins =
+            with_badges(privmsg("ann", "hello there"), vec![badge("moderator", "1")]);
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &mut phrase_wins,
+            Some("me"),
+        );
+        match phrase_wins {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#01020304"));
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut first = with_badges(privmsg("ann", "hi"), vec![badge("moderator", "1")]);
+        if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
+            *first_msg = true;
+        }
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &mut first,
+            Some("me"),
+        );
+        match first {
+            ChatEvent::Privmsg { highlight_color, .. } => {
+                assert_eq!(highlight_color.as_deref(), Some("#AABBCCDD"));
+            }
+            _ => panic!("privmsg"),
+        }
+        assert!(badge_matches("vip,moderator", &[badge("moderator", "1")]));
+        assert!(!badge_matches("", &[badge("moderator", "1")]));
     }
 
     #[test]
