@@ -181,6 +181,42 @@ function assert(cond: boolean, msg: string): void {
   assert(lines === -3, `line delta, got ${lines}`);
   const page = wheelDeltaRows(1, 2, 22, 10);
   assert(page === 10, `page delta, got ${page}`);
+  assert(Math.abs(px * 2 - 4) < 1e-9, "multiplier scales wheel rows");
+}
+
+{
+  const m = new ScrollModel();
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+  ]);
+  m.applyLayout(8, 4, laid, undefined);
+  assert(m.atBottom && m.desired === 4, "setup at bottom");
+  const grown = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(10, 4, grown, undefined, true);
+  assert(!m.atBottom, "paused follow leaves atBottom");
+  assert(Math.abs(m.desired - 4) < 1e-3, `paused holds prev bottom 4, got ${m.desired}`);
+  m.applyLayout(12, 4, slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+    ["f", 2],
+  ]), undefined, true);
+  assert(!m.atBottom, "paused stays not atBottom after more growth");
+  assert(Math.abs(m.desired - 4) < 1e-3, `still held while paused, got ${m.desired}`);
+  // Unpause resume: goToBottom (ring followIntent) returns to live.
+  m.goToBottom();
+  assert(m.atBottom && m.desired === 8, "manual goToBottom resumes bottom");
 }
 
 console.log("scroll tests ok");

@@ -42,6 +42,8 @@ const TIME_GAP = 8;
 const BADGE_GAP = 2;
 const MIN_BODY_CHARS = 24;
 
+export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
+
 export type SlotContext = {
   msgId: string;
   login: string;
@@ -124,6 +126,13 @@ export class MessageRing {
   private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
+  private pauseMouse = false;
+  private pauseKey = false;
+  private pauseFollowIntent = false;
+  private pauseOnHoverSec = 0;
+  private pauseModifier: PauseModifier = "None";
+  private wheelMultiplier = 1;
+  private hoverPauseTimer = 0;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
@@ -146,6 +155,125 @@ export class MessageRing {
 
   setOnNickClick(cb: (ctx: SlotContext) => void): void {
     this.onNickClick = cb;
+  }
+
+  configureScrollBehaviour(opts: {
+    pauseOnHoverSec: number;
+    pauseModifier: string;
+    wheelMultiplier: number;
+  }): void {
+    const sec = Number(opts.pauseOnHoverSec);
+    this.pauseOnHoverSec = Number.isFinite(sec) ? sec : 0;
+    const mod = opts.pauseModifier;
+    this.pauseModifier =
+      mod === "Shift" ||
+      mod === "Control" ||
+      mod === "Alt" ||
+      mod === "Meta"
+        ? mod
+        : "None";
+    const mult = Number(opts.wheelMultiplier);
+    this.wheelMultiplier = Number.isFinite(mult)
+      ? Math.min(2, Math.max(0.5, mult))
+      : 1;
+    let cleared = false;
+    if (Math.abs(this.pauseOnHoverSec) < 0.001 && this.pauseMouse) {
+      this.clearHoverPause();
+      cleared = true;
+    }
+    if (this.pauseModifier === "None" && this.pauseKey) {
+      this.pauseKey = false;
+      cleared = true;
+    }
+    if (cleared) {
+      this.resumeFollowIfPinned();
+    }
+  }
+
+  isPaused(): boolean {
+    return this.pauseMouse || this.pauseKey;
+  }
+
+  pauseModifierName(): PauseModifier {
+    return this.pauseModifier;
+  }
+
+  private markPauseEnter(): void {
+    if (!this.pauseFollowIntent && this.scroll.atBottom) {
+      this.pauseFollowIntent = true;
+    }
+  }
+
+  /** Hover over chat: timed or indefinite pause (stock pauseOnHoverDuration). */
+  noteChatHover(): void {
+    if (Math.abs(this.pauseOnHoverSec) < 0.001) {
+      return;
+    }
+    if (this.pauseOnHoverSec < -0.5) {
+      window.clearTimeout(this.hoverPauseTimer);
+      this.hoverPauseTimer = 0;
+      this.markPauseEnter();
+      this.pauseMouse = true;
+      return;
+    }
+    this.markPauseEnter();
+    this.pauseMouse = true;
+    window.clearTimeout(this.hoverPauseTimer);
+    this.hoverPauseTimer = window.setTimeout(() => {
+      this.hoverPauseTimer = 0;
+      this.pauseMouse = false;
+      this.resumeFollowIfPinned();
+    }, Math.round(this.pauseOnHoverSec * 1000));
+  }
+
+  leaveChatHover(): void {
+    this.clearHoverPause();
+    this.resumeFollowIfPinned();
+  }
+
+  setKeyPause(active: boolean): void {
+    if (this.pauseModifier === "None") {
+      if (this.pauseKey) {
+        this.pauseKey = false;
+        this.resumeFollowIfPinned();
+      }
+      return;
+    }
+    const was = this.pauseKey;
+    if (active) {
+      this.markPauseEnter();
+      this.pauseKey = true;
+    } else {
+      this.pauseKey = false;
+      if (was) {
+        this.resumeFollowIfPinned();
+      }
+    }
+  }
+
+  private clearHoverPause(): void {
+    window.clearTimeout(this.hoverPauseTimer);
+    this.hoverPauseTimer = 0;
+    this.pauseMouse = false;
+  }
+
+  private resumeFollowIfPinned(): void {
+    if (this.isPaused()) {
+      return;
+    }
+    if (this.pauseFollowIntent) {
+      this.pauseFollowIntent = false;
+      this.scroll.goToBottom();
+      this.applyStageY();
+      this.notifyScroll();
+      return;
+    }
+    const snap = this.scroll.snapshot();
+    if (snap.overflow && snap.desired >= snap.bottom - 1e-3) {
+      this.scroll.goToBottom();
+      this.applyStageY();
+      this.notifyScroll();
+    }
   }
 
   /** Масштаб шрифта, timestamps, emotes и hideModerated без destroy PIXI.Application. */
@@ -229,12 +357,14 @@ export class MessageRing {
   }
 
   goToBottom(): void {
+    this.pauseFollowIntent = false;
     this.scroll.goToBottom();
     this.applyStageY();
     this.notifyScroll();
   }
 
   setDesired(rows: number): void {
+    this.pauseFollowIntent = false;
     this.scroll.setDesired(rows);
     this.applyStageY();
     this.notifyScroll();
@@ -290,12 +420,17 @@ export class MessageRing {
 
   handleWheel(ev: WheelEvent): void {
     ev.preventDefault();
-    if (ev.ctrlKey) {
+    // Zoom gesture: ignore ctrl+wheel unless Control is the pause modifier (then scroll stays usable).
+    if (ev.ctrlKey && this.pauseModifier !== "Control") {
       return;
     }
-    this.scroll.wheel(
-      wheelDeltaRows(ev.deltaY, ev.deltaMode, this.lineHeight, this.scroll.viewRows),
-    );
+    const rows =
+      wheelDeltaRows(ev.deltaY, ev.deltaMode, this.lineHeight, this.scroll.viewRows) *
+      this.wheelMultiplier;
+    this.scroll.wheel(rows);
+    if (!this.isPaused()) {
+      this.pauseFollowIntent = false;
+    }
     this.applyStageY();
     this.notifyScroll();
   }
@@ -942,7 +1077,13 @@ export class MessageRing {
       row += slot.lineCount;
     }
     const viewRows = this.app.screen.height / this.lineHeight;
-    this.scroll.applyLayout(row, viewRows, this.laidSlots(), resolved);
+    this.scroll.applyLayout(
+      row,
+      viewRows,
+      this.laidSlots(),
+      resolved,
+      this.isPaused(),
+    );
     this.applyStageY();
     this.notifyScroll();
   }

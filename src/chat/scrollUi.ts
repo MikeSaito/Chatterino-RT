@@ -45,6 +45,41 @@ export function bindScrollChrome(opts: {
   host.addEventListener("wheel", onWheel, { passive: false });
   track.addEventListener("wheel", onWheel, { passive: false });
 
+  host.addEventListener("pointerenter", () => {
+    ring.noteChatHover();
+  });
+  host.addEventListener("pointermove", () => {
+    ring.noteChatHover();
+  });
+  host.addEventListener("pointerleave", () => {
+    ring.leaveChatHover();
+  });
+
+  const syncKeyPause = (ev: KeyboardEvent | FocusEvent): void => {
+    const mod = ring.pauseModifierName();
+    if (mod === "None") {
+      ring.setKeyPause(false);
+      return;
+    }
+    if (ev instanceof FocusEvent) {
+      ring.setKeyPause(false);
+      return;
+    }
+    const shift = ev.shiftKey;
+    const ctrl = ev.ctrlKey;
+    const alt = ev.altKey;
+    const meta = ev.metaKey;
+    const down =
+      (mod === "Shift" && shift && !ctrl && !alt && !meta) ||
+      (mod === "Control" && ctrl && !shift && !alt && !meta) ||
+      (mod === "Alt" && alt && !shift && !ctrl && !meta) ||
+      (mod === "Meta" && meta && !shift && !ctrl && !alt);
+    ring.setKeyPause(down);
+  };
+  window.addEventListener("keydown", syncKeyPause);
+  window.addEventListener("keyup", syncKeyPause);
+  window.addEventListener("blur", syncKeyPause);
+
   jump.addEventListener("click", () => {
     ring.goToBottom();
   });

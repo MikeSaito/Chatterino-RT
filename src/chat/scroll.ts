@@ -103,9 +103,28 @@ export class ScrollModel {
     viewRows: number,
     slots: readonly LaidSlot[],
     anchor: ScrollAnchor | undefined,
+    paused = false,
   ): void {
+    const prevBottom = this.bottom();
+    const wasFollowing = this.atBottom;
     this.contentRows = Math.max(0, contentRows);
     this.viewRows = Math.max(0, viewRows);
+    if (paused) {
+      this.atBottom = false;
+      if (anchor) {
+        const found = slots.find((slot) => slot.msgId === anchor.msgId);
+        if (found && found.lineCount > 0) {
+          const frac = Math.min(1, Math.max(0, anchor.offsetFrac));
+          this.desired = found.startRow + frac * found.lineCount;
+        } else if (wasFollowing) {
+          this.desired = prevBottom;
+        }
+      } else if (wasFollowing) {
+        this.desired = prevBottom;
+      }
+      this.finish(false);
+      return;
+    }
     if (!this.atBottom && anchor) {
       const found = slots.find((slot) => slot.msgId === anchor.msgId);
       if (found && found.lineCount > 0) {
@@ -115,7 +134,7 @@ export class ScrollModel {
         this.desired = 0;
       }
     }
-    this.finish();
+    this.finish(true);
   }
 
   stageY(lineHeight: number): number {
@@ -125,15 +144,17 @@ export class ScrollModel {
     return -this.desired * lineHeight;
   }
 
-  private finish(): void {
+  private finish(allowSnapToBottom = true): void {
     const b = this.bottom();
     if (b <= EPS) {
       this.desired = 0;
-      this.atBottom = true;
+      if (allowSnapToBottom) {
+        this.atBottom = true;
+      }
       return;
     }
     this.desired = Math.min(Math.max(0, this.desired), b);
-    if (this.atBottom || this.desired >= b - EPS) {
+    if (allowSnapToBottom && (this.atBottom || this.desired >= b - EPS)) {
       this.desired = b;
       this.atBottom = true;
     }

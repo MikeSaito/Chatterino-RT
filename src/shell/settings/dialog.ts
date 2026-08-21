@@ -214,6 +214,13 @@ function paintRuntime(
     muted: isStreamerModeActive() && sm.muteMentions,
   });
   configureHotkeys(data.hotkeys ?? []);
+  const hoverRaw = Number(data.knobs["behaviour.pauseOnHoverDuration"] ?? 0);
+  const multRaw = Number(data.knobs["behaviour.mouseScrollMultiplier"] ?? 1);
+  ring.configureScrollBehaviour({
+    pauseOnHoverSec: Number.isFinite(hoverRaw) ? hoverRaw : 0,
+    pauseModifier: String(data.knobs["behaviour.pauseChatModifier"] ?? "None"),
+    wheelMultiplier: Number.isFinite(multRaw) ? multRaw : 1,
+  });
   onDisplay?.(data);
 }
 
