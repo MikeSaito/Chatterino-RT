@@ -27,6 +27,7 @@ emojis = "0.6"
 unicode-segmentation = "1"
 base64 = "0.22"
 rfd = "0.15"
+regex = "1.13.1"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+use regex::Regex;
 
 use super::auth;
 use super::state::Shared;
@@ -114,10 +115,21 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
     if should_drop(&filters, event, self_login.as_deref()) {
         return true;
     }
-    let sound_ctx = HighlightSoundCtx::from_shared(shared);
+    let sound_ctx = match shared.highlight_sound.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => HighlightSoundCtx::default(),
+    };
     let kinds = HighlightKindsCtx::from_shared(shared);
     apply_highlight(&filters, &sound_ctx, &kinds, event, self_login.as_deref());
     false
+}
+
+/// Rebuild cached phrase/user/badge highlight context after settings change.
+pub fn refresh_highlight_sound(shared: &Shared) {
+    let ctx = HighlightSoundCtx::from_shared(shared);
+    if let Ok(mut slot) = shared.highlight_sound.lock() {
+        *slot = ctx;
+    }
 }
 
 pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
@@ -347,6 +359,44 @@ impl HighlightKindsCtx {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct PhraseRule {
+    pub pattern: String,
+    pub play: bool,
+    pub color: String,
+    pub is_regex: bool,
+    pub case_sensitive: bool,
+    /// Compiled only when `is_regex`; None if pattern invalid (never matches).
+    pub compiled: Option<Regex>,
+}
+
+impl PhraseRule {
+    fn from_row(pattern: String, play: bool, color: String, is_regex: bool, case_sensitive: bool) -> Self {
+        let compiled = if is_regex {
+            regex::RegexBuilder::new(&pattern)
+                .case_insensitive(!case_sensitive)
+                .unicode(true)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        Self {
+            pattern,
+            play,
+            color,
+            is_regex,
+            case_sensitive,
+            compiled,
+        }
+    }
+
+    #[cfg(test)]
+    fn plain(pattern: &str, play: bool, color: &str) -> Self {
+        Self::from_row(pattern.into(), play, color.into(), false, false)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct HighlightSoundCtx {
     pub enable_self_sound: bool,
     /// Raw color from `highlighting.selfHighlightColor` (empty → fallback).
@@ -354,8 +404,7 @@ pub(crate) struct HighlightSoundCtx {
     /// Stock self-message highlight (own outgoing messages).
     pub enable_self_message: bool,
     pub self_message_color: String,
-    /// pattern → (play_sound, raw color)
-    pub phrase_sound: Vec<(String, bool, String)>,
+    pub phrase_rules: Vec<PhraseRule>,
     /// username → (play_sound, raw color)
     pub user_sound: Vec<(String, bool, String)>,
     /// badge name (`set` or `set/version`, comma-separated) → (play, color)
@@ -369,7 +418,7 @@ impl Default for HighlightSoundCtx {
             self_highlight_color: String::new(),
             enable_self_message: false,
             self_message_color: String::new(),
-            phrase_sound: Vec::new(),
+            phrase_rules: Vec::new(),
             user_sound: Vec::new(),
             badge_rows: Vec::new(),
         }
@@ -384,7 +433,12 @@ impl HighlightSoundCtx {
                 ..Self::default()
             };
         };
-        let knobs = &settings.data.knobs;
+        Self::from_settings(&settings.data)
+    }
+
+    /// Build from already-loaded settings (caller holds the settings lock).
+    pub fn from_settings(data: &super::settings::AppSettings) -> Self {
+        let knobs = &data.knobs;
         let enable_self_sound = knobs
             .get("highlighting.enableSelfHighlightSound")
             .and_then(|v| v.as_bool())
@@ -403,22 +457,27 @@ impl HighlightSoundCtx {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let phrase_sound = settings
-            .data
+        let phrase_rules = data
             .highlight_messages
             .iter()
             .filter(|r| !r.pattern.trim().is_empty())
-            .map(|r| (r.pattern.clone(), r.play_sound, r.color.clone()))
+            .map(|r| {
+                PhraseRule::from_row(
+                    r.pattern.clone(),
+                    r.play_sound,
+                    r.color.clone(),
+                    r.regex,
+                    r.case_sensitive,
+                )
+            })
             .collect();
-        let user_sound = settings
-            .data
+        let user_sound = data
             .highlight_users
             .iter()
             .filter(|r| !r.username.trim().is_empty())
             .map(|r| (r.username.clone(), r.play_sound, r.color.clone()))
             .collect();
-        let badge_rows = settings
-            .data
+        let badge_rows = data
             .highlight_badges
             .iter()
             .filter(|r| !r.name.trim().is_empty())
@@ -429,7 +488,7 @@ impl HighlightSoundCtx {
             self_highlight_color,
             enable_self_message,
             self_message_color,
-            phrase_sound,
+            phrase_rules,
             user_sound,
             badge_rows,
         }
@@ -492,19 +551,19 @@ fn highlight_hit(
                 }
             }
         }
-        for (pattern, play, color) in &sound.phrase_sound {
-            if phrase_matches(text, pattern) {
+        for rule in &sound.phrase_rules {
+            if phrase_matches_ex(text, rule) {
                 return HighlightHit {
-                    color: Some(resolve_highlight_color(color)),
-                    sound: *play,
+                    color: Some(resolve_highlight_color(&rule.color)),
+                    sound: rule.play,
                 };
             }
         }
         for phrase in &filters.highlight_phrases {
             if sound
-                .phrase_sound
+                .phrase_rules
                 .iter()
-                .any(|(p, _, _)| p.eq_ignore_ascii_case(phrase))
+                .any(|r| r.pattern.eq_ignore_ascii_case(phrase))
             {
                 continue;
             }
@@ -584,6 +643,20 @@ fn badge_id_matches(id: &str, badges: &[Badge]) -> bool {
 }
 
 pub(crate) fn phrase_matches(text: &str, pattern: &str) -> bool {
+    phrase_matches_boundary(text, pattern, false)
+}
+
+fn phrase_matches_ex(text: &str, rule: &PhraseRule) -> bool {
+    if rule.pattern.is_empty() {
+        return false;
+    }
+    if rule.is_regex {
+        return rule.compiled.as_ref().is_some_and(|re| re.is_match(text));
+    }
+    phrase_matches_boundary(text, &rule.pattern, rule.case_sensitive)
+}
+
+fn phrase_matches_boundary(text: &str, pattern: &str, case_sensitive: bool) -> bool {
     if pattern.is_empty() {
         return false;
     }
@@ -594,7 +667,13 @@ pub(crate) fn phrase_matches(text: &str, pattern: &str) -> bool {
     }
     let last = hay.len() - needle.len();
     for i in 0..=last {
-        if !eq_ignore_case(&hay[i..i + needle.len()], &needle) {
+        let slice = &hay[i..i + needle.len()];
+        let eq = if case_sensitive {
+            slice == needle.as_slice()
+        } else {
+            eq_ignore_case(slice, &needle)
+        };
+        if !eq {
             continue;
         }
         let left_ok = i == 0
@@ -895,7 +974,7 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             enable_self_sound: true,
-            phrase_sound: vec![("pog".into(), true, String::new())],
+            phrase_rules: vec![PhraseRule::plain("pog", true, "")],
             user_sound: vec![("streamer".into(), true, String::new())],
             ..HighlightSoundCtx::default()
         };
@@ -916,7 +995,7 @@ mod tests {
         apply_highlight(
             &filters,
             &HighlightSoundCtx {
-                phrase_sound: vec![("pog".into(), false, String::new())],
+                phrase_rules: vec![PhraseRule::plain("pog", false, "")],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
@@ -1006,6 +1085,150 @@ mod tests {
         assert!(phrase_matches("Hello!", "hello"));
         assert!(!phrase_matches("shello", "hello"));
         assert!(phrase_matches("foo bar baz", "bar"));
+    }
+
+    #[test]
+    fn phrase_case_sensitive_and_regex() {
+        let filters = Filters {
+            enable_self_highlight: false,
+            ..Filters::default()
+        };
+        let case_row = PhraseRule::from_row("Pog".into(), true, String::new(), false, true);
+        assert!(phrase_matches_ex("say Pog now", &case_row));
+        assert!(!phrase_matches_ex("say pog now", &case_row));
+        assert!(!phrase_matches_ex("xPog", &case_row));
+        assert!(!phrase_matches_ex("PogChamp", &case_row));
+        assert!(phrase_matches_ex("Pog!", &case_row));
+
+        let ignore_case = PhraseRule::plain("Pog", true, "");
+        assert!(phrase_matches_ex("say pog now", &ignore_case));
+
+        let re = PhraseRule::from_row(r"\bfoo\b".into(), true, "#11223344".into(), true, false);
+        assert!(re.compiled.is_some());
+        let mut hit = privmsg("x", "bar foo baz");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                phrase_rules: vec![re],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut hit,
+            Some("me"),
+        );
+        match hit {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11223344"));
+                assert!(highlight_sound);
+            }
+            _ => panic!("privmsg"),
+        }
+        let mut miss = privmsg("x", "bar foobar baz");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                phrase_rules: vec![PhraseRule::from_row(
+                    r"\bfoo\b".into(),
+                    true,
+                    String::new(),
+                    true,
+                    false,
+                )],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut miss,
+            Some("me"),
+        );
+        match miss {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+
+        let invalid = PhraseRule::from_row("(".into(), true, "#FF0000".into(), true, false);
+        assert!(invalid.compiled.is_none());
+        assert!(!phrase_matches_ex("anything", &invalid));
+        let mut no_hl = privmsg("x", "(");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                phrase_rules: vec![invalid],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut no_hl,
+            Some("me"),
+        );
+        match no_hl {
+            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            _ => panic!("privmsg"),
+        }
+
+        let case_re = PhraseRule::from_row("Foo".into(), false, String::new(), true, true);
+        assert!(phrase_matches_ex("Foo", &case_re));
+        assert!(!phrase_matches_ex("foo", &case_re));
+
+        let ignore_re = PhraseRule::from_row("[a-z]+".into(), false, String::new(), true, false);
+        assert!(phrase_matches_ex("FOO", &ignore_re));
+
+        let first = PhraseRule::from_row("alpha".into(), true, "#11111111".into(), false, false);
+        let second = PhraseRule::from_row("beta".into(), false, "#22222222".into(), false, false);
+        let mut multi = privmsg("x", "alpha and beta");
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                phrase_rules: vec![first, second],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &mut multi,
+            Some("me"),
+        );
+        match multi {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
+                assert_eq!(highlight_color.as_deref(), Some("#11111111"));
+                assert!(highlight_sound);
+            }
+            _ => panic!("privmsg"),
+        }
+    }
+
+    #[test]
+    fn refresh_highlight_sound_compiles_once_into_shared() {
+        use super::super::settings::{AppSettings, HighlightMessageRow};
+        use super::super::state::Shared;
+
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.data = AppSettings {
+                highlight_messages: vec![HighlightMessageRow {
+                    pattern: r"\bcache\b".into(),
+                    show_in_mentions: false,
+                    flash_taskbar: false,
+                    play_sound: true,
+                    custom_sound: String::new(),
+                    regex: true,
+                    case_sensitive: false,
+                    color: "#AABBCCDD".into(),
+                }],
+                ..AppSettings::default()
+            };
+        }
+        refresh_highlight_sound(&shared);
+        let ctx = shared.highlight_sound.lock().unwrap().clone();
+        assert_eq!(ctx.phrase_rules.len(), 1);
+        assert!(ctx.phrase_rules[0].compiled.is_some());
+        assert!(phrase_matches_ex("has cache here", &ctx.phrase_rules[0]));
+        assert!(!phrase_matches_ex("cached", &ctx.phrase_rules[0]));
     }
 
     fn usernotice(login: &str, system: &str) -> ChatEvent {
@@ -1310,7 +1533,7 @@ mod tests {
             ..Filters::default()
         };
         let sound = HighlightSoundCtx {
-            phrase_sound: vec![("pog".into(), true, "#11223344".into())],
+            phrase_rules: vec![PhraseRule::plain("pog", true, "#11223344")],
             user_sound: vec![("streamer".into(), true, "#AABBCC".into())],
             ..HighlightSoundCtx::default()
         };
@@ -1346,7 +1569,7 @@ mod tests {
         apply_highlight(
             &filters,
             &HighlightSoundCtx {
-                phrase_sound: vec![("pog".into(), true, String::new())],
+                phrase_rules: vec![PhraseRule::plain("pog", true, "")],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
@@ -1363,7 +1586,7 @@ mod tests {
         apply_highlight(
             &filters,
             &HighlightSoundCtx {
-                phrase_sound: vec![("pog".into(), true, "#xyz".into())],
+                phrase_rules: vec![PhraseRule::plain("pog", true, "#xyz")],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
@@ -1415,7 +1638,7 @@ mod tests {
                 ("moderator".into(), true, "#AABBCCDD".into()),
                 ("subscriber/12".into(), false, String::new()),
             ],
-            phrase_sound: vec![("hello".into(), false, "#01020304".into())],
+            phrase_rules: vec![PhraseRule::plain("hello", false, "#01020304")],
             ..HighlightSoundCtx::default()
         };
         let mut by_set = with_badges(privmsg("ann", "hi"), vec![badge("moderator", "1")]);
@@ -1592,7 +1815,7 @@ mod tests {
         apply_highlight(
             &filters,
             &HighlightSoundCtx {
-                phrase_sound: vec![("hello".into(), false, "#01020304".into())],
+                phrase_rules: vec![PhraseRule::plain("hello", false, "#01020304")],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),

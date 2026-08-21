@@ -281,6 +281,10 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let mut inner = shared.settings.lock().map_err(|e| e.to_string())?;
     inner.path = path;
     inner.data = data;
+    let ctx = super::filters::HighlightSoundCtx::from_settings(&inner.data);
+    if let Ok(mut slot) = shared.highlight_sound.lock() {
+        *slot = ctx;
+    }
     Ok(())
 }
 
@@ -301,6 +305,10 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     let prev_flags = super::fetch::EmoteProviderFlags::from_knobs(&inner.data.knobs);
     save_file(&inner.path, &clean).map_err(|e| ApiError::internal(&e))?;
     inner.data = clean.clone();
+    let ctx = super::filters::HighlightSoundCtx::from_settings(&inner.data);
+    if let Ok(mut slot) = shared.highlight_sound.lock() {
+        *slot = ctx;
+    }
     drop(inner);
     let flags = super::fetch::EmoteProviderFlags::from_knobs(&clean.knobs);
     let bttv_live = clean

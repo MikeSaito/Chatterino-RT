@@ -9,7 +9,7 @@ use super::batch::encode_batch;
 use super::cheers::CheerCatalog;
 use super::chatters::Chatters;
 use super::emotes::Catalog;
-use super::filters::FiltersInner;
+use super::filters::{FiltersInner, HighlightSoundCtx};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
 use super::session::SessionInner;
@@ -107,6 +107,8 @@ pub struct Shared {
     pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
     pub session: Arc<Mutex<SessionInner>>,
     pub settings: Arc<Mutex<SettingsInner>>,
+    /// Compiled highlight phrase rules; refreshed on settings load/replace.
+    pub highlight_sound: Arc<Mutex<HighlightSoundCtx>>,
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
     /// Last successfully sent outbound PRIVMSG text per channel login.
     pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
@@ -143,6 +145,7 @@ impl Shared {
             batch_tx: Arc::new(Mutex::new(None)),
             session: Arc::new(Mutex::new(SessionInner::default())),
             settings: Arc::new(Mutex::new(SettingsInner::default())),
+            highlight_sound: Arc::new(Mutex::new(HighlightSoundCtx::default())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
             outbound_pending: Arc::new(AtomicUsize::new(0)),
