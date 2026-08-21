@@ -14,6 +14,7 @@
     "test:hl-mute": "node --experimental-strip-types ./tests/highlightSoundMute.test.ts",
     "test:hotkeys": "node --experimental-strip-types ./tests/hotkeys.test.ts",
     "test:chat-font": "node --experimental-strip-types ./tests/chatFont.test.ts",
+    "test:theme": "node --experimental-strip-types ./tests/theme.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

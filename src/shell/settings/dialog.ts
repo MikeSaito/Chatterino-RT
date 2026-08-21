@@ -9,6 +9,12 @@ import {
   stepZoom,
 } from "../hotkeys";
 import {
+  applyResolvedTheme,
+  resolveThemePreset,
+  subscribeSystemTheme,
+} from "../theme";
+import { setChatAppBackground } from "../../pixi/app";
+import {
   configureStreamerMode,
   isStreamerModeActive,
   setStreamerModeOnChange,
@@ -189,6 +195,14 @@ function paintRuntime(
   const hideMod =
     data.knobs["appearance.hideModerationActions"] === true ||
     (sm.active && sm.hideModActions);
+  const preset = resolveThemePreset({
+    theme: String(data.knobs["appearance.theme"] ?? "Dark"),
+    darkSystem: String(data.knobs["appearance.darkSystemTheme"] ?? "Dark"),
+    lightSystem: String(data.knobs["appearance.lightSystemTheme"] ?? "Light"),
+  });
+  const tokens = applyResolvedTheme(preset);
+  ring.applyThemeFills(tokens.pixi);
+  setChatAppBackground(tokens.pixi.canvasBg);
   const fontSizeRaw = Number(data.knobs["appearance.chatFontSize"] ?? 10);
   const fontWeightRaw = Number(data.knobs["appearance.chatFontWeight"] ?? 50);
   ring.configureChatFont({
@@ -250,6 +264,15 @@ export function bindSettingsDialog(opts: {
     if (lastSettings) {
       paintRuntime(ring, lastSettings, onDisplay);
     }
+  });
+  subscribeSystemTheme(() => {
+    if (!lastSettings) {
+      return;
+    }
+    if (String(lastSettings.knobs["appearance.theme"] ?? "") !== "System") {
+      return;
+    }
+    paintRuntime(ring, lastSettings, onDisplay);
   });
   const wrapApply = (
     r: MessageRing,

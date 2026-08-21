@@ -34,6 +34,7 @@ import {
   qtWeightToPixi,
   sanitizeFontFamily,
 } from "./chatFont";
+import type { ThemePixiFills } from "../shell/theme";
 import {
   clipNick,
   indexToLineCol,
@@ -145,6 +146,17 @@ export class MessageRing {
   private wheelMultiplier = 1;
   private hoverPauseTimer = 0;
   private scrollRaf = 0;
+  private themeFills: ThemePixiFills = {
+    canvasBg: 0x191919,
+    body: 0xffffff,
+    timestamp: 0x8c7f7f,
+    nickFallback: 0x8c7f7f,
+    alternate: 0x222222,
+    alternateAlpha: 1,
+    separator: 0x3c3c3c,
+    disabled: 0x191919,
+    disabledAlpha: 0x99 / 255,
+  };
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
@@ -297,7 +309,26 @@ export class MessageRing {
     }
   }
 
-  /** Chat font knobs (family / size / Qt weight). Zoom applied via applyDisplay. */
+  /** Pixi chat colors from resolved theme preset. Atlas stays white; colors via style.fill / tint. */
+  applyThemeFills(fills: ThemePixiFills): void {
+    this.themeFills = { ...fills };
+    if (!this.ready) {
+      return;
+    }
+    for (const slot of this.slots) {
+      slot.time.style.fill = this.themeFills.timestamp;
+      slot.body.style.fill = this.themeFills.body;
+      slot.nick.style.fill = 0xffffff;
+      if (!slot.msgId) {
+        slot.nick.tint = this.themeFills.nickFallback;
+      }
+      dirtyBitmapText(slot.time);
+      dirtyBitmapText(slot.nick);
+      dirtyBitmapText(slot.body);
+    }
+    this.layout();
+  }
+
   configureChatFont(opts: {
     family: string;
     size: number;
@@ -437,7 +468,8 @@ export class MessageRing {
         fontFamily: this.chatFontFamily,
         fontSize: atlasSize,
         fontWeight: qtWeightToPixi(this.chatFontWeight),
-        fill: "#efeff1",
+        // White atlas so style.fill / nick tint work (Pixi tint-only when fill is white).
+        fill: "#ffffff",
       },
       chars: [
         ["\u0020", "\u007e"],
@@ -547,18 +579,26 @@ export class MessageRing {
       disabledGfx.eventMode = "none";
       const time = new BitmapText({
         text: "",
-        style: { fontFamily: "ChatFont", fontSize: this.fontSize, fill: 0xadadc0 },
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: this.fontSize,
+          fill: this.themeFills.timestamp,
+        },
       });
       const nick = new BitmapText({
         text: "",
-        style: { fontFamily: "ChatFont", fontSize: this.fontSize, fill: 0xffffff },
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: this.fontSize,
+          fill: 0xffffff,
+        },
       });
       const body = new BitmapText({
         text: "",
         style: {
           fontFamily: "ChatFont",
           fontSize: this.fontSize,
-          fill: 0xefeff1,
+          fill: this.themeFills.body,
           lineHeight: this.lineHeight,
         },
       });
@@ -915,7 +955,7 @@ export class MessageRing {
         return {
           time,
           nick: "*",
-          nickColor: 0xadadc0,
+          nickColor: this.themeFills.nickFallback,
           body,
           copyText,
           spans,
@@ -929,7 +969,7 @@ export class MessageRing {
         return {
           time,
           nick: "*",
-          nickColor: 0xadadc0,
+          nickColor: this.themeFills.nickFallback,
           body: clearchatText(event.targetLogin, event.durationSec),
           copyText: clearchatText(event.targetLogin, event.durationSec),
           spans: [],
@@ -942,7 +982,7 @@ export class MessageRing {
         return {
           time,
           nick: "*",
-          nickColor: 0xadadc0,
+          nickColor: this.themeFills.nickFallback,
           body: `emote:${event.emoteOnly} subs:${event.subsOnly} slow:${event.slowSec}`,
           copyText: "",
           spans: [],
@@ -955,7 +995,7 @@ export class MessageRing {
         return {
           time,
           nick: "*",
-          nickColor: 0xadadc0,
+          nickColor: this.themeFills.nickFallback,
           body: event.text,
           copyText: event.text,
           spans: [],
@@ -968,7 +1008,7 @@ export class MessageRing {
         return {
           time,
           nick: "*",
-          nickColor: 0xadadc0,
+          nickColor: this.themeFills.nickFallback,
           body: event.kind,
           copyText: "",
           spans: [],
@@ -1090,25 +1130,32 @@ export class MessageRing {
       return;
     }
     if (this.alternateMessages && slot.startRow % 2 === 1) {
-      slot.highlight.rect(0, 0, w, h).fill({ color: 0xffffff, alpha: 0.04 });
+      slot.highlight
+        .rect(0, 0, w, h)
+        .fill({
+          color: this.themeFills.alternate,
+          alpha: this.themeFills.alternateAlpha,
+        });
     }
     if (this.separateMessages) {
       slot.highlight
         .moveTo(0, h - 0.5)
         .lineTo(w, h - 0.5)
-        .stroke({ width: 1, color: 0x2a2a2d, alpha: 0.9 });
+        .stroke({ width: 1, color: this.themeFills.separator, alpha: 0.9 });
     }
   }
 
   private paintDisabled(slot: Slot): void {
     slot.disabledGfx.clear();
-    // Chatterino Dark messages.disabled = #99191919 (MessageLayout fillRect)
     if (!slot.disabled) {
       return;
     }
     slot.disabledGfx
       .rect(0, 0, this.app.screen.width, slot.lineCount * this.lineHeight)
-      .fill({ color: 0x191919, alpha: 0x99 / 255 });
+      .fill({
+        color: this.themeFills.disabled,
+        alpha: this.themeFills.disabledAlpha,
+      });
   }
 
   private paintMentions(slot: Slot, bodyX: number): void {

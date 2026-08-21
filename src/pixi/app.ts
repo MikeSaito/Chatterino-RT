@@ -12,7 +12,7 @@ export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement
   const created = new Application();
   await created.init({
     canvas,
-    background: 0x0e0e10,
+    background: 0x191919,
     antialias: false,
     autoDensity: true,
     resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -20,6 +20,13 @@ export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement
   });
   app = created;
   return created;
+}
+
+export function setChatAppBackground(color: number): void {
+  if (!app) {
+    return;
+  }
+  app.renderer.background.color = color;
 }
 
 export function chatApp(): Application {
