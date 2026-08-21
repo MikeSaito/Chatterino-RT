@@ -160,6 +160,7 @@ export class MessageRing {
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
+  private onNickRightClick: ((ctx: SlotContext, ev: FederatedPointerEvent) => void) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -179,6 +180,12 @@ export class MessageRing {
 
   setOnNickClick(cb: (ctx: SlotContext) => void): void {
     this.onNickClick = cb;
+  }
+
+  setOnNickRightClick(
+    cb: (ctx: SlotContext, ev: FederatedPointerEvent) => void,
+  ): void {
+    this.onNickRightClick = cb;
   }
 
   configureScrollBehaviour(opts: {
@@ -1285,6 +1292,10 @@ export class MessageRing {
   }
 
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
+    // Pixi fires pointertap after rightclick; only LMB opens UserCard / links.
+    if (ev.button !== 0) {
+      return;
+    }
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
       this.onNickClick({
         msgId: slot.msgId,
@@ -1307,7 +1318,28 @@ export class MessageRing {
   }
 
   private onSlotContext(slot: Slot, ev: FederatedPointerEvent): void {
-    if (!slot.msgId || !this.onContext) {
+    if (!slot.msgId) {
+      return;
+    }
+    if (this.nickAt(slot, ev) && slot.login && this.onNickRightClick) {
+      ev.preventDefault();
+      this.onNickRightClick(
+        {
+          msgId: slot.msgId,
+          login: slot.login,
+          nick: slot.nickRaw,
+          text: slot.copyText || slot.bodyRaw,
+          clientX: ev.clientX,
+          clientY: ev.clientY,
+          disabled: slot.disabled,
+          replyToId: slot.replyToId,
+          linkUrl: "",
+        },
+        ev,
+      );
+      return;
+    }
+    if (!this.onContext) {
       return;
     }
     ev.preventDefault();

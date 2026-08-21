@@ -16,6 +16,7 @@
     "test:chat-font": "node --experimental-strip-types ./tests/chatFont.test.ts",
     "test:theme": "node --experimental-strip-types ./tests/theme.test.ts",
     "test:composer": "node --experimental-strip-types ./tests/composerUi.test.ts",
+    "test:username-rclick": "node --experimental-strip-types ./tests/usernameRclick.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

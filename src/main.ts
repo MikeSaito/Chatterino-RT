@@ -20,6 +20,13 @@ import {
   parseMessageOverflow,
   type ComposerChromeOpts,
 } from "./shell/composerUi";
+import {
+  parseUsernameRclickAction,
+  parseUsernameRclickModifier,
+  resolveUsernameRightClick,
+  type UsernameRclickAction,
+  type UsernameRclickModifier,
+} from "./shell/usernameRclick";
 import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
@@ -141,6 +148,11 @@ async function boot(): Promise<void> {
     replyBar: replyBarEl,
     getOpts: () => composerOpts,
   });
+  let nickRclick = {
+    behavior: "Mention" as UsernameRclickAction,
+    modBehavior: "Reply" as UsernameRclickAction,
+    modifier: "Shift" as UsernameRclickModifier,
+  };
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
     if (!li || !completeBox.contains(li)) {
@@ -190,6 +202,17 @@ async function boot(): Promise<void> {
         "is-hidden-thumb",
         data.knobs["appearance.hideScrollbarThumb"] === true,
       );
+      nickRclick = {
+        behavior: parseUsernameRclickAction(
+          data.knobs["behaviour.usernameRightClickBehavior"],
+        ),
+        modBehavior: parseUsernameRclickAction(
+          data.knobs["behaviour.usernameRightClickModifierBehavior"],
+        ),
+        modifier: parseUsernameRclickModifier(
+          data.knobs["behaviour.usernameRightClickModifier"],
+        ),
+      };
     },
   });
   bindScrollChrome({
@@ -397,6 +420,44 @@ async function boot(): Promise<void> {
       clientX: ctx.clientX,
       clientY: ctx.clientY,
     });
+  });
+  ring.setOnNickRightClick((ctx, ev) => {
+    hideContextMenu();
+    const action = resolveUsernameRightClick({
+      behavior: nickRclick.behavior,
+      modBehavior: nickRclick.modBehavior,
+      modifier: nickRclick.modifier,
+      keys: {
+        shiftKey: ev.shiftKey,
+        ctrlKey: ev.ctrlKey,
+        altKey: ev.altKey,
+        metaKey: ev.metaKey,
+      },
+    });
+    if (action === "Ignore") {
+      return;
+    }
+    if (action === "Reply") {
+      if (ctx.login && ctx.msgId && !ctx.disabled) {
+        setReply(ctx.msgId, ctx.login, ctx.text);
+        messageInput.focus();
+      }
+      return;
+    }
+    if (!ctx.login) {
+      return;
+    }
+    const mention = `@${ctx.login} `;
+    const start = messageInput.selectionStart ?? messageInput.value.length;
+    const end = messageInput.selectionEnd ?? start;
+    const before = messageInput.value.slice(0, start);
+    const after = messageInput.value.slice(end);
+    messageInput.value = `${before}${mention}${after}`;
+    const caret = before.length + mention.length;
+    messageInput.setSelectionRange(caret, caret);
+    composer.hidden = false;
+    messageInput.focus();
+    composerChrome.sync();
   });
 
   document.addEventListener("pointerdown", (ev) => {
