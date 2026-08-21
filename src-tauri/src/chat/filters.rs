@@ -112,7 +112,11 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
         Ok(inner) => inner.data.clone(),
         Err(_) => return false,
     };
-    if should_drop(&filters, event, self_login.as_deref()) {
+    let ignore_blocks = match shared.ignore_block_rules.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => Vec::new(),
+    };
+    if should_drop(&filters, &ignore_blocks, event, self_login.as_deref()) {
         return true;
     }
     let sound_ctx = match shared.highlight_sound.lock() {
@@ -132,6 +136,17 @@ pub fn refresh_highlight_sound(shared: &Shared) {
     }
 }
 
+/// Rebuild cached ignore-message block rules after settings change.
+pub fn refresh_ignore_block_rules(shared: &Shared) {
+    let rules = match shared.settings.lock() {
+        Ok(inner) => ignore_block_rules_from_settings(&inner.data),
+        Err(_) => Vec::new(),
+    };
+    if let Ok(mut slot) = shared.ignore_block_rules.lock() {
+        *slot = rules;
+    }
+}
+
 pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
     Ok(Filters {
         enable_self_highlight: raw.enable_self_highlight,
@@ -142,7 +157,12 @@ pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
     })
 }
 
-pub(crate) fn should_drop(filters: &Filters, event: &ChatEvent, self_login: Option<&str>) -> bool {
+pub(crate) fn should_drop(
+    filters: &Filters,
+    ignore_blocks: &[PhraseRule],
+    event: &ChatEvent,
+    self_login: Option<&str>,
+) -> bool {
     let login = event_login(event);
     if let Some(login) = login {
         if is_self(login, self_login) {
@@ -153,7 +173,13 @@ pub(crate) fn should_drop(filters: &Filters, event: &ChatEvent, self_login: Opti
         }
     }
     let hay = event_hay(event);
-    if !hay.is_empty() && filters.ignore_phrases.iter().any(|p| phrase_matches(&hay, p)) {
+    if hay.is_empty() {
+        return false;
+    }
+    if ignore_blocks.iter().any(|rule| phrase_matches_ex(&hay, rule)) {
+        return true;
+    }
+    if filters.ignore_phrases.iter().any(|p| phrase_matches(&hay, p)) {
         return true;
     }
     false
@@ -394,6 +420,23 @@ impl PhraseRule {
     fn plain(pattern: &str, play: bool, color: &str) -> Self {
         Self::from_row(pattern.into(), play, color.into(), false, false)
     }
+}
+
+/// Block rows from Ignores Messages table (`block` + non-empty pattern).
+pub fn ignore_block_rules_from_settings(data: &super::settings::AppSettings) -> Vec<PhraseRule> {
+    data.ignore_messages
+        .iter()
+        .filter(|r| r.block && !r.pattern.trim().is_empty())
+        .map(|r| {
+            PhraseRule::from_row(
+                r.pattern.clone(),
+                false,
+                String::new(),
+                r.regex,
+                r.case_sensitive,
+            )
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -869,10 +912,10 @@ mod tests {
             ignore_logins: vec!["spam".into()],
             ..Filters::default()
         };
-        assert!(should_drop(&filters, &privmsg("spam", "hi"), Some("me")));
-        assert!(should_drop(&filters, &privmsg("SPAM", "hi"), Some("me")));
-        assert!(!should_drop(&filters, &privmsg("spam", "hi"), Some("spam")));
-        assert!(!should_drop(&filters, &privmsg("ok", "hi"), Some("me")));
+        assert!(should_drop(&filters, &[], &privmsg("spam", "hi"), Some("me")));
+        assert!(should_drop(&filters, &[], &privmsg("SPAM", "hi"), Some("me")));
+        assert!(!should_drop(&filters, &[], &privmsg("spam", "hi"), Some("spam")));
+        assert!(!should_drop(&filters, &[], &privmsg("ok", "hi"), Some("me")));
     }
 
     #[test]
@@ -883,15 +926,17 @@ mod tests {
         };
         assert!(should_drop(
             &filters,
+            &[],
             &privmsg("x", "please buy followers now"),
             Some("me")
         ));
         assert!(!should_drop(
             &filters,
+            &[],
             &privmsg("me", "please buy followers now"),
             Some("me")
         ));
-        assert!(!should_drop(&filters, &privmsg("x", "buyfollowers"), Some("me")));
+        assert!(!should_drop(&filters, &[], &privmsg("x", "buyfollowers"), Some("me")));
     }
 
     #[test]
@@ -1850,9 +1895,103 @@ mod tests {
             ..Filters::default()
         };
         let ev = privmsg("spam", "hi");
-        assert!(should_drop(&filters, &ev, Some("me")));
+        assert!(should_drop(&filters, &[], &ev, Some("me")));
         let mut pending = Pending::new("xqc");
         assert_eq!(pending.seq(), 0);
         assert!(pending.take_batch().is_none());
+    }
+
+    #[test]
+    fn ignore_messages_block_regex_and_case() {
+        let filters = Filters::default();
+        let case_row = PhraseRule::from_row("Spam".into(), false, String::new(), false, true);
+        assert!(should_drop(
+            &filters,
+            &[case_row.clone()],
+            &privmsg("x", "buy Spam now"),
+            Some("me")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &[case_row],
+            &privmsg("x", "buy spam now"),
+            Some("me")
+        ));
+
+        let re = PhraseRule::from_row(r"\bspam\b".into(), false, String::new(), true, false);
+        assert!(should_drop(
+            &filters,
+            &[re.clone()],
+            &privmsg("x", "no Spam here"),
+            Some("me")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &[re],
+            &privmsg("x", "spammer alert"),
+            Some("me")
+        ));
+
+        let invalid = PhraseRule::from_row("(".into(), false, String::new(), true, false);
+        assert!(invalid.compiled.is_none());
+        assert!(!should_drop(
+            &filters,
+            &[invalid],
+            &privmsg("x", "("),
+            Some("me")
+        ));
+
+        let no_block = ignore_block_rules_from_settings(&super::super::settings::AppSettings {
+            ignore_messages: vec![super::super::settings::IgnoreMessageRow {
+                pattern: "spam".into(),
+                regex: false,
+                case_sensitive: false,
+                block: false,
+                replacement: "***".into(),
+            }],
+            ..super::super::settings::AppSettings::default()
+        });
+        assert!(no_block.is_empty());
+        assert!(!should_drop(
+            &filters,
+            &no_block,
+            &privmsg("x", "spam"),
+            Some("me")
+        ));
+
+        assert!(!should_drop(
+            &filters,
+            &[PhraseRule::plain("spam", false, "")],
+            &privmsg("me", "spam"),
+            Some("me")
+        ));
+
+        let shared = super::super::state::Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.data.ignore_messages = vec![super::super::settings::IgnoreMessageRow {
+                pattern: r"\bcache\b".into(),
+                regex: true,
+                case_sensitive: false,
+                block: true,
+                replacement: String::new(),
+            }];
+        }
+        refresh_ignore_block_rules(&shared);
+        let rules = shared.ignore_block_rules.lock().unwrap().clone();
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].compiled.is_some());
+        assert!(should_drop(
+            &filters,
+            &rules,
+            &privmsg("x", "has cache here"),
+            Some("me")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &rules,
+            &privmsg("x", "cached"),
+            Some("me")
+        ));
     }
 }
