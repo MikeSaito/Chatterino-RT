@@ -72,6 +72,7 @@ pub fn suggestions_with_rank(
 }
 
 /// Leading `:` → emote query needle (stock TabCompletionModel / SplitInput).
+/// Classic popup uses contains matching regardless of prefixOnlyEmoteCompletion.
 /// Lone `:` → `Some("")` (match all emotes, capped by caller).
 pub fn colon_emote_needle(token: &str) -> Option<&str> {
     token.strip_prefix(':')

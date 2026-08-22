@@ -387,8 +387,13 @@ pub fn chat_complete(
             ranked.truncate(complete::COMPLETE_LIMIT);
             ranked
         } else {
-            let mut emotes =
-                catalog.codes_matching(&channel, needle, emote_mode, false, false);
+            let mut emotes = catalog.codes_matching(
+                &channel,
+                needle,
+                super::emotes::MatchMode::Contains,
+                false,
+                false,
+            );
             if needle.is_empty() {
                 emotes.truncate(complete::COMPLETE_LIMIT);
             }
