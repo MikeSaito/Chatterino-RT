@@ -115,6 +115,11 @@ export type ChatStatus = {
   message?: string;
 };
 
+export type ChannelLive = {
+  channel: string;
+  live: boolean;
+};
+
 export type AuthInfo = {
   login?: string;
   canSend: boolean;

@@ -178,6 +178,8 @@ export class MessageRing {
   private hideDeletionActions = false;
   private deletedMessageLengthLimit = 50;
   private fadeMessageHistory = true;
+  private hideTimestampsWhenLive = false;
+  private channelLive = false;
   private loadingSnapshot = false;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
@@ -577,6 +579,7 @@ export class MessageRing {
     hideDeletionActions = false,
     deletedMessageLengthLimit = 50,
     fadeMessageHistory = true,
+    hideTimestampsWhenLive = false,
     showReplyButton = false,
     emotes?: {
       scale?: number;
@@ -608,6 +611,7 @@ export class MessageRing {
       Math.floor(Number(deletedMessageLengthLimit) || 0),
     );
     this.fadeMessageHistory = fadeMessageHistory;
+    this.hideTimestampsWhenLive = hideTimestampsWhenLive;
     this.showReplyButton = showReplyButton;
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
     this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
@@ -968,8 +972,26 @@ export class MessageRing {
 
   reset(): void {
     this.liveMsgIds.clear();
+    this.channelLive = false;
     this.resetSlots();
     this.layout();
+  }
+
+  setChannelLive(live: boolean): void {
+    if (this.channelLive === live) {
+      return;
+    }
+    this.channelLive = live;
+    if (!this.ready) {
+      return;
+    }
+    this.layout();
+  }
+
+  private timestampsVisible(): boolean {
+    return (
+      this.showTimestamps && !(this.hideTimestampsWhenLive && this.channelLive)
+    );
   }
 
   destroy(): void {
@@ -1477,10 +1499,10 @@ export class MessageRing {
 
   private paintClip(slot: Slot): void {
     const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
-    const timeSample = this.showTimestamps
+    const timeSample = this.timestampsVisible()
       ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
       : "";
-    const timeW = this.showTimestamps
+    const timeW = this.timestampsVisible()
       ? measureTextWidth(
           this.chatFontFamily,
           qtWeightToCss(this.chatFontWeight),
@@ -1489,7 +1511,7 @@ export class MessageRing {
         ) + gap
       : 0;
     slot.time.x = 0;
-    slot.time.visible = this.showTimestamps;
+    slot.time.visible = this.timestampsVisible();
     const badgeN = slot.badgesRaw.length;
     const badgeBand =
       badgeN === 0 ? 0 : badgeN * this.badgeSize + (badgeN - 1) * BADGE_GAP;

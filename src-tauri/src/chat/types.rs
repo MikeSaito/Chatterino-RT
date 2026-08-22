@@ -30,6 +30,13 @@ pub struct ChatStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ChannelLive {
+    pub channel: String,
+    pub live: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatPipe {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

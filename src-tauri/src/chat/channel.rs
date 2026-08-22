@@ -9,6 +9,7 @@ pub struct ChannelBuf {
     pub pending: Pending,
     room_modes: Option<RoomModes>,
     send_wait: SendWait,
+    live: bool,
 }
 
 impl ChannelBuf {
@@ -18,7 +19,21 @@ impl ChannelBuf {
             pending: Pending::new(channel_id),
             room_modes: None,
             send_wait: SendWait::default(),
+            live: false,
         }
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// Returns true when the live flag changed.
+    pub fn set_live(&mut self, live: bool) -> bool {
+        if self.live == live {
+            return false;
+        }
+        self.live = live;
+        true
     }
 
     /// ROOMSTATE / USERSTATE: merge or send-wait side effects; drop from scrollback.

@@ -106,9 +106,14 @@ impl Hub {
     }
 
     pub fn set_active(&mut self, channel: Option<String>) {
+        let changed = self.active != channel;
         self.active = channel;
         if let Some(ch) = self.active.clone() {
-            self.buffer(&ch);
+            if changed {
+                self.buffer(&ch).set_live(false);
+            } else {
+                self.buffer(&ch);
+            }
         }
     }
 
@@ -137,6 +142,17 @@ impl Hub {
         } else {
             self.joined.remove(channel);
         }
+    }
+
+    pub fn channel_live(&self, channel: &str) -> bool {
+        self.buffers
+            .get(channel)
+            .is_some_and(|buf| buf.is_live())
+    }
+
+    /// Returns true when the stored live flag changed.
+    pub fn set_channel_live(&mut self, channel: &str, live: bool) -> bool {
+        self.buffer(channel).set_live(live)
     }
 }
 
@@ -187,6 +203,18 @@ mod tests {
         assert!(hub.is_joined("xqc"));
         hub.set_active(Some("xqc".into()));
         assert!(hub.joined_active());
+    }
+
+    #[test]
+    fn set_channel_live_tracks_per_buffer() {
+        let mut hub = Hub::default();
+        hub.set_active(Some("xqc".into()));
+        assert!(!hub.channel_live("xqc"));
+        assert!(hub.set_channel_live("xqc", true));
+        assert!(hub.channel_live("xqc"));
+        assert!(!hub.set_channel_live("xqc", true));
+        assert!(hub.set_channel_live("xqc", false));
+        assert!(!hub.channel_live("xqc"));
     }
 
     #[test]

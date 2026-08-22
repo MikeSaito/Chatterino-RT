@@ -260,6 +260,29 @@ pub fn allowed_cheer_url(raw: &str) -> Option<String> {
     allowed_https_host(raw, CHEER_HOSTS)
 }
 
+pub fn parse_streams_live(value: &Value) -> bool {
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .is_some_and(|data| !data.is_empty())
+}
+
+pub async fn fetch_channel_live(
+    login: &str,
+    token: Option<&str>,
+    client_id: &str,
+) -> Option<bool> {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return None;
+    };
+    let url = helix_query("/streams", &[("user_login", login)]);
+    let client = http_client();
+    match get_helix(&client, &url, &client_id, &token).await {
+        HelixFetch::Ok(v) => Some(parse_streams_live(&v)),
+        HelixFetch::Auth | HelixFetch::Fail => None,
+    }
+}
+
 fn allowed_https_host(raw: &str, hosts: &[&str]) -> Option<String> {
     let parsed = Url::parse(raw.trim()).ok()?;
     if parsed.scheme() != "https" {
@@ -618,6 +641,15 @@ mod tests {
         assert_eq!(sets[0].prefix, "Cheer");
         assert_eq!(sets[0].tiers[0].min_bits, 100);
         assert_eq!(sets[0].tiers[1].min_bits, 1);
+    }
+
+    #[test]
+    fn parse_streams_live_empty_and_present() {
+        let offline: serde_json::Value = serde_json::json!({ "data": [] });
+        assert!(!parse_streams_live(&offline));
+        let online: serde_json::Value =
+            serde_json::json!({ "data": [{ "id": "1", "user_login": "xqc" }] });
+        assert!(parse_streams_live(&online));
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub fn run() {
             chat::settings::init(app.handle(), &shared)?;
             chat::eventapi::start(shared.clone())?;
             chat::bttv_live::start(shared.clone())?;
+            chat::live_status::start(app.handle().clone(), shared.clone());
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
@@ -65,6 +66,7 @@ pub fn run() {
                     }
                     state.notify_event(EventCmd::Shutdown);
                     state.notify_bttv(BttvCmd::Shutdown);
+                    chat::live_status::shutdown();
                 }
             }
         });

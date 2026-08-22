@@ -33,8 +33,8 @@ import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
-import type { AuthInfo, ChatStatus } from "./chat/types";
+import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
+import type { AuthInfo, ChannelLive, ChatStatus } from "./chat/types";
 
 let chatIpc: ChatIpc | null = null;
 let teardownChat: (() => void) | null = null;
@@ -586,6 +586,14 @@ async function boot(): Promise<void> {
       return;
     }
     statusEl.textContent = formatStatus(ev.payload);
+  });
+
+  await listen<ChannelLive>(CHAT_CHANNEL_LIVE_EVENT, (ev) => {
+    const ch = ev.payload.channel?.trim().toLowerCase() ?? "";
+    if (!ch || ch !== ipc.active().toLowerCase()) {
+      return;
+    }
+    ring.setChannelLive(ev.payload.live);
   });
 
   await listen<{
