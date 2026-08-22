@@ -106,6 +106,8 @@ type Slot = {
   startRow: number;
   highlightColor: string;
   disabled: boolean;
+  /** Scrollback snapshot (stock MessageFlag::RecentMessage). */
+  fromHistory: boolean;
   /** Privmsg-like: stock MessageFlag::Collapsed + expand on click. */
   collapsible: boolean;
   expanded: boolean;
@@ -175,6 +177,10 @@ export class MessageRing {
   private hideModerationActions = false;
   private hideDeletionActions = false;
   private deletedMessageLengthLimit = 50;
+  private fadeMessageHistory = true;
+  private loadingSnapshot = false;
+  /** Live msg ids this channel session (survive gap recovery snapshot). */
+  private liveMsgIds = new Set<string>();
   private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
@@ -570,6 +576,7 @@ export class MessageRing {
     hideModerationActions = false,
     hideDeletionActions = false,
     deletedMessageLengthLimit = 50,
+    fadeMessageHistory = true,
     showReplyButton = false,
     emotes?: {
       scale?: number;
@@ -600,6 +607,7 @@ export class MessageRing {
       0,
       Math.floor(Number(deletedMessageLengthLimit) || 0),
     );
+    this.fadeMessageHistory = fadeMessageHistory;
     this.showReplyButton = showReplyButton;
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
     this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
@@ -928,6 +936,7 @@ export class MessageRing {
         startRow: 0,
         highlightColor: "",
         disabled: false,
+        fromHistory: false,
         collapsible: false,
         expanded: false,
         collapsed: false,
@@ -958,6 +967,7 @@ export class MessageRing {
   }
 
   reset(): void {
+    this.liveMsgIds.clear();
     this.resetSlots();
     this.layout();
   }
@@ -972,8 +982,13 @@ export class MessageRing {
     const anchor = this.scroll.captureAnchor(this.laidSlots());
     this.clearSlots();
     const start = Math.max(0, events.length - MESSAGE_POOL_SIZE);
-    for (const event of events.slice(start)) {
-      this.pushOne(event);
+    this.loadingSnapshot = true;
+    try {
+      for (const event of events.slice(start)) {
+        this.pushOne(event);
+      }
+    } finally {
+      this.loadingSnapshot = false;
     }
     this.layout(follow ? undefined : anchor);
   }
@@ -1129,6 +1144,7 @@ export class MessageRing {
     slot.startRow = 0;
     slot.highlightColor = "";
     slot.disabled = false;
+    slot.fromHistory = false;
     slot.collapsible = false;
     slot.expanded = false;
     slot.collapsed = false;
@@ -1173,6 +1189,14 @@ export class MessageRing {
     } else {
       slot.msgId = event.id;
       slot.login = eventLogin(event);
+    }
+    if (this.loadingSnapshot) {
+      slot.fromHistory = !slot.msgId || !this.liveMsgIds.has(slot.msgId);
+    } else {
+      slot.fromHistory = false;
+      if (slot.msgId) {
+        this.liveMsgIds.add(slot.msgId);
+      }
     }
     const drawn = this.line(event);
     slot.time.text = drawn.time;
@@ -1639,7 +1663,9 @@ export class MessageRing {
 
   private paintDisabled(slot: Slot): void {
     slot.disabledGfx.clear();
-    if (!slot.disabled) {
+    const dim =
+      slot.disabled || (this.fadeMessageHistory && slot.fromHistory);
+    if (!dim) {
       return;
     }
     slot.disabledGfx

@@ -209,6 +209,7 @@ function paintRuntime(
   const hideDel = data.knobs["appearance.hideDeletionActions"] === true;
   const delLenRaw = Number(data.knobs["behaviour.deletedMessageLengthLimit"] ?? 50);
   const delLen = Number.isFinite(delLenRaw) ? delLenRaw : 50;
+  const fadeHistory = data.knobs["appearance.fadeMessageHistory"] !== false;
   const preset = resolveThemePreset({
     theme: String(data.knobs["appearance.theme"] ?? "Dark"),
     darkSystem: String(data.knobs["appearance.darkSystemTheme"] ?? "Dark"),
@@ -235,6 +236,7 @@ function paintRuntime(
     hideMod,
     hideDel,
     delLen,
+    fadeHistory,
     data.knobs["appearance.showReplyButton"] === true,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
