@@ -135,6 +135,10 @@ body,
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #streamer-badge {

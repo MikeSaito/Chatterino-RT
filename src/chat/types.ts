@@ -118,6 +118,10 @@ export type ChatStatus = {
 export type ChannelLive = {
   channel: string;
   live: boolean;
+  viewerCount?: number;
+  gameName?: string;
+  streamTitle?: string;
+  startedAt?: string;
 };
 
 export type AuthInfo = {

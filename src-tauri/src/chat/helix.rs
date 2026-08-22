@@ -267,18 +267,65 @@ pub fn parse_streams_live(value: &Value) -> bool {
         .is_some_and(|data| !data.is_empty())
 }
 
-pub async fn fetch_channel_live(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamStatus {
+    pub live: bool,
+    pub viewer_count: Option<u32>,
+    pub game_name: Option<String>,
+    pub stream_title: Option<String>,
+    pub started_at: Option<String>,
+}
+
+pub fn parse_stream_status(value: &Value) -> StreamStatus {
+    let Some(item) = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+    else {
+        return StreamStatus {
+            live: false,
+            viewer_count: None,
+            game_name: None,
+            stream_title: None,
+            started_at: None,
+        };
+    };
+    StreamStatus {
+        live: true,
+        viewer_count: item
+            .get("viewer_count")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok()),
+        game_name: item
+            .get("game_name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        stream_title: item
+            .get("title")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        started_at: item
+            .get("started_at")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    }
+}
+
+pub async fn fetch_channel_stream(
     login: &str,
     token: Option<&str>,
     client_id: &str,
-) -> Option<bool> {
+) -> Option<StreamStatus> {
     let Some((client_id, token)) = helix_creds(token, client_id) else {
         return None;
     };
     let url = helix_query("/streams", &[("user_login", login)]);
     let client = http_client();
     match get_helix(&client, &url, &client_id, &token).await {
-        HelixFetch::Ok(v) => Some(parse_streams_live(&v)),
+        HelixFetch::Ok(v) => Some(parse_stream_status(&v)),
         HelixFetch::Auth | HelixFetch::Fail => None,
     }
 }
@@ -650,6 +697,29 @@ mod tests {
         let online: serde_json::Value =
             serde_json::json!({ "data": [{ "id": "1", "user_login": "xqc" }] });
         assert!(parse_streams_live(&online));
+    }
+
+    #[test]
+    fn parse_stream_status_offline_and_live() {
+        let offline = serde_json::json!({ "data": [] });
+        let parsed = parse_stream_status(&offline);
+        assert!(!parsed.live);
+        assert!(parsed.viewer_count.is_none());
+
+        let online = serde_json::json!({
+            "data": [{
+                "viewer_count": 12345,
+                "game_name": "Just Chatting",
+                "title": "hello world",
+                "started_at": "2020-01-01T12:00:00Z"
+            }]
+        });
+        let parsed = parse_stream_status(&online);
+        assert!(parsed.live);
+        assert_eq!(parsed.viewer_count, Some(12345));
+        assert_eq!(parsed.game_name.as_deref(), Some("Just Chatting"));
+        assert_eq!(parsed.stream_title.as_deref(), Some("hello world"));
+        assert_eq!(parsed.started_at.as_deref(), Some("2020-01-01T12:00:00Z"));
     }
 
     #[test]

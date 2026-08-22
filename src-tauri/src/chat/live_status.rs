@@ -57,6 +57,26 @@ async fn run_poller(app: AppHandle, shared: Shared) {
     }
 }
 
+fn channel_live_payload(channel: &str, status: &helix::StreamStatus) -> ChannelLive {
+    ChannelLive {
+        channel: channel.to_string(),
+        live: status.live,
+        viewer_count: status.live.then(|| status.viewer_count).flatten(),
+        game_name: status
+            .live
+            .then(|| status.game_name.clone())
+            .flatten(),
+        stream_title: status
+            .live
+            .then(|| status.stream_title.clone())
+            .flatten(),
+        started_at: status
+            .live
+            .then(|| status.started_at.clone())
+            .flatten(),
+    }
+}
+
 async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
     let still_active = shared
         .hub
@@ -69,27 +89,22 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
     }
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
-    let Some(live) = helix::fetch_channel_live(channel, token.as_deref(), &client_id).await
+    let Some(status) =
+        helix::fetch_channel_stream(channel, token.as_deref(), &client_id).await
     else {
         return;
     };
-    let changed = {
+    let live_changed = {
         let Ok(mut hub) = shared.hub.lock() else {
             return;
         };
         if hub.active.as_deref() != Some(channel) {
             return;
         }
-        hub.set_channel_live(channel, live)
+        hub.set_channel_live(channel, status.live)
     };
-    if !changed {
-        return;
+    let payload = channel_live_payload(channel, &status);
+    if status.live || live_changed {
+        let _ = app.emit("chat:channel_live", payload);
     }
-    let _ = app.emit(
-        "chat:channel_live",
-        ChannelLive {
-            channel: channel.to_string(),
-            live,
-        },
-    );
 }

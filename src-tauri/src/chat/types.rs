@@ -33,6 +33,14 @@ pub struct ChatStatus {
 pub struct ChannelLive {
     pub channel: String,
     pub live: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewer_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

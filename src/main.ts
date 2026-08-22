@@ -7,6 +7,11 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import {
+  formatChannelTitle,
+  parseHeaderKnobs,
+  type HeaderKnobs,
+} from "./shell/channelHeader";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindSettingsDialog } from "./shell/settings/dialog";
 import {
@@ -202,6 +207,8 @@ async function boot(): Promise<void> {
   let linkInfoTooltip = false;
   let thumbnailSizePx = 0;
   let hideLinkThumbnails = true;
+  let headerKnobs: HeaderKnobs = parseHeaderKnobs({});
+  const streamByChannel = new Map<string, ChannelLive>();
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
   if (emoteTooltip && emoteTooltipImg && emoteTooltipText && canvasHost) {
     emoteTooltipCtl = bindEmoteTooltip({
@@ -314,10 +321,27 @@ async function boot(): Promise<void> {
       linkInfoTooltip = data.knobs["links.linkInfoTooltip"] === true;
       thumbnailSizePx = parseThumbnailSize(data.knobs["appearance.thumbnailSize"]);
       hideLinkThumbnails = data.knobs["streamerMode.hideLinkThumbnails"] !== false;
+      headerKnobs = parseHeaderKnobs(data.knobs);
       emoteTooltipCtl?.refresh();
+      repaintChannelTitle();
     },
   });
   const ipc = bindChatIpc(ring);
+
+  let repaintChannelTitle = (): void => {
+    if (!titleEl) {
+      return;
+    }
+    const ch = ipc.active();
+    if (!ch) {
+      titleEl.textContent = "";
+      ring.setChannelLive(false);
+      return;
+    }
+    const stream = streamByChannel.get(ch.toLowerCase());
+    ring.setChannelLive(stream?.live ?? false);
+    titleEl.textContent = formatChannelTitle(ch, stream, headerKnobs);
+  };
 
   function applySendWaitForActive(): void {
     const ch = ipc.active().toLowerCase();
@@ -634,10 +658,15 @@ async function boot(): Promise<void> {
 
   await listen<ChannelLive>(CHAT_CHANNEL_LIVE_EVENT, (ev) => {
     const ch = ev.payload.channel?.trim().toLowerCase() ?? "";
-    if (!ch || ch !== ipc.active().toLowerCase()) {
+    if (!ch) {
+      return;
+    }
+    streamByChannel.set(ch, ev.payload);
+    if (ch !== ipc.active().toLowerCase()) {
       return;
     }
     ring.setChannelLive(ev.payload.live);
+    repaintChannelTitle();
   });
 
   await listen<{
@@ -650,6 +679,7 @@ async function boot(): Promise<void> {
     if (ev.payload.dropped) {
       channels.remove(ev.payload.dropped);
       sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
+      streamByChannel.delete(ev.payload.dropped.toLowerCase());
     }
     channels.syncOpen(open, focus);
     channelQueue.push({ kind: "sync", name: focus });
@@ -1239,7 +1269,9 @@ async function boot(): Promise<void> {
 
   function applyMounted(joined: string): void {
     channels.remember(joined);
-    titleEl.textContent = `#${joined}`;
+    streamByChannel.delete(joined.toLowerCase());
+    ring.setChannelLive(false);
+    repaintChannelTitle();
     channelInput.value = joined;
     if (joined !== mountedChannel) {
       unmountPlayer(playerSlot);
@@ -1278,7 +1310,7 @@ async function boot(): Promise<void> {
       if (focus) {
         applyMounted(focus);
       } else {
-        titleEl.textContent = "";
+        repaintChannelTitle();
         channelInput.value = "";
         if (mountedChannel) {
           unmountPlayer(playerSlot);
@@ -1316,8 +1348,9 @@ async function boot(): Promise<void> {
       const next = await ipc.leave(name);
       channels.remove(name);
       sendWaitByChannel.delete(name.toLowerCase());
+      streamByChannel.delete(name.toLowerCase());
       if (!next) {
-        titleEl.textContent = "";
+        repaintChannelTitle();
         channelInput.value = "";
         if (mountedChannel) {
           unmountPlayer(playerSlot);
