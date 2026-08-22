@@ -1,10 +1,19 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing, TooltipHit } from "../chat/ring";
 
 export type TooltipPreviewMode = "DontShow" | "AlwaysShow" | "ShowOnShift";
 export type EmoteTooltipScale = "Small" | "Medium" | "Large" | "Huge";
 
+type LinkInfoResponse = {
+  tooltip: string;
+  thumbnail_url?: string | null;
+};
+
 const CURSOR_OFFSET = 12;
 const VIEWPORT_PAD = 4;
+const RESOLVE_FAIL_TTL_MS = 60_000;
+const resolveCache = new Map<string, Promise<LinkInfoResponse>>();
+const resolveFailUntil = new Map<string, number>();
 
 export function parseTooltipPreviewMode(raw: unknown): TooltipPreviewMode {
   if (raw === "DontShow" || raw === "AlwaysShow" || raw === "ShowOnShift") {
@@ -18,6 +27,19 @@ export function parseEmoteTooltipScale(raw: unknown): EmoteTooltipScale {
     return raw;
   }
   return "Medium";
+}
+
+export function parseThumbnailSize(raw: unknown): number {
+  if (raw === "100" || raw === 100) {
+    return 100;
+  }
+  if (raw === "200" || raw === 200) {
+    return 200;
+  }
+  if (raw === "300" || raw === 300) {
+    return 300;
+  }
+  return 0;
 }
 
 export function shouldShowImage(
@@ -46,6 +68,25 @@ export function tooltipScalePx(scale: EmoteTooltipScale): number {
   }
 }
 
+function fetchLinkInfo(url: string): Promise<LinkInfoResponse> {
+  const failUntil = resolveFailUntil.get(url);
+  if (failUntil !== undefined && Date.now() < failUntil) {
+    return Promise.reject(new Error("link resolve cached failure"));
+  }
+  let pending = resolveCache.get(url);
+  if (!pending) {
+    pending = invoke<LinkInfoResponse>("resolve_link_info", { url }).catch(
+      (err: unknown) => {
+        resolveCache.delete(url);
+        resolveFailUntil.set(url, Date.now() + RESOLVE_FAIL_TTL_MS);
+        throw err;
+      },
+    );
+    resolveCache.set(url, pending);
+  }
+  return pending;
+}
+
 export function bindEmoteTooltip(opts: {
   host: HTMLElement;
   ring: MessageRing;
@@ -54,18 +95,23 @@ export function bindEmoteTooltip(opts: {
   text: HTMLElement;
   getPreviewMode: () => TooltipPreviewMode;
   getScale: () => EmoteTooltipScale;
+  getLinkInfoEnabled: () => boolean;
+  getThumbnailSizePx: () => number;
+  getHideLinkThumbnails: () => boolean;
 }): { hide: () => void; refresh: () => void } {
   let lastImageUrl = "";
   let lastHit: TooltipHit | null = null;
   let lastX = 0;
   let lastY = 0;
   let lastShift = false;
+  let activeResolveUrl = "";
 
   const hide = (): void => {
     opts.tooltip.hidden = true;
     opts.img.hidden = true;
     lastImageUrl = "";
     lastHit = null;
+    activeResolveUrl = "";
   };
 
   const positionTooltip = (clientX: number, clientY: number): void => {
@@ -83,7 +129,23 @@ export function bindEmoteTooltip(opts: {
     tip.style.top = `${top}px`;
   };
 
-  const show = (
+  const paintImage = (imageUrl: string, sizePx: number): void => {
+    opts.img.style.width = `${sizePx}px`;
+    opts.img.style.height = `${sizePx}px`;
+    opts.img.hidden = false;
+    if (imageUrl !== lastImageUrl) {
+      opts.img.src = imageUrl;
+      lastImageUrl = imageUrl;
+    }
+  };
+
+  const clearImage = (): void => {
+    opts.img.hidden = true;
+    opts.img.removeAttribute("src");
+    lastImageUrl = "";
+  };
+
+  const showEmote = (
     hit: TooltipHit,
     clientX: number,
     clientY: number,
@@ -95,21 +157,68 @@ export function bindEmoteTooltip(opts: {
     const imageUrl =
       shouldShowImage(mode, shiftKey) && hit.imageUrl ? hit.imageUrl : "";
     if (imageUrl) {
-      const px = tooltipScalePx(scale);
-      opts.img.style.width = `${px}px`;
-      opts.img.style.height = `${px}px`;
-      opts.img.hidden = false;
-      if (imageUrl !== lastImageUrl) {
-        opts.img.src = imageUrl;
-        lastImageUrl = imageUrl;
-      }
+      paintImage(imageUrl, tooltipScalePx(scale));
     } else {
-      opts.img.hidden = true;
-      opts.img.removeAttribute("src");
-      lastImageUrl = "";
+      clearImage();
     }
     opts.tooltip.hidden = false;
     positionTooltip(clientX, clientY);
+  };
+
+  const showLink = async (
+    hit: TooltipHit,
+    clientX: number,
+    clientY: number,
+  ): Promise<void> => {
+    const url = hit.resolveUrl;
+    if (!url) {
+      return;
+    }
+    activeResolveUrl = url;
+    opts.text.textContent = hit.text;
+    clearImage();
+    opts.tooltip.hidden = false;
+    positionTooltip(clientX, clientY);
+    try {
+      const info = await fetchLinkInfo(url);
+      if (activeResolveUrl !== url || lastHit?.resolveUrl !== url) {
+        return;
+      }
+      opts.text.textContent = info.tooltip || url;
+      const thumbPx = opts.getThumbnailSizePx();
+      const thumb = info.thumbnail_url ?? undefined;
+      if (thumbPx > 0 && thumb && !opts.getHideLinkThumbnails()) {
+        paintImage(thumb, thumbPx);
+      } else {
+        clearImage();
+      }
+      positionTooltip(clientX, clientY);
+    } catch {
+      if (activeResolveUrl !== url || lastHit?.resolveUrl !== url) {
+        return;
+      }
+      opts.text.textContent = "No link info found";
+      clearImage();
+      positionTooltip(clientX, clientY);
+    }
+  };
+
+  const present = (
+    hit: TooltipHit,
+    clientX: number,
+    clientY: number,
+    shiftKey: boolean,
+  ): void => {
+    if (hit.resolveUrl) {
+      if (!opts.getLinkInfoEnabled()) {
+        hide();
+        return;
+      }
+      void showLink(hit, clientX, clientY);
+      return;
+    }
+    activeResolveUrl = "";
+    showEmote(hit, clientX, clientY, shiftKey);
   };
 
   const refresh = (): void => {
@@ -122,7 +231,7 @@ export function bindEmoteTooltip(opts: {
       return;
     }
     lastHit = hit;
-    show(hit, lastX, lastY, lastShift);
+    present(hit, lastX, lastY, lastShift);
   };
 
   const onPointer = (clientX: number, clientY: number, shiftKey: boolean): void => {
@@ -134,15 +243,19 @@ export function bindEmoteTooltip(opts: {
       hide();
       return;
     }
+    if (hit.resolveUrl && !opts.getLinkInfoEnabled()) {
+      hide();
+      return;
+    }
     lastHit = hit;
-    show(hit, clientX, clientY, shiftKey);
+    present(hit, clientX, clientY, shiftKey);
   };
 
   const onShiftChange = (): void => {
-    if (lastHit === null) {
+    if (lastHit === null || lastHit.resolveUrl) {
       return;
     }
-    show(lastHit, lastX, lastY, lastShift);
+    showEmote(lastHit, lastX, lastY, lastShift);
   };
 
   opts.host.addEventListener("pointermove", (ev) => {

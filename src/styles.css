@@ -821,6 +821,7 @@ button:disabled {
 #emote-tooltip-text {
   text-align: center;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 #chat-reply-btn {

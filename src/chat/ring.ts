@@ -2151,6 +2151,10 @@ export class MessageRing {
       if (emoteHit) {
         return emoteHit;
       }
+      const linkHit = this.linkTooltipAt(slot, localX, slotLocalY);
+      if (linkHit) {
+        return linkHit;
+      }
       return null;
     }
     return null;
@@ -2207,6 +2211,43 @@ export class MessageRing {
       }
     }
     return null;
+  }
+
+  private linkTooltipAt(
+    slot: Slot,
+    localX: number,
+    slotLocalY: number,
+  ): TooltipHit | null {
+    if (slot.linkSpans.length === 0) {
+      return null;
+    }
+    if (
+      localX < slot.body.x ||
+      slotLocalY < 0 ||
+      slotLocalY >= slot.lineCount * this.lineHeight
+    ) {
+      return null;
+    }
+    const col = Math.floor((localX - slot.body.x) / this.charWidth);
+    const line = Math.floor(slotLocalY / this.lineHeight);
+    const idx = lineColToIndex(
+      slot.bodyRaw,
+      slot.wrapLines,
+      line,
+      col,
+      slot.spansRaw,
+      this.wrapOpts(slot),
+    );
+    if (idx === null) {
+      return null;
+    }
+    const hit = slot.linkSpans.find(
+      (span) => idx >= span.start && idx < span.end,
+    );
+    if (!hit) {
+      return null;
+    }
+    return { text: hit.url, resolveUrl: hit.url };
   }
 
   /** Hover reply chip: screen rect of last visible privmsg under pointer, or null. */
@@ -2542,6 +2583,7 @@ function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
 export type TooltipHit = {
   text: string;
   imageUrl?: string;
+  resolveUrl?: string;
 };
 
 function spriteHit(localX: number, localY: number, spr: Sprite): boolean {

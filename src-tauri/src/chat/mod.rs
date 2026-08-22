@@ -16,6 +16,7 @@ pub mod helix;
 pub mod highlight_sound;
 pub mod hub;
 pub mod irc;
+pub mod link_resolver;
 pub mod live_status;
 pub mod membership_batch;
 pub mod parse;

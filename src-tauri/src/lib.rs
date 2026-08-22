@@ -8,6 +8,7 @@ use chat::commands::{
     highlight_request_attention, open_chat_link, session_get, settings_get,
     settings_set, streamer_mode_detect,
 };
+use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use tauri::Manager;
 
@@ -40,6 +41,7 @@ pub fn run() {
             chat_search,
             session_get,
             open_chat_link,
+            resolve_link_info,
             auth_start,
             auth_status,
             auth_import,

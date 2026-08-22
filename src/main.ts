@@ -28,13 +28,14 @@ import {
   type UsernameRclickModifier,
 } from "./shell/usernameRclick";
 import { mentionInsertText } from "./shell/mentionFormat";
-import { bindStreamerModeBadge } from "./shell/streamerMode";
+import { bindStreamerModeBadge, isStreamerModeActive } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
   bindEmoteTooltip,
   parseEmoteTooltipScale,
+  parseThumbnailSize,
   parseTooltipPreviewMode,
   type EmoteTooltipScale,
   type TooltipPreviewMode,
@@ -198,6 +199,9 @@ async function boot(): Promise<void> {
     document.querySelector<HTMLElement>("#emote-tooltip-text");
   let emotesTooltipPreview: TooltipPreviewMode = "AlwaysShow";
   let emoteTooltipScale: EmoteTooltipScale = "Medium";
+  let linkInfoTooltip = false;
+  let thumbnailSizePx = 0;
+  let hideLinkThumbnails = true;
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
   if (emoteTooltip && emoteTooltipImg && emoteTooltipText && canvasHost) {
     emoteTooltipCtl = bindEmoteTooltip({
@@ -208,6 +212,9 @@ async function boot(): Promise<void> {
       text: emoteTooltipText,
       getPreviewMode: () => emotesTooltipPreview,
       getScale: () => emoteTooltipScale,
+      getLinkInfoEnabled: () => linkInfoTooltip,
+      getThumbnailSizePx: () => thumbnailSizePx,
+      getHideLinkThumbnails: () => hideLinkThumbnails && isStreamerModeActive(),
     });
   }
   teardownChat = () => {
@@ -304,6 +311,10 @@ async function boot(): Promise<void> {
       emoteTooltipScale = parseEmoteTooltipScale(
         data.knobs["emotes.emoteTooltipScale"],
       );
+      linkInfoTooltip = data.knobs["links.linkInfoTooltip"] === true;
+      thumbnailSizePx = parseThumbnailSize(data.knobs["appearance.thumbnailSize"]);
+      hideLinkThumbnails = data.knobs["streamerMode.hideLinkThumbnails"] !== false;
+      emoteTooltipCtl?.refresh();
     },
   });
   const ipc = bindChatIpc(ring);
