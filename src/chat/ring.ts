@@ -47,9 +47,11 @@ import {
 import { NickColorCache } from "../shell/nickColorCache";
 import {
   clipNick,
+  collapseWrapLines,
   indexToLineCol,
   lineColToIndex,
   renderWrapped,
+  withCollapsedEllipsis,
   wrapBody,
   type WrapLine,
   type WrapOptions,
@@ -104,6 +106,11 @@ type Slot = {
   startRow: number;
   highlightColor: string;
   disabled: boolean;
+  /** Privmsg-like: stock MessageFlag::Collapsed + expand on click. */
+  collapsible: boolean;
+  expanded: boolean;
+  /** Set in paintClip when body is truncated this frame. */
+  collapsed: boolean;
   /** System/timeout-like: не гасить при room CLEARCHAT (как MessageFlag::System). */
   system: boolean;
   /** Author nick chrome (privmsg); empty → system / fallback. */
@@ -169,6 +176,7 @@ export class MessageRing {
   private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
+  private collapseMessagesMinLines = 0;
   private showLastRead = false;
   private lastReadPattern: LastReadPattern = "Solid";
   private lastReadColor = 0x7f2026;
@@ -556,6 +564,7 @@ export class MessageRing {
     timestampFormat = "hh:mm",
     alternateMessages = false,
     separateMessages = false,
+    collapseMessagesMinLines = 0,
     hideModerationActions = false,
     showReplyButton = false,
     emotes?: {
@@ -577,6 +586,10 @@ export class MessageRing {
     this.timestampFormat = timestampFormat === "Disable" ? "hh:mm" : timestampFormat;
     this.alternateMessages = alternateMessages;
     this.separateMessages = separateMessages;
+    this.collapseMessagesMinLines = Math.max(
+      0,
+      Math.floor(Number(collapseMessagesMinLines) || 0),
+    );
     this.hideModerationActions = hideModerationActions;
     this.showReplyButton = showReplyButton;
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
@@ -906,6 +919,9 @@ export class MessageRing {
         startRow: 0,
         highlightColor: "",
         disabled: false,
+        collapsible: false,
+        expanded: false,
+        collapsed: false,
         system: false,
         nickUserId: "",
         nickColorRaw: "",
@@ -1065,6 +1081,9 @@ export class MessageRing {
     slot.startRow = 0;
     slot.highlightColor = "";
     slot.disabled = false;
+    slot.collapsible = false;
+    slot.expanded = false;
+    slot.collapsed = false;
     slot.system = false;
     slot.nickUserId = "";
     slot.nickColorRaw = "";
@@ -1095,8 +1114,11 @@ export class MessageRing {
     slot.root.visible = true;
     slot.disabled = false;
     slot.disabledGfx.clear();
+    slot.expanded = false;
+    slot.collapsed = false;
     // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
     slot.system = event.kind !== "privmsg";
+    slot.collapsible = event.kind === "privmsg";
     if (event.kind === "usernotice" && event.privmsg && event.privmsg.kind === "privmsg") {
       slot.msgId = event.privmsg.id;
       slot.login = event.privmsg.login.toLowerCase();
@@ -1429,12 +1451,25 @@ export class MessageRing {
       slot.root.hitArea.width = this.app.screen.width;
     }
     const layoutOpts = this.wrapOpts(slot);
-    const lines = wrapBody(
+    const bodyCols = maxBodyChars(this.app.screen.width, bodyX, this.charWidth);
+    const wrapped = wrapBody(
       slot.bodyRaw,
-      maxBodyChars(this.app.screen.width, bodyX, this.charWidth),
+      bodyCols,
       slot.spansRaw,
       layoutOpts,
     );
+    const maxLines =
+      slot.collapsible && !slot.expanded ? this.collapseMessagesMinLines : 0;
+    const { lines, collapsed } = collapseWrapLines(
+      wrapped,
+      maxLines,
+      slot.bodyRaw,
+      bodyCols,
+      slot.spansRaw,
+      layoutOpts,
+    );
+    slot.collapsed = collapsed;
+    slot.root.cursor = collapsed ? "pointer" : "default";
     slot.wrapLines = lines;
     slot.lineCount = lines.length;
     const overlayMentions =
@@ -1442,11 +1477,9 @@ export class MessageRing {
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
     const renderOpts = this.wrapOpts(slot, overlayMentions);
-    slot.body.text = renderWrapped(
-      slot.bodyRaw,
-      lines,
-      slot.spansRaw,
-      renderOpts,
+    slot.body.text = withCollapsedEllipsis(
+      renderWrapped(slot.bodyRaw, lines, slot.spansRaw, renderOpts),
+      collapsed,
     );
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
@@ -1782,6 +1815,12 @@ export class MessageRing {
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
     // Pixi fires pointertap after rightclick; only LMB opens UserCard / links.
     if (ev.button !== 0) {
+      return;
+    }
+    if (slot.collapsed && !slot.expanded) {
+      slot.expanded = true;
+      this.paintClip(slot);
+      this.layout();
       return;
     }
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {

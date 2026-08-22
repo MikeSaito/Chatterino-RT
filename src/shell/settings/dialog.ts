@@ -228,6 +228,7 @@ function paintRuntime(
     data.timestampFormat,
     data.knobs["appearance.alternateMessages"] === true,
     data.knobs["appearance.separateMessages"] === true,
+    Number(data.knobs["appearance.collpseMessagesMinLines"] ?? 0),
     hideMod,
     data.knobs["appearance.showReplyButton"] === true,
     {

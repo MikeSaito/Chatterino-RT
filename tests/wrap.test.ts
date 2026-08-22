@@ -1,7 +1,9 @@
 import {
+  collapseWrapLines,
   indexToLineCol,
   lineColToIndex,
   renderWrapped,
+  withCollapsedEllipsis,
   wrapBody,
 } from "../src/chat/wrap.ts";
 import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
@@ -285,5 +287,25 @@ if (isScrollbarMarkColor("red") || isScrollbarMarkColor("#fff")) {
   throw new Error("scrollbar mark color must reject non-hex CSS names / short hex");
 }
 
-console.log("wrap tests ok");
+const longText = "alpha beta gamma delta epsilon zeta eta theta iota";
+const longLines = wrapBody(longText, 10, []);
+if (longLines.length < 3) {
+  throw new Error("expected multi-line wrap for collapse test");
+}
+const collapsed = collapseWrapLines(longLines, 2, longText, 10, []);
+if (!collapsed.collapsed || collapsed.lines.length !== 2) {
+  throw new Error(`expected 2 collapsed lines, got ${JSON.stringify(collapsed)}`);
+}
+const collapsedRender = withCollapsedEllipsis(
+  renderWrapped(longText, collapsed.lines, []),
+  collapsed.collapsed,
+);
+if (!collapsedRender.endsWith("...")) {
+  throw new Error(`collapsed render must end with ellipsis, got ${JSON.stringify(collapsedRender)}`);
+}
+const passthrough = collapseWrapLines(longLines, 0, longText, 10, []);
+if (passthrough.collapsed || passthrough.lines.length !== longLines.length) {
+  throw new Error("maxLines 0 must not collapse");
+}
 
+console.log("wrap tests ok");

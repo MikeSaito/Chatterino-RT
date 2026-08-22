@@ -162,6 +162,76 @@ export function lineColToIndex(
   return null;
 }
 
+const COLLAPSE_ELLIPSIS_COLS = 3;
+
+export type CollapsedWrap = {
+  lines: WrapLine[];
+  collapsed: boolean;
+};
+
+/** Stock collpseMessagesMinLines: keep first N wrap lines and trim last line for "...". */
+export function collapseWrapLines(
+  lines: readonly WrapLine[],
+  maxLines: number,
+  text: string,
+  lineWidth: number,
+  emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
+): CollapsedWrap {
+  maxLines = Math.max(0, Math.floor(Number(maxLines) || 0));
+  if (maxLines <= 0 || lines.length <= maxLines) {
+    return { lines: [...lines], collapsed: false };
+  }
+  const ctx = ctxFrom(opts);
+  const kept = lines.slice(0, maxLines);
+  const last = kept[maxLines - 1];
+  const budget = Math.max(1, lineWidth - COLLAPSE_ELLIPSIS_COLS);
+  const end = trimLineVisualEnd(text, last.start, last.end, budget, emotes, ctx);
+  kept[maxLines - 1] = { start: last.start, end };
+  return { lines: kept, collapsed: true };
+}
+
+export function withCollapsedEllipsis(rendered: string, collapsed: boolean): string {
+  if (!collapsed) {
+    return rendered;
+  }
+  const parts = rendered.split("\n");
+  if (parts.length === 0) {
+    return "...";
+  }
+  parts[parts.length - 1] = `${parts[parts.length - 1]}...`;
+  return parts.join("\n");
+}
+
+function trimLineVisualEnd(
+  text: string,
+  start: number,
+  end: number,
+  maxVisual: number,
+  emotes: readonly WrapEmote[],
+  ctx: WrapCtx,
+): number {
+  if (end <= start) {
+    return end;
+  }
+  let cols = visualWidth(text, start, end, emotes, ctx);
+  const row: WrapLine = { start, end };
+  while (cols > maxVisual && cols > 0) {
+    cols -= 1;
+  }
+  if (cols <= 0) {
+    return Math.min(end, nextUtf16(text, start));
+  }
+  const idx = lineColToIndex(text, [row], 0, cols, emotes, {
+    emoteMinCols: ctx.emoteMinCols,
+    maskEmotes: ctx.maskEmotes,
+    enableZeroWidth: ctx.enableZeroWidth,
+    removeSpacesBetweenEmotes: ctx.removeSpacesBetweenEmotes,
+    maskMentions: ctx.maskMentions,
+  });
+  return idx ?? end;
+}
+
 export function clipNick(nick: string, maxChars: number): string {
   if (maxChars <= 0) {
     return "";
