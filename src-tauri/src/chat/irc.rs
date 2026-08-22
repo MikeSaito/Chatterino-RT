@@ -557,6 +557,45 @@ fn dispatch_line(
                         set.add(&channel, &login, &login);
                     }
                 }
+                let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
+                if !part && login == nick {
+                    if shared
+                        .hub
+                        .lock()
+                        .ok()
+                        .is_some_and(|hub| hub.has_channel(&channel))
+                    {
+                        shared.post_channel_notice(app, &channel, "joined channel".into());
+                    }
+                } else if part {
+                    if super::membership_batch::should_show(
+                        shared,
+                        &channel,
+                        &login,
+                        self_login.as_deref(),
+                        false,
+                    ) {
+                        super::membership_batch::record_part(
+                            shared,
+                            app,
+                            channel.clone(),
+                            login,
+                        );
+                    }
+                } else if super::membership_batch::should_show(
+                    shared,
+                    &channel,
+                    &login,
+                    self_login.as_deref(),
+                    true,
+                ) {
+                    super::membership_batch::record_join(
+                        shared,
+                        app,
+                        channel.clone(),
+                        login,
+                    );
+                }
                 LineAction::None
             }
         }

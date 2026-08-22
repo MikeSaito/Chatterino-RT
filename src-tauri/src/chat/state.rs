@@ -13,6 +13,7 @@ use super::emotes::Catalog;
 use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule, ReplaceRule};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
+use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::types::ChatBatch;
@@ -125,6 +126,7 @@ pub struct Shared {
     pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
     /// Reserved outbound PRIVMSG slots (chat_send → wire flush).
     pub outbound_pending: Arc<AtomicUsize>,
+    pub membership_batch: Arc<Mutex<MembershipBatcher>>,
 }
 
 pub enum BatchSend {
@@ -165,6 +167,7 @@ impl Shared {
             allowed_highlight_sounds: Arc::new(Mutex::new(HashSet::new())),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
             outbound_pending: Arc::new(AtomicUsize::new(0)),
+            membership_batch: Arc::new(Mutex::new(MembershipBatcher::default())),
         }
     }
 
@@ -342,6 +345,63 @@ impl Shared {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }
+        }
+    }
+}
+
+impl Shared {
+    pub fn post_channel_notice(&self, app: &tauri::AppHandle, channel: &str, text: String) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use tauri::Emitter;
+
+        use super::auth;
+        use super::types::{ChatEvent, ChatPipe, ChatSendWait};
+
+        static SEQ: AtomicU64 = AtomicU64::new(1);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let event = ChatEvent::Notice {
+            id: format!("mb-{ts}-{seq}-{}", text.len()),
+            timestamp_ms: ts,
+            text,
+        };
+        let self_login = auth::resolved_login_token(self).map(|(l, _)| l);
+        let batch = self.hub.lock().ok().and_then(|mut hub| {
+            hub.ingest(channel, event, self_login.as_deref())
+        });
+        if let Some(batch) = batch {
+            match self.send_batch(&batch) {
+                BatchSend::Delivered => {}
+                BatchSend::EncodeError | BatchSend::NoSubscriber => {
+                    let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
+                    self.note_undelivered(&batch.channel_id, n);
+                    let _ = app.emit(
+                        "chat:pipe",
+                        ChatPipe {
+                            ok: false,
+                            channel: Some(batch.channel_id.clone()),
+                        },
+                    );
+                }
+            }
+        }
+        let updates = self
+            .hub
+            .lock()
+            .ok()
+            .map(|mut hub| hub.poll_send_waits())
+            .unwrap_or_default();
+        for (channel_id, wait_text) in updates {
+            let _ = app.emit(
+                "chat:send-wait",
+                ChatSendWait {
+                    channel_id,
+                    text: wait_text,
+                },
+            );
         }
     }
 }

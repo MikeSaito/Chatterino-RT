@@ -158,6 +158,29 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
     false
 }
 
+pub(crate) fn membership_login_ignored(shared: &super::state::Shared, login: &str) -> bool {
+    let self_login = super::auth::resolved_login_token(shared).map(|(l, _)| l);
+    if is_self(login, self_login.as_deref()) {
+        return false;
+    }
+    let filters = match shared.filters.lock() {
+        Ok(inner) => inner.data.clone(),
+        Err(_) => return false,
+    };
+    if filters
+        .ignore_logins
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(login))
+    {
+        return true;
+    }
+    let ignore_users = match shared.ignore_user_rules.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => Vec::new(),
+    };
+    login_is_blacklisted(login, &ignore_users)
+}
+
 const INLINE_WHISPER_HIGHLIGHT_COLOR: &str = "#772CE8";
 
 pub fn apply_whisper_highlight(shared: &Shared, event: &mut ChatEvent) {

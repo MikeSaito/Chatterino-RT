@@ -88,6 +88,13 @@ impl Chatters {
         }
     }
 
+    pub fn len(&self, channel: &str) -> usize {
+        self.by_channel
+            .get(channel)
+            .map(|room| room.names.len())
+            .unwrap_or(0)
+    }
+
     pub fn prefixed(
         &self,
         channel: &str,
@@ -238,6 +245,17 @@ mod tests {
         assert!(set.contains("xqc", "@Bob"));
         assert!(!set.contains("xqc", "alice"));
         assert!(!set.contains("other", "bob"));
+    }
+
+    #[test]
+    fn len_tracks_channel_size() {
+        let mut set = Chatters::default();
+        assert_eq!(set.len("xqc"), 0);
+        set.add("xqc", "a", "a");
+        set.add("xqc", "b", "b");
+        assert_eq!(set.len("xqc"), 2);
+        set.remove("xqc", "a");
+        assert_eq!(set.len("xqc"), 1);
     }
 
     #[test]
