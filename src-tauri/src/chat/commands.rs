@@ -330,17 +330,27 @@ pub fn chat_complete(
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
         return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
     }
-    let smart = {
+    let (smart, prefix_only) = {
         let settings = state
             .settings
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        settings
-            .data
-            .knobs
-            .get("experiments.useSmartEmoteCompletion")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
+        let knobs = &settings.data.knobs;
+        (
+            knobs
+                .get("experiments.useSmartEmoteCompletion")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            knobs
+                .get("behaviour.prefixOnlyEmoteCompletion")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+        )
+    };
+    let emote_mode = if prefix_only {
+        super::emotes::MatchMode::Prefix
+    } else {
+        super::emotes::MatchMode::Contains
     };
     let channel = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -369,7 +379,8 @@ pub fn chat_complete(
             ranked.truncate(complete::COMPLETE_LIMIT);
             ranked
         } else {
-            let mut emotes = catalog.codes_prefixed(&channel, needle);
+            let mut emotes =
+                catalog.codes_matching(&channel, needle, emote_mode, false, false);
             if needle.is_empty() {
                 emotes.truncate(complete::COMPLETE_LIMIT);
             }
@@ -391,14 +402,9 @@ pub fn chat_complete(
             .catalog
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        let pool = catalog.codes_matching(
-            &channel,
-            "",
-            super::emotes::MatchMode::Prefix,
-            false,
-            false,
-        );
-        let mut ranked = complete::apply_smart_emotes(&token, pool, false, false, false);
+        let pool = catalog.codes_matching(&channel, "", emote_mode, false, false);
+        let mut ranked =
+            complete::apply_smart_emotes(&token, pool, !prefix_only, false, false);
         ranked.truncate(complete::COMPLETE_LIMIT);
         ranked
     } else {
@@ -406,7 +412,7 @@ pub fn chat_complete(
             .catalog
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        catalog.codes_prefixed(&channel, &token)
+        catalog.codes_matching(&channel, &token, emote_mode, false, false)
     };
     let names = {
         let chatters = state

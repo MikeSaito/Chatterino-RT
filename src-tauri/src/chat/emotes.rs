@@ -703,4 +703,31 @@ mod tests {
         }
         assert!(cat.lookup("xqc", "Kappa").is_none());
     }
+
+    fn catalog_with_kappa_apple() -> Catalog {
+        let mut cat = Catalog::default();
+        cat.insert_global("Kappa".into(), def("1", "bttv", false));
+        cat.insert_global("Apple".into(), def("2", "bttv", false));
+        cat
+    }
+
+    #[test]
+    fn codes_matching_prefix_vs_contains() {
+        let cat = catalog_with_kappa_apple();
+        let prefix = cat.codes_matching("xqc", "ap", MatchMode::Prefix, false, false);
+        assert_eq!(prefix, vec!["Apple".to_string()]);
+        let contains = cat.codes_matching("xqc", "ap", MatchMode::Contains, false, false);
+        assert_eq!(contains.len(), 2);
+        assert!(contains.iter().any(|c| c == "Kappa"));
+        assert!(contains.iter().any(|c| c == "Apple"));
+    }
+
+    #[test]
+    fn codes_matching_empty_needle_returns_all_deduped() {
+        let cat = catalog_with_kappa_apple();
+        let all = cat.codes_matching("xqc", "", MatchMode::Prefix, false, false);
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().any(|c| c == "Kappa"));
+        assert!(all.iter().any(|c| c == "Apple"));
+    }
 }
