@@ -305,6 +305,24 @@ mod tests {
     }
 
     #[test]
+    fn emotes_only_when_no_users() {
+        let emotes = vec!["Kappa".to_string()];
+        assert_eq!(
+            suggestions("Ka", false, emotes, Vec::new()),
+            vec!["Kappa ".to_string()]
+        );
+    }
+
+    #[test]
+    fn at_only_users_without_emotes() {
+        let users = vec!["Kapper".to_string()];
+        assert_eq!(
+            suggestions("@ka", false, Vec::new(), users),
+            vec!["@Kapper ".to_string()]
+        );
+    }
+
+    #[test]
     fn emote_prefix_and_at_users() {
         let emotes = vec!["Kappa".to_string()];
         let users = vec!["Kapper".to_string()];

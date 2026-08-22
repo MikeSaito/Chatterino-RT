@@ -330,7 +330,7 @@ pub fn chat_complete(
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
         return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
     }
-    let (smart, prefix_only) = {
+    let (smart, prefix_only, user_completion_only_with_at) = {
         let settings = state
             .settings
             .lock()
@@ -345,6 +345,10 @@ pub fn chat_complete(
                 .get("behaviour.prefixOnlyEmoteCompletion")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
+            knobs
+                .get("behaviour.userCompletionOnlyWithAt")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         )
     };
     let emote_mode = if prefix_only {
@@ -414,7 +418,9 @@ pub fn chat_complete(
             .map_err(|_| ApiError::internal("lock"))?;
         catalog.codes_matching(&channel, &token, emote_mode, false, false)
     };
-    let names = {
+    let names = if user_completion_only_with_at && !at_only {
+        Vec::new()
+    } else {
         let chatters = state
             .chatters
             .lock()
