@@ -2104,6 +2104,111 @@ export class MessageRing {
     return hit?.url;
   }
 
+  /** Hover target for emote/badge tooltip (text + optional CDN image). */
+  tooltipHitAt(clientX: number, clientY: number): TooltipHit | null {
+    if (!this.ready) {
+      return null;
+    }
+    const canvas = this.app.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const stageY = this.app.stage.y;
+    const row = Math.floor((localY - stageY) / this.lineHeight);
+    if (row < 0) {
+      return null;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (!slot.msgId || !slot.root.visible) {
+        continue;
+      }
+      if (slot.disabled && this.hideModerated) {
+        continue;
+      }
+      const y0 = slot.startRow;
+      const y1 = slot.startRow + slot.lineCount;
+      if (row < y0 || row >= y1) {
+        continue;
+      }
+      const slotLocalY = localY - stageY - slot.startRow * this.lineHeight;
+      for (let b = 0; b < slot.badges.length; b += 1) {
+        const spr = slot.badges[b];
+        const badge = slot.badgesRaw[b];
+        if (!badge || !spr.visible) {
+          continue;
+        }
+        if (!spriteHit(localX, slotLocalY, spr)) {
+          continue;
+        }
+        return {
+          text: badgeTooltipText(badge.set),
+          imageUrl: badge.url,
+        };
+      }
+      const emoteHit = this.emoteTooltipAt(slot, localX, slotLocalY);
+      if (emoteHit) {
+        return emoteHit;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  private emoteTooltipAt(
+    slot: Slot,
+    localX: number,
+    slotLocalY: number,
+  ): TooltipHit | null {
+    if (this.enableEmoteImages) {
+      for (let e = slot.emotes.length - 1; e >= 0; e -= 1) {
+        const spr = slot.emotes[e];
+        const span = slot.spansRaw[e];
+        if (!span || !spr.visible) {
+          continue;
+        }
+        if (!spriteHit(localX, slotLocalY, spr)) {
+          continue;
+        }
+        return {
+          text: slot.bodyRaw.slice(span.start, span.end),
+          imageUrl: this.emoteLoadUrl(span),
+        };
+      }
+      return null;
+    }
+    if (
+      localX < slot.body.x ||
+      slotLocalY < 0 ||
+      slotLocalY >= slot.lineCount * this.lineHeight
+    ) {
+      return null;
+    }
+    const col = Math.floor((localX - slot.body.x) / this.charWidth);
+    const line = Math.floor(slotLocalY / this.lineHeight);
+    const idx = lineColToIndex(
+      slot.bodyRaw,
+      slot.wrapLines,
+      line,
+      col,
+      slot.spansRaw,
+      this.wrapOpts(slot),
+    );
+    if (idx === null) {
+      return null;
+    }
+    for (const span of slot.spansRaw) {
+      if (idx >= span.start && idx < span.end) {
+        return {
+          text: slot.bodyRaw.slice(span.start, span.end),
+          imageUrl: this.emoteLoadUrl(span),
+        };
+      }
+    }
+    return null;
+  }
+
   /** Hover reply chip: screen rect of last visible privmsg under pointer, or null. */
   replyAnchorAt(clientX: number, clientY: number): {
     msgId: string;
@@ -2432,6 +2537,28 @@ function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
   spr.texture = tex;
   spr.width = size;
   spr.height = size;
+}
+
+export type TooltipHit = {
+  text: string;
+  imageUrl?: string;
+};
+
+function spriteHit(localX: number, localY: number, spr: Sprite): boolean {
+  return (
+    localX >= spr.x &&
+    localX < spr.x + spr.width &&
+    localY >= spr.y &&
+    localY < spr.y + spr.height
+  );
+}
+
+function badgeTooltipText(set: string): string {
+  return set
+    .split(/[-_]/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function maxBodyChars(paneWidth: number, bodyX: number, charWidth: number): number {

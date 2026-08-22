@@ -32,6 +32,13 @@ import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
+import {
+  bindEmoteTooltip,
+  parseEmoteTooltipScale,
+  parseTooltipPreviewMode,
+  type EmoteTooltipScale,
+  type TooltipPreviewMode,
+} from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChannelLive, ChatStatus } from "./chat/types";
@@ -184,6 +191,25 @@ async function boot(): Promise<void> {
   const textures = new TextureLru();
   const ring = new MessageRing(app, textures);
   await ring.init();
+  const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
+  const emoteTooltipImg =
+    document.querySelector<HTMLImageElement>("#emote-tooltip-img");
+  const emoteTooltipText =
+    document.querySelector<HTMLElement>("#emote-tooltip-text");
+  let emotesTooltipPreview: TooltipPreviewMode = "AlwaysShow";
+  let emoteTooltipScale: EmoteTooltipScale = "Medium";
+  let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
+  if (emoteTooltip && emoteTooltipImg && emoteTooltipText && canvasHost) {
+    emoteTooltipCtl = bindEmoteTooltip({
+      host: canvasHost,
+      ring,
+      tooltip: emoteTooltip,
+      img: emoteTooltipImg,
+      text: emoteTooltipText,
+      getPreviewMode: () => emotesTooltipPreview,
+      getScale: () => emoteTooltipScale,
+    });
+  }
   teardownChat = () => {
     chatIpc?.stop();
     chatIpc = null;
@@ -204,6 +230,7 @@ async function boot(): Promise<void> {
     thumb: scrollThumb,
     jump: jumpBottom,
     onScroll: () => {
+      emoteTooltipCtl?.refresh();
       if (!replyBtn || replyBtn.hidden || !replyHover) {
         return;
       }
@@ -271,6 +298,12 @@ async function boot(): Promise<void> {
       }
       emoteCompletionWithColon = colonOn;
       showUsernameCompletionMenu = usernameMenuOn;
+      emotesTooltipPreview = parseTooltipPreviewMode(
+        data.knobs["misc.emotesTooltipPreview"],
+      );
+      emoteTooltipScale = parseEmoteTooltipScale(
+        data.knobs["emotes.emoteTooltipScale"],
+      );
     },
   });
   const ipc = bindChatIpc(ring);
