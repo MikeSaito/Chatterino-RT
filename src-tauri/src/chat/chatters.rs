@@ -88,10 +88,12 @@ impl Chatters {
         }
     }
 
-    pub fn prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
-        let Some(room) = self.by_channel.get(channel) else {
-            return Vec::new();
-        };
+    pub fn prefixed(
+        &self,
+        channel: &str,
+        prefix: &str,
+        include_broadcaster: bool,
+    ) -> Vec<String> {
         let needle = prefix
             .strip_prefix('@')
             .unwrap_or(prefix)
@@ -99,11 +101,19 @@ impl Chatters {
         if needle.is_empty() {
             return Vec::new();
         }
-        room.names
-            .iter()
-            .filter(|(k, _)| k.starts_with(&needle))
-            .map(|(_, display)| display.clone())
-            .collect()
+        let mut out = if let Some(room) = self.by_channel.get(channel) {
+            room.names
+                .iter()
+                .filter(|(k, _)| k.starts_with(&needle))
+                .map(|(_, display)| display.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if include_broadcaster {
+            push_broadcaster_if_missing(channel, &needle, &mut out);
+        }
+        out
     }
 
     pub fn contains(&self, channel: &str, login: &str) -> bool {
@@ -135,6 +145,17 @@ fn valid_login(login: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+fn push_broadcaster_if_missing(channel: &str, needle: &str, out: &mut Vec<String>) {
+    let login = channel.trim().to_ascii_lowercase();
+    if !valid_login(&login) || !login.starts_with(needle) {
+        return;
+    }
+    if out.iter().any(|n| n.eq_ignore_ascii_case(&login)) {
+        return;
+    }
+    out.push(login);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,15 +165,15 @@ mod tests {
         let mut set = Chatters::default();
         set.add("xqc", "Xqc", "xQc");
         set.add("xqc", "xqcow", "xqcow");
-        let mut got = set.prefixed("xqc", "xq");
+        let mut got = set.prefixed("xqc", "xq", false);
         crate::chat::complete::rank_prefix(&mut got, "xq");
         assert_eq!(got, vec!["xQc".to_string(), "xqcow".to_string()]);
-        let mut at = set.prefixed("xqc", "@xq");
+        let mut at = set.prefixed("xqc", "@xq", false);
         crate::chat::complete::rank_prefix(&mut at, "@xq");
         assert_eq!(at, vec!["xQc".to_string(), "xqcow".to_string()]);
-        assert!(set.prefixed("other", "xq").is_empty());
+        assert!(set.prefixed("other", "xq", false).is_empty());
         set.add("xqc", "%modder", "Modder");
-        let mut mods = set.prefixed("xqc", "mo");
+        let mut mods = set.prefixed("xqc", "mo", false);
         crate::chat::complete::rank_prefix(&mut mods, "mo");
         assert!(mods.iter().any(|n| n == "Modder"));
     }
@@ -162,11 +183,11 @@ mod tests {
         let mut set = Chatters::default();
         set.add("xqc", "bob", "bob");
         set.add("lirik", "alice", "alice");
-        assert_eq!(set.prefixed("xqc", "bo"), vec!["bob".to_string()]);
-        assert_eq!(set.prefixed("lirik", "al"), vec!["alice".to_string()]);
+        assert_eq!(set.prefixed("xqc", "bo", false), vec!["bob".to_string()]);
+        assert_eq!(set.prefixed("lirik", "al", false), vec!["alice".to_string()]);
         set.drop_channel("xqc");
-        assert!(set.prefixed("xqc", "bo").is_empty());
-        assert_eq!(set.prefixed("lirik", "al"), vec!["alice".to_string()]);
+        assert!(set.prefixed("xqc", "bo", false).is_empty());
+        assert_eq!(set.prefixed("lirik", "al", false), vec!["alice".to_string()]);
     }
 
     #[test]
@@ -188,7 +209,7 @@ mod tests {
         let mut set = Chatters::default();
         set.add("xqc", "bob", "bob");
         set.remove("xqc", "bob");
-        assert!(set.prefixed("xqc", "bo").is_empty());
+        assert!(set.prefixed("xqc", "bo", false).is_empty());
     }
 
     #[test]
@@ -196,17 +217,17 @@ mod tests {
         let mut set = Chatters::default();
         set.add("xqc", "bob", "밥");
         set.add("xqc", "alice", "Alice");
-        let mut bob = set.prefixed("xqc", "bo");
+        let mut bob = set.prefixed("xqc", "bo", false);
         crate::chat::complete::rank_prefix(&mut bob, "bo");
         assert_eq!(bob, vec!["bob".to_string()]);
-        let mut alice = set.prefixed("xqc", "al");
+        let mut alice = set.prefixed("xqc", "al", false);
         crate::chat::complete::rank_prefix(&mut alice, "al");
         assert_eq!(alice, vec!["Alice".to_string()]);
         set.add("xqc", "eve", "@@eve");
-        let mut eve = set.prefixed("xqc", "ev");
+        let mut eve = set.prefixed("xqc", "ev", false);
         crate::chat::complete::rank_prefix(&mut eve, "ev");
         assert_eq!(eve, vec!["eve".to_string()]);
-        assert!(set.prefixed("xqc", "@@ev").is_empty());
+        assert!(set.prefixed("xqc", "@@ev", false).is_empty());
     }
 
     #[test]
@@ -217,5 +238,35 @@ mod tests {
         assert!(set.contains("xqc", "@Bob"));
         assert!(!set.contains("xqc", "alice"));
         assert!(!set.contains("other", "bob"));
+    }
+
+    #[test]
+    fn include_broadcaster_injects_when_absent() {
+        let set = Chatters::default();
+        let got = set.prefixed("xqc", "xq", true);
+        assert_eq!(got, vec!["xqc".to_string()]);
+    }
+
+    #[test]
+    fn include_broadcaster_no_duplicate() {
+        let mut set = Chatters::default();
+        set.add("xqc", "xqc", "xQc");
+        set.add("xqc", "xqcow", "xqcow");
+        let got = set.prefixed("xqc", "xq", true);
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().any(|n| n == "xQc"));
+        assert!(got.iter().any(|n| n == "xqcow"));
+    }
+
+    #[test]
+    fn include_broadcaster_off() {
+        let set = Chatters::default();
+        assert!(set.prefixed("xqc", "xq", false).is_empty());
+    }
+
+    #[test]
+    fn include_broadcaster_respects_prefix() {
+        let set = Chatters::default();
+        assert!(set.prefixed("xqc", "zz", true).is_empty());
     }
 }

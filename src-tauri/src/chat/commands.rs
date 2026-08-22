@@ -330,7 +330,7 @@ pub fn chat_complete(
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
         return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
     }
-    let (smart, prefix_only, user_completion_only_with_at) = {
+    let (smart, prefix_only, user_completion_only_with_at, always_include_broadcaster) = {
         let settings = state
             .settings
             .lock()
@@ -349,6 +349,10 @@ pub fn chat_complete(
                 .get("behaviour.userCompletionOnlyWithAt")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            knobs
+                .get("behaviour.alwaysIncludeBroadcasterInUserCompletions")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         )
     };
     let emote_mode = if prefix_only {
@@ -425,7 +429,7 @@ pub fn chat_complete(
             .chatters
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        chatters.prefixed(&channel, &token)
+        chatters.prefixed(&channel, &token, always_include_broadcaster)
     };
     Ok(complete::suggestions_with_rank(
         &token,
