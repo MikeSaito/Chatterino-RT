@@ -24,6 +24,11 @@ export function isColonEmoteToken(token: string): boolean {
   return token.startsWith(":");
 }
 
+/** Stock SplitInput user mention popup: token starts with `@` at word boundary. */
+export function isAtUserToken(token: string): boolean {
+  return token.startsWith("@");
+}
+
 function isBreak(ch: string): boolean {
   return ch === " ";
 }

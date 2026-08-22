@@ -32,7 +32,7 @@ import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
-import { isColonEmoteToken, tokenAtCursor } from "./chat/token";
+import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus } from "./chat/types";
 
@@ -161,6 +161,7 @@ async function boot(): Promise<void> {
   };
   let mentionUsersWithComma = true;
   let emoteCompletionWithColon = true;
+  let showUsernameCompletionMenu = true;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
     if (!li || !completeBox.contains(li)) {
@@ -256,8 +257,17 @@ async function boot(): Promise<void> {
       };
       mentionUsersWithComma =
         data.knobs["behaviour.mentionUsersWithComma"] !== false;
-      emoteCompletionWithColon =
-        data.knobs["behaviour.emoteCompletionWithColon"] !== false;
+      const colonOn = data.knobs["behaviour.emoteCompletionWithColon"] !== false;
+      const usernameMenuOn =
+        data.knobs["behaviour.showUsernameCompletionMenu"] !== false;
+      if (!colonOn && complete?.popup === "colon") {
+        clearComplete();
+      }
+      if (!usernameMenuOn && complete?.popup === "at") {
+        clearComplete();
+      }
+      emoteCompletionWithColon = colonOn;
+      showUsernameCompletionMenu = usernameMenuOn;
     },
   });
   const ipc = bindChatIpc(ring);
@@ -422,7 +432,7 @@ async function boot(): Promise<void> {
     suffix: string;
     items: string[];
     index: number;
-    colon: boolean;
+    popup: "colon" | "at" | null;
     query: string;
   } | null = null;
   let applyingComplete = false;
@@ -647,6 +657,8 @@ async function boot(): Promise<void> {
     const { token } = tokenAtCursor(messageInput.value, cursor);
     if (emoteCompletionWithColon && isColonEmoteToken(token)) {
       void refreshColonComplete();
+    } else if (showUsernameCompletionMenu && isAtUserToken(token)) {
+      void refreshAtUserComplete();
     } else {
       clearComplete();
     }
@@ -661,7 +673,9 @@ async function boot(): Promise<void> {
     const { token } = tokenAtCursor(messageInput.value, cursor);
     if (emoteCompletionWithColon && isColonEmoteToken(token)) {
       void refreshColonComplete();
-    } else if (complete?.colon) {
+    } else if (showUsernameCompletionMenu && isAtUserToken(token)) {
+      void refreshAtUserComplete();
+    } else if (complete?.popup) {
       clearComplete();
     }
   });
@@ -899,7 +913,7 @@ async function boot(): Promise<void> {
     const text = messageInput.value;
     const { start, token, firstWord } = tokenAtCursor(text, cursor);
     if (!isColonEmoteToken(token)) {
-      if (complete?.colon) {
+      if (complete?.popup === "colon") {
         clearComplete();
       }
       return;
@@ -910,7 +924,7 @@ async function boot(): Promise<void> {
     try {
       items = await invoke<string[]>("chat_complete", { token, firstWord });
     } catch {
-      if (seq === completeSeq && complete?.colon) {
+      if (seq === completeSeq && complete?.popup === "colon") {
         clearComplete();
       }
       return;
@@ -941,7 +955,63 @@ async function boot(): Promise<void> {
       suffix: now.slice(nowCursor),
       items,
       index: 0,
-      colon: true,
+      popup: "colon",
+      query: token,
+    };
+    paintComplete();
+  }
+
+  async function refreshAtUserComplete(): Promise<void> {
+    if (applyingComplete || !showUsernameCompletionMenu) {
+      return;
+    }
+    const cursor = messageInput.selectionStart ?? 0;
+    const text = messageInput.value;
+    const { start, token, firstWord } = tokenAtCursor(text, cursor);
+    if (!isAtUserToken(token)) {
+      if (complete?.popup === "at") {
+        clearComplete();
+      }
+      return;
+    }
+    const seq = ++completeSeq;
+    completeInFlight = true;
+    let items: string[] = [];
+    try {
+      items = await invoke<string[]>("chat_complete", { token, firstWord });
+    } catch {
+      if (seq === completeSeq && complete?.popup === "at") {
+        clearComplete();
+      }
+      return;
+    } finally {
+      if (seq === completeSeq) {
+        completeInFlight = false;
+      }
+    }
+    if (seq !== completeSeq) {
+      return;
+    }
+    const now = messageInput.value;
+    const nowCursor = messageInput.selectionStart ?? 0;
+    const nowTok = tokenAtCursor(now, nowCursor);
+    if (nowTok.start !== start || nowTok.token !== token) {
+      clearComplete();
+      if (showUsernameCompletionMenu && isAtUserToken(nowTok.token)) {
+        void refreshAtUserComplete();
+      }
+      return;
+    }
+    if (items.length === 0) {
+      clearComplete();
+      return;
+    }
+    complete = {
+      start,
+      suffix: now.slice(nowCursor),
+      items,
+      index: 0,
+      popup: "at",
       query: token,
     };
     paintComplete();
@@ -960,10 +1030,15 @@ async function boot(): Promise<void> {
         writeComplete();
         return;
       }
-      if (complete.colon && complete.items.length > 0) {
+      if (complete.popup && complete.items.length > 0) {
         const { token } = tokenAtCursor(text, cursor);
+        const popupKind = isColonEmoteToken(token)
+          ? "colon"
+          : isAtUserToken(token)
+            ? "at"
+            : null;
         if (
-          isColonEmoteToken(token) &&
+          popupKind === complete.popup &&
           complete.start === tokenAtCursor(text, cursor).start &&
           token === complete.query
         ) {
@@ -1027,7 +1102,11 @@ async function boot(): Promise<void> {
       suffix: now.slice(nowCursor),
       items,
       index,
-      colon: isColonEmoteToken(token),
+      popup: isColonEmoteToken(token)
+        ? "colon"
+        : isAtUserToken(token)
+          ? "at"
+          : null,
       query: token,
     };
     writeComplete();
@@ -1043,7 +1122,7 @@ async function boot(): Promise<void> {
       messageInput.value = `${messageInput.value.slice(0, complete.start)}${item}${complete.suffix}`;
       const pos = complete.start + item.length;
       messageInput.setSelectionRange(pos, pos);
-      complete.colon = false;
+      complete.popup = null;
       paintComplete();
     } finally {
       applyingComplete = false;

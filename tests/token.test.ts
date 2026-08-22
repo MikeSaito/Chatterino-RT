@@ -1,4 +1,4 @@
-import { isColonEmoteToken, tokenAtCursor } from "../src/chat/token.ts";
+import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "../src/chat/token.ts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -61,6 +61,14 @@ function assert(cond: boolean, msg: string): void {
   assert(mid.token === ":Ka" && isColonEmoteToken(mid.token), `colon mid ${JSON.stringify(mid)}`);
   const url = tokenAtCursor("http://x", 8);
   assert(url.token === "http://x" && !isColonEmoteToken(url.token), `url ${JSON.stringify(url)}`);
+}
+
+{
+  assert(isAtUserToken("@xq"), "@xq is at user");
+  assert(!isAtUserToken("Kappa"), "plain token is not at user");
+  assert(!isAtUserToken(":K"), "colon token is not at user");
+  const at = tokenAtCursor("hi @xq", 6);
+  assert(at.token === "@xq" && isAtUserToken(at.token), `at mid ${JSON.stringify(at)}`);
 }
 
 console.log("token tests ok");
