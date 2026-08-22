@@ -12,6 +12,16 @@ pub fn suggestions(
     mut emote_codes: Vec<String>,
     mut chatter_names: Vec<String>,
 ) -> Vec<String> {
+    suggestions_with_rank(token, first_word, emote_codes, chatter_names, true)
+}
+
+pub fn suggestions_with_rank(
+    token: &str,
+    first_word: bool,
+    mut emote_codes: Vec<String>,
+    mut chatter_names: Vec<String>,
+    rank_emotes: bool,
+) -> Vec<String> {
     if token.chars().count() < MIN_QUERY && token != ":" {
         return Vec::new();
     }
@@ -26,7 +36,9 @@ pub fn suggestions(
     }
     let with_at = token.starts_with('@');
     let colon_emote = token.starts_with(':');
-    rank_prefix(&mut emote_codes, token);
+    if rank_emotes {
+        rank_prefix(&mut emote_codes, token);
+    }
     rank_prefix(&mut chatter_names, token);
     let mut out = Vec::new();
     if !with_at {
@@ -63,6 +75,131 @@ pub fn suggestions(
 /// Lone `:` → `Some("")` (match all emotes, capped by caller).
 pub fn colon_emote_needle(token: &str) -> Option<&str> {
     token.strip_prefix(':')
+}
+
+/// Stock SmartEmoteStrategy / SmartTabEmoteStrategy (MIT reimpl).
+/// `contains`: true = popup colon path; false = Tab prefix-only path.
+pub fn apply_smart_emotes(
+    query_needle: &str,
+    codes: Vec<String>,
+    contains: bool,
+    ignore_colon_for_cost: bool,
+    ignore_tilde_for_cost: bool,
+) -> Vec<String> {
+    if codes.is_empty() {
+        return codes;
+    }
+    let have_upper = query_needle.chars().any(|c| c.is_uppercase());
+    let matches = |code: &str, case_sensitive: bool| -> bool {
+        if query_needle.is_empty() {
+            return true;
+        }
+        smart_needle_match(code, query_needle, contains, case_sensitive)
+    };
+    let mut matched: Vec<String> = codes
+        .iter()
+        .filter(|c| matches(c, have_upper))
+        .cloned()
+        .collect();
+    let prioritize_upper;
+    if matched.is_empty() {
+        if !have_upper {
+            return Vec::new();
+        }
+        matched = codes
+            .into_iter()
+            .filter(|c| matches(&c, false))
+            .collect();
+        if matched.is_empty() {
+            return matched;
+        }
+        prioritize_upper = true;
+    } else {
+        prioritize_upper = false;
+    }
+    smart_emote_rank(
+        query_needle,
+        &mut matched,
+        prioritize_upper,
+        ignore_colon_for_cost,
+        ignore_tilde_for_cost,
+    );
+    matched
+}
+
+fn smart_needle_match(code: &str, needle: &str, contains: bool, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        if contains {
+            code.contains(needle)
+        } else {
+            code.starts_with(needle)
+        }
+    } else {
+        let code_l = code.to_ascii_lowercase();
+        let needle_l = needle.to_ascii_lowercase();
+        if contains {
+            code_l.contains(&needle_l)
+        } else {
+            code_l.starts_with(&needle_l)
+        }
+    }
+}
+
+fn strip_for_cost<'a>(emote: &'a str, ignore_colon: bool, ignore_tilde: bool) -> &'a str {
+    let mut s = emote;
+    if ignore_colon {
+        s = s.strip_prefix(':').unwrap_or(s);
+    }
+    if ignore_tilde {
+        s = s.strip_prefix('~').unwrap_or(s);
+    }
+    s
+}
+
+fn cost_of_emote(query: &str, emote: &str, prioritize_upper: bool) -> i32 {
+    let mut score: i32 = 0;
+    if prioritize_upper {
+        for c in emote.chars() {
+            if !c.is_uppercase() {
+                score += 1;
+            }
+        }
+    } else {
+        for (qc, ec) in query.chars().zip(emote.chars()) {
+            if qc.is_uppercase() != ec.is_uppercase() {
+                score += 1;
+            }
+        }
+    }
+    if score == 0 {
+        score = -10;
+    }
+    let q_len = query.chars().count() as i32;
+    let e_len = emote.chars().count() as i32;
+    let diff = e_len - q_len;
+    if diff > 0 {
+        score += diff * 100;
+    }
+    score
+}
+
+fn smart_emote_rank(
+    query: &str,
+    codes: &mut [String],
+    prioritize_upper: bool,
+    ignore_colon: bool,
+    ignore_tilde: bool,
+) {
+    codes.sort_by(|a, b| {
+        let sa = strip_for_cost(a, ignore_colon, ignore_tilde);
+        let sb = strip_for_cost(b, ignore_colon, ignore_tilde);
+        let cost_a = cost_of_emote(query, sa, prioritize_upper);
+        let cost_b = cost_of_emote(query, sb, prioritize_upper);
+        if cost_a != cost_b {
+            return cost_a.cmp(&cost_b);
+        }
+        sa.to_ascii_lowercase().cmp(&sb.to_ascii_lowercase())
+    });
 }
 
 pub fn rank_prefix(items: &mut Vec<String>, prefix: &str) {
@@ -207,5 +344,52 @@ mod tests {
             vec!["Kapper".to_string()],
         );
         assert_eq!(no_users, vec!["Kappa ".to_string()]);
+    }
+
+    #[test]
+    fn smart_contains_and_cost_order() {
+        let codes = vec![
+            "xxKappa".to_string(),
+            "Kappa".to_string(),
+            "KappaPride".to_string(),
+        ];
+        let ranked = apply_smart_emotes("Kappa", codes, true, true, false);
+        assert_eq!(ranked.first().map(String::as_str), Some("Kappa"));
+        assert!(ranked.iter().any(|c| c == "xxKappa"));
+        assert!(ranked.iter().any(|c| c == "KappaPride"));
+        assert!(
+            ranked.iter().position(|c| c == "Kappa").unwrap()
+                < ranked.iter().position(|c| c == "KappaPride").unwrap()
+        );
+        let empty_q = apply_smart_emotes(
+            "",
+            vec!["LongName".into(), "Ab".into(), "Mid".into()],
+            true,
+            true,
+            false,
+        );
+        assert_eq!(empty_q.first().map(String::as_str), Some("Ab"));
+        let colon_code = apply_smart_emotes(
+            ")",
+            vec![":)".into(), "Kappa".into()],
+            true,
+            true,
+            false,
+        );
+        assert_eq!(colon_code.first().map(String::as_str), Some(":)"));
+    }
+
+    #[test]
+    fn smart_uppercase_prefers_case_match() {
+        let codes = vec!["pajaW".to_string(), "PAJAW".to_string()];
+        let ranked = apply_smart_emotes("PA", codes, false, false, false);
+        assert_eq!(ranked, vec!["PAJAW".to_string()]);
+    }
+
+    #[test]
+    fn smart_preserves_order_in_suggestions_with_rank_false() {
+        let emotes = vec!["B".to_string(), "A".to_string()];
+        let out = suggestions_with_rank("ab", false, emotes, Vec::new(), false);
+        assert_eq!(out, vec!["B ".to_string(), "A ".to_string()]);
     }
 }

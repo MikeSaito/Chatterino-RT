@@ -1,5 +1,30 @@
 use super::types::EmoteSpan;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchMode {
+    Prefix,
+    Contains,
+}
+
+fn needle_matches(code: &str, needle: &str, mode: MatchMode, case_sensitive: bool) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if case_sensitive {
+        match mode {
+            MatchMode::Prefix => code.starts_with(needle),
+            MatchMode::Contains => code.contains(needle),
+        }
+    } else {
+        let code_l = code.to_ascii_lowercase();
+        let needle_l = needle.to_ascii_lowercase();
+        match mode {
+            MatchMode::Prefix => code_l.starts_with(&needle_l),
+            MatchMode::Contains => code_l.contains(&needle_l),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmoteDef {
     pub id: String,
@@ -131,11 +156,25 @@ impl Catalog {
     }
 
     pub fn codes_prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
-        let needle = prefix.to_ascii_lowercase();
+        self.codes_matching(channel, prefix, MatchMode::Prefix, false, false)
+    }
+
+    /// Emote codes for completion. Empty needle = all (caller caps).
+    pub fn codes_matching(
+        &self,
+        channel: &str,
+        needle: &str,
+        mode: MatchMode,
+        case_sensitive: bool,
+        zero_width_only: bool,
+    ) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let mut push = |code: &str| {
-            if !needle.is_empty() && !code.to_ascii_lowercase().starts_with(&needle) {
+        let mut push = |code: &str, def: &EmoteDef| {
+            if zero_width_only && !def.zero_width {
+                return;
+            }
+            if !needle_matches(code, needle, mode, case_sensitive) {
                 return;
             }
             if seen.insert(code.to_ascii_lowercase()) {
@@ -143,12 +182,12 @@ impl Catalog {
             }
         };
         if let Some(map) = self.channel.get(channel) {
-            for code in map.keys() {
-                push(code);
+            for (code, def) in map {
+                push(code, def);
             }
         }
-        for code in self.global.keys() {
-            push(code);
+        for (code, def) in &self.global {
+            push(code, def);
         }
         out
     }

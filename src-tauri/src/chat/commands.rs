@@ -330,6 +330,18 @@ pub fn chat_complete(
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
         return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
     }
+    let smart = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        settings
+            .data
+            .knobs
+            .get("experiments.useSmartEmoteCompletion")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
     let channel = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.active.clone().unwrap_or_default()
@@ -340,20 +352,55 @@ pub fn chat_complete(
             .catalog
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        let mut emotes = catalog.codes_prefixed(&channel, needle);
-        if needle.is_empty() {
-            emotes.truncate(complete::COMPLETE_LIMIT);
-        }
-        return Ok(complete::suggestions(
+        let emotes = if smart {
+            let (zw_only, query) = if let Some(rest) = needle.strip_prefix('~') {
+                (true, rest)
+            } else {
+                (false, needle)
+            };
+            let pool = catalog.codes_matching(
+                &channel,
+                "",
+                super::emotes::MatchMode::Contains,
+                false,
+                zw_only,
+            );
+            let mut ranked = complete::apply_smart_emotes(query, pool, true, true, zw_only);
+            ranked.truncate(complete::COMPLETE_LIMIT);
+            ranked
+        } else {
+            let mut emotes = catalog.codes_prefixed(&channel, needle);
+            if needle.is_empty() {
+                emotes.truncate(complete::COMPLETE_LIMIT);
+            }
+            emotes
+        };
+        return Ok(complete::suggestions_with_rank(
             &token,
             first_word,
             emotes,
             Vec::new(),
+            !smart,
         ));
     }
     let at_only = token.starts_with('@');
     let emotes = if at_only {
         Vec::new()
+    } else if smart {
+        let catalog = state
+            .catalog
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        let pool = catalog.codes_matching(
+            &channel,
+            "",
+            super::emotes::MatchMode::Prefix,
+            false,
+            false,
+        );
+        let mut ranked = complete::apply_smart_emotes(&token, pool, false, false, false);
+        ranked.truncate(complete::COMPLETE_LIMIT);
+        ranked
     } else {
         let catalog = state
             .catalog
@@ -368,8 +415,12 @@ pub fn chat_complete(
             .map_err(|_| ApiError::internal("lock"))?;
         chatters.prefixed(&channel, &token)
     };
-    Ok(complete::suggestions(
-        &token, first_word, emotes, names,
+    Ok(complete::suggestions_with_rank(
+        &token,
+        first_word,
+        emotes,
+        names,
+        !smart || at_only,
     ))
 }
 
