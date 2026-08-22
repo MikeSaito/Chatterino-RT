@@ -206,6 +206,9 @@ function paintRuntime(
   const hideMod =
     data.knobs["appearance.hideModerationActions"] === true ||
     (sm.active && sm.hideModActions);
+  const hideDel = data.knobs["appearance.hideDeletionActions"] === true;
+  const delLenRaw = Number(data.knobs["behaviour.deletedMessageLengthLimit"] ?? 50);
+  const delLen = Number.isFinite(delLenRaw) ? delLenRaw : 50;
   const preset = resolveThemePreset({
     theme: String(data.knobs["appearance.theme"] ?? "Dark"),
     darkSystem: String(data.knobs["appearance.darkSystemTheme"] ?? "Dark"),
@@ -230,6 +233,8 @@ function paintRuntime(
     data.knobs["appearance.separateMessages"] === true,
     Number(data.knobs["appearance.collpseMessagesMinLines"] ?? 0),
     hideMod,
+    hideDel,
+    delLen,
     data.knobs["appearance.showReplyButton"] === true,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,

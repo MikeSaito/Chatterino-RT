@@ -173,6 +173,8 @@ export class MessageRing {
   private findHitId = "";
   private hideModerated = false;
   private hideModerationActions = false;
+  private hideDeletionActions = false;
+  private deletedMessageLengthLimit = 50;
   private showReplyButton = false;
   private alternateMessages = false;
   private separateMessages = false;
@@ -566,6 +568,8 @@ export class MessageRing {
     separateMessages = false,
     collapseMessagesMinLines = 0,
     hideModerationActions = false,
+    hideDeletionActions = false,
+    deletedMessageLengthLimit = 50,
     showReplyButton = false,
     emotes?: {
       scale?: number;
@@ -591,6 +595,11 @@ export class MessageRing {
       Math.floor(Number(collapseMessagesMinLines) || 0),
     );
     this.hideModerationActions = hideModerationActions;
+    this.hideDeletionActions = hideDeletionActions;
+    this.deletedMessageLengthLimit = Math.max(
+      0,
+      Math.floor(Number(deletedMessageLengthLimit) || 0),
+    );
     this.showReplyButton = showReplyButton;
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
     this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
@@ -994,7 +1003,34 @@ export class MessageRing {
 
   private pushOne(event: ChatEvent): void {
     if (event.kind === "clearmsg") {
+      const target = this.findSlotByMsgId(event.targetId);
+      if (!target) {
+        return;
+      }
       this.disableById(event.targetId);
+      if (this.hideDeletionActions || this.hideModerationActions) {
+        this.layout();
+        return;
+      }
+      const login = target.nickLogin || target.login || "unknown";
+      const notice: ChatEvent = {
+        kind: "notice",
+        id: `${event.id}:del`,
+        timestampMs: event.timestampMs,
+        text: deletionNoticeText(
+          login,
+          target.copyText,
+          this.deletedMessageLengthLimit,
+        ),
+      };
+      const slot = this.slots[this.head];
+      this.write(slot, notice);
+      this.head = (this.head + 1) % MESSAGE_POOL_SIZE;
+      if (this.occupied < MESSAGE_POOL_SIZE) {
+        this.occupied += 1;
+      }
+      this.bumpHighlightMarks();
+      this.layout();
       return;
     }
     if (event.kind === "clearchat") {
@@ -1022,6 +1058,18 @@ export class MessageRing {
   }
 
   /** Soft-delete: MessageFlag::Disabled, слот остаётся (Chatterino Channel). */
+  private findSlotByMsgId(id: string): Slot | undefined {
+    if (!id) {
+      return undefined;
+    }
+    for (const slot of this.slots) {
+      if (slot.msgId === id) {
+        return slot;
+      }
+    }
+    return undefined;
+  }
+
   private disableById(id: string): void {
     for (const slot of this.slots) {
       if (slot.msgId === id) {
@@ -2284,6 +2332,17 @@ function clearchatText(login: string | undefined, durationSec: number | undefine
     return `${login} тайм-аут ${durationSec}с`;
   }
   return `${login} забанен`;
+}
+
+function deletionNoticeText(login: string, body: string, limit: number): string {
+  return `A message from ${login} was deleted: ${truncateDeletedBody(body, limit)}`;
+}
+
+function truncateDeletedBody(body: string, limit: number): string {
+  if (limit <= 0 || body.length <= limit) {
+    return body;
+  }
+  return `${body.slice(0, limit)}…`;
 }
 
 function shiftSpans<T extends { start: number; end: number }>(spans: T[], shift: number): T[] {
