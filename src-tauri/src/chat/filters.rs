@@ -300,12 +300,14 @@ pub(crate) fn apply_highlight(
             highlight_color,
             highlight_sound,
             highlight_sound_path,
+            highlight_flash,
             ..
         } => {
             let hit = highlight_hit(filters, sound, login, text, badges, self_login);
             *highlight_color = hit.color;
             *highlight_sound = hit.sound;
             *highlight_sound_path = hit.sound_path;
+            *highlight_flash = hit.flash;
             if highlight_color.is_none() {
                 let redeemed = kinds.enable_redeemed
                     && (custom_reward_id.as_ref().is_some_and(|s| !s.is_empty())
@@ -331,6 +333,7 @@ pub(crate) fn apply_highlight(
             highlight_color,
             highlight_sound,
             highlight_sound_path,
+            highlight_flash,
             ..
         } => {
             let sender = login
@@ -357,17 +360,20 @@ pub(crate) fn apply_highlight(
             *highlight_color = hit.color.clone();
             *highlight_sound = hit.sound;
             *highlight_sound_path = hit.sound_path.clone();
+            *highlight_flash = hit.flash;
             if let Some(inner) = privmsg.as_mut() {
                 if let ChatEvent::Privmsg {
                     highlight_color: inner_color,
                     highlight_sound: inner_sound,
                     highlight_sound_path: inner_sound_path,
+                    highlight_flash: inner_flash,
                     ..
                 } = inner.as_mut()
                 {
                     *inner_color = hit.color;
                     *inner_sound = hit.sound;
                     *inner_sound_path = hit.sound_path;
+                    *inner_flash = hit.flash;
                 }
             }
             // HighlightController: Sub before Phrase — overwrite for sub USERNOTICE.
@@ -469,6 +475,7 @@ pub(crate) struct PhraseRule {
     pub play: bool,
     pub color: String,
     pub custom_sound: String,
+    pub flash_taskbar: bool,
     pub is_regex: bool,
     pub case_sensitive: bool,
     /// Compiled only when `is_regex`; None if pattern invalid (never matches).
@@ -481,6 +488,7 @@ impl PhraseRule {
         play: bool,
         color: String,
         custom_sound: String,
+        flash_taskbar: bool,
         is_regex: bool,
         case_sensitive: bool,
     ) -> Self {
@@ -498,6 +506,7 @@ impl PhraseRule {
             play,
             color,
             custom_sound,
+            flash_taskbar,
             is_regex,
             case_sensitive,
             compiled,
@@ -506,7 +515,15 @@ impl PhraseRule {
 
     #[cfg(test)]
     fn plain(pattern: &str, play: bool, color: &str) -> Self {
-        Self::from_row(pattern.into(), play, color.into(), String::new(), false, false)
+        Self::from_row(
+            pattern.into(),
+            play,
+            color.into(),
+            String::new(),
+            false,
+            false,
+            false,
+        )
     }
 }
 
@@ -521,6 +538,7 @@ pub fn ignore_block_rules_from_settings(data: &super::settings::AppSettings) -> 
                 false,
                 String::new(),
                 String::new(),
+                false,
                 r.regex,
                 r.case_sensitive,
             )
@@ -983,10 +1001,10 @@ pub(crate) struct HighlightSoundCtx {
     pub enable_self_message: bool,
     pub self_message_color: String,
     pub phrase_rules: Vec<PhraseRule>,
-    /// username → (play_sound, raw color, custom_sound path)
-    pub user_sound: Vec<(String, bool, String, String)>,
-    /// badge name (`set` or `set/version`, comma-separated) → (play, color, custom_sound)
-    pub badge_rows: Vec<(String, bool, String, String)>,
+    /// username → (play_sound, raw color, custom_sound path, flash_taskbar)
+    pub user_sound: Vec<(String, bool, String, String, bool)>,
+    /// badge name → (play, color, custom_sound, flash_taskbar)
+    pub badge_rows: Vec<(String, bool, String, String, bool)>,
 }
 
 impl Default for HighlightSoundCtx {
@@ -1045,6 +1063,7 @@ impl HighlightSoundCtx {
                     r.play_sound,
                     r.color.clone(),
                     r.custom_sound.clone(),
+                    r.flash_taskbar,
                     r.regex,
                     r.case_sensitive,
                 )
@@ -1060,6 +1079,7 @@ impl HighlightSoundCtx {
                     r.play_sound,
                     r.color.clone(),
                     r.custom_sound.clone(),
+                    r.flash_taskbar,
                 )
             })
             .collect();
@@ -1073,6 +1093,7 @@ impl HighlightSoundCtx {
                     r.play_sound,
                     r.color.clone(),
                     r.custom_sound.clone(),
+                    r.flash_taskbar,
                 )
             })
             .collect();
@@ -1093,6 +1114,7 @@ struct HighlightHit {
     color: Option<String>,
     sound: bool,
     sound_path: Option<String>,
+    flash: bool,
 }
 
 fn highlight_sound_path(play: bool, custom_sound: &str) -> Option<String> {
@@ -1149,7 +1171,7 @@ fn first_custom_sound_in_check_order(
             }
         }
     }
-    for (user, play, _, custom_sound) in &sound.user_sound {
+    for (user, play, _, custom_sound, _) in &sound.user_sound {
         if user.eq_ignore_ascii_case(login) {
             if let Some(p) = highlight_sound_path(*play, custom_sound) {
                 return Some(p);
@@ -1161,17 +1183,17 @@ fn first_custom_sound_in_check_order(
         .iter()
         .any(|item| item.eq_ignore_ascii_case(login))
     {
-        if let Some((_, play, _, custom)) = sound
+        if let Some((_, play, _, custom, _)) = sound
             .user_sound
             .iter()
-            .find(|(u, _, _, _)| u.eq_ignore_ascii_case(login))
+            .find(|(u, _, _, _, _)| u.eq_ignore_ascii_case(login))
         {
             if let Some(p) = highlight_sound_path(*play, custom) {
                 return Some(p);
             }
         }
     }
-    for (name, play, _, custom_sound) in &sound.badge_rows {
+    for (name, play, _, custom_sound, _) in &sound.badge_rows {
         if badge_matches(name, badges) {
             if let Some(p) = highlight_sound_path(*play, custom_sound) {
                 return Some(p);
@@ -1179,6 +1201,60 @@ fn first_custom_sound_in_check_order(
         }
     }
     None
+}
+
+fn first_flash_in_check_order(
+    filters: &Filters,
+    sound: &HighlightSoundCtx,
+    login: &str,
+    text: &str,
+    badges: &[Badge],
+    self_login: Option<&str>,
+) -> bool {
+    let self_msg = is_self(login, self_login);
+    if self_msg && sound.enable_self_message {
+        return false;
+    }
+    if !self_msg && filters.enable_self_highlight {
+        if let Some(me) = self_login {
+            if phrase_matches(text, me) {
+                return true;
+            }
+        }
+    }
+    if !self_msg {
+        for rule in &sound.phrase_rules {
+            if phrase_matches_ex(text, rule) && rule.flash_taskbar {
+                return true;
+            }
+        }
+    }
+    for (user, _, _, _, flash) in &sound.user_sound {
+        if user.eq_ignore_ascii_case(login) && *flash {
+            return true;
+        }
+    }
+    if filters
+        .highlight_logins
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(login))
+    {
+        if let Some((_, _, _, _, flash)) = sound
+            .user_sound
+            .iter()
+            .find(|(u, _, _, _, _)| u.eq_ignore_ascii_case(login))
+        {
+            if *flash {
+                return true;
+            }
+        }
+    }
+    for (name, _, _, _, flash) in &sound.badge_rows {
+        if badge_matches(name, badges) && *flash {
+            return true;
+        }
+    }
+    false
 }
 
 fn highlight_primary(
@@ -1231,7 +1307,7 @@ fn highlight_primary(
             }
         }
     }
-    for (user, play, color, _) in &sound.user_sound {
+    for (user, play, color, _, _) in &sound.user_sound {
         if user.eq_ignore_ascii_case(login) {
             return (Some(resolve_highlight_color(color)), *play);
         }
@@ -1244,12 +1320,12 @@ fn highlight_primary(
         let (play, color) = sound
             .user_sound
             .iter()
-            .find(|(u, _, _, _)| u.eq_ignore_ascii_case(login))
-            .map(|(_, p, c, _)| (*p, c.as_str()))
+            .find(|(u, _, _, _, _)| u.eq_ignore_ascii_case(login))
+            .map(|(_, p, c, _, _)| (*p, c.as_str()))
             .unwrap_or((false, ""));
         return (Some(resolve_highlight_color(color)), play);
     }
-    for (name, play, color, _) in &sound.badge_rows {
+    for (name, play, color, _, _) in &sound.badge_rows {
         if badge_matches(name, badges) {
             return (
                 Some(resolve_highlight_color_or(color, BADGE_HIGHLIGHT_COLOR)),
@@ -1275,10 +1351,12 @@ fn highlight_hit(
     } else {
         None
     };
+    let flash = first_flash_in_check_order(filters, sound, login, text, badges, self_login);
     HighlightHit {
         color,
         sound: sound_flag,
         sound_path,
+        flash,
     }
 }
 
@@ -1512,6 +1590,7 @@ mod tests {
             highlight_color: None,
             highlight_sound: false,
             highlight_sound_path: None,
+            highlight_flash: false,
         }
     }
 
@@ -1642,6 +1721,97 @@ mod tests {
     }
 
     #[test]
+    fn phrase_user_badge_flash_taskbar_on_event() {
+        let filters = Filters {
+            enable_self_highlight: false,
+            ..Filters::default()
+        };
+        let sound = HighlightSoundCtx {
+            phrase_rules: vec![PhraseRule::from_row(
+                "pog".into(),
+                true,
+                String::new(),
+                String::new(),
+                false,
+                false,
+                false,
+            )],
+            user_sound: vec![(
+                "streamer".into(),
+                true,
+                String::new(),
+                String::new(),
+                true,
+            )],
+            ..HighlightSoundCtx::default()
+        };
+        let mut by_phrase = privmsg("x", "nice pog");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_phrase,
+            Some("me"),
+        );
+        match by_phrase {
+            ChatEvent::Privmsg { highlight_flash, .. } => assert!(!highlight_flash),
+            _ => panic!("privmsg"),
+        }
+
+        let mut by_user = privmsg("streamer", "hello");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_user,
+            Some("me"),
+        );
+        match by_user {
+            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            _ => panic!("privmsg"),
+        }
+
+        let mut phrase_then_user = privmsg("streamer", "nice pog");
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut phrase_then_user,
+            Some("me"),
+        );
+        match phrase_then_user {
+            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            _ => panic!("privmsg"),
+        }
+
+        let mut by_badge = with_badges(privmsg("ann", "hi"), vec![badge("moderator", "1")]);
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx {
+                badge_rows: vec![(
+                    "moderator".into(),
+                    true,
+                    String::new(),
+                    String::new(),
+                    true,
+                )],
+                ..HighlightSoundCtx::default()
+            },
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_badge,
+            Some("me"),
+        );
+        match by_badge {
+            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            _ => panic!("privmsg"),
+        }
+    }
+
+    #[test]
     fn phrase_and_user_custom_sound_path_on_event() {
         let filters = Filters {
             enable_self_highlight: false,
@@ -1657,12 +1827,14 @@ mod tests {
                 phrase_path.clone(),
                 false,
                 false,
+                false,
             )],
             user_sound: vec![(
                 "streamer".into(),
                 true,
                 String::new(),
                 user_path.clone(),
+                false,
             )],
             ..HighlightSoundCtx::default()
         };
@@ -1743,12 +1915,14 @@ mod tests {
                     String::new(),
                     false,
                     false,
+                    false,
                 )],
                 user_sound: vec![(
                     "streamer".into(),
                     true,
                     String::new(),
                     user_path.clone(),
+                    false,
                 )],
                 ..HighlightSoundCtx::default()
             },
@@ -1808,7 +1982,7 @@ mod tests {
         let sound = HighlightSoundCtx {
             enable_self_sound: true,
             phrase_rules: vec![PhraseRule::plain("pog", true, "")],
-            user_sound: vec![("streamer".into(), true, String::new(), String::new())],
+            user_sound: vec![("streamer".into(), true, String::new(), String::new(), false)],
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "that was pog");
@@ -1927,7 +2101,7 @@ mod tests {
             enable_self_highlight: false,
             ..Filters::default()
         };
-        let case_row = PhraseRule::from_row("Pog".into(), true, String::new(), String::new(), false, true);
+        let case_row = PhraseRule::from_row("Pog".into(), true, String::new(), String::new(), false, false, true);
         assert!(phrase_matches_ex("say Pog now", &case_row));
         assert!(!phrase_matches_ex("say pog now", &case_row));
         assert!(!phrase_matches_ex("xPog", &case_row));
@@ -1937,7 +2111,7 @@ mod tests {
         let ignore_case = PhraseRule::plain("Pog", true, "");
         assert!(phrase_matches_ex("say pog now", &ignore_case));
 
-        let re = PhraseRule::from_row(r"\bfoo\b".into(), true, "#11223344".into(), String::new(), true, false);
+        let re = PhraseRule::from_row(r"\bfoo\b".into(), true, "#11223344".into(), String::new(), false, true, false);
         assert!(re.compiled.is_some());
         let mut hit = privmsg("x", "bar foo baz");
         apply_highlight(
@@ -1971,6 +2145,7 @@ mod tests {
                     true,
                     String::new(),
                     String::new(),
+                    false,
                     true,
                     false,
                 )],
@@ -1986,7 +2161,7 @@ mod tests {
             _ => panic!("privmsg"),
         }
 
-        let invalid = PhraseRule::from_row("(".into(), true, "#FF0000".into(), String::new(), true, false);
+        let invalid = PhraseRule::from_row("(".into(), true, "#FF0000".into(), String::new(), false, true, false);
         assert!(invalid.compiled.is_none());
         assert!(!phrase_matches_ex("anything", &invalid));
         let mut no_hl = privmsg("x", "(");
@@ -2006,15 +2181,15 @@ mod tests {
             _ => panic!("privmsg"),
         }
 
-        let case_re = PhraseRule::from_row("Foo".into(), false, String::new(), String::new(), true, true);
+        let case_re = PhraseRule::from_row("Foo".into(), false, String::new(), String::new(), false, true, true);
         assert!(phrase_matches_ex("Foo", &case_re));
         assert!(!phrase_matches_ex("foo", &case_re));
 
-        let ignore_re = PhraseRule::from_row("[a-z]+".into(), false, String::new(), String::new(), true, false);
+        let ignore_re = PhraseRule::from_row("[a-z]+".into(), false, String::new(), String::new(), false, true, false);
         assert!(phrase_matches_ex("FOO", &ignore_re));
 
-        let first = PhraseRule::from_row("alpha".into(), true, "#11111111".into(), String::new(), false, false);
-        let second = PhraseRule::from_row("beta".into(), false, "#22222222".into(), String::new(), false, false);
+        let first = PhraseRule::from_row("alpha".into(), true, "#11111111".into(), String::new(), false, false, false);
+        let second = PhraseRule::from_row("beta".into(), false, "#22222222".into(), String::new(), false, false, false);
         let mut multi = privmsg("x", "alpha and beta");
         apply_highlight(
             &filters,
@@ -2081,6 +2256,7 @@ mod tests {
             highlight_color: None,
         highlight_sound: false,
         highlight_sound_path: None,
+        highlight_flash: false,
         }
     }
 
@@ -2382,7 +2558,7 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             phrase_rules: vec![PhraseRule::plain("pog", true, "#11223344")],
-            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new())],
+            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new(), false)],
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "that was pog");
@@ -2488,8 +2664,8 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             badge_rows: vec![
-                ("moderator".into(), true, "#AABBCCDD".into(), String::new()),
-                ("subscriber/12".into(), false, String::new(), String::new()),
+                ("moderator".into(), true, "#AABBCCDD".into(), String::new(), false),
+                ("subscriber/12".into(), false, String::new(), String::new(), false),
             ],
             phrase_rules: vec![PhraseRule::plain("hello", false, "#01020304")],
             ..HighlightSoundCtx::default()
@@ -2647,7 +2823,7 @@ mod tests {
             &filters,
             &HighlightSoundCtx {
                 enable_self_message: true,
-                user_sound: vec![("ann".into(), false, "#AABBCC".into(), String::new())],
+                user_sound: vec![("ann".into(), false, "#AABBCC".into(), String::new(), false)],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
@@ -2722,7 +2898,7 @@ mod tests {
     #[test]
     fn ignore_messages_block_regex_and_case() {
         let filters = Filters::default();
-        let case_row = PhraseRule::from_row("Spam".into(), false, String::new(), String::new(), false, true);
+        let case_row = PhraseRule::from_row("Spam".into(), false, String::new(), String::new(), false, false, true);
         assert!(should_drop(
             &filters,
             &[],
@@ -2738,7 +2914,7 @@ mod tests {
             Some("me")
         ));
 
-        let re = PhraseRule::from_row(r"\bspam\b".into(), false, String::new(), String::new(), true, false);
+        let re = PhraseRule::from_row(r"\bspam\b".into(), false, String::new(), String::new(), false, true, false);
         assert!(should_drop(
             &filters,
             &[],
@@ -2754,7 +2930,7 @@ mod tests {
             Some("me")
         ));
 
-        let invalid = PhraseRule::from_row("(".into(), false, String::new(), String::new(), true, false);
+        let invalid = PhraseRule::from_row("(".into(), false, String::new(), String::new(), false, true, false);
         assert!(invalid.compiled.is_none());
         assert!(!should_drop(
             &filters,
@@ -3144,7 +3320,7 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             phrase_rules: vec![PhraseRule::plain("hello", true, "#11223344")],
-            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new())],
+            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new(), false)],
             ..HighlightSoundCtx::default()
         };
         let exact = BlacklistRule::from_row("ann".into(), false);

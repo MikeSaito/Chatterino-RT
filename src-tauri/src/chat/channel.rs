@@ -252,6 +252,7 @@ mod tests {
                 highlight_color: None,
                 highlight_sound: false,
                 highlight_sound_path: None,
+                highlight_flash: false,
             },
             Some("me"),
         );
@@ -298,6 +299,7 @@ mod tests {
                 highlight_color: None,
                 highlight_sound: false,
                 highlight_sound_path: None,
+                highlight_flash: false,
             },
             Some("me"),
         );
@@ -359,6 +361,7 @@ mod tests {
                 highlight_color: None,
                 highlight_sound: false,
                 highlight_sound_path: None,
+                highlight_flash: false,
             },
             Some("me"),
         );

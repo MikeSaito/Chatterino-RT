@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing } from "../../chat/ring";
 import type { Filters } from "../../chat/types";
 import { configureHighlightSound } from "../highlightSound";
+import { configureHighlightFlash } from "../highlightFlash";
 import {
   configureHotkeys,
   defaultHotkeyTableRows,
@@ -244,6 +245,10 @@ function paintRuntime(
   configureHighlightSound({
     alwaysPlay: data.knobs["highlighting.highlightAlwaysPlaySound"] === true,
     path: String(data.knobs["highlighting.pathHighlightSound"] ?? ""),
+    muted: isStreamerModeActive() && sm.muteMentions,
+  });
+  configureHighlightFlash({
+    longAlerts: data.knobs["highlighting.longAlerts"] === true,
     muted: isStreamerModeActive() && sm.muteMentions,
   });
   configureHotkeys(data.hotkeys ?? []);

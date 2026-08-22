@@ -50,6 +50,7 @@ export type ChatEvent =
       highlightColor?: string;
       highlightSound?: boolean;
       highlightSoundPath?: string;
+      highlightFlash?: boolean;
     }
   | {
       kind: "clearchat";
@@ -75,6 +76,7 @@ export type ChatEvent =
       highlightColor?: string;
       highlightSound?: boolean;
       highlightSoundPath?: string;
+      highlightFlash?: boolean;
     }
   | {
       kind: "roomstate";

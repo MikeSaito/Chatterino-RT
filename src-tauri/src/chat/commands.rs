@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::complete;
@@ -429,6 +429,34 @@ pub fn highlight_sound_pick(
     state: tauri::State<'_, Shared>,
 ) -> Result<String, ApiError> {
     super::highlight_sound::pick_path(&state)
+}
+
+#[tauri::command]
+pub fn highlight_request_attention(
+    app: tauri::AppHandle,
+    long_alerts: bool,
+) -> Result<(), ApiError> {
+    use tauri::UserAttentionType;
+    let Some(window) = app.get_webview_window("main") else {
+        return Err(ApiError::internal("окно main недоступно"));
+    };
+    let kind = if long_alerts {
+        UserAttentionType::Critical
+    } else {
+        UserAttentionType::Informational
+    };
+    window
+        .request_user_attention(Some(kind))
+        .map_err(|e| ApiError::internal(&e.to_string()))
+}
+
+#[tauri::command]
+pub fn highlight_cancel_attention(app: tauri::AppHandle) -> Result<(), ApiError> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let _ = window.request_user_attention(None);
+    Ok(())
 }
 
 #[tauri::command]
