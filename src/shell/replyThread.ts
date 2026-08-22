@@ -16,9 +16,10 @@ export function bindReplyThread(opts: {
   modal: HTMLElement;
   settingsModal: HTMLElement;
   activeChannel: () => string;
+  autoClose: () => boolean;
   onReply: (id: string, login: string, text: string) => void;
 }): { open: (info: ReplyThreadOpen) => void; close: () => void } {
-  const { modal, settingsModal, activeChannel, onReply } = opts;
+  const { modal, settingsModal, activeChannel, autoClose, onReply } = opts;
   const dialog = modal.querySelector<HTMLElement>("#replythread-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#replythread-backdrop");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#replythread-close");
@@ -149,6 +150,17 @@ export function bindReplyThread(opts: {
       ev.preventDefault();
       close();
     }
+  });
+
+  document.addEventListener("pointerdown", (ev) => {
+    if (modal.hidden || !autoClose()) {
+      return;
+    }
+    const t = ev.target as Node;
+    if (dialog.contains(t)) {
+      return;
+    }
+    close();
   });
 
   return { open, close };

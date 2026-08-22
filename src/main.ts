@@ -193,6 +193,7 @@ async function boot(): Promise<void> {
   };
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
+  let autoCloseThreadPopup = false;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;
   let lastPointerY = 0;
@@ -223,6 +224,8 @@ async function boot(): Promise<void> {
     onDisplay: (data) => {
       autoCloseUserPopup =
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
+      autoCloseThreadPopup =
+        data.knobs["behaviour.autoCloseThreadPopup"] === true;
       if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
         replyBtn.hidden = true;
         replyHover = null;
@@ -352,6 +355,7 @@ async function boot(): Promise<void> {
     modal: replythreadModal,
     settingsModal,
     activeChannel: () => ipc.active(),
+    autoClose: () => autoCloseThreadPopup,
     onReply: (id, login, text) => {
       setReply(id, login, text);
       messageInput.focus();
