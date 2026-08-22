@@ -1,5 +1,6 @@
 //! Read/pick highlight sound files for WebView playback.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path};
 
@@ -36,6 +37,88 @@ pub fn path_from_settings(shared: &Shared) -> Result<String, ApiError> {
     Ok(path)
 }
 
+pub fn allowed_paths_from_settings(data: &super::settings::AppSettings) -> HashSet<String> {
+    let mut set = HashSet::new();
+    if let Some(p) = data
+        .knobs
+        .get("highlighting.pathHighlightSound")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        set.insert(p.to_string());
+    }
+    for row in &data.highlight_messages {
+        let p = row.custom_sound.trim();
+        if !p.is_empty() {
+            set.insert(p.to_string());
+        }
+    }
+    for row in &data.highlight_users {
+        let p = row.custom_sound.trim();
+        if !p.is_empty() {
+            set.insert(p.to_string());
+        }
+    }
+    for row in &data.highlight_badges {
+        let p = row.custom_sound.trim();
+        if !p.is_empty() {
+            set.insert(p.to_string());
+        }
+    }
+    set
+}
+
+pub fn rebuild_allowed_paths(shared: &Shared, data: &super::settings::AppSettings) {
+    let set = allowed_paths_from_settings(data);
+    if let Ok(mut slot) = shared.allowed_highlight_sounds.lock() {
+        *slot = set;
+    }
+}
+
+pub fn validate_sound_path(raw: &str) -> Result<(), ApiError> {
+    let path = Path::new(raw);
+    if !path.is_absolute() {
+        return Err(ApiError::invalid("нужен абсолютный путь к файлу"));
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(ApiError::invalid("недопустимый путь"));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "wav" | "ogg" | "mp3" => Ok(()),
+        _ => Err(ApiError::invalid("формат: wav, ogg или mp3")),
+    }
+}
+
+fn path_allowed(shared: &Shared, path: &str, settings_path: Option<&str>) -> bool {
+    if settings_path == Some(path) {
+        return true;
+    }
+    if shared
+        .pending_highlight_sound
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .as_deref()
+        == Some(path)
+    {
+        return true;
+    }
+    shared
+        .allowed_highlight_sounds
+        .lock()
+        .ok()
+        .is_some_and(|set| set.contains(path))
+}
+
 pub fn read_configured(shared: &Shared, override_path: Option<String>) -> Result<SoundFile, ApiError> {
     let settings_path = shared
         .settings
@@ -50,19 +133,13 @@ pub fn read_configured(shared: &Shared, override_path: Option<String>) -> Result
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         });
-    let pending = shared
-        .pending_highlight_sound
-        .lock()
-        .ok()
-        .and_then(|g| g.clone());
     let path = match override_path {
         Some(p) => {
             let p = p.trim().to_string();
             if p.is_empty() {
                 return Err(ApiError::invalid("путь звука не задан"));
             }
-            let allowed = settings_path.as_deref() == Some(p.as_str())
-                || pending.as_deref() == Some(p.as_str());
+            let allowed = path_allowed(&shared, &p, settings_path.as_deref());
             if !allowed {
                 return Err(ApiError::invalid("путь звука не разрешён"));
             }
@@ -91,16 +168,8 @@ pub fn pick_path(shared: &Shared) -> Result<String, ApiError> {
 }
 
 pub fn read_path(raw: &str) -> Result<SoundFile, ApiError> {
+    validate_sound_path(raw)?;
     let path = Path::new(raw);
-    if !path.is_absolute() {
-        return Err(ApiError::invalid("нужен абсолютный путь к файлу"));
-    }
-    if path
-        .components()
-        .any(|c| matches!(c, Component::ParentDir))
-    {
-        return Err(ApiError::invalid("недопустимый путь"));
-    }
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -149,6 +218,35 @@ mod tests {
         let out = read_path(path.to_str().unwrap()).unwrap();
         assert_eq!(out.mime, "audio/wav");
         assert!(!out.data.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn table_custom_sound_allowed_after_rebuild() {
+        use super::super::settings::{AppSettings, HighlightMessageRow};
+
+        let dir = std::env::temp_dir().join(format!("hl-table-allow-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("row.wav");
+        fs::write(&path, b"RIFF....WAVEfmt ").unwrap();
+        let p = path.to_str().unwrap().to_string();
+
+        let shared = Shared::new();
+        let data = AppSettings {
+            highlight_messages: vec![HighlightMessageRow {
+                pattern: "pog".into(),
+                show_in_mentions: false,
+                flash_taskbar: false,
+                regex: false,
+                case_sensitive: false,
+                play_sound: true,
+                custom_sound: p.clone(),
+                color: String::new(),
+            }],
+            ..AppSettings::default()
+        };
+        rebuild_allowed_paths(&shared, &data);
+        assert!(read_configured(&shared, Some(p)).is_ok());
         let _ = fs::remove_dir_all(&dir);
     }
 

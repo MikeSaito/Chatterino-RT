@@ -49,6 +49,7 @@ export type ChatEvent =
       systemMsgId?: string;
       highlightColor?: string;
       highlightSound?: boolean;
+      highlightSoundPath?: string;
     }
   | {
       kind: "clearchat";
@@ -73,6 +74,7 @@ export type ChatEvent =
       privmsg?: ChatEvent;
       highlightColor?: string;
       highlightSound?: boolean;
+      highlightSoundPath?: string;
     }
   | {
       kind: "roomstate";

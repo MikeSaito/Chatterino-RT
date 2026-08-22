@@ -5,11 +5,37 @@ type SoundPayload = {
   data: string;
 };
 
+const MAX_SOUND_CACHE = 16;
+const PLAY_GAP_MS = 100;
+
 let lastPlay = 0;
-let cachedCustom: { path: string; url: string } | null = null;
+const cachedCustom = new Map<string, string>();
 let alwaysPlay = false;
 let customPath = "";
 let muted = false;
+
+function clearSoundCache(): void {
+  for (const url of cachedCustom.values()) {
+    URL.revokeObjectURL(url);
+  }
+  cachedCustom.clear();
+}
+
+function rememberCached(path: string, url: string): void {
+  const prev = cachedCustom.get(path);
+  if (prev) {
+    URL.revokeObjectURL(prev);
+  }
+  cachedCustom.set(path, url);
+  while (cachedCustom.size > MAX_SOUND_CACHE) {
+    const oldest = cachedCustom.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    URL.revokeObjectURL(cachedCustom.get(oldest)!);
+    cachedCustom.delete(oldest);
+  }
+}
 
 export function configureHighlightSound(opts: {
   alwaysPlay: boolean;
@@ -21,23 +47,28 @@ export function configureHighlightSound(opts: {
   const next = opts.path.trim();
   if (next !== customPath) {
     customPath = next;
-    if (cachedCustom) {
-      URL.revokeObjectURL(cachedCustom.url);
-      cachedCustom = null;
-    }
+    clearSoundCache();
   }
 }
 
 export function notifyHighlightSounds(
-  events: ReadonlyArray<{ highlightSound?: boolean } | object>,
+  events: ReadonlyArray<
+    { highlightSound?: boolean; highlightSoundPath?: string } | object
+  >,
 ): void {
-  if (!events.some((ev) => "highlightSound" in ev && ev.highlightSound === true)) {
+  const hits = events.filter(
+    (ev): ev is { highlightSound: true; highlightSoundPath?: string } =>
+      "highlightSound" in ev && ev.highlightSound === true,
+  );
+  if (hits.length === 0) {
     return;
   }
-  void playHighlightSound();
+  void playHighlightSoundBatch(hits);
 }
 
-export async function playHighlightSound(): Promise<void> {
+async function playHighlightSoundBatch(
+  hits: ReadonlyArray<{ highlightSoundPath?: string }>,
+): Promise<void> {
   if (muted) {
     return;
   }
@@ -45,37 +76,49 @@ export async function playHighlightSound(): Promise<void> {
   if (focused && !alwaysPlay) {
     return;
   }
-  const now = Date.now();
-  if (now - lastPlay < 100) {
-    return;
-  }
-  lastPlay = now;
-  try {
-    const src = await resolveSrc();
-    const audio = new Audio(src);
-    audio.volume = 0.7;
-    await audio.play();
-  } catch {
-    // Autoplay / decode failures are non-fatal.
+  for (const hit of hits) {
+    const now = Date.now();
+    const wait = PLAY_GAP_MS - (now - lastPlay);
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    lastPlay = Date.now();
+    const path =
+      typeof hit.highlightSoundPath === "string"
+        ? hit.highlightSoundPath.trim()
+        : "";
+    try {
+      const src = await resolveSrc(path || undefined);
+      const audio = new Audio(src);
+      audio.volume = 0.7;
+      await audio.play();
+    } catch {
+      // Autoplay / decode failures are non-fatal.
+    }
   }
 }
 
-async function resolveSrc(): Promise<string> {
-  if (!customPath) {
+export async function playHighlightSound(overridePath?: string): Promise<void> {
+  await playHighlightSoundBatch([
+    { highlightSoundPath: overridePath },
+  ]);
+}
+
+async function resolveSrc(overridePath?: string): Promise<string> {
+  const path = overridePath?.trim() || customPath;
+  if (!path) {
     return "/sounds/ping.wav";
   }
-  if (cachedCustom && cachedCustom.path === customPath) {
-    return cachedCustom.url;
+  const cached = cachedCustom.get(path);
+  if (cached) {
+    return cached;
   }
   const payload = await invoke<SoundPayload>("highlight_sound_read", {
-    path: customPath || null,
+    path,
   });
   const bin = Uint8Array.from(atob(payload.data), (c) => c.charCodeAt(0));
   const blob = new Blob([bin], { type: payload.mime || "audio/wav" });
   const url = URL.createObjectURL(blob);
-  if (cachedCustom) {
-    URL.revokeObjectURL(cachedCustom.url);
-  }
-  cachedCustom = { path: customPath, url };
+  rememberCached(path, url);
   return url;
 }

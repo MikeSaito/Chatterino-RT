@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
@@ -118,6 +119,8 @@ pub struct Shared {
     /// Compiled Highlights Blacklisted Users rules; refreshed on settings load/replace.
     pub highlight_blacklist: Arc<Mutex<Vec<BlacklistRule>>>,
     pub pending_highlight_sound: Arc<Mutex<Option<String>>>,
+    /// Whitelist of highlight sound paths from settings tables + default knob.
+    pub allowed_highlight_sounds: Arc<Mutex<HashSet<String>>>,
     /// Last successfully sent outbound PRIVMSG text per channel login.
     pub last_sent: Arc<Mutex<std::collections::HashMap<String, String>>>,
     /// Reserved outbound PRIVMSG slots (chat_send → wire flush).
@@ -159,6 +162,7 @@ impl Shared {
             ignore_user_rules: Arc::new(Mutex::new(Vec::new())),
             highlight_blacklist: Arc::new(Mutex::new(Vec::new())),
             pending_highlight_sound: Arc::new(Mutex::new(None)),
+            allowed_highlight_sounds: Arc::new(Mutex::new(HashSet::new())),
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
             outbound_pending: Arc::new(AtomicUsize::new(0)),
         }

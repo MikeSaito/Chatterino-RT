@@ -251,6 +251,7 @@ mod tests {
                 system_msg_id: None,
                 highlight_color: None,
                 highlight_sound: false,
+                highlight_sound_path: None,
             },
             Some("me"),
         );
@@ -296,6 +297,7 @@ mod tests {
                 system_msg_id: None,
                 highlight_color: None,
                 highlight_sound: false,
+                highlight_sound_path: None,
             },
             Some("me"),
         );
@@ -356,6 +358,7 @@ mod tests {
                 system_msg_id: None,
                 highlight_color: None,
                 highlight_sound: false,
+                highlight_sound_path: None,
             },
             Some("me"),
         );

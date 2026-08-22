@@ -124,6 +124,7 @@ fn parse_privmsg(
             text,
             highlight_color: None,
             highlight_sound: false,
+            highlight_sound_path: None,
         },
         channel,
     }
@@ -203,6 +204,7 @@ fn parse_usernotice(
             system_msg_id: None,
             highlight_color: None,
             highlight_sound: false,
+            highlight_sound_path: None,
         })
     });
     ParsedLine::Event {
@@ -216,6 +218,7 @@ fn parse_usernotice(
             privmsg: attached,
             highlight_color: None,
             highlight_sound: false,
+            highlight_sound_path: None,
         },
         channel,
     }

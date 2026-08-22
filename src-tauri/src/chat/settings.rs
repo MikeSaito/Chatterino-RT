@@ -301,6 +301,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     if let Ok(mut slot) = shared.highlight_blacklist.lock() {
         *slot = blacklist;
     }
+    super::highlight_sound::rebuild_allowed_paths(shared, &inner.data);
     Ok(())
 }
 
@@ -340,6 +341,15 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     let blacklist = super::filters::blacklist_rules_from_settings(&inner.data);
     if let Ok(mut slot) = shared.highlight_blacklist.lock() {
         *slot = blacklist;
+    }
+    super::highlight_sound::rebuild_allowed_paths(shared, &clean);
+    if let Ok(mut pending) = shared.pending_highlight_sound.lock() {
+        if pending
+            .as_deref()
+            .is_some_and(|p| shared.allowed_highlight_sounds.lock().ok().is_some_and(|set| set.contains(p)))
+        {
+            *pending = None;
+        }
     }
     drop(inner);
     let flags = super::fetch::EmoteProviderFlags::from_knobs(&clean.knobs);
@@ -511,6 +521,13 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         Ok(())
     }
 
+    fn validate_sound_cell(s: &str) -> Result<(), ApiError> {
+        if s.is_empty() {
+            return Ok(());
+        }
+        super::highlight_sound::validate_sound_path(s)
+    }
+
     if raw.nicknames.len() > MAX_TABLE_ROWS
         || raw.commands.len() > MAX_TABLE_ROWS
         || raw.highlight_messages.len() > MAX_TABLE_ROWS
@@ -539,16 +556,19 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     for row in &mut raw.highlight_messages {
         trim_cell(&mut row.pattern)?;
         trim_cell(&mut row.custom_sound)?;
+        validate_sound_cell(&row.custom_sound)?;
         trim_cell(&mut row.color)?;
     }
     for row in &mut raw.highlight_users {
         trim_cell(&mut row.username)?;
         trim_cell(&mut row.custom_sound)?;
+        validate_sound_cell(&row.custom_sound)?;
         trim_cell(&mut row.color)?;
     }
     for row in &mut raw.highlight_badges {
         trim_cell(&mut row.name)?;
         trim_cell(&mut row.custom_sound)?;
+        validate_sound_cell(&row.custom_sound)?;
         trim_cell(&mut row.color)?;
     }
     for row in &mut raw.highlight_blacklist {
@@ -585,6 +605,10 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     }
     for row in &mut raw.notify_channels {
         trim_cell(&mut row.channel)?;
+    }
+
+    if let Some(Value::String(path)) = raw.knobs.get("highlighting.pathHighlightSound") {
+        validate_sound_cell(path)?;
     }
 
     Ok(raw)
