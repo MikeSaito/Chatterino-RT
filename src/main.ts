@@ -32,7 +32,7 @@ import { bindStreamerModeBadge } from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
-import { tokenAtCursor } from "./chat/token";
+import { isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
 import type { AuthInfo, ChatStatus } from "./chat/types";
 
@@ -160,6 +160,7 @@ async function boot(): Promise<void> {
     modifier: "Shift" as UsernameRclickModifier,
   };
   let mentionUsersWithComma = true;
+  let emoteCompletionWithColon = true;
   completeBox.addEventListener("mousedown", (ev) => {
     const li = (ev.target as HTMLElement).closest("li");
     if (!li || !completeBox.contains(li)) {
@@ -255,6 +256,8 @@ async function boot(): Promise<void> {
       };
       mentionUsersWithComma =
         data.knobs["behaviour.mentionUsersWithComma"] !== false;
+      emoteCompletionWithColon =
+        data.knobs["behaviour.emoteCompletionWithColon"] !== false;
     },
   });
   const ipc = bindChatIpc(ring);
@@ -419,6 +422,8 @@ async function boot(): Promise<void> {
     suffix: string;
     items: string[];
     index: number;
+    colon: boolean;
+    query: string;
   } | null = null;
   let applyingComplete = false;
   let completeSeq = 0;
@@ -634,10 +639,31 @@ async function boot(): Promise<void> {
   });
 
   messageInput.addEventListener("input", () => {
-    if (!applyingComplete) {
+    if (applyingComplete) {
+      composerChrome.sync();
+      return;
+    }
+    const cursor = messageInput.selectionStart ?? 0;
+    const { token } = tokenAtCursor(messageInput.value, cursor);
+    if (emoteCompletionWithColon && isColonEmoteToken(token)) {
+      void refreshColonComplete();
+    } else {
       clearComplete();
     }
     composerChrome.sync();
+  });
+
+  document.addEventListener("selectionchange", () => {
+    if (applyingComplete || document.activeElement !== messageInput) {
+      return;
+    }
+    const cursor = messageInput.selectionStart ?? 0;
+    const { token } = tokenAtCursor(messageInput.value, cursor);
+    if (emoteCompletionWithColon && isColonEmoteToken(token)) {
+      void refreshColonComplete();
+    } else if (complete?.colon) {
+      clearComplete();
+    }
   });
 
   window.addEventListener("keydown", (ev) => {
@@ -865,6 +891,62 @@ async function boot(): Promise<void> {
     }
   }
 
+  async function refreshColonComplete(): Promise<void> {
+    if (applyingComplete || !emoteCompletionWithColon) {
+      return;
+    }
+    const cursor = messageInput.selectionStart ?? 0;
+    const text = messageInput.value;
+    const { start, token, firstWord } = tokenAtCursor(text, cursor);
+    if (!isColonEmoteToken(token)) {
+      if (complete?.colon) {
+        clearComplete();
+      }
+      return;
+    }
+    const seq = ++completeSeq;
+    completeInFlight = true;
+    let items: string[] = [];
+    try {
+      items = await invoke<string[]>("chat_complete", { token, firstWord });
+    } catch {
+      if (seq === completeSeq && complete?.colon) {
+        clearComplete();
+      }
+      return;
+    } finally {
+      if (seq === completeSeq) {
+        completeInFlight = false;
+      }
+    }
+    if (seq !== completeSeq) {
+      return;
+    }
+    const now = messageInput.value;
+    const nowCursor = messageInput.selectionStart ?? 0;
+    const nowTok = tokenAtCursor(now, nowCursor);
+    if (nowTok.start !== start || nowTok.token !== token) {
+      clearComplete();
+      if (emoteCompletionWithColon && isColonEmoteToken(nowTok.token)) {
+        void refreshColonComplete();
+      }
+      return;
+    }
+    if (items.length === 0) {
+      clearComplete();
+      return;
+    }
+    complete = {
+      start,
+      suffix: now.slice(nowCursor),
+      items,
+      index: 0,
+      colon: true,
+      query: token,
+    };
+    paintComplete();
+  }
+
   async function cycleComplete(reverse: boolean): Promise<void> {
     const cursor = messageInput.selectionStart ?? 0;
     const text = messageInput.value;
@@ -872,9 +954,27 @@ async function boot(): Promise<void> {
       const current = complete.items[complete.index];
       if (text.slice(complete.start, cursor) === current) {
         const n = complete.items.length;
-        complete.index = reverse ? (complete.index - 1 + n) % n : (complete.index + 1) % n;
+        complete.index = reverse
+          ? (complete.index - 1 + n) % n
+          : (complete.index + 1) % n;
         writeComplete();
         return;
+      }
+      if (complete.colon && complete.items.length > 0) {
+        const { token } = tokenAtCursor(text, cursor);
+        if (
+          isColonEmoteToken(token) &&
+          complete.start === tokenAtCursor(text, cursor).start &&
+          token === complete.query
+        ) {
+          if (reverse) {
+            const n = complete.items.length;
+            complete.index = (complete.index - 1 + n) % n;
+          }
+          writeComplete();
+          return;
+        }
+        clearComplete();
       }
     }
     if (completeInFlight) {
@@ -882,7 +982,8 @@ async function boot(): Promise<void> {
       return;
     }
     const { start, token, firstWord } = tokenAtCursor(text, cursor);
-    if (Array.from(token).length < 2) {
+    const minLen = isColonEmoteToken(token) ? 1 : 2;
+    if (Array.from(token).length < minLen) {
       clearComplete();
       return;
     }
@@ -926,6 +1027,8 @@ async function boot(): Promise<void> {
       suffix: now.slice(nowCursor),
       items,
       index,
+      colon: isColonEmoteToken(token),
+      query: token,
     };
     writeComplete();
   }
@@ -940,6 +1043,7 @@ async function boot(): Promise<void> {
       messageInput.value = `${messageInput.value.slice(0, complete.start)}${item}${complete.suffix}`;
       const pos = complete.start + item.length;
       messageInput.setSelectionRange(pos, pos);
+      complete.colon = false;
       paintComplete();
     } finally {
       applyingComplete = false;

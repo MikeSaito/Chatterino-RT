@@ -12,7 +12,7 @@ pub fn suggestions(
     mut emote_codes: Vec<String>,
     mut chatter_names: Vec<String>,
 ) -> Vec<String> {
-    if token.chars().count() < MIN_QUERY {
+    if token.chars().count() < MIN_QUERY && token != ":" {
         return Vec::new();
     }
     if token
@@ -25,35 +25,51 @@ pub fn suggestions(
         return command_items(token);
     }
     let with_at = token.starts_with('@');
+    let colon_emote = token.starts_with(':');
     rank_prefix(&mut emote_codes, token);
     rank_prefix(&mut chatter_names, token);
     let mut out = Vec::new();
     if !with_at {
-        let user_room = chatter_names.len().min(USER_RESERVE).min(COMPLETE_LIMIT);
+        let user_room = if colon_emote {
+            0
+        } else {
+            chatter_names.len().min(USER_RESERVE).min(COMPLETE_LIMIT)
+        };
         let emote_cap = COMPLETE_LIMIT.saturating_sub(user_room);
         for code in emote_codes.into_iter().take(emote_cap) {
             out.push(format!("{code} "));
         }
     }
-    for name in chatter_names {
-        let item = if with_at {
-            format!("@{name} ")
-        } else {
-            format!("{name} ")
-        };
-        if out.iter().any(|x| x == &item) {
-            continue;
-        }
-        out.push(item);
-        if out.len() >= COMPLETE_LIMIT {
-            break;
+    if !colon_emote {
+        for name in chatter_names {
+            let item = if with_at {
+                format!("@{name} ")
+            } else {
+                format!("{name} ")
+            };
+            if out.iter().any(|x| x == &item) {
+                continue;
+            }
+            out.push(item);
+            if out.len() >= COMPLETE_LIMIT {
+                break;
+            }
         }
     }
     out
 }
 
+/// Leading `:` → emote query needle (stock TabCompletionModel / SplitInput).
+/// Lone `:` → `Some("")` (match all emotes, capped by caller).
+pub fn colon_emote_needle(token: &str) -> Option<&str> {
+    token.strip_prefix(':')
+}
+
 pub fn rank_prefix(items: &mut Vec<String>, prefix: &str) {
-    let needle = prefix.strip_prefix('@').unwrap_or(prefix);
+    let needle = prefix
+        .strip_prefix('@')
+        .or_else(|| prefix.strip_prefix(':'))
+        .unwrap_or(prefix);
     items.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
     if needle.is_empty() {
         return;
@@ -175,5 +191,21 @@ mod tests {
         assert_eq!(out.len(), COMPLETE_LIMIT);
         assert!(out.iter().any(|s| s == "aardvark "));
         assert!(out.iter().any(|s| s.starts_with("aa")));
+    }
+
+    #[test]
+    fn colon_emote_needle_and_suggestions() {
+        assert_eq!(colon_emote_needle(":Ka"), Some("Ka"));
+        assert_eq!(colon_emote_needle(":"), Some(""));
+        assert_eq!(colon_emote_needle("Ka"), None);
+        let out = suggestions(":Ka", false, vec!["Kappa".to_string()], Vec::new());
+        assert_eq!(out, vec!["Kappa ".to_string()]);
+        let no_users = suggestions(
+            ":Ka",
+            false,
+            vec!["Kappa".to_string()],
+            vec!["Kapper".to_string()],
+        );
+        assert_eq!(no_users, vec!["Kappa ".to_string()]);
     }
 }

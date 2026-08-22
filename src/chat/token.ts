@@ -19,6 +19,11 @@ export function tokenAtCursor(text: string, cursor: number): InputToken {
   };
 }
 
+/** Stock SplitInput colon emote: token starts with `:` at word boundary (tokenAtCursor). */
+export function isColonEmoteToken(token: string): boolean {
+  return token.startsWith(":");
+}
+
 function isBreak(ch: string): boolean {
   return ch === " ";
 }

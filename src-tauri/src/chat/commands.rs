@@ -314,7 +314,8 @@ pub fn chat_complete(
     token: String,
     first_word: bool,
 ) -> Result<Vec<String>, ApiError> {
-    if token.chars().count() < complete::MIN_QUERY {
+    let colon = complete::colon_emote_needle(&token).is_some();
+    if token.chars().count() < complete::MIN_QUERY && !(colon && token == ":") {
         return Ok(Vec::new());
     }
     if token.chars().count() > MAX_CHAT_CHARS {
@@ -329,11 +330,28 @@ pub fn chat_complete(
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
         return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
     }
-    let at_only = token.starts_with('@');
     let channel = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.active.clone().unwrap_or_default()
     };
+    // `:query` → emote-only (stock TabCompletionModel SourceKind::Emote).
+    if let Some(needle) = complete::colon_emote_needle(&token) {
+        let catalog = state
+            .catalog
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        let mut emotes = catalog.codes_prefixed(&channel, needle);
+        if needle.is_empty() {
+            emotes.truncate(complete::COMPLETE_LIMIT);
+        }
+        return Ok(complete::suggestions(
+            &token,
+            first_word,
+            emotes,
+            Vec::new(),
+        ));
+    }
+    let at_only = token.starts_with('@');
     let emotes = if at_only {
         Vec::new()
     } else {

@@ -132,14 +132,13 @@ impl Catalog {
 
     pub fn codes_prefixed(&self, channel: &str, prefix: &str) -> Vec<String> {
         let needle = prefix.to_ascii_lowercase();
-        if needle.is_empty() {
-            return Vec::new();
-        }
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
         let mut push = |code: &str| {
-            if code.to_ascii_lowercase().starts_with(&needle) && seen.insert(code.to_ascii_lowercase())
-            {
+            if !needle.is_empty() && !code.to_ascii_lowercase().starts_with(&needle) {
+                return;
+            }
+            if seen.insert(code.to_ascii_lowercase()) {
                 out.push(code.to_string());
             }
         };

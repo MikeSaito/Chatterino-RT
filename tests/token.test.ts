@@ -1,4 +1,4 @@
-import { tokenAtCursor } from "../src/chat/token.ts";
+import { isColonEmoteToken, tokenAtCursor } from "../src/chat/token.ts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -49,6 +49,18 @@ function assert(cond: boolean, msg: string): void {
 {
   const t = tokenAtCursor("hello\n/m", 8);
   assert(t.token === "hello\n/m" && t.firstWord, `newline token ${JSON.stringify(t)}`);
+}
+
+{
+  assert(isColonEmoteToken(":K"), ":K is colon emote");
+  assert(isColonEmoteToken(":Kappa"), ":Kappa is colon emote");
+  assert(isColonEmoteToken(":"), "lone colon opens emote popup");
+  assert(!isColonEmoteToken("Kappa"), "plain token is not colon");
+  assert(!isColonEmoteToken("http://x"), "url mid colon is not colon emote token");
+  const mid = tokenAtCursor("say :Ka", 7);
+  assert(mid.token === ":Ka" && isColonEmoteToken(mid.token), `colon mid ${JSON.stringify(mid)}`);
+  const url = tokenAtCursor("http://x", 8);
+  assert(url.token === "http://x" && !isColonEmoteToken(url.token), `url ${JSON.stringify(url)}`);
 }
 
 console.log("token tests ok");
