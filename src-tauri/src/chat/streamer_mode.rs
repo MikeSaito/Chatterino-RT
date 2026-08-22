@@ -1,5 +1,7 @@
 //! Детект стримерского софта для Automatic Streamer Mode (как Chatterino StreamerMode).
 
+use super::state::Shared;
+
 /// Имена процессов Win (эталон broadcastingBinaries в StreamerMode.cpp).
 pub const BROADCASTING_BINARIES: &[&str] = &[
     "obs.exe",
@@ -19,6 +21,57 @@ pub fn broadcasting_software_active() -> bool {
     {
         false
     }
+}
+
+/// Stock `IStreamerMode::isEnabled()` from `streamerMode.enabled` knob.
+pub fn is_enabled(shared: &Shared) -> bool {
+    let settings = match shared.settings.lock() {
+        Ok(inner) => inner,
+        Err(_) => return false,
+    };
+    let mode = settings
+        .data
+        .knobs
+        .get("streamerMode.enabled")
+        .and_then(|v| v.as_str())
+        .unwrap_or("DetectStreamingSoftware");
+    match mode {
+        "Enabled" => true,
+        "DetectStreamingSoftware" => broadcasting_software_active(),
+        _ => false,
+    }
+}
+
+pub fn should_suppress_inline_whispers(shared: &Shared) -> bool {
+    let suppress = shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("streamerMode.suppressInlineWhispers")
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false);
+    suppress && is_enabled(shared)
+}
+
+pub fn inline_whispers_enabled(shared: &Shared) -> bool {
+    let on = shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("whispers.inlineWhispers")
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(true);
+    on && !should_suppress_inline_whispers(shared)
 }
 
 pub fn is_broadcasting_process_name(name: &str) -> bool {
@@ -82,6 +135,8 @@ fn wchar_to_string(buf: &[u16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::state::Shared;
+    use serde_json::json;
 
     #[test]
     fn matches_obs_case_insensitive() {
@@ -96,5 +151,56 @@ mod tests {
         assert!(!is_broadcasting_process_name("chrome.exe"));
         assert!(!is_broadcasting_process_name("obs"));
         assert!(!is_broadcasting_process_name(""));
+    }
+
+    #[test]
+    fn enabled_mode_without_obs() {
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner
+                .data
+                .knobs
+                .insert("streamerMode.enabled".into(), json!("Enabled"));
+            inner.data.knobs.insert(
+                "streamerMode.suppressInlineWhispers".into(),
+                json!(true),
+            );
+        }
+        assert!(is_enabled(&shared));
+        assert!(should_suppress_inline_whispers(&shared));
+        assert!(!inline_whispers_enabled(&shared));
+    }
+
+    #[test]
+    fn disabled_mode_with_suppress_knob() {
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner
+                .data
+                .knobs
+                .insert("streamerMode.enabled".into(), json!("Disabled"));
+            inner.data.knobs.insert(
+                "streamerMode.suppressInlineWhispers".into(),
+                json!(true),
+            );
+        }
+        assert!(!is_enabled(&shared));
+        assert!(!should_suppress_inline_whispers(&shared));
+        assert!(inline_whispers_enabled(&shared));
+    }
+
+    #[test]
+    fn inline_whispers_off() {
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner
+                .data
+                .knobs
+                .insert("whispers.inlineWhispers".into(), json!(false));
+        }
+        assert!(!inline_whispers_enabled(&shared));
     }
 }

@@ -512,6 +512,10 @@ enum LineAction {
     Reconnect,
 }
 
+fn inline_whispers_enabled(shared: &Shared) -> bool {
+    super::streamer_mode::inline_whispers_enabled(shared)
+}
+
 fn dispatch_line(
     app: &AppHandle,
     shared: &Shared,
@@ -560,6 +564,32 @@ fn dispatch_line(
             if let Ok(mut set) = shared.chatters.lock() {
                 set.add_many(&channel, &logins);
             }
+            LineAction::None
+        }
+        ParsedLine::Whisper { mut event } => {
+            if !inline_whispers_enabled(shared) {
+                return LineAction::None;
+            }
+            if super::filters::gate_event(shared, &mut event) {
+                return LineAction::None;
+            }
+            super::filters::apply_whisper_highlight(shared, &mut event);
+            let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
+            let mut batches = Vec::new();
+            if let Ok(mut hub) = shared.hub.lock() {
+                let channels = hub.channels();
+                for ch in channels {
+                    let mut ev = event.clone();
+                    decorate_event(&mut ev, shared, &ch);
+                    if let Some(batch) = hub.ingest(&ch, ev, self_login.as_deref()) {
+                        batches.push(batch);
+                    }
+                }
+            }
+            for batch in batches {
+                deliver_batch(app, shared, &batch);
+            }
+            emit_send_waits(app, shared);
             LineAction::None
         }
         ParsedLine::Event {

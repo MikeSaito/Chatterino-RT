@@ -1265,6 +1265,9 @@ export class MessageRing {
     switch (event.kind) {
       case "privmsg": {
         let prefix = "";
+        if (event.whisper) {
+          prefix += "Whisper: ";
+        }
         if (!this.hideReplyContext && event.replyToLogin) {
           prefix += `@${event.replyToLogin} `;
         }

@@ -137,6 +137,8 @@ pub enum ChatEvent {
         highlight_sound_path: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         highlight_flash: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        whisper: bool,
     },
     #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
@@ -478,6 +480,7 @@ mod tests {
             highlight_sound: false,
             highlight_sound_path: None,
             highlight_flash: false,
+            whisper: false,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["kind"], "privmsg");

@@ -24,6 +24,9 @@ pub enum ParsedLine {
         channel: String,
         logins: Vec<String>,
     },
+    Whisper {
+        event: ChatEvent,
+    },
     Ignore,
 }
 
@@ -53,6 +56,7 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "PONG" => ParsedLine::Pong,
         "001" => ParsedLine::Ready,
         "PRIVMSG" => parse_privmsg(&tags, prefix.as_deref(), &params, trailing.as_deref(), now_ms),
+        "WHISPER" => parse_whisper(&tags, prefix.as_deref(), trailing.as_deref(), now_ms),
         "CLEARCHAT" => parse_clearchat(&tags, &params, trailing.as_deref(), now_ms),
         "CLEARMSG" => parse_clearmsg(&tags, &params, now_ms),
         "USERNOTICE" => parse_usernotice(&tags, &params, trailing.as_deref(), now_ms),
@@ -79,7 +83,28 @@ fn parse_privmsg(
     if channel.is_empty() {
         return ParsedLine::Ignore;
     }
-    let mut text = trailing.unwrap_or("").to_string();
+    let (text, action) = parse_message_body(trailing.unwrap_or(""));
+    ParsedLine::Event {
+        room_id: tags.get("room-id"),
+        event: build_privmsg(tags, prefix, text, action, now_ms, false),
+        channel,
+    }
+}
+
+fn parse_whisper(
+    tags: &Tags,
+    prefix: Option<&str>,
+    trailing: Option<&str>,
+    now_ms: u64,
+) -> ParsedLine {
+    let (text, action) = parse_message_body(trailing.unwrap_or(""));
+    ParsedLine::Whisper {
+        event: build_privmsg(tags, prefix, text, action, now_ms, true),
+    }
+}
+
+fn parse_message_body(raw: &str) -> (String, bool) {
+    let mut text = raw.to_string();
     let mut action = false;
     if let Some(inner) = text
         .strip_prefix("\u{0001}ACTION ")
@@ -88,46 +113,61 @@ fn parse_privmsg(
         text = inner.to_string();
         action = true;
     }
+    (text, action)
+}
+
+fn build_privmsg(
+    tags: &Tags,
+    prefix: Option<&str>,
+    text: String,
+    action: bool,
+    now_ms: u64,
+    whisper: bool,
+) -> ChatEvent {
     let login = tags
         .get("login")
         .or_else(|| prefix.and_then(login_from_prefix))
         .unwrap_or_default();
-    let display_name = tags.get("display-name").filter(|s| !s.is_empty()).unwrap_or_else(|| login.clone());
+    let display_name = tags
+        .get("display-name")
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| login.clone());
     let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), &text);
     let (link_spans, mention_spans) = super::spans::decorate_text_spans(&text, &emote_spans);
-    ParsedLine::Event {
-        room_id: tags.get("room-id"),
-        event: ChatEvent::Privmsg {
-            id: tags.get("id").unwrap_or_else(|| synthetic_id("p", now_ms, &text)),
-            timestamp_ms: tags.timestamp(now_ms),
-            user_id: tags.get("user-id").unwrap_or_default(),
-            login,
-            display_name,
-            color: tags.get("color").unwrap_or_default(),
-            badges: parse_badges(tags.get("badges").as_deref()),
-            emote_spans,
-            link_spans,
-            mention_spans,
-            bits: tags.get("bits").and_then(|s| s.parse().ok()),
-            reply_to_id: tags.get("reply-parent-msg-id"),
-            reply_to_login: tags
-                .get("reply-parent-user-login")
-                .or_else(|| tags.get("reply-parent-display-name")),
-            reply_to_display_name: tags.get("reply-parent-display-name"),
-            reply_to_text: tags.get("reply-parent-msg-body"),
-            action,
-            first_msg: tags.get("first-msg").as_deref() == Some("1"),
-            custom_reward_id: tags
-                .get("custom-reward-id")
-                .filter(|s| !s.is_empty()),
-            system_msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
-            text,
-            highlight_color: None,
-            highlight_sound: false,
-            highlight_sound_path: None,
-            highlight_flash: false,
-        },
-        channel,
+    let id_prefix = if whisper { "w" } else { "p" };
+    ChatEvent::Privmsg {
+        id: tags
+            .get("id")
+            .or_else(|| tags.get("message-id"))
+            .unwrap_or_else(|| synthetic_id(id_prefix, now_ms, &text)),
+        timestamp_ms: tags.timestamp(now_ms),
+        user_id: tags.get("user-id").unwrap_or_default(),
+        login,
+        display_name,
+        color: tags.get("color").unwrap_or_default(),
+        badges: parse_badges(tags.get("badges").as_deref()),
+        emote_spans,
+        link_spans,
+        mention_spans,
+        bits: tags.get("bits").and_then(|s| s.parse().ok()),
+        reply_to_id: tags.get("reply-parent-msg-id"),
+        reply_to_login: tags
+            .get("reply-parent-user-login")
+            .or_else(|| tags.get("reply-parent-display-name")),
+        reply_to_display_name: tags.get("reply-parent-display-name"),
+        reply_to_text: tags.get("reply-parent-msg-body"),
+        action,
+        first_msg: tags.get("first-msg").as_deref() == Some("1"),
+        custom_reward_id: tags
+            .get("custom-reward-id")
+            .filter(|s| !s.is_empty()),
+        system_msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
+        text,
+        highlight_color: None,
+        highlight_sound: false,
+        highlight_sound_path: None,
+        highlight_flash: false,
+        whisper,
     }
 }
 
@@ -207,6 +247,7 @@ fn parse_usernotice(
             highlight_sound: false,
             highlight_sound_path: None,
             highlight_flash: false,
+            whisper: false,
         })
     });
     ParsedLine::Event {
@@ -893,6 +934,33 @@ mod tests {
                 ..
             } => {
                 assert_eq!(msg_id.as_deref(), Some("resub"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_whisper_with_message_id_and_emotes() {
+        let line = "@badge-info=;badges=;color=#9146FF;display-name=Sender;emotes=25:0-4;message-id=w1;thread-id=t1;turbo=0;user-id=42;user-type= :sender!sender@sender.tmi.twitch.tv WHISPER receiver :Kappa secret";
+        match parse_line(line, 100) {
+            ParsedLine::Whisper {
+                event:
+                    ChatEvent::Privmsg {
+                        text,
+                        emote_spans,
+                        login,
+                        user_id,
+                        whisper,
+                        ..
+                    },
+            } => {
+                assert!(whisper);
+                assert_eq!(login, "sender");
+                assert_eq!(user_id, "42");
+                assert_eq!(text, "Kappa secret");
+                assert_eq!(emote_spans.len(), 1);
+                assert_eq!(emote_spans[0].start, 0);
+                assert_eq!(emote_spans[0].end, 5);
             }
             other => panic!("{other:?}"),
         }

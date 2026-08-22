@@ -37,6 +37,27 @@ impl Hub {
         self.joined.contains(channel)
     }
 
+    pub fn joined_channels(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.joined.iter().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    pub fn ingest_fanout_joined(
+        &mut self,
+        event: ChatEvent,
+        self_login: Option<&str>,
+    ) -> Vec<ChatBatch> {
+        let channels = self.channels();
+        let mut batches = Vec::new();
+        for ch in channels {
+            if let Some(batch) = self.ingest(&ch, event.clone(), self_login) {
+                batches.push(batch);
+            }
+        }
+        batches
+    }
+
     pub fn ingest(
         &mut self,
         channel: &str,
@@ -166,5 +187,23 @@ mod tests {
         assert!(hub.is_joined("xqc"));
         hub.set_active(Some("xqc".into()));
         assert!(hub.joined_active());
+    }
+
+    #[test]
+    fn ingest_fanout_joined_delivers_to_active_and_scrollback() {
+        let mut hub = Hub::default();
+        hub.set_active(Some("xqc".into()));
+        hub.set_joined("xqc", true);
+        hub.buffer("lirik");
+        hub.set_joined("lirik", true);
+
+        let batches = hub.ingest_fanout_joined(notice("w"), None);
+        assert!(batches.is_empty());
+        let snap_xqc = hub.snapshot("xqc").unwrap();
+        assert_eq!(snap_xqc.events.len(), 1);
+
+        hub.set_active(Some("lirik".into()));
+        let snap = hub.snapshot("lirik").unwrap();
+        assert_eq!(snap.events.len(), 1);
     }
 }

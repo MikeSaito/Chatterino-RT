@@ -51,6 +51,7 @@ export type ChatEvent =
       highlightSound?: boolean;
       highlightSoundPath?: string;
       highlightFlash?: boolean;
+      whisper?: boolean;
     }
   | {
       kind: "clearchat";

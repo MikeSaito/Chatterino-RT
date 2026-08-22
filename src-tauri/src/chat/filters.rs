@@ -158,6 +158,41 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
     false
 }
 
+const INLINE_WHISPER_HIGHLIGHT_COLOR: &str = "#772CE8";
+
+pub fn apply_whisper_highlight(shared: &Shared, event: &mut ChatEvent) {
+    let ChatEvent::Privmsg {
+        whisper,
+        highlight_color,
+        highlight_sound,
+        highlight_flash,
+        ..
+    } = event
+    else {
+        return;
+    };
+    if !*whisper {
+        return;
+    }
+    *highlight_sound = false;
+    *highlight_flash = false;
+    let highlight = shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("whispers.highlightInlineWhispers")
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false);
+    if highlight {
+        *highlight_color = Some(INLINE_WHISPER_HIGHLIGHT_COLOR.to_string());
+    }
+}
+
 /// Rebuild cached phrase/user/badge highlight context after settings change.
 pub fn refresh_highlight_sound(shared: &Shared) {
     let ctx = HighlightSoundCtx::from_shared(shared);
@@ -1591,7 +1626,16 @@ mod tests {
             highlight_sound: false,
             highlight_sound_path: None,
             highlight_flash: false,
+            whisper: false,
         }
+    }
+
+    fn whisper_privmsg(login: &str, text: &str) -> ChatEvent {
+        let mut ev = privmsg(login, text);
+        if let ChatEvent::Privmsg { whisper, .. } = &mut ev {
+            *whisper = true;
+        }
+        ev
     }
 
     fn with_badges(mut ev: ChatEvent, badges: Vec<Badge>) -> ChatEvent {
@@ -3453,5 +3497,87 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert!(login_is_blacklisted("NightBot", &rules));
         assert!(!login_is_blacklisted("bob", &rules));
+    }
+
+    #[test]
+    fn whisper_highlight_sets_color_and_silences_notifications() {
+        use super::super::state::Shared;
+        use serde_json::json;
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner
+                .data
+                .knobs
+                .insert("whispers.highlightInlineWhispers".into(), json!(true));
+        }
+        let mut ev = whisper_privmsg("sender", "psst");
+        apply_whisper_highlight(&shared, &mut ev);
+        match ev {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                highlight_flash,
+                ..
+            } => {
+                assert_eq!(
+                    highlight_color.as_deref(),
+                    Some(INLINE_WHISPER_HIGHLIGHT_COLOR)
+                );
+                assert!(!highlight_sound);
+                assert!(!highlight_flash);
+            }
+            _ => panic!("privmsg"),
+        }
+    }
+
+    #[test]
+    fn whisper_highlight_skipped_when_knob_off() {
+        use super::super::state::Shared;
+        let shared = Shared::new();
+        let mut ev = whisper_privmsg("sender", "psst");
+        apply_whisper_highlight(&shared, &mut ev);
+        match ev {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                highlight_flash,
+                ..
+            } => {
+                assert!(highlight_color.is_none());
+                assert!(!highlight_sound);
+                assert!(!highlight_flash);
+            }
+            _ => panic!("privmsg"),
+        }
+    }
+
+    #[test]
+    fn privmsg_highlight_unaffected_by_whisper_helper() {
+        use super::super::state::Shared;
+        use serde_json::json;
+        let shared = Shared::new();
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner
+                .data
+                .knobs
+                .insert("whispers.highlightInlineWhispers".into(), json!(true));
+        }
+        let mut ev = privmsg("sender", "normal");
+        apply_whisper_highlight(&shared, &mut ev);
+        match ev {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                highlight_flash,
+                ..
+            } => {
+                assert!(highlight_color.is_none());
+                assert!(!highlight_sound);
+                assert!(!highlight_flash);
+            }
+            _ => panic!("privmsg"),
+        }
     }
 }
