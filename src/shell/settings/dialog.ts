@@ -287,6 +287,9 @@ function paintRuntime(
     subscription: data.knobs["appearance.showBadgesSubscription"] !== false,
     vanity: data.knobs["appearance.showBadgesVanity"] !== false,
   });
+  ring.configureLowercaseDomains(
+    data.knobs["links.lowercaseDomains"] !== false,
+  );
   ring.configureNickStyle({
     colorize: data.knobs["appearance.colorizeNicknames"] !== false,
     mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),

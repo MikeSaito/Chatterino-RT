@@ -25,6 +25,7 @@ import {
   filterVisibleBadges,
   type BadgeVisibilityFlags,
 } from "./badgeVisibility";
+import { lowercaseLinkHosts } from "./linkDisplay";
 import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -99,6 +100,9 @@ type Slot = {
   badgesRaw: Badge[];
   msgId: string;
   login: string;
+  /** Текст с префиксами до host-display transform; обновляется при reply-prefix. */
+  bodySource: string;
+  /** Painted body (may lowercase link hosts). */
   bodyRaw: string;
   nickRaw: string;
   copyText: string;
@@ -129,7 +133,7 @@ type Slot = {
   useNickStyle: boolean;
   replyToLogin: string;
   isAction: boolean;
-  /** Символы до reply/action prefix + copyText (system lead у usernotice). */
+  /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
   leadLen: number;
 };
 
@@ -191,6 +195,8 @@ export class MessageRing {
   private liveMsgIds = new Set<string>();
   private showReplyButton = false;
   private linksDoubleClickOnly = false;
+  /** Stock links.lowercaseDomains (default on). */
+  private lowercaseDomains = true;
   private alternateMessages = false;
   private separateMessages = false;
   private collapseMessagesMinLines = 0;
@@ -321,6 +327,33 @@ export class MessageRing {
       }
     }
     this.layout();
+  }
+
+  /** Stock links.lowercaseDomains: paint host lowercased; open/copy keep original. */
+  configureLowercaseDomains(enabled: boolean): void {
+    const on = enabled !== false;
+    if (on === this.lowercaseDomains) {
+      return;
+    }
+    this.lowercaseDomains = on;
+    if (!this.ready) {
+      return;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (slot.msgId) {
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+      }
+    }
+    this.layout();
+  }
+
+  private displayBody(source: string, links: LinkSpan[]): string {
+    if (!this.lowercaseDomains || !source || links.length === 0) {
+      return source;
+    }
+    return lowercaseLinkHosts(source, links);
   }
 
   private visibleBadges(slot: Slot): Badge[] {
@@ -999,6 +1032,7 @@ export class MessageRing {
         badgesRaw: [],
         msgId: "",
         login: "",
+        bodySource: "",
         bodyRaw: "",
         nickRaw: "",
         copyText: "",
@@ -1225,6 +1259,7 @@ export class MessageRing {
     slot.body.text = "";
     slot.msgId = "";
     slot.login = "";
+    slot.bodySource = "";
     slot.bodyRaw = "";
     slot.nickRaw = "";
     slot.copyText = "";
@@ -1315,8 +1350,10 @@ export class MessageRing {
       slot.nickLogin = "";
       slot.nickDisplay = "";
     }
-    slot.bodyRaw = drawn.body;
+    slot.bodySource = drawn.body;
     slot.copyText = drawn.copyText;
+    slot.linkSpans = drawn.links;
+    slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
     slot.leadLen = drawn.leadLen;
     if (event.kind === "privmsg") {
       slot.replyToId = event.replyToId ?? "";
@@ -1337,7 +1374,6 @@ export class MessageRing {
     }
     slot.timestampMs = event.timestampMs;
     slot.spansRaw = drawn.spans;
-    slot.linkSpans = drawn.links;
     slot.mentionSpans = drawn.mentions;
     slot.badgesRaw = drawn.badges;
     slot.highlightColor = drawn.highlightColor;
@@ -1396,24 +1432,26 @@ export class MessageRing {
   /** Пересобрать @reply / * prefix при смене hideReplyContext без полного rewrite события. */
   private reapplyReplyPrefix(slot: Slot): void {
     const core = slot.copyText;
-    const lead = slot.bodyRaw.slice(0, Math.max(0, slot.leadLen));
+    const lead = slot.bodySource.slice(0, Math.max(0, slot.leadLen));
     const newReply =
       !this.hideReplyContext && slot.replyToLogin
         ? `@${slot.replyToLogin} `
         : "";
     const newAction = slot.isAction ? "* " : "";
     const newBefore = `${lead}${newReply}${newAction}`;
-    const oldBeforeLen = Math.max(0, slot.bodyRaw.length - core.length);
+    const oldBeforeLen = Math.max(0, slot.bodySource.length - core.length);
     const delta = newBefore.length - oldBeforeLen;
-    if (delta === 0 && slot.bodyRaw === `${newBefore}${core}`) {
+    const nextSource = `${newBefore}${core}`;
+    if (delta === 0 && slot.bodySource === nextSource) {
       return;
     }
-    slot.bodyRaw = `${newBefore}${core}`;
+    slot.bodySource = nextSource;
     if (delta !== 0) {
       slot.spansRaw = shiftSpans(slot.spansRaw, delta);
       slot.linkSpans = shiftSpans(slot.linkSpans, delta);
       slot.mentionSpans = shiftSpans(slot.mentionSpans, delta);
     }
+    slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
   }
 
   private line(event: ChatEvent): Drawn {
@@ -1421,8 +1459,10 @@ export class MessageRing {
     switch (event.kind) {
       case "privmsg": {
         let prefix = "";
+        let leadLen = 0;
         if (event.whisper) {
           prefix += "Whisper: ";
+          leadLen = prefix.length;
         }
         if (!this.hideReplyContext && event.replyToLogin) {
           prefix += `@${event.replyToLogin} `;
@@ -1446,7 +1486,7 @@ export class MessageRing {
           }),
           body: `${prefix}${event.text}`,
           copyText: event.text,
-          leadLen: 0,
+          leadLen,
           spans: shiftSpans(event.emoteSpans ?? [], shift),
           links: shiftSpans(event.linkSpans ?? [], shift),
           mentions: shiftSpans(event.mentionSpans ?? [], shift),
