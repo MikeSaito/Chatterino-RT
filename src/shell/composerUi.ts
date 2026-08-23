@@ -16,6 +16,7 @@ export type ComposerChromeOpts = {
   showEmptyInput: boolean;
   showMessageLength: boolean;
   showSendWaitTimer: boolean;
+  showSendButton: boolean;
   overflow: MessageOverflow;
   pulseOnSelf: boolean;
 };
@@ -25,6 +26,7 @@ export function defaultComposerChrome(): ComposerChromeOpts {
     showEmptyInput: true,
     showMessageLength: false,
     showSendWaitTimer: false,
+    showSendButton: false,
     overflow: "Highlight",
     pulseOnSelf: false,
   };
@@ -36,13 +38,14 @@ export function bindComposerChrome(opts: {
   lengthEl: HTMLElement;
   waitEl: HTMLElement;
   replyBar: HTMLElement;
+  sendBtn: HTMLButtonElement;
   getOpts: () => ComposerChromeOpts;
 }): {
   sync: () => void;
   pulse: () => void;
   setWaitText: (text: string) => void;
 } {
-  const { form, input, lengthEl, waitEl, replyBar, getOpts } = opts;
+  const { form, input, lengthEl, waitEl, replyBar, sendBtn, getOpts } = opts;
   let waitText = "";
 
   const sync = (): void => {
@@ -55,6 +58,8 @@ export function bindComposerChrome(opts: {
     if (hideComposer && document.activeElement === input) {
       input.blur();
     }
+
+    sendBtn.hidden = !cfg.showSendButton;
 
     if (cfg.overflow === "Prevent") {
       input.maxLength = MAX_CHAT_CHARS;

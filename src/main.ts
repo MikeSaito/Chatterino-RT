@@ -170,6 +170,7 @@ async function boot(): Promise<void> {
     lengthEl: composerLength,
     waitEl: composerWait,
     replyBar: replyBarEl,
+    sendBtn: composerSend,
     getOpts: () => composerOpts,
   });
   let nickRclick = {
@@ -286,6 +287,7 @@ async function boot(): Promise<void> {
         showMessageLength: data.knobs["appearance.showMessageLength"] === true,
         showSendWaitTimer:
           data.knobs["appearance.showSendWaitTimer"] === true,
+        showSendButton: data.knobs["ui.showSendButton"] === true,
         overflow: parseMessageOverflow(data.knobs["appearance.messageOverflow"]),
         pulseOnSelf:
           data.knobs["appearance.pulseTextInputOnSelfMessage"] === true,
