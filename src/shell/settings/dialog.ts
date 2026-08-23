@@ -22,6 +22,7 @@ import {
   parseBoldScale,
   parseUsernameDisplayMode,
 } from "../nickStyle";
+import { normalizeNicknameRules } from "../nicknames";
 import { applyWindowTopMost } from "../windowTopMost";
 import { presetToEngine } from "../webSearch";
 import { setChatAppBackground } from "../../pixi/app";
@@ -296,6 +297,7 @@ function paintRuntime(
     mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),
     boldScale: parseBoldScale(data.knobs["appearance.boldScale"]),
   });
+  ring.configureNicknames(normalizeNicknameRules(data.nicknames));
   ring.configureMentionStyle({
     bold: data.knobs["appearance.boldUsernames"] !== false,
     color: data.knobs["appearance.colorUsernames"] !== false,

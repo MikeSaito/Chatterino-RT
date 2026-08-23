@@ -51,6 +51,11 @@ import {
   resolveNickColor,
   type UsernameDisplayMode,
 } from "../shell/nickStyle";
+import {
+  applyNickname,
+  nicknameRulesEqual,
+  type NicknameRule,
+} from "../shell/nicknames";
 import { NickColorCache } from "../shell/nickColorCache";
 import {
   clipNick,
@@ -206,6 +211,7 @@ export class MessageRing {
   private lastReadMsgId = "";
   private colorizeNicknames = true;
   private usernameDisplayMode: UsernameDisplayMode = "UsernameAndLocalizedName";
+  private nicknameRules: NicknameRule[] = [];
   private nickBoldScale = 63;
   private nickAtlasDesignSize = 0;
   private boldUsernames = true;
@@ -435,15 +441,52 @@ export class MessageRing {
       this.reinstallNickFont();
     }
     this.refreshFontMetrics();
+    this.repaintNickChrome();
+    this.layout();
+  }
+
+  /** Stock nicknames table: rewrite painted nick after usernameDisplayMode. */
+  configureNicknames(rules: NicknameRule[]): void {
+    if (nicknameRulesEqual(this.nicknameRules, rules)) {
+      return;
+    }
+    this.nicknameRules = rules.slice();
+    if (!this.ready) {
+      return;
+    }
+    this.repaintNickChrome();
+    this.layout();
+  }
+
+  private paintedNick(login: string, displayName: string): string {
+    return applyNickname(
+      formatUsername({
+        login,
+        displayName,
+        mode: this.usernameDisplayMode,
+      }),
+      this.nicknameRules,
+    );
+  }
+
+  /** Display/login for UserCard and context (no nickname alias). */
+  private contextNick(slot: Slot): string {
+    if (!slot.useNickStyle) {
+      return slot.nickRaw;
+    }
+    return formatUsername({
+      login: slot.nickLogin,
+      displayName: slot.nickDisplay,
+      mode: this.usernameDisplayMode,
+    });
+  }
+
+  private repaintNickChrome(): void {
     for (const slot of this.slots) {
       slot.nick.style.fontFamily = "ChatNickFont";
       slot.nick.style.fontSize = this.fontSize;
       if (slot.useNickStyle) {
-        slot.nickRaw = formatUsername({
-          login: slot.nickLogin,
-          displayName: slot.nickDisplay,
-          mode: this.usernameDisplayMode,
-        });
+        slot.nickRaw = this.paintedNick(slot.nickLogin, slot.nickDisplay);
         slot.nick.text = slot.nickRaw;
         slot.nick.tint = resolveNickColor({
           color: slot.nickColorRaw,
@@ -454,7 +497,6 @@ export class MessageRing {
       }
       dirtyBitmapText(slot.nick);
     }
-    this.layout();
   }
 
   configureMentionStyle(opts: { bold: boolean; color: boolean }): void {
@@ -1473,11 +1515,10 @@ export class MessageRing {
         const shift = prefix.length;
         return {
           time,
-          nick: formatUsername({
-            login: event.login,
-            displayName: event.displayName || event.login,
-            mode: this.usernameDisplayMode,
-          }),
+          nick: this.paintedNick(
+            event.login,
+            event.displayName || event.login,
+          ),
           nickColor: resolveNickColor({
             color: event.color,
             userId: event.userId,
@@ -2036,7 +2077,7 @@ export class MessageRing {
         msgId: slot.msgId,
         login: slot.login,
         authorLogin: slot.login,
-        nick: slot.nickRaw,
+        nick: this.contextNick(slot),
         text: slot.copyText || slot.bodyRaw,
         clientX: ev.clientX,
         clientY: ev.clientY,
@@ -2084,7 +2125,7 @@ export class MessageRing {
           msgId: slot.msgId,
           login: slot.login,
           authorLogin: slot.login,
-          nick: slot.nickRaw,
+          nick: this.contextNick(slot),
           text: slot.copyText || slot.bodyRaw,
           clientX: ev.clientX,
           clientY: ev.clientY,
@@ -2124,7 +2165,7 @@ export class MessageRing {
       msgId: slot.msgId,
       login: slot.login,
       authorLogin: slot.login,
-      nick: slot.nickRaw,
+      nick: this.contextNick(slot),
       text: slot.copyText || slot.bodyRaw,
       clientX: ev.clientX,
       clientY: ev.clientY,
@@ -2147,7 +2188,7 @@ export class MessageRing {
   }
 
   private nickAt(slot: Slot, ev: FederatedPointerEvent): boolean {
-    if (!slot.login || slot.system || !slot.nickRaw) {
+    if (!slot.login || slot.system || !slot.useNickStyle) {
       return false;
     }
     const local = ev.getLocalPosition(slot.root);
