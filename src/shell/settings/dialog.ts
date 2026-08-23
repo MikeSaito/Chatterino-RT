@@ -278,6 +278,13 @@ function paintRuntime(
     pattern: parseLastReadPattern(data.knobs["appearance.lastMessagePattern"]),
     color: parseLastReadColor(data.knobs["appearance.lastMessageColor"]),
   });
+  ring.configureBadgeVisibility({
+    globalAuthority: data.knobs["appearance.showBadgesGlobalAuthority"] !== false,
+    predictions: data.knobs["appearance.showBadgesPredictions"] !== false,
+    channelAuthority: data.knobs["appearance.showBadgesChannelAuthority"] !== false,
+    subscription: data.knobs["appearance.showBadgesSubscription"] !== false,
+    vanity: data.knobs["appearance.showBadgesVanity"] !== false,
+  });
   ring.configureNickStyle({
     colorize: data.knobs["appearance.colorizeNicknames"] !== false,
     mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),

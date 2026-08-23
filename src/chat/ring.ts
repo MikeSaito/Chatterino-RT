@@ -19,6 +19,12 @@ import {
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import { resolveEmojiUrl } from "./emoteUrl";
+import {
+  badgeVisibilityEqual,
+  DEFAULT_BADGE_VISIBILITY,
+  filterVisibleBadges,
+  type BadgeVisibilityFlags,
+} from "./badgeVisibility";
 import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -200,6 +206,7 @@ export class MessageRing {
   private colorUsernames = true;
   private readonly nickColorCache = new NickColorCache(500);
   private hideReplyContext = false;
+  private badgeVisibility: BadgeVisibilityFlags = { ...DEFAULT_BADGE_VISIBILITY };
   private pauseMouse = false;
   private pauseKey = false;
   private pauseFollowIntent = false;
@@ -290,6 +297,63 @@ export class MessageRing {
       return;
     }
     this.repaintHighlights();
+  }
+
+  /** Twitch IRC badge category knobs (stock Visible badges). */
+  configureBadgeVisibility(flags: BadgeVisibilityFlags): void {
+    if (badgeVisibilityEqual(this.badgeVisibility, flags)) {
+      return;
+    }
+    this.badgeVisibility = { ...flags };
+    if (!this.ready) {
+      return;
+    }
+    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      if (slot.msgId) {
+        this.loadBadgeSprites(slot);
+      }
+    }
+    this.layout();
+  }
+
+  private visibleBadges(slot: Slot): Badge[] {
+    return filterVisibleBadges(
+      slot.badgesRaw,
+      this.badgeVisibility,
+      BADGE_SLOTS_PER_ROW,
+    );
+  }
+
+  private loadBadgeSprites(slot: Slot): void {
+    for (const key of slot.badgeKeys) {
+      if (key) {
+        this.textures.release(key);
+      }
+    }
+    slot.badgeKeys = new Array(slot.badges.length).fill("");
+    for (const spr of slot.badges) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    const visible = this.visibleBadges(slot);
+    const msgId = slot.msgId;
+    for (let i = 0; i < slot.badges.length; i += 1) {
+      const spr = slot.badges[i];
+      const badge = visible[i];
+      if (!badge || !badge.url) {
+        continue;
+      }
+      const key = `badge:${badge.url}`;
+      slot.badgeKeys[i] = key;
+      this.textures.acquire(key);
+      void this.textures.load(key, badge.url, false).then((tex) => {
+        if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key) {
+          applySpriteTexture(spr, tex, this.badgeSize);
+        }
+      });
+    }
   }
 
   /** Capture newest message id when leaving the app (stock updateLastReadMessage). */
@@ -1321,21 +1385,7 @@ export class MessageRing {
         });
       }
     }
-    for (let i = 0; i < slot.badges.length; i += 1) {
-      const spr = slot.badges[i];
-      const badge = drawn.badges[i];
-      if (!badge || !badge.url) {
-        continue;
-      }
-      const key = `badge:${badge.url}`;
-      slot.badgeKeys.push(key);
-      this.textures.acquire(key);
-      void this.textures.load(key, badge.url, false).then((tex) => {
-        if (tex && slot.msgId === msgId) {
-          applySpriteTexture(spr, tex, this.badgeSize);
-        }
-      });
-    }
+    this.loadBadgeSprites(slot);
   }
 
   /** Пересобрать @reply / * prefix при смене hideReplyContext без полного rewrite события. */
@@ -1519,12 +1569,13 @@ export class MessageRing {
       : 0;
     slot.time.x = 0;
     slot.time.visible = this.timestampsVisible();
-    const badgeN = slot.badgesRaw.length;
+    const badgeVisible = this.visibleBadges(slot);
+    const badgeN = badgeVisible.length;
     const badgeBand =
       badgeN === 0 ? 0 : badgeN * this.badgeSize + (badgeN - 1) * BADGE_GAP;
     for (let i = 0; i < slot.badges.length; i += 1) {
       const spr = slot.badges[i];
-      const badge = slot.badgesRaw[i];
+      const badge = badgeVisible[i];
       if (!badge) {
         spr.visible = false;
         continue;
@@ -2146,9 +2197,10 @@ export class MessageRing {
         continue;
       }
       const slotLocalY = localY - stageY - slot.startRow * this.lineHeight;
+      const badgeVisible = this.visibleBadges(slot);
       for (let b = 0; b < slot.badges.length; b += 1) {
         const spr = slot.badges[b];
-        const badge = slot.badgesRaw[b];
+        const badge = badgeVisible[b];
         if (!badge || !spr.visible) {
           continue;
         }
@@ -2570,9 +2622,6 @@ function badgesWithUrl(badges: Badge[]): Badge[] {
       continue;
     }
     out.push(badge);
-    if (out.length >= BADGE_SLOTS_PER_ROW) {
-      break;
-    }
   }
   return out;
 }
