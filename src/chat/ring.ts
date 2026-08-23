@@ -230,6 +230,7 @@ export class MessageRing {
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
   private onNickRightClick: ((ctx: SlotContext, ev: FederatedPointerEvent) => void) | undefined;
+  private onOpenChatLink: ((url: string) => void) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -280,6 +281,10 @@ export class MessageRing {
     cb: (ctx: SlotContext, ev: FederatedPointerEvent) => void,
   ): void {
     this.onNickRightClick = cb;
+  }
+
+  setOnOpenChatLink(cb: (url: string) => void): void {
+    this.onOpenChatLink = cb;
   }
 
   configureLastReadIndicator(opts: {
@@ -2019,6 +2024,10 @@ export class MessageRing {
     }
     const url = this.linkAt(slot, ev);
     if (!url) {
+      return;
+    }
+    if (this.onOpenChatLink) {
+      this.onOpenChatLink(url);
       return;
     }
     void invoke("open_chat_link", { url }).catch(() => undefined);

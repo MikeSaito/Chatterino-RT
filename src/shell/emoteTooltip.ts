@@ -7,13 +7,70 @@ export type EmoteTooltipScale = "Small" | "Medium" | "Large" | "Huge";
 type LinkInfoResponse = {
   tooltip: string;
   thumbnail_url?: string | null;
+  resolved_url?: string | null;
 };
 
 const CURSOR_OFFSET = 12;
 const VIEWPORT_PAD = 4;
 const RESOLVE_FAIL_TTL_MS = 60_000;
+const RESOLVED_CACHE_LIMIT = 200;
 const resolveCache = new Map<string, Promise<LinkInfoResponse>>();
 const resolveFailUntil = new Map<string, number>();
+/** Original chat URL → validated resolved destination from resolver `link`. */
+const resolvedUrlByOriginal = new Map<string, string>();
+
+function rememberResolved(original: string, resolved: string): void {
+  if (resolvedUrlByOriginal.has(original)) {
+    resolvedUrlByOriginal.delete(original);
+  }
+  resolvedUrlByOriginal.set(original, resolved);
+  while (resolvedUrlByOriginal.size > RESOLVED_CACHE_LIMIT) {
+    const oldest = resolvedUrlByOriginal.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    resolvedUrlByOriginal.delete(oldest);
+  }
+}
+
+export function cachedResolvedUrl(original: string): string | undefined {
+  return resolvedUrlByOriginal.get(original);
+}
+
+/** Sync open URL when cache already warm. */
+export function openUrlForChatLink(
+  original: string,
+  unshortLinks: boolean,
+): string {
+  if (!unshortLinks) {
+    return original;
+  }
+  return cachedResolvedUrl(original) ?? original;
+}
+
+/**
+ * When unshortLinks is on: use cache or resolve-on-click (stock-like).
+ * On failure / no `link` field: original URL.
+ */
+export async function resolveOpenUrlForChatLink(
+  original: string,
+  unshortLinks: boolean,
+): Promise<string> {
+  if (!unshortLinks) {
+    return original;
+  }
+  const hit = cachedResolvedUrl(original);
+  if (hit) {
+    return hit;
+  }
+  try {
+    const info = await fetchLinkInfo(original);
+    const resolved = info.resolved_url?.trim();
+    return resolved || original;
+  } catch {
+    return original;
+  }
+}
 
 export function parseTooltipPreviewMode(raw: unknown): TooltipPreviewMode {
   if (raw === "DontShow" || raw === "AlwaysShow" || raw === "ShowOnShift") {
@@ -75,13 +132,21 @@ function fetchLinkInfo(url: string): Promise<LinkInfoResponse> {
   }
   let pending = resolveCache.get(url);
   if (!pending) {
-    pending = invoke<LinkInfoResponse>("resolve_link_info", { url }).catch(
-      (err: unknown) => {
+    pending = invoke<LinkInfoResponse>("resolve_link_info", { url })
+      .then((info) => {
+        const resolved = info.resolved_url?.trim();
+        if (resolved) {
+          rememberResolved(url, resolved);
+        } else {
+          resolvedUrlByOriginal.delete(url);
+        }
+        return info;
+      })
+      .catch((err: unknown) => {
         resolveCache.delete(url);
         resolveFailUntil.set(url, Date.now() + RESOLVE_FAIL_TTL_MS);
         throw err;
-      },
-    );
+      });
     resolveCache.set(url, pending);
   }
   return pending;

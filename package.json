@@ -22,6 +22,7 @@
     "test:mention-format": "node --experimental-strip-types ./tests/mentionFormat.test.ts",
     "test:badge-vis": "node --experimental-strip-types ./tests/badgeVisibility.test.ts",
     "test:channel-header": "node --experimental-strip-types ./tests/channelHeader.test.ts",
+    "test:unshort": "node --experimental-strip-types ./tests/unshortLinks.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

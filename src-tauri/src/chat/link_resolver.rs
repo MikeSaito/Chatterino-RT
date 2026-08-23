@@ -19,6 +19,9 @@ const TIMEOUT_SECS: u64 = 30;
 pub struct LinkInfoResponse {
     pub tooltip: String,
     pub thumbnail_url: Option<String>,
+    /// Unshortened destination from resolver `link` (validated); None if absent/invalid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_url: Option<String>,
 }
 
 struct LinkResolverState {
@@ -142,9 +145,15 @@ pub fn parse_resolver_json(body: &Value) -> LinkInfoResponse {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .and_then(|raw| allowed_chat_url(raw).ok());
+        let resolved_url = body
+            .get("link")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .and_then(|raw| allowed_chat_url(raw).ok());
         return LinkInfoResponse {
             tooltip,
             thumbnail_url,
+            resolved_url,
         };
     }
     let message = body
@@ -156,6 +165,7 @@ pub fn parse_resolver_json(body: &Value) -> LinkInfoResponse {
     LinkInfoResponse {
         tooltip: message,
         thumbnail_url: None,
+        resolved_url: None,
     }
 }
 
@@ -243,13 +253,18 @@ mod tests {
         let body = json!({
             "status": 200,
             "tooltip": "Hello%20world",
-            "thumbnail": "https://example.com/thumb.png"
+            "thumbnail": "https://example.com/thumb.png",
+            "link": "https://example.com/full"
         });
         let parsed = parse_resolver_json(&body);
         assert_eq!(parsed.tooltip, "Hello world");
         assert_eq!(
             parsed.thumbnail_url.as_deref(),
             Some("https://example.com/thumb.png")
+        );
+        assert_eq!(
+            parsed.resolved_url.as_deref(),
+            Some("https://example.com/full")
         );
     }
 
@@ -262,6 +277,18 @@ mod tests {
         });
         let parsed = parse_resolver_json(&body);
         assert!(parsed.thumbnail_url.is_none());
+        assert!(parsed.resolved_url.is_none());
+    }
+
+    #[test]
+    fn parse_resolver_json_rejects_bad_resolved_link() {
+        let body = json!({
+            "status": 200,
+            "tooltip": "x",
+            "link": "javascript:alert(1)"
+        });
+        let parsed = parse_resolver_json(&body);
+        assert!(parsed.resolved_url.is_none());
     }
 
     #[test]
@@ -270,6 +297,7 @@ mod tests {
         let parsed = parse_resolver_json(&body);
         assert_eq!(parsed.tooltip, "Not found");
         assert!(parsed.thumbnail_url.is_none());
+        assert!(parsed.resolved_url.is_none());
     }
 
     #[test]

@@ -44,6 +44,7 @@ import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
   bindEmoteTooltip,
+  resolveOpenUrlForChatLink,
   parseEmoteTooltipScale,
   parseThumbnailSize,
   parseTooltipPreviewMode,
@@ -213,6 +214,7 @@ async function boot(): Promise<void> {
   let linkInfoTooltip = false;
   let thumbnailSizePx = 0;
   let hideLinkThumbnails = true;
+  let unshortLinks = false;
   let headerKnobs: HeaderKnobs = parseHeaderKnobs({});
   const streamByChannel = new Map<string, ChannelLive>();
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
@@ -230,6 +232,12 @@ async function boot(): Promise<void> {
       getHideLinkThumbnails: () => hideLinkThumbnails && isStreamerModeActive(),
     });
   }
+  ring.setOnOpenChatLink((url) => {
+    void (async () => {
+      const openUrl = await resolveOpenUrlForChatLink(url, unshortLinks);
+      await invoke("open_chat_link", { url: openUrl }).catch(() => undefined);
+    })();
+  });
   teardownChat = () => {
     chatIpc?.stop();
     chatIpc = null;
@@ -333,6 +341,7 @@ async function boot(): Promise<void> {
       linkInfoTooltip = data.knobs["links.linkInfoTooltip"] === true;
       thumbnailSizePx = parseThumbnailSize(data.knobs["appearance.thumbnailSize"]);
       hideLinkThumbnails = data.knobs["streamerMode.hideLinkThumbnails"] !== false;
+      unshortLinks = data.knobs["links.unshortLinks"] === true;
       headerKnobs = parseHeaderKnobs(data.knobs);
       emoteTooltipCtl?.refresh();
       repaintChannelTitle();
