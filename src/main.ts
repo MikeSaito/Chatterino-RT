@@ -35,6 +35,10 @@ import {
 } from "./shell/usernameRclick";
 import { mentionInsertText } from "./shell/mentionFormat";
 import {
+  buildWebSearchUrl,
+  webSearchMenuLabel,
+} from "./shell/webSearch";
+import {
   bindStreamerModeBadge,
   isStreamerModeActive,
   streamerModeState,
@@ -215,6 +219,9 @@ async function boot(): Promise<void> {
   let thumbnailSizePx = 0;
   let hideLinkThumbnails = true;
   let unshortLinks = false;
+  let searchEnabled = false;
+  let searchEngineUrl = "";
+  let searchEngineName = "";
   let headerKnobs: HeaderKnobs = parseHeaderKnobs({});
   const streamByChannel = new Map<string, ChannelLive>();
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
@@ -278,6 +285,9 @@ async function boot(): Promise<void> {
     ring,
     openBtn: settingsOpen,
     modal: settingsModal,
+    onOpen: () => {
+      hideContextMenu();
+    },
     onDisplay: (data) => {
       autoCloseUserPopup =
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
@@ -342,6 +352,9 @@ async function boot(): Promise<void> {
       thumbnailSizePx = parseThumbnailSize(data.knobs["appearance.thumbnailSize"]);
       hideLinkThumbnails = data.knobs["streamerMode.hideLinkThumbnails"] !== false;
       unshortLinks = data.knobs["links.unshortLinks"] === true;
+      searchEnabled = data.knobs["behaviour.searchEnabled"] === true;
+      searchEngineUrl = String(data.knobs["behaviour.searchEngineUrl"] ?? "");
+      searchEngineName = String(data.knobs["behaviour.searchEngineName"] ?? "");
       headerKnobs = parseHeaderKnobs(data.knobs);
       emoteTooltipCtl?.refresh();
       repaintChannelTitle();
@@ -499,6 +512,7 @@ async function boot(): Promise<void> {
         chatFindCtl.open();
         return true;
       case "openSettings":
+        hideContextMenu();
         chatFindCtl.close();
         settingsCtl.open();
         return true;
@@ -641,6 +655,16 @@ async function boot(): Promise<void> {
     }
     if (action === "copy-link" && target.linkUrl) {
       void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
+      return;
+    }
+    if (action === "web-search") {
+      if (!searchEnabled) {
+        return;
+      }
+      const searchUrl = buildWebSearchUrl(searchEngineUrl, target.text);
+      if (searchUrl) {
+        void invoke("open_chat_link", { url: searchUrl }).catch(() => undefined);
+      }
       return;
     }
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
@@ -880,6 +904,7 @@ async function boot(): Promise<void> {
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
+    const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
     }
@@ -894,6 +919,12 @@ async function boot(): Promise<void> {
     }
     if (copyLinkBtn) {
       copyLinkBtn.hidden = !ctx.linkUrl;
+    }
+    if (webSearchBtn) {
+      const searchUrl =
+        searchEnabled ? buildWebSearchUrl(searchEngineUrl, ctx.text) : null;
+      webSearchBtn.hidden = !searchUrl;
+      webSearchBtn.textContent = webSearchMenuLabel(searchEngineName);
     }
     contextMenuEl.hidden = false;
     const pad = 8;

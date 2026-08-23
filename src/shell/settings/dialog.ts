@@ -23,6 +23,7 @@ import {
   parseUsernameDisplayMode,
 } from "../nickStyle";
 import { applyWindowTopMost } from "../windowTopMost";
+import { presetToEngine } from "../webSearch";
 import { setChatAppBackground } from "../../pixi/app";
 import {
   configureStreamerMode,
@@ -311,12 +312,13 @@ export function bindSettingsDialog(opts: {
   openBtn: HTMLButtonElement;
   modal: HTMLElement;
   onDisplay?: (data: AppSettings) => void;
+  onOpen?: () => void;
 }): {
   open: () => void;
   close: () => void;
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
 } {
-  const { ring, openBtn, modal, onDisplay } = opts;
+  const { ring, openBtn, modal, onDisplay, onOpen } = opts;
   let lastSettings: AppSettings | null = null;
   setStreamerModeOnChange(() => {
     if (lastSettings) {
@@ -505,9 +507,31 @@ export function bindSettingsDialog(opts: {
     row.append(lab, input);
     block.append(row);
     knobInputs.set(knob.path, input);
-    input.addEventListener("change", () => {
-      schedulePreview();
-    });
+    if (
+      knob.path === "behaviour.searchEnginePreset" &&
+      input instanceof HTMLSelectElement
+    ) {
+      input.addEventListener("change", () => {
+        const engine = presetToEngine(input.value);
+        if (!engine) {
+          schedulePreview();
+          return;
+        }
+        const urlInput = knobInputs.get("behaviour.searchEngineUrl");
+        const nameInput = knobInputs.get("behaviour.searchEngineName");
+        if (urlInput) {
+          urlInput.value = engine.url;
+        }
+        if (nameInput) {
+          nameInput.value = engine.name;
+        }
+        schedulePreview();
+      });
+    } else {
+      input.addEventListener("change", () => {
+        schedulePreview();
+      });
+    }
     input.addEventListener("input", () => {
       schedulePreview();
     });
@@ -880,6 +904,7 @@ export function bindSettingsDialog(opts: {
   };
 
   const openModal = async (): Promise<void> => {
+    onOpen?.();
     statusEl.textContent = "";
     loadReady = false;
     okBtn.disabled = true;

@@ -24,6 +24,7 @@
     "test:channel-header": "node --experimental-strip-types ./tests/channelHeader.test.ts",
     "test:unshort": "node --experimental-strip-types ./tests/unshortLinks.test.ts",
     "test:link-display": "node --experimental-strip-types ./tests/linkDisplay.test.ts",
+    "test:web-search": "node --experimental-strip-types ./tests/webSearch.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
