@@ -240,6 +240,7 @@ function paintRuntime(
     fadeHistory,
     hideTsLive,
     data.knobs["appearance.showReplyButton"] === true,
+    data.knobs["links.linksDoubleClickOnly"] === true,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
       images: data.knobs["emotes.enableEmoteImages"] !== false,

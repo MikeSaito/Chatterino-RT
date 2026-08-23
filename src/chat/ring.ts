@@ -184,6 +184,7 @@ export class MessageRing {
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
   private showReplyButton = false;
+  private linksDoubleClickOnly = false;
   private alternateMessages = false;
   private separateMessages = false;
   private collapseMessagesMinLines = 0;
@@ -581,6 +582,7 @@ export class MessageRing {
     fadeMessageHistory = true,
     hideTimestampsWhenLive = false,
     showReplyButton = false,
+    linksDoubleClickOnly = false,
     emotes?: {
       scale?: number;
       images?: boolean;
@@ -613,6 +615,7 @@ export class MessageRing {
     this.fadeMessageHistory = fadeMessageHistory;
     this.hideTimestampsWhenLive = hideTimestampsWhenLive;
     this.showReplyButton = showReplyButton;
+    this.linksDoubleClickOnly = linksDoubleClickOnly;
     this.emoteScale = clampEmoteScale(emotes?.scale ?? this.emoteScale);
     this.enableEmoteImages = emotes?.images ?? this.enableEmoteImages;
     this.enableZeroWidthEmotes = emotes?.zeroWidth ?? this.enableZeroWidthEmotes;
@@ -1920,6 +1923,12 @@ export class MessageRing {
       slot.expanded = true;
       this.paintClip(slot);
       this.layout();
+      return;
+    }
+    // Pixi has no dblclick; DOM double-click sets detail >= 2 on the second tap.
+    const needDbl = this.linksDoubleClickOnly;
+    const isDbl = (ev.detail ?? 1) >= 2;
+    if (needDbl && !isDbl) {
       return;
     }
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
