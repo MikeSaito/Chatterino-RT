@@ -1033,6 +1033,24 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.popup-head > div:not(.popup-head-actions) {
+  min-width: 0;
+  flex: 1;
+}
+
+#usercard-avatar {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--c-split-bg);
+}
+
+#usercard-avatar[hidden] {
+  display: none;
+}
+
 #usercard-pin.is-pinned {
   background: #3a2a55;
   border-color: #9147ff;

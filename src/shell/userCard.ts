@@ -8,6 +8,12 @@ export type UserCardOpen = {
   clientY: number;
 };
 
+type UserProfile = {
+  login: string;
+  displayName: string;
+  profileImageUrl?: string | null;
+};
+
 /**
  * SPA UserInfoPopup: плавающая карточка у курсора (DraggablePopup), без fullscreen dim.
  */
@@ -17,23 +23,56 @@ export function bindUserCard(opts: {
   searchModal: HTMLElement;
   activeChannel: () => string;
   autoClose: () => boolean;
-}): { open: (info: UserCardOpen) => void; close: () => void } {
-  const { modal, settingsModal, searchModal, activeChannel, autoClose } = opts;
+  getHideAvatars: () => boolean;
+}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void } {
+  const { modal, settingsModal, searchModal, activeChannel, autoClose, getHideAvatars } =
+    opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
   const pinBtn = modal.querySelector<HTMLButtonElement>("#usercard-pin");
+  const avatarEl = modal.querySelector<HTMLImageElement>("#usercard-avatar");
   const nameEl = modal.querySelector<HTMLElement>("#usercard-name");
   const loginEl = modal.querySelector<HTMLElement>("#usercard-login");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
   const head = modal.querySelector<HTMLElement>(".popup-head");
   if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
-    return { open: () => undefined, close: () => undefined };
+    return {
+      open: () => undefined,
+      close: () => undefined,
+      syncAvatars: () => undefined,
+    };
   }
 
   let currentLogin = "";
   let pinned = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
+
+  const clearAvatar = (): void => {
+    if (!avatarEl) {
+      return;
+    }
+    avatarEl.hidden = true;
+    avatarEl.removeAttribute("src");
+    avatarEl.alt = "";
+  };
+
+  if (avatarEl) {
+    avatarEl.addEventListener("error", () => {
+      clearAvatar();
+    });
+  }
+
+  const syncAvatars = (): void => {
+    if (modal.hidden || !currentLogin) {
+      return;
+    }
+    if (getHideAvatars()) {
+      clearAvatar();
+      return;
+    }
+    void loadAvatar(currentLogin);
+  };
 
   const close = (): void => {
     modal.hidden = true;
@@ -43,6 +82,7 @@ export function bindUserCard(opts: {
       pinBtn.classList.remove("is-pinned");
       pinBtn.title = "Pin";
     }
+    clearAvatar();
     recent.replaceChildren();
   };
 
@@ -59,6 +99,36 @@ export function bindUserCard(opts: {
     dialog.style.top = `${top}px`;
   };
 
+  const loadAvatar = async (login: string): Promise<void> => {
+    if (!avatarEl || getHideAvatars()) {
+      clearAvatar();
+      return;
+    }
+    try {
+      const profile = await invoke<UserProfile>("chat_user_profile", { login });
+      if (login !== currentLogin) {
+        return;
+      }
+      if (getHideAvatars()) {
+        clearAvatar();
+        return;
+      }
+      const url = profile.profileImageUrl?.trim() ?? "";
+      if (!url) {
+        clearAvatar();
+        return;
+      }
+      avatarEl.alt = profile.displayName || login;
+      avatarEl.src = url;
+      avatarEl.hidden = false;
+    } catch {
+      if (login !== currentLogin) {
+        return;
+      }
+      clearAvatar();
+    }
+  };
+
   const open = (info: UserCardOpen): void => {
     if (!settingsModal.hidden || !searchModal.hidden) {
       return;
@@ -66,6 +136,7 @@ export function bindUserCard(opts: {
     currentLogin = info.login.toLowerCase();
     nameEl.textContent = info.nick || info.login;
     loginEl.textContent = info.login ? `@${info.login}` : "";
+    clearAvatar();
     recent.replaceChildren();
     const loading = document.createElement("p");
     loading.className = "usercard-empty";
@@ -73,6 +144,7 @@ export function bindUserCard(opts: {
     recent.append(loading);
     placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
+    void loadAvatar(currentLogin);
   };
 
   const loadRecent = async (login: string): Promise<void> => {
@@ -209,5 +281,5 @@ export function bindUserCard(opts: {
     }
   });
 
-  return { open, close };
+  return { open, close, syncAvatars };
 }

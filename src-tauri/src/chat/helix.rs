@@ -330,6 +330,62 @@ pub async fn fetch_channel_stream(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProfile {
+    pub login: String,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_image_url: Option<String>,
+}
+
+pub fn allowed_profile_image_url(raw: &str) -> Option<String> {
+    allowed_https_host(raw, BADGE_HOSTS)
+}
+
+pub fn parse_user_profile(value: &Value) -> Option<UserProfile> {
+    let item = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())?;
+    let login = item
+        .get("login")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())?
+        .to_lowercase();
+    let display_name = item
+        .get("display_name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(login.as_str())
+        .to_string();
+    let profile_image_url = item
+        .get("profile_image_url")
+        .and_then(Value::as_str)
+        .and_then(allowed_profile_image_url);
+    Some(UserProfile {
+        login,
+        display_name,
+        profile_image_url,
+    })
+}
+
+pub async fn fetch_user_profile(
+    login: &str,
+    token: Option<&str>,
+    client_id: &str,
+) -> Option<UserProfile> {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return None;
+    };
+    let url = helix_query("/users", &[("login", login)]);
+    let client = http_client();
+    match get_helix(&client, &url, &client_id, &token).await {
+        HelixFetch::Ok(v) => parse_user_profile(&v),
+        HelixFetch::Auth | HelixFetch::Fail => None,
+    }
+}
+
 fn allowed_https_host(raw: &str, hosts: &[&str]) -> Option<String> {
     let parsed = Url::parse(raw.trim()).ok()?;
     if parsed.scheme() != "https" {
@@ -720,6 +776,37 @@ mod tests {
         assert_eq!(parsed.game_name.as_deref(), Some("Just Chatting"));
         assert_eq!(parsed.stream_title.as_deref(), Some("hello world"));
         assert_eq!(parsed.started_at.as_deref(), Some("2020-01-01T12:00:00Z"));
+    }
+
+    #[test]
+    fn parse_user_profile_and_reject_bad_avatar() {
+        let ok = serde_json::json!({
+            "data": [{
+                "login": "XQC",
+                "display_name": "xQc",
+                "profile_image_url": "https://static-cdn.jtvnw.net/jtv_user_pictures/x.png"
+            }]
+        });
+        let parsed = parse_user_profile(&ok).expect("profile");
+        assert_eq!(parsed.login, "xqc");
+        assert_eq!(parsed.display_name, "xQc");
+        assert_eq!(
+            parsed.profile_image_url.as_deref(),
+            Some("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png")
+        );
+
+        let bad_img = serde_json::json!({
+            "data": [{
+                "login": "xqc",
+                "display_name": "xQc",
+                "profile_image_url": "javascript:alert(1)"
+            }]
+        });
+        let parsed = parse_user_profile(&bad_img).expect("profile without img");
+        assert!(parsed.profile_image_url.is_none());
+
+        assert!(allowed_profile_image_url("https://evil.example/a.png").is_none());
+        assert!(parse_user_profile(&serde_json::json!({ "data": [] })).is_none());
     }
 
     #[test]

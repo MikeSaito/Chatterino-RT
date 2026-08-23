@@ -3,10 +3,10 @@ mod security;
 
 use chat::commands::{
     auth_import, auth_logout, auth_start, auth_status, chat_complete, chat_join, chat_leave,
-    chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, filters_get, filters_set,
-    highlight_sound_pick, highlight_sound_read, highlight_cancel_attention,
-    highlight_request_attention, open_chat_link, session_get, settings_get,
-    settings_set, streamer_mode_detect,
+    chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, chat_user_profile,
+    filters_get, filters_set, highlight_sound_pick, highlight_sound_read,
+    highlight_cancel_attention, highlight_request_attention, open_chat_link, session_get,
+    settings_get, settings_set, streamer_mode_detect,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -39,6 +39,7 @@ pub fn run() {
             chat_send,
             chat_complete,
             chat_search,
+            chat_user_profile,
             session_get,
             open_chat_link,
             resolve_link_info,

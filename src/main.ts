@@ -234,6 +234,8 @@ async function boot(): Promise<void> {
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   let autoCloseThreadPopup = false;
+  let hideUsercardAvatars = true;
+  let userCard: ReturnType<typeof bindUserCard> | null = null;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;
   let lastPointerY = 0;
@@ -267,6 +269,9 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
+      hideUsercardAvatars =
+        data.knobs["streamerMode.hideUsercardAvatars"] !== false;
+      userCard?.syncAvatars();
       if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
         replyBtn.hidden = true;
         replyHover = null;
@@ -368,12 +373,13 @@ async function boot(): Promise<void> {
       hideContextMenu();
     },
   });
-  const userCard = bindUserCard({
+  userCard = bindUserCard({
     modal: usercardModal,
     settingsModal,
     searchModal,
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseUserPopup,
+    getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
   });
   if (replyBtn) {
     canvasHost.addEventListener("pointermove", (ev) => {

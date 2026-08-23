@@ -555,6 +555,28 @@ pub fn streamer_mode_detect() -> Result<bool, ApiError> {
 }
 
 #[tauri::command]
+pub async fn chat_user_profile(
+    state: tauri::State<'_, Shared>,
+    login: String,
+) -> Result<super::helix::UserProfile, ApiError> {
+    let normalized = normalize_channel(&login)?;
+    let token = auth::oauth_token(&state);
+    let client_id = auth::resolved_client_id(&state);
+    if token.is_none() {
+        return Err(ApiError {
+            code: "auth_required".into(),
+            message: "нужен вход Twitch для профиля".into(),
+        });
+    }
+    super::helix::fetch_user_profile(&normalized, token.as_deref(), &client_id)
+        .await
+        .ok_or_else(|| ApiError {
+            code: "not_found".into(),
+            message: "пользователь не найден".into(),
+        })
+}
+
+#[tauri::command]
 pub fn open_chat_link(url: String) -> Result<(), ApiError> {
     let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
         code: "invalid_input".into(),
