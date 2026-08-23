@@ -9,6 +9,7 @@ export type StreamerModeState = {
   active: boolean;
   muteMentions: boolean;
   hideModActions: boolean;
+  hideViewerCountAndDuration: boolean;
 };
 
 const POLL_MS = 10_000;
@@ -16,6 +17,7 @@ const POLL_MS = 10_000;
 let mode: StreamerModeSetting = "DetectStreamingSoftware";
 let muteMentions = true;
 let hideModActions = true;
+let hideViewerCountAndDuration = false;
 let detected = false;
 let active = false;
 let pollTimer: number | null = null;
@@ -39,6 +41,7 @@ export function configureStreamerMode(opts: {
   mode: string;
   muteMentions: boolean;
   hideModActions: boolean;
+  hideViewerCountAndDuration: boolean;
 }): void {
   const nextMode = parseMode(opts.mode);
   if (mode === "DetectStreamingSoftware" && nextMode !== "DetectStreamingSoftware") {
@@ -52,6 +55,7 @@ export function configureStreamerMode(opts: {
   mode = nextMode;
   muteMentions = opts.muteMentions;
   hideModActions = opts.hideModActions;
+  hideViewerCountAndDuration = opts.hideViewerCountAndDuration;
   syncPolling();
   setActive(computeActive(), false);
 }
@@ -61,7 +65,7 @@ export function isStreamerModeActive(): boolean {
 }
 
 export function streamerModeState(): StreamerModeState {
-  return { active, muteMentions, hideModActions };
+  return { active, muteMentions, hideModActions, hideViewerCountAndDuration };
 }
 
 function parseMode(raw: string): StreamerModeSetting {

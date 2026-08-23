@@ -8,6 +8,7 @@ import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import {
+  effectiveHeaderKnobs,
   formatChannelTitle,
   parseHeaderKnobs,
   type HeaderKnobs,
@@ -33,7 +34,11 @@ import {
   type UsernameRclickModifier,
 } from "./shell/usernameRclick";
 import { mentionInsertText } from "./shell/mentionFormat";
-import { bindStreamerModeBadge, isStreamerModeActive } from "./shell/streamerMode";
+import {
+  bindStreamerModeBadge,
+  isStreamerModeActive,
+  streamerModeState,
+} from "./shell/streamerMode";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
@@ -345,7 +350,12 @@ async function boot(): Promise<void> {
     }
     const stream = streamByChannel.get(ch.toLowerCase());
     ring.setChannelLive(stream?.live ?? false);
-    titleEl.textContent = formatChannelTitle(ch, stream, headerKnobs);
+    const sm = streamerModeState();
+    const knobs = effectiveHeaderKnobs(headerKnobs, {
+      streamerActive: sm.active,
+      hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
+    });
+    titleEl.textContent = formatChannelTitle(ch, stream, knobs);
   };
 
   function applySendWaitForActive(): void {

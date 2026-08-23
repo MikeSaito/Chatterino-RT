@@ -192,6 +192,8 @@ function applyDisplay(
     mode: String(data.knobs["streamerMode.enabled"] ?? "DetectStreamingSoftware"),
     muteMentions: data.knobs["streamerMode.muteMentions"] !== false,
     hideModActions: data.knobs["streamerMode.hideModActions"] !== false,
+    hideViewerCountAndDuration:
+      data.knobs["streamerMode.hideViewerCountAndDuration"] === true,
   });
   paintRuntime(ring, data, onDisplay);
 }

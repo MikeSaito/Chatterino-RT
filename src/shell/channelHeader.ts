@@ -16,6 +16,21 @@ export function parseHeaderKnobs(knobs: Record<string, unknown>): HeaderKnobs {
   };
 }
 
+/** Stock SplitHeader: hide uptime/viewers while streamer mode + knob. */
+export function effectiveHeaderKnobs(
+  appearance: HeaderKnobs,
+  opts: { streamerActive: boolean; hideViewerCountAndDuration: boolean },
+): HeaderKnobs {
+  if (!(opts.streamerActive && opts.hideViewerCountAndDuration)) {
+    return appearance;
+  }
+  return {
+    ...appearance,
+    uptime: false,
+    viewerCount: false,
+  };
+}
+
 function formatUptime(startedAt: string): string {
   const since = Date.parse(startedAt);
   if (!Number.isFinite(since)) {
