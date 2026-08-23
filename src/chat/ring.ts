@@ -1201,7 +1201,11 @@ export class MessageRing {
 
   private write(slot: Slot, event: ChatEvent): void {
     slot.root.visible = true;
-    slot.disabled = false;
+    slot.disabled =
+      (event.kind === "privmsg" && !!event.disabled) ||
+      (event.kind === "usernotice" &&
+        event.privmsg?.kind === "privmsg" &&
+        !!event.privmsg.disabled);
     slot.disabledGfx.clear();
     slot.expanded = false;
     slot.collapsed = false;

@@ -26,6 +26,7 @@ pub mod scrollback;
 pub mod send_wait;
 pub mod session;
 pub mod settings;
+pub mod similarity;
 pub mod spans;
 pub mod state;
 pub mod streamer_mode;

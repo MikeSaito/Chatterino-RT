@@ -1650,6 +1650,7 @@ mod tests {
             highlight_sound_path: None,
             highlight_flash: false,
             whisper: false,
+        disabled: false,
         }
     }
 

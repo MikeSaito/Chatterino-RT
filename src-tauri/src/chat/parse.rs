@@ -168,6 +168,7 @@ fn build_privmsg(
         highlight_sound_path: None,
         highlight_flash: false,
         whisper,
+        disabled: false,
     }
 }
 
@@ -248,6 +249,7 @@ fn parse_usernotice(
             highlight_sound_path: None,
             highlight_flash: false,
             whisper: false,
+        disabled: false,
         })
     });
     ParsedLine::Event {

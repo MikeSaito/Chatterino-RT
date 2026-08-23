@@ -2,6 +2,7 @@ use super::pending::Pending;
 use super::room_modes::RoomModes;
 use super::scrollback::Scrollback;
 use super::send_wait::{self, SendWait};
+use super::similarity::{self, SimilarityCfg, SimilarityRecent};
 use super::types::{ChatBatch, ChatEvent};
 
 pub struct ChannelBuf {
@@ -10,6 +11,7 @@ pub struct ChannelBuf {
     room_modes: Option<RoomModes>,
     send_wait: SendWait,
     live: bool,
+    similarity_recent: SimilarityRecent,
 }
 
 impl ChannelBuf {
@@ -20,6 +22,7 @@ impl ChannelBuf {
             room_modes: None,
             send_wait: SendWait::default(),
             live: false,
+            similarity_recent: SimilarityRecent::default(),
         }
     }
 
@@ -64,11 +67,16 @@ impl ChannelBuf {
         vec![event]
     }
 
-    pub fn ingest(&mut self, event: ChatEvent, self_login: Option<&str>) -> Option<ChatBatch> {
+    pub fn ingest(
+        &mut self,
+        event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+    ) -> Option<ChatBatch> {
         let mut flushed: Option<ChatBatch> = None;
         for item in self.expand(event) {
             self.note_send_wait(&item, self_login);
-            if let Some(batch) = self.ingest_one(item) {
+            if let Some(batch) = self.ingest_one(item, self_login, sim) {
                 flushed = Some(merge_batches(flushed, batch));
             }
         }
@@ -76,9 +84,16 @@ impl ChannelBuf {
     }
 
     /// Inactive channel: keep scrollback + room mode state, no live pending.
-    pub fn push_scrollback_only(&mut self, event: ChatEvent, self_login: Option<&str>) {
-        for item in self.expand(event) {
+    pub fn push_scrollback_only(
+        &mut self,
+        event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+    ) {
+        for mut item in self.expand(event) {
             self.note_send_wait(&item, self_login);
+            similarity::mark_similar(&self.similarity_recent, &mut item, sim, self_login);
+            self.similarity_recent.remember(&item);
             self.scrollback.push(item);
         }
     }
@@ -88,7 +103,14 @@ impl ChannelBuf {
         send_wait::apply_event(&mut self.send_wait, event, self_login, slow);
     }
 
-    fn ingest_one(&mut self, event: ChatEvent) -> Option<ChatBatch> {
+    fn ingest_one(
+        &mut self,
+        mut event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+    ) -> Option<ChatBatch> {
+        similarity::mark_similar(&self.similarity_recent, &mut event, sim, self_login);
+        self.similarity_recent.remember(&event);
         self.scrollback.push(event.clone());
         if self.pending.would_exceed(&event) {
             let flushed = self.pending.take_batch();
@@ -158,12 +180,12 @@ mod tests {
     fn snapshot_flushes_pending_and_advances_seq() {
         let mut hub = crate::chat::hub::Hub::default();
         hub.set_active(Some("xqc".into()));
-        hub.ingest("xqc", notice("1"), None);
+        hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default());
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.seq, 1);
         assert_eq!(snap.events.len(), 1);
         assert!(hub.buffer("xqc").flush().is_none());
-        hub.ingest("xqc", notice("2"), None);
+        hub.ingest("xqc", notice("2"), None, &SimilarityCfg::default());
         let live = hub.flush_all();
         assert_eq!(live[0].seq, 2);
         assert_eq!(live[0].events.len(), 1);
@@ -174,7 +196,7 @@ mod tests {
     fn ingest_keeps_overflow_in_scrollback_not_dropped() {
         let mut buf = ChannelBuf::new("xqc");
         for i in 0..(BATCH_MAX_MESSAGES + 2) {
-            let _ = buf.ingest(notice(&i.to_string()), None);
+            let _ = buf.ingest(notice(&i.to_string()), None, &SimilarityCfg::default());
         }
         assert!(buf.scrollback.len() >= BATCH_MAX_MESSAGES);
     }
@@ -192,6 +214,7 @@ mod tests {
                 followers_only: None,
             },
             None,
+            &SimilarityCfg::default(),
         );
         let snap = buf.snapshot_batch("xqc");
         assert!(snap.events.is_empty());
@@ -211,6 +234,7 @@ mod tests {
                 followers_only: Some(-1),
             },
             None,
+            &SimilarityCfg::default(),
         );
         let _ = buf.ingest(
             ChatEvent::Roomstate {
@@ -222,6 +246,7 @@ mod tests {
                 followers_only: None,
             },
             None,
+            &SimilarityCfg::default(),
         );
         let modes = buf.room_modes.expect("modes");
         assert!(modes.emote_only);
@@ -241,6 +266,7 @@ mod tests {
                 followers_only: None,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         let _ = buf.ingest(
             ChatEvent::Privmsg {
@@ -269,8 +295,10 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
+            disabled: false,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         let text = buf.poll_send_wait().expect("wait");
         assert!(text.contains('s') || text.contains('m'), "{text}");
@@ -289,6 +317,7 @@ mod tests {
                 followers_only: None,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         let _ = buf.ingest(
             ChatEvent::Privmsg {
@@ -317,8 +346,10 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
+            disabled: false,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         assert!(buf.poll_send_wait().is_some());
         let _ = buf.ingest(
@@ -331,6 +362,7 @@ mod tests {
                 followers_only: None,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         assert_eq!(buf.poll_send_wait().as_deref(), Some(""));
     }
@@ -348,6 +380,7 @@ mod tests {
                 followers_only: None,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         let _ = buf.ingest(
             ChatEvent::Privmsg {
@@ -380,8 +413,10 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
+            disabled: false,
             },
             Some("me"),
+            &SimilarityCfg::default(),
         );
         assert!(buf.poll_send_wait().is_none());
     }

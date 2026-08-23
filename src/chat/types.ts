@@ -52,6 +52,8 @@ export type ChatEvent =
       highlightSoundPath?: string;
       highlightFlash?: boolean;
       whisper?: boolean;
+      /** Soft-disabled (similar / R9K). */
+      disabled?: boolean;
     }
   | {
       kind: "clearchat";

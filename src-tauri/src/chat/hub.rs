@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::channel::ChannelBuf;
+use super::similarity::SimilarityCfg;
 use super::types::{ChatBatch, ChatEvent};
 
 #[derive(Default)]
@@ -47,11 +48,12 @@ impl Hub {
         &mut self,
         event: ChatEvent,
         self_login: Option<&str>,
+        sim: &SimilarityCfg,
     ) -> Vec<ChatBatch> {
         let channels = self.channels();
         let mut batches = Vec::new();
         for ch in channels {
-            if let Some(batch) = self.ingest(&ch, event.clone(), self_login) {
+            if let Some(batch) = self.ingest(&ch, event.clone(), self_login, sim) {
                 batches.push(batch);
             }
         }
@@ -63,15 +65,16 @@ impl Hub {
         channel: &str,
         event: ChatEvent,
         self_login: Option<&str>,
+        sim: &SimilarityCfg,
     ) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
             if self.buffers.contains_key(channel) {
                 self.buffer(channel)
-                    .push_scrollback_only(event, self_login);
+                    .push_scrollback_only(event, self_login, sim);
             }
             return None;
         }
-        self.buffer(channel).ingest(event, self_login)
+        self.buffer(channel).ingest(event, self_login, sim)
     }
 
     /// Poll all buffers for changed send-wait labels.
@@ -173,8 +176,8 @@ mod tests {
     fn ingest_ignores_unknown_inactive() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
-        assert!(hub.ingest("xqc", notice("1"), None).is_none());
-        assert!(hub.ingest("other", notice("nope"), None).is_none());
+        assert!(hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default()).is_none());
+        assert!(hub.ingest("other", notice("nope"), None, &SimilarityCfg::default()).is_none());
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
@@ -185,7 +188,7 @@ mod tests {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         hub.buffer("lirik");
-        hub.ingest("lirik", notice("a"), None);
+        hub.ingest("lirik", notice("a"), None, &SimilarityCfg::default());
         hub.set_active(Some("lirik".into()));
         let snap = hub.snapshot("lirik").unwrap();
         assert_eq!(snap.events.len(), 1);
@@ -225,7 +228,7 @@ mod tests {
         hub.buffer("lirik");
         hub.set_joined("lirik", true);
 
-        let batches = hub.ingest_fanout_joined(notice("w"), None);
+        let batches = hub.ingest_fanout_joined(notice("w"), None, &SimilarityCfg::default());
         assert!(batches.is_empty());
         let snap_xqc = hub.snapshot("xqc").unwrap();
         assert_eq!(snap_xqc.events.len(), 1);

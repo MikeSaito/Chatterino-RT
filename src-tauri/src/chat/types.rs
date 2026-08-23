@@ -154,6 +154,9 @@ pub enum ChatEvent {
         highlight_flash: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         whisper: bool,
+        /// Soft-disabled (similar / R9K); Pixi overlay like MessageFlag::Disabled.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        disabled: bool,
     },
     #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
@@ -496,6 +499,7 @@ mod tests {
             highlight_sound_path: None,
             highlight_flash: false,
             whisper: false,
+            disabled: false,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["kind"], "privmsg");
