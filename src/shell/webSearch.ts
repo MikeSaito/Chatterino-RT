@@ -80,7 +80,11 @@ export function buildWebSearchUrl(
   return fullParsed.href;
 }
 
-export function webSearchMenuLabel(engineName: string): string {
+export function webSearchMenuLabel(
+  engineName: string,
+  privateMode = false,
+): string {
   const name = engineName.trim();
-  return name ? `Search with ${name}` : "Search";
+  const base = name ? `Search with ${name}` : "Search";
+  return privateMode ? `${base} in private mode` : base;
 }

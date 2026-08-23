@@ -219,6 +219,9 @@ async function boot(): Promise<void> {
   let thumbnailSizePx = 0;
   let hideLinkThumbnails = true;
   let unshortLinks = false;
+  let openLinksIncognito = false;
+  let searchIncognito = false;
+  let supportsIncognito = false;
   let searchEnabled = false;
   let searchEngineUrl = "";
   let searchEngineName = "";
@@ -242,7 +245,10 @@ async function boot(): Promise<void> {
   ring.setOnOpenChatLink((url) => {
     void (async () => {
       const openUrl = await resolveOpenUrlForChatLink(url, unshortLinks);
-      await invoke("open_chat_link", { url: openUrl }).catch(() => undefined);
+      await invoke("open_chat_link", {
+        url: openUrl,
+        private: openLinksIncognito,
+      }).catch(() => undefined);
     })();
   });
   teardownChat = () => {
@@ -281,6 +287,12 @@ async function boot(): Promise<void> {
       replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
     },
   });
+  try {
+    supportsIncognito =
+      (await invoke<boolean>("supports_incognito_links")) === true;
+  } catch {
+    supportsIncognito = false;
+  }
   const settingsCtl = bindSettingsDialog({
     ring,
     openBtn: settingsOpen,
@@ -352,6 +364,8 @@ async function boot(): Promise<void> {
       thumbnailSizePx = parseThumbnailSize(data.knobs["appearance.thumbnailSize"]);
       hideLinkThumbnails = data.knobs["streamerMode.hideLinkThumbnails"] !== false;
       unshortLinks = data.knobs["links.unshortLinks"] === true;
+      openLinksIncognito = data.knobs["misc.openLinksIncognito"] === true;
+      searchIncognito = data.knobs["behaviour.searchIncognito"] === true;
       searchEnabled = data.knobs["behaviour.searchEnabled"] === true;
       searchEngineUrl = String(data.knobs["behaviour.searchEngineUrl"] ?? "");
       searchEngineName = String(data.knobs["behaviour.searchEngineName"] ?? "");
@@ -414,6 +428,7 @@ async function boot(): Promise<void> {
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseUserPopup,
     getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
+    getOpenPrivate: () => openLinksIncognito,
   });
   if (replyBtn) {
     canvasHost.addEventListener("pointermove", (ev) => {
@@ -663,7 +678,10 @@ async function boot(): Promise<void> {
       }
       const searchUrl = buildWebSearchUrl(searchEngineUrl, target.text);
       if (searchUrl) {
-        void invoke("open_chat_link", { url: searchUrl }).catch(() => undefined);
+        void invoke("open_chat_link", {
+          url: searchUrl,
+          private: searchIncognito,
+        }).catch(() => undefined);
       }
       return;
     }
@@ -692,6 +710,7 @@ async function boot(): Promise<void> {
     if (action === "open-twitch" && target.login) {
       void invoke("open_chat_link", {
         url: `https://www.twitch.tv/${target.login}`,
+        private: openLinksIncognito,
       }).catch(() => undefined);
     }
   });
@@ -924,7 +943,10 @@ async function boot(): Promise<void> {
       const searchUrl =
         searchEnabled ? buildWebSearchUrl(searchEngineUrl, ctx.text) : null;
       webSearchBtn.hidden = !searchUrl;
-      webSearchBtn.textContent = webSearchMenuLabel(searchEngineName);
+      webSearchBtn.textContent = webSearchMenuLabel(
+        searchEngineName,
+        searchIncognito && supportsIncognito,
+      );
     }
     contextMenuEl.hidden = false;
     const pad = 8;

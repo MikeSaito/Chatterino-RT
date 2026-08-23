@@ -577,12 +577,24 @@ pub async fn chat_user_profile(
 }
 
 #[tauri::command]
-pub fn open_chat_link(url: String) -> Result<(), ApiError> {
+pub fn supports_incognito_links() -> bool {
+    super::incognito::supports_incognito()
+}
+
+#[tauri::command]
+pub fn open_chat_link(url: String, private: Option<bool>) -> Result<(), ApiError> {
     let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
         code: "invalid_input".into(),
         message,
     })?;
-    tauri_plugin_opener::open_url(&allowed, None::<&str>).map_err(|e| ApiError::internal(&e.to_string()))
+    if private.unwrap_or(false) && super::incognito::supports_incognito() {
+        if super::incognito::open_incognito(&allowed).is_ok() {
+            return Ok(());
+        }
+        // Spawn failed: fall through to normal opener (stock still opens).
+    }
+    tauri_plugin_opener::open_url(&allowed, None::<&str>)
+        .map_err(|e| ApiError::internal(&e.to_string()))
 }
 
 pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
@@ -702,8 +714,8 @@ mod tests {
 
     #[test]
     fn open_chat_link_rejects_bad_url() {
-        assert!(open_chat_link("javascript:alert(1)".into()).is_err());
-        assert!(open_chat_link("https://user:pass@example.com/".into()).is_err());
+        assert!(open_chat_link("javascript:alert(1)".into(), None).is_err());
+        assert!(open_chat_link("https://user:pass@example.com/".into(), None).is_err());
         assert!(crate::chat::spans::allowed_chat_url("https://example.com/chat").is_ok());
     }
 

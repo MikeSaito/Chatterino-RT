@@ -24,9 +24,18 @@ export function bindUserCard(opts: {
   activeChannel: () => string;
   autoClose: () => boolean;
   getHideAvatars: () => boolean;
+  /** misc.openLinksIncognito when private open is supported. */
+  getOpenPrivate?: () => boolean;
 }): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void } {
-  const { modal, settingsModal, searchModal, activeChannel, autoClose, getHideAvatars } =
-    opts;
+  const {
+    modal,
+    settingsModal,
+    searchModal,
+    activeChannel,
+    autoClose,
+    getHideAvatars,
+    getOpenPrivate,
+  } = opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
   const pinBtn = modal.querySelector<HTMLButtonElement>("#usercard-pin");
@@ -260,6 +269,7 @@ export function bindUserCard(opts: {
     }
     void invoke("open_chat_link", {
       url: `https://www.twitch.tv/${currentLogin}`,
+      private: getOpenPrivate?.() === true,
     }).catch(() => undefined);
   });
 

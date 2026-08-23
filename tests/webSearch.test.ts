@@ -39,5 +39,9 @@ assert(isAllowedHttpUrl("https://example.com/a"), "https ok");
 assert(!isAllowedHttpUrl("https://user:pass@example.com/"), "userinfo");
 assert(webSearchMenuLabel("Google") === "Search with Google", "label named");
 assert(webSearchMenuLabel("  ") === "Search", "label empty");
+assert(
+  webSearchMenuLabel("Google", true) === "Search with Google in private mode",
+  "label private",
+);
 
 console.log("webSearch.test.ts: ok");

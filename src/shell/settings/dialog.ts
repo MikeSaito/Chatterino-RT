@@ -903,6 +903,31 @@ export function bindSettingsDialog(opts: {
     openBtn.focus();
   };
 
+  const refreshIncognitoKnobs = async (): Promise<void> => {
+    let ok = false;
+    try {
+      ok = (await invoke<boolean>("supports_incognito_links")) === true;
+    } catch {
+      ok = false;
+    }
+    for (const path of [
+      "misc.openLinksIncognito",
+      "behaviour.searchIncognito",
+    ] as const) {
+      const input = knobInputs.get(path);
+      if (!(input instanceof HTMLInputElement)) {
+        continue;
+      }
+      input.disabled = !ok;
+      if (!ok) {
+        input.title =
+          "Private browsing is not available for the default browser.";
+      } else {
+        input.removeAttribute("title");
+      }
+    }
+  };
+
   const openModal = async (): Promise<void> => {
     onOpen?.();
     statusEl.textContent = "";
@@ -935,6 +960,7 @@ export function bindSettingsDialog(opts: {
       okBtn.disabled = true;
     }
     paintDraft(baseline);
+    void refreshIncognitoKnobs();
     modal.hidden = false;
     setAppInert(true);
     showPage(activePage);
