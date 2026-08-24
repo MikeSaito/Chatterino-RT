@@ -21,9 +21,9 @@ pub struct ChannelBuf {
 }
 
 impl ChannelBuf {
-    pub fn new(channel_id: &str) -> Self {
+    pub fn new(channel_id: &str, scrollback_limit: usize) -> Self {
         Self {
-            scrollback: Scrollback::new(),
+            scrollback: Scrollback::with_limit(scrollback_limit),
             pending: Pending::new(channel_id),
             room_modes: None,
             send_wait: SendWait::default(),
@@ -33,6 +33,10 @@ impl ChannelBuf {
             live: false,
             similarity_recent: SimilarityRecent::default(),
         }
+    }
+
+    pub fn set_scrollback_limit(&mut self, limit: usize) {
+        self.scrollback.set_limit(limit);
     }
 
     pub fn is_live(&self) -> bool {
@@ -243,7 +247,7 @@ mod tests {
 
     #[test]
     fn ingest_stacks_clearchat_and_emits_updated_event() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let style = TimeoutStackStyle::Stack;
         for i in 0..2 {
             let _ = buf.ingest(
@@ -275,7 +279,7 @@ mod tests {
 
     #[test]
     fn prepend_history_dedups_existing_ids() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         assert_eq!(buf.prepend_history(vec![notice("a"), notice("b")]), 2);
         assert_eq!(buf.prepend_history(vec![notice("b"), notice("c")]), 1);
         let ids: Vec<String> = buf
@@ -308,7 +312,7 @@ mod tests {
 
     #[test]
     fn ingest_keeps_overflow_in_scrollback_not_dropped() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         for i in 0..(BATCH_MAX_MESSAGES + 2) {
             let _ = buf.ingest(notice(&i.to_string()), None, &SimilarityCfg::default(), no_stack());
         }
@@ -317,7 +321,7 @@ mod tests {
 
     #[test]
     fn roomstate_not_pushed_to_scrollback() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let _ = buf.ingest(
             ChatEvent::Roomstate {
                 id: "r1".into(),
@@ -338,7 +342,7 @@ mod tests {
 
     #[test]
     fn partial_roomstate_preserves_prior_flags() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let _ = buf.ingest(
             ChatEvent::Roomstate {
                 id: "r1".into(),
@@ -372,7 +376,7 @@ mod tests {
 
     #[test]
     fn own_privmsg_starts_slow_wait() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let _ = buf.ingest(
             ChatEvent::Roomstate {
                 id: "r".into(),
@@ -427,7 +431,7 @@ mod tests {
 
     #[test]
     fn slow_zero_clears_wait() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let _ = buf.ingest(
             ChatEvent::Roomstate {
                 id: "r1".into(),
@@ -495,7 +499,7 @@ mod tests {
 
     #[test]
     fn mod_badge_skips_slow_wait() {
-        let mut buf = ChannelBuf::new("xqc");
+        let mut buf = ChannelBuf::new("xqc", 1000);
         let _ = buf.ingest(
             ChatEvent::Roomstate {
                 id: "r".into(),

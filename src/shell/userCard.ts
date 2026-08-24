@@ -26,6 +26,8 @@ export function bindUserCard(opts: {
   getHideAvatars: () => boolean;
   /** misc.openLinksIncognito when private open is supported. */
   getOpenPrivate?: () => boolean;
+  /** misc.scrollbackUsercardLimit (hot on each open). */
+  getUsercardLimit: () => number;
 }): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void } {
   const {
     modal,
@@ -35,6 +37,7 @@ export function bindUserCard(opts: {
     autoClose,
     getHideAvatars,
     getOpenPrivate,
+    getUsercardLimit,
   } = opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
@@ -177,7 +180,7 @@ export function bindUserCard(opts: {
         .filter(
           (ev) => ev.kind === "privmsg" && ev.login.toLowerCase() === login,
         )
-        .slice(-40);
+        .slice(-getUsercardLimit());
       if (hits.length === 0) {
         const empty = document.createElement("p");
         empty.className = "usercard-empty";

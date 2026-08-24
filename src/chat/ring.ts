@@ -15,7 +15,6 @@ import {
   BADGE_SLOTS_PER_ROW,
   EMOTE_SLOTS_PER_ROW,
   MENTION_SLOTS_PER_ROW,
-  MESSAGE_POOL_SIZE,
 } from "../constants";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import { resolveEmojiUrl } from "./emoteUrl";
@@ -159,6 +158,7 @@ type Drawn = {
 };
 
 export class MessageRing {
+  private readonly poolSize: number;
   private readonly slots: Slot[] = [];
   private readonly textures: TextureLru;
   private readonly emoteTicker = new EmoteFrameTicker();
@@ -249,7 +249,9 @@ export class MessageRing {
   constructor(
     private readonly app: Application,
     textures: TextureLru,
+    poolSize: number,
   ) {
+    this.poolSize = poolSize;
     this.textures = textures;
     this.emoteTicker.subscribe(() => this.tickEmoteFrames());
   }
@@ -264,9 +266,9 @@ export class MessageRing {
       return this.highlightMarksCache;
     }
     const out: string[] = [];
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       out.push(slot.msgId ? slot.highlightColor : "");
     }
     this.highlightMarksCache = out;
@@ -327,9 +329,9 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId) {
         this.loadBadgeSprites(slot);
       }
@@ -347,9 +349,9 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId) {
         slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
       }
@@ -420,7 +422,7 @@ export class MessageRing {
     if (!this.showLastRead || this.occupied === 0) {
       return;
     }
-    const idx = (this.head - 1 + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const idx = (this.head - 1 + this.poolSize) % this.poolSize;
     const id = this.slots[idx]?.msgId ?? "";
     if (id === this.lastReadMsgId) {
       return;
@@ -931,11 +933,11 @@ export class MessageRing {
     if (!id || !this.ready) {
       return false;
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     let target: Slot | undefined;
     let prevSlot: Slot | undefined;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (this.findHitId && slot.msgId === this.findHitId) {
         prevSlot = slot;
       }
@@ -963,9 +965,9 @@ export class MessageRing {
     }
     const prev = this.findHitId;
     this.findHitId = "";
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId === prev) {
         this.paintHighlight(slot);
         break;
@@ -997,7 +999,7 @@ export class MessageRing {
     this.refreshFontMetrics();
     const stage = this.app.stage;
     stage.eventMode = "static";
-    for (let i = 0; i < MESSAGE_POOL_SIZE; i += 1) {
+    for (let i = 0; i < this.poolSize; i += 1) {
       const root = new Container();
       root.visible = false;
       root.eventMode = "static";
@@ -1180,7 +1182,7 @@ export class MessageRing {
     const follow = this.scroll.atBottom;
     const anchor = this.scroll.captureAnchor(this.laidSlots());
     this.clearSlots();
-    const start = Math.max(0, events.length - MESSAGE_POOL_SIZE);
+    const start = Math.max(0, events.length - this.poolSize);
     this.loadingSnapshot = true;
     try {
       for (const event of events.slice(start)) {
@@ -1239,8 +1241,8 @@ export class MessageRing {
       };
       const slot = this.slots[this.head];
       this.write(slot, notice);
-      this.head = (this.head + 1) % MESSAGE_POOL_SIZE;
-      if (this.occupied < MESSAGE_POOL_SIZE) {
+      this.head = (this.head + 1) % this.poolSize;
+      if (this.occupied < this.poolSize) {
         this.occupied += 1;
       }
       this.bumpHighlightMarks();
@@ -1273,8 +1275,8 @@ export class MessageRing {
     }
     const slot = this.slots[this.head];
     this.write(slot, event);
-    this.head = (this.head + 1) % MESSAGE_POOL_SIZE;
-    if (this.occupied < MESSAGE_POOL_SIZE) {
+    this.head = (this.head + 1) % this.poolSize;
+    if (this.occupied < this.poolSize) {
       this.occupied += 1;
     }
     this.bumpHighlightMarks();
@@ -2036,10 +2038,10 @@ export class MessageRing {
 
   private layout(anchor?: ScrollAnchor): void {
     const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     let row = 0;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       const live = slot.msgId.length > 0;
       const show = live && !(this.hideModerated && slot.disabled);
       slot.root.visible = show;
@@ -2093,10 +2095,10 @@ export class MessageRing {
   }
 
   private laidSlots(): LaidSlot[] {
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     this.laidBuf.length = 0;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId.length === 0) {
         continue;
       }
@@ -2337,9 +2339,9 @@ export class MessageRing {
     if (row < 0) {
       return null;
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (!slot.msgId || !slot.root.visible) {
         continue;
       }
@@ -2490,9 +2492,9 @@ export class MessageRing {
     if (row < 0) {
       return null;
     }
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (!slot.msgId || slot.system || !slot.login) {
         continue;
       }
@@ -2553,9 +2555,9 @@ export class MessageRing {
   }
 
   private reloadVisibleEmotes(): void {
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (!slot.msgId) {
         continue;
       }
@@ -2604,9 +2606,9 @@ export class MessageRing {
 
   private snapEmotesToFirstFrame(): void {
     const size = this.emotePixelSize();
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       for (let e = 0; e < slot.emotes.length; e += 1) {
         const key = slot.emoteKeys[e];
         if (!key) {
@@ -2627,9 +2629,9 @@ export class MessageRing {
     }
     const pos = this.emoteTicker.position();
     const size = this.emotePixelSize();
-    const start = (this.head - this.occupied + MESSAGE_POOL_SIZE) % MESSAGE_POOL_SIZE;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % MESSAGE_POOL_SIZE];
+      const slot = this.slots[(start + i) % this.poolSize];
       if (!slot.root.visible) {
         continue;
       }

@@ -1,10 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 
-use super::constants::SCROLLBACK_LIMIT;
+use super::scrollback_config::DEFAULT_SCROLLBACK_LIMIT;
 use super::timeout_stack::{self, PushOutcome, TimeoutStackStyle};
 use super::types::{ChatEvent, SearchHit};
-
-const SEARCH_LIMIT: usize = 200;
 
 #[derive(Debug, Default)]
 pub struct Scrollback {
@@ -14,9 +12,24 @@ pub struct Scrollback {
 
 impl Scrollback {
     pub fn new() -> Self {
+        Self::with_limit(DEFAULT_SCROLLBACK_LIMIT)
+    }
+
+    pub fn with_limit(limit: usize) -> Self {
         Self {
-            items: VecDeque::with_capacity(SCROLLBACK_LIMIT),
-            limit: SCROLLBACK_LIMIT,
+            items: VecDeque::with_capacity(limit.min(DEFAULT_SCROLLBACK_LIMIT)),
+            limit,
+        }
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
+        while self.items.len() > self.limit {
+            self.items.pop_front();
         }
     }
 
@@ -99,9 +112,10 @@ impl Scrollback {
     /// Empty query: full snapshot capped (SearchPopup with no predicates).
     /// Chronological order; prefer newest when capped.
     pub fn search_hits(&self, query: &str) -> Vec<SearchHit> {
+        let cap = self.limit;
         let needle = query.trim();
         if needle.is_empty() {
-            let skip = self.items.len().saturating_sub(SEARCH_LIMIT);
+            let skip = self.items.len().saturating_sub(cap);
             return self
                 .items
                 .iter()
@@ -116,7 +130,7 @@ impl Scrollback {
         for event in self.items.iter().rev() {
             if event.matches_substring(&needle_lower) {
                 newest_first.push(event.to_search_hit());
-                if newest_first.len() >= SEARCH_LIMIT {
+                if newest_first.len() >= cap {
                     break;
                 }
             }
@@ -193,30 +207,42 @@ mod tests {
             custom_reward_id: None,
             system_msg_id: None,
             highlight_color: None,
-        highlight_sound: false,
-        highlight_sound_path: None,
-        highlight_flash: false,
-        whisper: false,
-        disabled: false,
-        source_room_id: None,
-        source_badges: vec![],
+            highlight_sound: false,
+            highlight_sound_path: None,
+            highlight_flash: false,
+            whisper: false,
+            disabled: false,
+            source_room_id: None,
+            source_badges: vec![],
         }
     }
 
     #[test]
     fn evicts_oldest_without_growing_past_limit() {
-        let mut q = Scrollback::new();
-        for i in 0..(SCROLLBACK_LIMIT + 5) {
+        let mut q = Scrollback::with_limit(DEFAULT_SCROLLBACK_LIMIT);
+        for i in 0..(DEFAULT_SCROLLBACK_LIMIT + 5) {
             q.push(notice(&i.to_string(), &i.to_string()), no_stack());
         }
         assert!(!q.is_empty());
-        assert_eq!(q.len(), SCROLLBACK_LIMIT);
+        assert_eq!(q.len(), DEFAULT_SCROLLBACK_LIMIT);
         let snap = q.snapshot();
         assert_eq!(snap.first().unwrap().id(), "5");
         assert_eq!(
             snap.last().unwrap().id(),
-            &(SCROLLBACK_LIMIT + 4).to_string()
+            &(DEFAULT_SCROLLBACK_LIMIT + 4).to_string()
         );
+    }
+
+    #[test]
+    fn set_limit_trims_oldest() {
+        let mut q = Scrollback::with_limit(5);
+        for i in 0..5 {
+            q.push(notice(&i.to_string(), "x"), no_stack());
+        }
+        q.set_limit(2);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q.snapshot()[0].id(), "3");
+        assert_eq!(q.snapshot()[1].id(), "4");
     }
 
     #[test]
@@ -243,12 +269,13 @@ mod tests {
 
     #[test]
     fn search_prefers_newest_when_capped() {
-        let mut q = Scrollback::new();
+        let cap = 200;
+        let mut q = Scrollback::with_limit(cap);
         for i in 0..250 {
             q.push(privmsg(&i.to_string(), "ann", "needle here"), no_stack());
         }
         let ids = q.search_ids("needle");
-        assert_eq!(ids.len(), SEARCH_LIMIT);
+        assert_eq!(ids.len(), cap);
         assert_eq!(ids.first().unwrap(), "50");
         assert_eq!(ids.last().unwrap(), "249");
     }
@@ -278,12 +305,12 @@ mod tests {
     #[test]
     fn prepend_front_respects_remaining_space() {
         let mut q = Scrollback::new();
-        for i in 0..SCROLLBACK_LIMIT {
+        for i in 0..DEFAULT_SCROLLBACK_LIMIT {
             q.push(notice(&i.to_string(), "x"), no_stack());
         }
         let extra = notice("new-live", "live");
         q.push(extra, no_stack());
-        assert_eq!(q.len(), SCROLLBACK_LIMIT);
+        assert_eq!(q.len(), DEFAULT_SCROLLBACK_LIMIT);
         let history: Vec<ChatEvent> = (0..10)
             .map(|i| notice(&format!("hist-{i}"), "h"))
             .collect();

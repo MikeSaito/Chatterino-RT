@@ -56,8 +56,9 @@ import {
   type TooltipPreviewMode,
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT } from "./constants";
+import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
 import type { AuthInfo, ChannelLive, ChatStatus } from "./chat/types";
+import type { AppSettings } from "./shell/settings/dialog";
 
 let chatIpc: ChatIpc | null = null;
 let teardownChat: (() => void) | null = null;
@@ -206,7 +207,16 @@ async function boot(): Promise<void> {
 
   const app = await createChatApp(canvas, canvasHost);
   const textures = new TextureLru();
-  const ring = new MessageRing(app, textures);
+  let bootKnobs: AppSettings["knobs"] = {};
+  try {
+    const bootSettings = await invoke<AppSettings>("settings_get");
+    bootKnobs = bootSettings.knobs ?? {};
+  } catch {
+    bootKnobs = {};
+  }
+  const poolSize = scrollbackLimitFromKnobs(bootKnobs);
+  let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
+  const ring = new MessageRing(app, textures, poolSize);
   await ring.init();
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
@@ -301,6 +311,7 @@ async function boot(): Promise<void> {
       hideContextMenu();
     },
     onDisplay: (data) => {
+      usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(data.knobs);
       autoCloseUserPopup =
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
@@ -429,6 +440,7 @@ async function boot(): Promise<void> {
     autoClose: () => autoCloseUserPopup,
     getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
     getOpenPrivate: () => openLinksIncognito,
+    getUsercardLimit: () => usercardScrollbackLimit,
   });
   if (replyBtn) {
     canvasHost.addEventListener("pointermove", (ev) => {

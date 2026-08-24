@@ -1659,7 +1659,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
       num(
         "scrollback-usercard",
         "misc.scrollbackUsercardLimit",
-        "Usercard scrollback limit (requires restart)",
+        "Usercard scrollback limit",
         1000,
         100,
         100000,

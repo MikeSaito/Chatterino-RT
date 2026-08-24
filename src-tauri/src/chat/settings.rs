@@ -302,7 +302,15 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
         *slot = blacklist;
     }
     super::highlight_sound::rebuild_allowed_paths(shared, &inner.data);
+    apply_scrollback_limit(shared, &inner.data.knobs);
     Ok(())
+}
+
+pub fn apply_scrollback_limit(shared: &Shared, knobs: &BTreeMap<String, Value>) {
+    let limit = super::scrollback_config::scrollback_split_limit(knobs);
+    if let Ok(mut hub) = shared.hub.lock() {
+        hub.set_scrollback_limit(limit);
+    }
 }
 
 pub fn snapshot(shared: &Shared) -> Result<AppSettings, ApiError> {
@@ -366,6 +374,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     if prev_flags.catalog_reload_key() != flags.catalog_reload_key() {
         spawn_emote_catalog_reload(shared);
     }
+    apply_scrollback_limit(shared, &clean.knobs);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }

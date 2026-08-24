@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::channel::ChannelBuf;
+use super::scrollback_config::DEFAULT_SCROLLBACK_LIMIT;
 use super::similarity::SimilarityCfg;
 use super::timeout_stack::TimeoutStackStyle;
 use super::types::{ChatBatch, ChatEvent};
 
-#[derive(Default)]
 pub struct Hub {
     pub active: Option<String>,
     joined: HashSet<String>,
@@ -16,13 +16,40 @@ pub struct Hub {
     recent_loaded: HashSet<String>,
     /// IRC disconnect time per channel (epoch ms) for reconnect gap fill.
     disconnect_at_ms: HashMap<String, u64>,
+    scrollback_limit: usize,
+}
+
+impl Default for Hub {
+    fn default() -> Self {
+        Self {
+            active: None,
+            joined: HashSet::new(),
+            buffers: HashMap::new(),
+            room_ids: HashMap::new(),
+            recent_loaded: HashSet::new(),
+            disconnect_at_ms: HashMap::new(),
+            scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
+        }
+    }
 }
 
 impl Hub {
+    pub fn scrollback_limit(&self) -> usize {
+        self.scrollback_limit
+    }
+
+    pub fn set_scrollback_limit(&mut self, limit: usize) {
+        self.scrollback_limit = limit;
+        for buf in self.buffers.values_mut() {
+            buf.set_scrollback_limit(limit);
+        }
+    }
+
     pub fn buffer(&mut self, channel: &str) -> &mut ChannelBuf {
+        let limit = self.scrollback_limit;
         self.buffers
             .entry(channel.to_string())
-            .or_insert_with(|| ChannelBuf::new(channel))
+            .or_insert_with(|| ChannelBuf::new(channel, limit))
     }
 
     pub fn has_channel(&self, channel: &str) -> bool {

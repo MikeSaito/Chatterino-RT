@@ -1,7 +1,8 @@
 pub const BATCH_FLUSH_MS: u64 = 40;
 pub const BATCH_MAX_MESSAGES: usize = 64;
 pub const BATCH_MAX_BYTES: usize = 64 * 1024;
-pub const SCROLLBACK_LIMIT: usize = 1000;
+pub use super::scrollback_config::DEFAULT_SCROLLBACK_LIMIT;
+pub const SCROLLBACK_LIMIT: usize = DEFAULT_SCROLLBACK_LIMIT;
 pub const MESSAGE_POOL_SIZE: usize = SCROLLBACK_LIMIT;
 pub const EMOTE_SLOTS_PER_ROW: usize = 12;
 pub const BADGE_SLOTS_PER_ROW: usize = 8;
