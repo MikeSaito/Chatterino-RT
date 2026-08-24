@@ -278,7 +278,7 @@ fn build_history_events(shared: &Shared, channel: &str, raw_lines: &[String]) ->
                 if !history_event_kind(&event) {
                     continue;
                 }
-                if filters::gate_event(shared, &mut event) {
+                if filters::gate_event(shared, channel, &mut event) {
                     continue;
                 }
                 decorate_event(&mut event, shared, channel);

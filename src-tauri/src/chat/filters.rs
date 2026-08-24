@@ -14,6 +14,7 @@ use regex::Regex;
 use super::auth;
 use super::spans::decorate_text_spans;
 use super::state::Shared;
+use super::twitch_blocks::{self, BlockedUserShow, TwitchBlockSet};
 use super::types::{Badge, ChatEvent, EmoteSpan};
 
 const FILTERS_FILE: &str = "filters.json";
@@ -110,7 +111,7 @@ pub fn replace(shared: &Shared, incoming: Filters) -> Result<Filters, String> {
     Ok(clean)
 }
 
-pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
+pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool {
     let self_login = auth::resolved_login_token(shared).map(|(login, _)| login);
     let filters = match shared.filters.lock() {
         Ok(inner) => inner.data.clone(),
@@ -132,6 +133,30 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
         self_login.as_deref(),
     ) {
         return true;
+    }
+    if auth::oauth_token(shared).is_some() {
+        let blocks = match shared.twitch_blocks.lock() {
+            Ok(inner) => inner.clone(),
+            Err(_) => TwitchBlockSet::default(),
+        };
+        let (blocks_enabled, show) = twitch_block_knobs(shared);
+        let viewer = shared
+            .hub
+            .lock()
+            .ok()
+            .map(|hub| hub.viewer_role(channel, auth::resolved_twitch_user_id(shared).as_deref()))
+            .unwrap_or_default();
+        if twitch_blocks::should_drop_blocked_user(
+            &blocks,
+            blocks_enabled,
+            show,
+            viewer,
+            event_user_id(event),
+            event_login(event),
+            self_login.as_deref(),
+        ) {
+            return true;
+        }
     }
     let ignore_replaces = match shared.ignore_replace_rules.lock() {
         Ok(inner) => inner.clone(),
@@ -158,7 +183,7 @@ pub fn gate_event(shared: &Shared, event: &mut ChatEvent) -> bool {
     false
 }
 
-pub(crate) fn membership_login_ignored(shared: &super::state::Shared, login: &str) -> bool {
+pub(crate) fn membership_login_ignored(shared: &super::state::Shared, channel: &str, login: &str) -> bool {
     let self_login = super::auth::resolved_login_token(shared).map(|(l, _)| l);
     if is_self(login, self_login.as_deref()) {
         return false;
@@ -178,7 +203,37 @@ pub(crate) fn membership_login_ignored(shared: &super::state::Shared, login: &st
         Ok(inner) => inner.clone(),
         Err(_) => Vec::new(),
     };
-    login_is_blacklisted(login, &ignore_users)
+    if login_is_blacklisted(login, &ignore_users) {
+        return true;
+    }
+    if super::auth::oauth_token(shared).is_none() {
+        return false;
+    }
+    let blocks = match shared.twitch_blocks.lock() {
+        Ok(inner) => inner.clone(),
+        Err(_) => TwitchBlockSet::default(),
+    };
+    let (blocks_enabled, show) = twitch_block_knobs(shared);
+    let viewer = shared
+        .hub
+        .lock()
+        .ok()
+        .map(|hub| {
+            hub.viewer_role(
+                channel,
+                super::auth::resolved_twitch_user_id(shared).as_deref(),
+            )
+        })
+        .unwrap_or_default();
+    twitch_blocks::should_drop_blocked_user(
+        &blocks,
+        blocks_enabled,
+        show,
+        viewer,
+        None,
+        Some(login),
+        self_login.as_deref(),
+    )
 }
 
 const INLINE_WHISPER_HIGHLIGHT_COLOR: &str = "#772CE8";
@@ -1521,6 +1576,38 @@ fn event_login(event: &ChatEvent) -> Option<&str> {
             }),
         _ => None,
     }
+}
+
+fn event_user_id(event: &ChatEvent) -> Option<&str> {
+    match event {
+        ChatEvent::Privmsg { user_id, .. } if !user_id.is_empty() => Some(user_id.as_str()),
+        ChatEvent::Usernotice { privmsg, .. } => match privmsg.as_deref() {
+            Some(ChatEvent::Privmsg { user_id, .. }) if !user_id.is_empty() => Some(user_id.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn twitch_block_knobs(shared: &Shared) -> (bool, BlockedUserShow) {
+    shared
+        .settings
+        .lock()
+        .ok()
+        .map(|inner| {
+            let knobs = &inner.data.knobs;
+            let enabled = knobs
+                .get("ignore.enableTwitchBlockedUsers")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let show = knobs
+                .get("ignore.showBlockedUsersMessages")
+                .and_then(|v| v.as_str())
+                .map(BlockedUserShow::from_knob)
+                .unwrap_or(BlockedUserShow::Never);
+            (enabled, show)
+        })
+        .unwrap_or((true, BlockedUserShow::Never))
 }
 
 fn sanitize_logins(items: Vec<String>, label: &str) -> Result<Vec<String>, String> {

@@ -53,6 +53,16 @@ pub fn has_high_rate_limit(badges: &[Badge]) -> bool {
     })
 }
 
+pub fn is_mod_badges(badges: &[Badge]) -> bool {
+    badges.iter().any(|b| {
+        matches!(b.set.as_str(), "moderator" | "lead_moderator")
+    })
+}
+
+pub fn is_broadcaster_badges(badges: &[Badge]) -> bool {
+    badges.iter().any(|b| b.set == "broadcaster")
+}
+
 /// Seconds from NOTICE `msg_slowmode` / `msg_timedout` English text (stock word index).
 pub fn seconds_from_notice(msg_id: &str, text: &str) -> Option<u32> {
     let idx = if msg_id.eq_ignore_ascii_case("msg_slowmode") {

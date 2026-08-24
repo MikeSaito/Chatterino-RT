@@ -135,6 +135,21 @@ impl Hub {
             .is_some_and(|b| b.self_high_rate())
     }
 
+    pub fn viewer_role(&self, channel: &str, self_user_id: Option<&str>) -> super::twitch_blocks::ViewerRole {
+        let buf = self.buffers.get(channel);
+        let mut is_broadcaster = buf.is_some_and(|b| b.self_is_broadcaster());
+        if !is_broadcaster {
+            if let (Some(uid), Some(rid)) = (self_user_id, self.room_id(channel)) {
+                is_broadcaster = uid == rid;
+            }
+        }
+        let is_mod = buf.is_some_and(|b| b.self_is_mod()) || is_broadcaster;
+        super::twitch_blocks::ViewerRole {
+            is_mod,
+            is_broadcaster,
+        }
+    }
+
     pub fn recent_already_loaded(&self, channel: &str) -> bool {
         self.recent_loaded.contains(channel)
     }

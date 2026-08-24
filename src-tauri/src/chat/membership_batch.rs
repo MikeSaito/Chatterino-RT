@@ -138,7 +138,7 @@ pub fn should_show(
     if count >= SHOW_CHATTER_LIMIT {
         return false;
     }
-    !filters::membership_login_ignored(shared, login)
+    !filters::membership_login_ignored(shared, channel, login)
 }
 
 pub fn record_join(shared: &Shared, app: &AppHandle, channel: String, login: String) {

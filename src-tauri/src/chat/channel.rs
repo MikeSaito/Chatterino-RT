@@ -14,6 +14,8 @@ pub struct ChannelBuf {
     room_modes: Option<RoomModes>,
     send_wait: SendWait,
     self_high_rate: bool,
+    self_is_mod: bool,
+    self_is_broadcaster: bool,
     live: bool,
     similarity_recent: SimilarityRecent,
 }
@@ -26,6 +28,8 @@ impl ChannelBuf {
             room_modes: None,
             send_wait: SendWait::default(),
             self_high_rate: false,
+            self_is_mod: false,
+            self_is_broadcaster: false,
             live: false,
             similarity_recent: SimilarityRecent::default(),
         }
@@ -37,6 +41,14 @@ impl ChannelBuf {
 
     pub fn self_high_rate(&self) -> bool {
         self.self_high_rate
+    }
+
+    pub fn self_is_mod(&self) -> bool {
+        self.self_is_mod
+    }
+
+    pub fn self_is_broadcaster(&self) -> bool {
+        self.self_is_broadcaster
     }
 
     fn self_rate_limit(&self) -> bool {
@@ -70,6 +82,9 @@ impl ChannelBuf {
                 is_mod_tag,
                 ..
             } => {
+                self.self_is_mod =
+                    *is_mod_tag || send_wait::is_mod_badges(badges);
+                self.self_is_broadcaster = send_wait::is_broadcaster_badges(badges);
                 self.self_high_rate =
                     send_wait::has_high_rate_limit(badges) || *is_mod_tag;
                 if self.self_rate_limit() {

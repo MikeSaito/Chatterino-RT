@@ -11,7 +11,7 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
-const DEVICE_SCOPES: &str = "chat:read chat:write";
+const DEVICE_SCOPES: &str = "chat:read chat:write user:read:blocked_users";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";
@@ -487,6 +487,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
     }
     request_relogin(&shared).await;
     super::provider_activity::clear_identity_cache(&shared);
+    super::twitch_blocks::clear_blocks(&shared);
     emit(&app, &shared);
     Ok(())
 }
@@ -525,6 +526,7 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
     }
     request_relogin(&shared).await;
     super::provider_activity::clear_identity_cache(&shared);
+    super::twitch_blocks::clear_blocks(&shared);
     emit(&app, &shared);
 }
 
@@ -639,6 +641,8 @@ async fn persist_and_relogin(
         inner.last_message = None;
     }
     request_relogin(shared).await;
+    super::twitch_blocks::clear_blocks(shared);
+    super::twitch_blocks::spawn_load_if_enabled(shared);
     emit(app, shared);
     true
 }

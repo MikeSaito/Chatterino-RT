@@ -53,6 +53,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
             shared.notify_event(EventCmd::ClearGlobal);
         }
     }
+    super::twitch_blocks::spawn_load_if_enabled(&shared);
     let mut wanted: HashSet<String> = HashSet::new();
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
@@ -618,7 +619,13 @@ fn dispatch_line(
             if !inline_whispers_enabled(shared) {
                 return LineAction::None;
             }
-            if super::filters::gate_event(shared, &mut event) {
+            let gate_channel = shared
+                .hub
+                .lock()
+                .ok()
+                .and_then(|h| h.active.clone())
+                .unwrap_or_default();
+            if super::filters::gate_event(shared, &gate_channel, &mut event) {
                 return LineAction::None;
             }
             super::filters::apply_whisper_highlight(shared, &mut event);
@@ -706,7 +713,7 @@ fn dispatch_line(
                 }
             }
             remember_chatter(shared, &channel, &event);
-            if super::filters::gate_event(shared, &mut event) {
+            if super::filters::gate_event(shared, &channel, &mut event) {
                 if let Some(msg) = failed {
                     return LineAction::JoinFailed {
                         channel,
@@ -1106,15 +1113,17 @@ fn credentials(shared: &Shared) -> (String, Option<String>) {
 fn spawn_helix_globals(shared: &Shared) {
     let badges = shared.badges.clone();
     let emotes = shared.catalog.clone();
-    let token = auth::oauth_token(shared);
-    let client_id = auth::resolved_client_id(shared);
+    let shared = shared.clone();
     tauri::async_runtime::spawn(async move {
+        let token = auth::oauth_token(&shared);
+        let client_id = auth::resolved_client_id(&shared);
         let t = token.as_deref();
         let id = client_id.as_str();
         tokio::join!(
             super::helix::load_global_badges(&badges, t, id),
             super::helix::load_global_emotes(&emotes, t, id),
         );
+        super::twitch_blocks::spawn_load_if_enabled(&shared);
     });
 }
 

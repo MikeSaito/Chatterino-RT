@@ -366,6 +366,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     if prev_flags.catalog_reload_key() != flags.catalog_reload_key() {
         spawn_emote_catalog_reload(shared);
     }
+    super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }
 
