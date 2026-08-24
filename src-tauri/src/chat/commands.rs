@@ -273,6 +273,7 @@ pub async fn chat_send(
         state.release_outbound(1);
         return Err(err);
     }
+    super::provider_activity::post_send_activity(state.inner().clone(), channel);
     Ok(())
 }
 

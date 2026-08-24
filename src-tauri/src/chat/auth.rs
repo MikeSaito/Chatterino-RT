@@ -25,12 +25,14 @@ pub struct StoredCreds {
     pub login: String,
     pub token: String,
     pub client_id: String,
+    pub user_id: Option<String>,
 }
 
 #[derive(Default)]
 pub struct AuthInner {
     pub path: PathBuf,
     pub disk: Option<StoredCreds>,
+    pub cached_user_id: Option<String>,
     pub pending_user_code: Option<String>,
     pub pending_paste: bool,
     pub poll_gen: u64,
@@ -96,6 +98,8 @@ struct DiskFile {
     token: String,
     #[serde(default)]
     client_id: String,
+    #[serde(default)]
+    user_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -103,6 +107,8 @@ struct DiskFileOut<'a> {
     login: &'a str,
     token: &'a str,
     client_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_id: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -122,7 +128,8 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     {
         let mut inner = shared.auth.lock().map_err(|e| e.to_string())?;
         inner.path = path;
-        inner.disk = disk;
+        inner.disk = disk.clone();
+        inner.cached_user_id = disk.and_then(|c| c.user_id);
     }
     emit(app, shared);
     let app_chk = app.clone();
@@ -185,6 +192,52 @@ pub fn resolved_login_token(shared: &Shared) -> Option<(String, String)> {
 
 pub fn oauth_token(shared: &Shared) -> Option<String> {
     resolved_login_token(shared).map(|(_, token)| token)
+}
+
+fn valid_twitch_user_id(raw: &str) -> bool {
+    !raw.is_empty() && raw.chars().all(|c| c.is_ascii_digit())
+}
+
+pub fn resolved_twitch_user_id(shared: &Shared) -> Option<String> {
+    let inner = shared.auth.lock().ok()?;
+    if let Some(id) = inner.cached_user_id.as_deref().filter(|s| valid_twitch_user_id(s)) {
+        return Some(id.to_string());
+    }
+    inner
+        .disk
+        .as_ref()
+        .and_then(|c| c.user_id.as_deref())
+        .filter(|s| valid_twitch_user_id(s))
+        .map(str::to_string)
+}
+
+pub fn set_cached_twitch_user_id(shared: &Shared, user_id: String) {
+    if !valid_twitch_user_id(&user_id) {
+        return;
+    }
+    if let Ok(mut inner) = shared.auth.lock() {
+        inner.cached_user_id = Some(user_id.clone());
+        if let Some(disk) = inner.disk.as_mut() {
+            disk.user_id = Some(user_id);
+        }
+    }
+}
+
+pub async fn ensure_twitch_user_id(shared: &Shared) -> Option<String> {
+    if let Some(id) = resolved_twitch_user_id(shared) {
+        return Some(id);
+    }
+    let _guard = shared.auth_user_id_fetch.lock().await;
+    if let Some(id) = resolved_twitch_user_id(shared) {
+        return Some(id);
+    }
+    let token = oauth_token(shared)?;
+    let validated = validate_token(&http_client(), &token).await.ok()?;
+    if let Some(uid) = validated.user_id {
+        set_cached_twitch_user_id(shared, uid.clone());
+        return Some(uid);
+    }
+    None
 }
 
 pub fn resolved_client_id(shared: &Shared) -> String {
@@ -291,6 +344,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
         login,
         parsed.token,
         parsed.client_id,
+        Some(parsed.user_id),
     )
     .await
     {
@@ -348,12 +402,14 @@ fn parse_chatterino_blob(raw: &str) -> Result<ParsedLogin, AuthFail> {
     Ok(ParsedLogin {
         token,
         client_id,
+        user_id,
     })
 }
 
 struct ParsedLogin {
     token: String,
     client_id: String,
+    user_id: String,
 }
 
 pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
@@ -417,6 +473,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
         inner.pending_user_code = None;
         inner.pending_paste = false;
         inner.disk = None;
+        inner.cached_user_id = None;
         inner.last_message = None;
         (inner.path.clone(), inner.poll_gen)
     };
@@ -429,6 +486,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
         return Err(e);
     }
     request_relogin(&shared).await;
+    super::provider_activity::clear_identity_cache(&shared);
     emit(&app, &shared);
     Ok(())
 }
@@ -451,6 +509,7 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
         inner.pending_user_code = None;
         inner.pending_paste = false;
         inner.disk = None;
+        inner.cached_user_id = None;
         inner.last_message = Some(message.to_string());
         (inner.path.clone(), inner.poll_gen)
     };
@@ -465,6 +524,7 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
         return;
     }
     request_relogin(&shared).await;
+    super::provider_activity::clear_identity_cache(&shared);
     emit(&app, &shared);
 }
 
@@ -504,15 +564,16 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
                 return;
             }
             TokenPoll::Ok(token) => {
-                match validate_login(&client, &token).await {
-                    Ok(login) => {
+                match validate_token(&client, &token).await {
+                    Ok(validated) => {
                         if persist_and_relogin(
                             &app,
                             &shared,
                             job.gen,
-                            login,
+                            validated.login,
                             token,
                             oauth_client_id(),
+                            validated.user_id,
                         )
                         .await {
                             return;
@@ -537,6 +598,7 @@ async fn persist_and_relogin(
     login: String,
     token: String,
     client_id: String,
+    user_id: Option<String>,
 ) -> bool {
     let path = {
         let inner = match shared.auth.lock() {
@@ -548,7 +610,7 @@ async fn persist_and_relogin(
         }
         inner.path.clone()
     };
-    if let Err(e) = save_file(&path, &login, &token, &client_id) {
+    if let Err(e) = save_file(&path, &login, &token, &client_id, user_id.as_deref()) {
         finish_pending(app, shared, gen, Some(&e));
         return false;
     }
@@ -569,7 +631,9 @@ async fn persist_and_relogin(
             login: login.clone(),
             token,
             client_id,
+            user_id: user_id.filter(|id| valid_twitch_user_id(id)),
         });
+        inner.cached_user_id = inner.disk.as_ref().and_then(|c| c.user_id.clone());
         inner.pending_user_code = None;
         inner.pending_paste = false;
         inner.last_message = None;
@@ -739,6 +803,15 @@ async fn request_token(client: &reqwest::Client, client_id: &str, device_code: &
 }
 
 async fn validate_login(client: &reqwest::Client, token: &str) -> Result<String, String> {
+    validate_token(client, token).await.map(|v| v.login)
+}
+
+struct ValidatedToken {
+    login: String,
+    user_id: Option<String>,
+}
+
+async fn validate_token(client: &reqwest::Client, token: &str) -> Result<ValidatedToken, String> {
     let mut delay = Duration::from_millis(200);
     let mut last = String::from("нет ответа");
     for attempt in 0..HTTP_ATTEMPTS {
@@ -762,7 +835,12 @@ async fn validate_login(client: &reqwest::Client, token: &str) -> Result<String,
                         if !valid_login(&login) {
                             return Err("validate: некорректный login".into());
                         }
-                        return Ok(login);
+                        let user_id = v
+                            .get("user_id")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|s| valid_twitch_user_id(s))
+                            .map(str::to_string);
+                        return Ok(ValidatedToken { login, user_id });
                     }
                     Ok(v) => {
                         last = v
@@ -836,6 +914,9 @@ fn load_file(path: &Path) -> Option<StoredCreds> {
         } else {
             parsed.client_id.trim().to_string()
         },
+        user_id: parsed
+            .user_id
+            .filter(|id| valid_twitch_user_id(id)),
     })
 }
 
@@ -850,7 +931,13 @@ fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
     }
 }
 
-fn save_file(path: &Path, login: &str, token: &str, client_id: &str) -> Result<(), String> {
+fn save_file(
+    path: &Path,
+    login: &str,
+    token: &str,
+    client_id: &str,
+    user_id: Option<&str>,
+) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("каталог конфигурации не задан".into());
     }
@@ -861,6 +948,7 @@ fn save_file(path: &Path, login: &str, token: &str, client_id: &str) -> Result<(
         login,
         token,
         client_id,
+        user_id: user_id.filter(|id| valid_twitch_user_id(id)),
     })
     .map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
@@ -909,6 +997,7 @@ mod tests {
         let parsed = parse_chatterino_blob(&blob).unwrap();
         assert_eq!(parsed.token, "abc123");
         assert_eq!(parsed.client_id, CHATTERINO_CLIENT_ID);
+        assert_eq!(parsed.user_id, "42");
         assert!(parse_chatterino_blob("oauth_token=abc;username=bad name;user_id=1;client_id=x")
             .is_err());
         assert!(parse_chatterino_blob("").is_err());

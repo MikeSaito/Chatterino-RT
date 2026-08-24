@@ -51,7 +51,19 @@ pub enum BttvCmd {
     SetChannel { login: String, room_id: String },
     ClearChannel,
     SetEnabled(bool),
+    BroadcastMe {
+        room_id: String,
+        twitch_user_id: String,
+    },
     Shutdown,
+}
+
+#[derive(Default)]
+pub struct ActivityInner {
+    pub bttv_next: std::collections::HashMap<String, std::time::Instant>,
+    pub seventv_next: std::collections::HashMap<String, std::time::Instant>,
+    pub seventv_user_id: Option<String>,
+    pub seventv_user_for: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +141,8 @@ pub struct Shared {
     pub membership_batch: Arc<Mutex<MembershipBatcher>>,
     /// In-flight recent-messages fetch per channel login.
     pub loading_recent: Arc<Mutex<HashSet<String>>>,
+    pub activity: Arc<Mutex<ActivityInner>>,
+    pub auth_user_id_fetch: Arc<tokio::sync::Mutex<()>>,
 }
 
 pub enum BatchSend {
@@ -171,6 +185,8 @@ impl Shared {
             outbound_pending: Arc::new(AtomicUsize::new(0)),
             membership_batch: Arc::new(Mutex::new(MembershipBatcher::default())),
             loading_recent: Arc::new(Mutex::new(HashSet::new())),
+            activity: Arc::new(Mutex::new(ActivityInner::default())),
+            auth_user_id_fetch: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -336,6 +352,7 @@ impl Shared {
                     wanted.enabled = *enabled;
                 }
             }
+            BttvCmd::BroadcastMe { .. } => {}
             BttvCmd::Shutdown => {
                 self.bttv_shutdown.store(true, Ordering::SeqCst);
             }
@@ -343,7 +360,9 @@ impl Shared {
     }
 
     pub fn notify_bttv(&self, cmd: BttvCmd) {
-        self.apply_bttv_cmd(&cmd);
+        if !matches!(cmd, BttvCmd::BroadcastMe { .. }) {
+            self.apply_bttv_cmd(&cmd);
+        }
         if let Ok(guard) = self.bttv_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);

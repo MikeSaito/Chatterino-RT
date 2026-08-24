@@ -10,6 +10,8 @@ pub struct Hub {
     pub active: Option<String>,
     joined: HashSet<String>,
     buffers: HashMap<String, ChannelBuf>,
+    /// Twitch numeric room-id per channel login (from IRC tags).
+    room_ids: HashMap<String, String>,
     /// Channels that already received a recent-messages fetch this session.
     recent_loaded: HashSet<String>,
     /// IRC disconnect time per channel (epoch ms) for reconnect gap fill.
@@ -116,6 +118,17 @@ impl Hub {
         Some(buf.snapshot_batch(channel))
     }
 
+    pub fn set_room_id(&mut self, channel: &str, room_id: String) {
+        if room_id.is_empty() || !room_id.chars().all(|c| c.is_ascii_digit()) {
+            return;
+        }
+        self.room_ids.insert(channel.to_string(), room_id);
+    }
+
+    pub fn room_id(&self, channel: &str) -> Option<&str> {
+        self.room_ids.get(channel).map(|s| s.as_str())
+    }
+
     pub fn recent_already_loaded(&self, channel: &str) -> bool {
         self.recent_loaded.contains(channel)
     }
@@ -162,6 +175,7 @@ impl Hub {
             .and_then(|b| b.clear_send_wait_for_drop());
         self.buffers.remove(channel);
         self.joined.remove(channel);
+        self.room_ids.remove(channel);
         self.recent_loaded.remove(channel);
         self.disconnect_at_ms.remove(channel);
         if self.active.as_deref() == Some(channel) {
@@ -173,6 +187,7 @@ impl Hub {
     pub fn clear_all(&mut self) {
         self.buffers.clear();
         self.joined.clear();
+        self.room_ids.clear();
         self.recent_loaded.clear();
         self.disconnect_at_ms.clear();
         self.active = None;

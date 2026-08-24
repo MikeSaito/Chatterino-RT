@@ -672,6 +672,9 @@ fn dispatch_line(
             }
             if let Some(id) = room_id.as_deref() {
                 if wanted.contains(&channel) {
+                    if let Ok(mut hub) = shared.hub.lock() {
+                        hub.set_room_id(&channel, id.to_string());
+                    }
                     let prev = loaded_room.insert(channel.clone(), id.to_string());
                     let room_changed = prev.as_ref().map(|r| r.as_str() != id).unwrap_or(true);
                     let is_active = shared

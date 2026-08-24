@@ -162,15 +162,36 @@ async fn connect_session(
                         let _ = send_ws(&mut write, Message::Close(None)).await;
                         return SessionEnd::Shutdown;
                     }
-                    Some(other) => {
-                        shared.apply_bttv_cmd(&other);
-                        if sync_join(shared, &mut write, &mut joined).await.is_err() {
-                            let _ = send_ws(&mut write, Message::Close(None)).await;
-                            return SessionEnd::Reconnect { wait: true };
+                    Some(other) => match other {
+                        BttvCmd::BroadcastMe {
+                            room_id,
+                            twitch_user_id,
+                        } => {
+                            let payload = super::provider_activity::broadcast_me_payload(
+                                &room_id,
+                                &twitch_user_id,
+                            );
+                            if send_ws(
+                                &mut write,
+                                Message::Text(payload.to_string().into()),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                let _ = send_ws(&mut write, Message::Close(None)).await;
+                                return SessionEnd::Reconnect { wait: true };
+                            }
                         }
-                        if !shared.snapshot_bttv_wanted().enabled {
-                            let _ = send_ws(&mut write, Message::Close(None)).await;
-                            return SessionEnd::Reconnect { wait: false };
+                        cmd => {
+                            shared.apply_bttv_cmd(&cmd);
+                            if sync_join(shared, &mut write, &mut joined).await.is_err() {
+                                let _ = send_ws(&mut write, Message::Close(None)).await;
+                                return SessionEnd::Reconnect { wait: true };
+                            }
+                            if !shared.snapshot_bttv_wanted().enabled {
+                                let _ = send_ws(&mut write, Message::Close(None)).await;
+                                return SessionEnd::Reconnect { wait: false };
+                            }
                         }
                     }
                 }
