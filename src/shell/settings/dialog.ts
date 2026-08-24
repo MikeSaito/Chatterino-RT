@@ -288,6 +288,7 @@ function paintRuntime(
     channelAuthority: data.knobs["appearance.showBadgesChannelAuthority"] !== false,
     subscription: data.knobs["appearance.showBadgesSubscription"] !== false,
     vanity: data.knobs["appearance.showBadgesVanity"] !== false,
+    ffz: data.knobs["appearance.showBadgesFfz"] !== false,
   });
   ring.configureLowercaseDomains(
     data.knobs["links.lowercaseDomains"] !== false,

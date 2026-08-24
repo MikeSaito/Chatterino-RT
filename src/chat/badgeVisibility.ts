@@ -13,6 +13,7 @@ export type BadgeVisibilityFlags = {
   channelAuthority: boolean;
   subscription: boolean;
   vanity: boolean;
+  ffz: boolean;
 };
 
 export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
@@ -21,6 +22,12 @@ export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
   channelAuthority: true,
   subscription: true,
   vanity: true,
+  ffz: true,
+};
+
+export type BadgeLike = {
+  set: string;
+  source?: string;
 };
 
 const GLOBAL_AUTHORITY = new Set(["staff", "admin", "global_mod"]);
@@ -51,10 +58,13 @@ export function badgeCategory(set: string): BadgeCategory {
 }
 
 export function isBadgeVisible(
-  set: string,
+  badge: BadgeLike,
   flags: BadgeVisibilityFlags,
 ): boolean {
-  switch (badgeCategory(set)) {
+  if (badge.source === "ffz" || badge.set === "ffz") {
+    return flags.ffz;
+  }
+  switch (badgeCategory(badge.set)) {
     case "globalAuthority":
       return flags.globalAuthority;
     case "predictions":
@@ -68,14 +78,14 @@ export function isBadgeVisible(
   }
 }
 
-export function filterVisibleBadges<T extends { set: string }>(
+export function filterVisibleBadges<T extends BadgeLike>(
   badges: T[],
   flags: BadgeVisibilityFlags,
   max: number,
 ): T[] {
   const out: T[] = [];
   for (const badge of badges) {
-    if (!isBadgeVisible(badge.set, flags)) {
+    if (!isBadgeVisible(badge, flags)) {
       continue;
     }
     out.push(badge);
@@ -95,6 +105,7 @@ export function badgeVisibilityEqual(
     a.predictions === b.predictions &&
     a.channelAuthority === b.channelAuthority &&
     a.subscription === b.subscription &&
-    a.vanity === b.vanity
+    a.vanity === b.vanity &&
+    a.ffz === b.ffz
   );
 }

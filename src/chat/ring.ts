@@ -2363,7 +2363,7 @@ export class MessageRing {
           continue;
         }
         return {
-          text: badgeTooltipText(badge.set),
+          text: badge.tooltip ?? badgeTooltipText(badge.set),
           imageUrl: badge.url,
         };
       }

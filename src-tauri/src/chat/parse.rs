@@ -466,6 +466,8 @@ fn parse_badges(raw: Option<&str>) -> Vec<Badge> {
                     set: set.to_string(),
                     version: version.to_string(),
                     url: None,
+                    source: "twitch".to_string(),
+                    tooltip: None,
                 })
             })
             .collect(),

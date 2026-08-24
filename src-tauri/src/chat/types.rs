@@ -101,6 +101,10 @@ pub struct MentionSpan {
     pub login: String,
 }
 
+fn default_badge_source() -> String {
+    "twitch".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Badge {
@@ -108,6 +112,10 @@ pub struct Badge {
     pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default = "default_badge_source")]
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -505,6 +513,8 @@ mod tests {
                 set: "moderator".into(),
                 version: "1".into(),
                 url: None,
+                source: "twitch".into(),
+                tooltip: None,
             }],
             text: "hi".into(),
             emote_spans: vec![EmoteSpan {

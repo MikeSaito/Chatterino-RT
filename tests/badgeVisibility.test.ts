@@ -27,16 +27,24 @@ assert(badgeCategory("partner") === "vanity", "partner vanity");
 assert(badgeCategory("STAFF") === "globalAuthority", "case");
 
 const allOn = { ...DEFAULT_BADGE_VISIBILITY };
-assert(isBadgeVisible("moderator", allOn), "mod on");
-assert(isBadgeVisible("bits", allOn), "vanity on");
+assert(isBadgeVisible({ set: "moderator" }, allOn), "mod on");
+assert(isBadgeVisible({ set: "bits" }, allOn), "vanity on");
 
 const noAuth = { ...DEFAULT_BADGE_VISIBILITY, globalAuthority: false };
-assert(!isBadgeVisible("staff", noAuth), "staff off");
-assert(isBadgeVisible("moderator", noAuth), "mod still on");
+assert(!isBadgeVisible({ set: "staff" }, noAuth), "staff off");
+assert(isBadgeVisible({ set: "moderator" }, noAuth), "mod still on");
 
 const noVanity = { ...DEFAULT_BADGE_VISIBILITY, vanity: false };
-assert(!isBadgeVisible("bits", noVanity), "vanity off");
-assert(isBadgeVisible("subscriber", noVanity), "sub still on");
+assert(!isBadgeVisible({ set: "bits" }, noVanity), "vanity off");
+assert(isBadgeVisible({ set: "subscriber" }, noVanity), "sub still on");
+
+const ffzBadge = { set: "ffz", version: "42", source: "ffz" };
+assert(isBadgeVisible(ffzBadge, allOn), "ffz on");
+assert(!isBadgeVisible(ffzBadge, { ...allOn, ffz: false }), "ffz off");
+assert(
+  isBadgeVisible({ set: "moderator" }, { ...allOn, ffz: false }),
+  "twitch unaffected when ffz off",
+);
 
 const badges = [
   { set: "staff", version: "1" },
@@ -56,5 +64,16 @@ assert(filtered[1].set === "subscriber", "second sub");
 const capped = filterVisibleBadges(badges, DEFAULT_BADGE_VISIBILITY, 2);
 assert(capped.length === 2, "cap");
 assert(capped[0].set === "staff" && capped[1].set === "moderator", "cap order");
+
+const mixed = [
+  { set: "moderator", version: "1" },
+  { set: "ffz", version: "42", source: "ffz" },
+];
+const ffzHidden = filterVisibleBadges(
+  mixed,
+  { ...DEFAULT_BADGE_VISIBILITY, ffz: false },
+  10,
+);
+assert(ffzHidden.length === 1 && ffzHidden[0].set === "moderator", "ffz filtered");
 
 console.log("badgeVisibility.test.ts: ok");

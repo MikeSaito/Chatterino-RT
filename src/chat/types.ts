@@ -26,6 +26,8 @@ export type Badge = {
   set: string;
   version: string;
   url?: string;
+  source?: string;
+  tooltip?: string;
 };
 
 export type ChatEvent =

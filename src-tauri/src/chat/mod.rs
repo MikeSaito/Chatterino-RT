@@ -12,6 +12,7 @@ pub mod emotes;
 pub mod eventapi;
 pub mod filters;
 pub mod fetch;
+pub mod ffz_badges;
 pub mod helix;
 pub mod highlight_sound;
 pub mod hub;

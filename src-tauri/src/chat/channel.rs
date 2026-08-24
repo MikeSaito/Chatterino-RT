@@ -502,6 +502,8 @@ mod tests {
                     set: "moderator".into(),
                     version: "1".into(),
                     url: None,
+                    source: "twitch".into(),
+                    tooltip: None,
                 }],
                 text: "hi".into(),
                 emote_spans: vec![],

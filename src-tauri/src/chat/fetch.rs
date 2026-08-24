@@ -453,7 +453,7 @@ fn abs_url(raw: &str) -> String {
     }
 }
 
-fn allowed_ffz_url(raw: &str) -> Option<String> {
+pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     let composed = abs_url(raw);
     let parsed = Url::parse(&composed).ok()?;
     if parsed.scheme() != "https" {

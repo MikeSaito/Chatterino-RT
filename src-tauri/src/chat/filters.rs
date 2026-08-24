@@ -1677,6 +1677,8 @@ mod tests {
             set: set.into(),
             version: version.into(),
             url: None,
+            source: "twitch".into(),
+            tooltip: None,
         }
     }
 

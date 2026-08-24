@@ -272,11 +272,15 @@ mod tests {
             set: "moderator".into(),
             version: "1".into(),
             url: None,
+            source: "twitch".into(),
+            tooltip: None,
         }]));
         assert!(!has_high_rate_limit(&[Badge {
             set: "subscriber".into(),
             version: "1".into(),
             url: None,
+            source: "twitch".into(),
+            tooltip: None,
         }]));
     }
 

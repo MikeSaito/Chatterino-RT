@@ -5,7 +5,7 @@ export const SCROLLBACK_LIMIT = 1000;
 export const MESSAGE_POOL_SIZE = 1000;
 export const EMOTE_SLOTS_PER_ROW = 12;
 export const MENTION_SLOTS_PER_ROW = 8;
-export const BADGE_SLOTS_PER_ROW = 8;
+export const BADGE_SLOTS_PER_ROW = 12;
 export const BADGE_SIZE = 18;
 export const TEXTURE_LRU_LIMIT = 256;
 /** Hard cap on decoded GIF/WebP animation frames per emote (VRAM bound). */

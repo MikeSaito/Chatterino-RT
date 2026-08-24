@@ -979,6 +979,8 @@ mod tests {
             set: "moderator".into(),
             version: "1".into(),
             url: None,
+            source: "twitch".into(),
+            tooltip: None,
         }];
         resolve_badge_urls(&mut badges, &cat, "xqc");
         assert_eq!(
