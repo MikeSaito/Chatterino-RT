@@ -6,6 +6,7 @@ use url::Url;
 
 use super::cheers::CheerCatalog;
 use super::emotes::{Catalog, EmoteDef, SetScope};
+use super::ffz_channel::{parse_ffz_room_extras, FfzChannelExtras};
 use super::helix::BadgeCatalog;
 use super::hub::Hub;
 use super::state::Shared;
@@ -137,6 +138,7 @@ pub async fn load_channel(
     badges: &std::sync::Arc<std::sync::Mutex<BadgeCatalog>>,
     cheers: &std::sync::Arc<std::sync::Mutex<CheerCatalog>>,
     hub: &std::sync::Arc<std::sync::Mutex<Hub>>,
+    ffz_channel: &std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, FfzChannelExtras>>>,
     login: &str,
     room_id: &str,
     token: Option<&str>,
@@ -168,10 +170,12 @@ pub async fn load_channel(
             }
         }
     }
+    let mut ffz_extras = None;
     if flags.ffz_channel {
         let ffz_url = format!("https://api.frankerfacez.com/v1/room/{login}");
         if let Ok(v) = get_json(&client, &ffz_url).await {
             collect_ffz_sets(&v, &mut map);
+            ffz_extras = Some(parse_ffz_room_extras(&v));
         }
     }
     let mut seventv = None;
@@ -198,6 +202,15 @@ pub async fn load_channel(
             cat.bind_set(set_id.clone(), SetScope::Channel(login.to_string()));
         } else {
             cat.purge_channel(login, "7tv");
+        }
+        if let Ok(mut slot) = ffz_channel.lock() {
+            if flags.ffz_channel {
+                if let Some(extras) = ffz_extras.take() {
+                    slot.insert(login.to_string(), extras);
+                }
+            } else {
+                slot.remove(login);
+            }
         }
         applied = true;
     });

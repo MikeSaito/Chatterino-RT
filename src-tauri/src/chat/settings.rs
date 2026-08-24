@@ -399,6 +399,9 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
                 }
                 if !flags.ffz_channel {
                     cat.purge_channel(&login, "ffz");
+                    if let Ok(mut fc) = shared.ffz_channel.lock() {
+                        fc.remove(&login);
+                    }
                 }
                 if !flags.seventv_channel {
                     cat.purge_channel(&login, "7tv");
@@ -416,6 +419,7 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
             &shared.badges,
             &shared.cheers,
             &shared.hub,
+            &shared.ffz_channel,
             &login,
             &room_id,
             token.as_deref(),

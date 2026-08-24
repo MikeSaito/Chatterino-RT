@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
@@ -15,6 +15,7 @@ use super::helix::BadgeCatalog;
 use super::bttv_badges::BttvBadgeCatalog;
 use super::chatterino_badges::ChatterinoBadgeCatalog;
 use super::ffz_badges::FfzBadgeCatalog;
+use super::ffz_channel::FfzChannelExtras;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::hub::Hub;
 use super::membership_batch::MembershipBatcher;
@@ -114,6 +115,7 @@ pub struct Shared {
     pub catalog: Arc<Mutex<Catalog>>,
     pub badges: Arc<Mutex<BadgeCatalog>>,
     pub ffz_badges: Arc<Mutex<FfzBadgeCatalog>>,
+    pub ffz_channel: Arc<Mutex<HashMap<String, FfzChannelExtras>>>,
     pub chatterino_badges: Arc<Mutex<ChatterinoBadgeCatalog>>,
     pub bttv_badges: Arc<Mutex<BttvBadgeCatalog>>,
     pub seventv_badges: Arc<Mutex<SeventvBadgeCatalog>>,
@@ -169,6 +171,7 @@ impl Shared {
             catalog: Arc::new(Mutex::new(Catalog::default())),
             badges: Arc::new(Mutex::new(BadgeCatalog::default())),
             ffz_badges: Arc::new(Mutex::new(FfzBadgeCatalog::default())),
+            ffz_channel: Arc::new(Mutex::new(HashMap::new())),
             chatterino_badges: Arc::new(Mutex::new(ChatterinoBadgeCatalog::default())),
             bttv_badges: Arc::new(Mutex::new(BttvBadgeCatalog::default())),
             seventv_badges: Arc::new(Mutex::new(SeventvBadgeCatalog::default())),

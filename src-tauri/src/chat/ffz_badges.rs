@@ -30,24 +30,24 @@ impl FfzBadgeCatalog {
         self.user_badges = parsed.user_badges;
     }
 
+    pub fn badge_for_id(&self, id: i32) -> Option<Badge> {
+        let def = self.badges.get(&id)?;
+        Some(Badge {
+            set: "ffz".into(),
+            version: id.to_string(),
+            url: Some(def.url.clone()),
+            source: "ffz".into(),
+            tooltip: def.tooltip.clone(),
+        })
+    }
+
     pub fn badges_for_user(&self, user_id: &str) -> Vec<Badge> {
         let Some(ids) = self.user_badges.get(user_id) else {
             return Vec::new();
         };
-        let mut out = Vec::new();
-        for id in ids {
-            let Some(def) = self.badges.get(id) else {
-                continue;
-            };
-            out.push(Badge {
-                set: "ffz".into(),
-                version: id.to_string(),
-                url: Some(def.url.clone()),
-                source: "ffz".into(),
-                tooltip: def.tooltip.clone(),
-            });
-        }
-        out
+        ids.iter()
+            .filter_map(|id| self.badge_for_id(*id))
+            .collect()
     }
 
     pub fn append_for_user(&self, badges: &mut Vec<Badge>, user_id: &str) {

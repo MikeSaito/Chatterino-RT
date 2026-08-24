@@ -15,6 +15,7 @@ pub mod eventapi;
 pub mod filters;
 pub mod fetch;
 pub mod ffz_badges;
+pub mod ffz_channel;
 pub mod helix;
 pub mod highlight_sound;
 pub mod hub;

@@ -964,10 +964,44 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             if let Ok(cat) = shared.badges.lock() {
                 resolve_badge_urls(badges, &cat, channel);
             }
+            let (use_ffz_mod, use_ffz_vip) = shared
+                .settings
+                .lock()
+                .ok()
+                .map(|inner| {
+                    let knobs = &inner.data.knobs;
+                    (
+                        knobs
+                            .get("appearance.useCustomFfzModeratorBadges")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true),
+                        knobs
+                            .get("appearance.useCustomFfzVipBadges")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true),
+                    )
+                })
+                .unwrap_or((true, true));
+            if let Ok(extras_map) = shared.ffz_channel.lock() {
+                if let Some(extras) = extras_map.get(channel) {
+                    super::ffz_channel::apply_custom_authority(
+                        badges,
+                        extras,
+                        use_ffz_mod,
+                        use_ffz_vip,
+                    );
+                }
+            }
             if let Ok(ch) = shared.chatterino_badges.lock() {
                 ch.append_for_user(badges, user_id);
             }
-            if let Ok(ffz) = shared.ffz_badges.lock() {
+            if let (Ok(ffz), Ok(extras_map)) = (shared.ffz_badges.lock(), shared.ffz_channel.lock())
+            {
+                ffz.append_for_user(badges, user_id);
+                if let Some(extras) = extras_map.get(channel) {
+                    super::ffz_channel::append_channel_badges(&ffz, extras, badges, user_id);
+                }
+            } else if let Ok(ffz) = shared.ffz_badges.lock() {
                 ffz.append_for_user(badges, user_id);
             }
             if let Ok(bttv) = shared.bttv_badges.lock() {
@@ -1095,6 +1129,7 @@ fn spawn_channel_assets(
     let badges = shared.badges.clone();
     let cheers = shared.cheers.clone();
     let hub = shared.hub.clone();
+    let ffz_channel = shared.ffz_channel.clone();
     let events = shared.clone();
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
@@ -1106,6 +1141,7 @@ fn spawn_channel_assets(
             &badges,
             &cheers,
             &hub,
+            &ffz_channel,
             &login,
             &room_id,
             token.as_deref(),

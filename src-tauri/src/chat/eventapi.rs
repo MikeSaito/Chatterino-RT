@@ -127,6 +127,7 @@ async fn resync_event_channel(shared: &Shared) {
                 &shared.badges,
                 &shared.cheers,
                 &shared.hub,
+                &shared.ffz_channel,
                 &login,
                 &room_id,
                 token.as_deref(),
