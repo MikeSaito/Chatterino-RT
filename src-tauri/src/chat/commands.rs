@@ -1,5 +1,7 @@
+use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::ipc::Channel;
@@ -8,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::auth::{self, AuthFail, AuthInfo, DeviceStart};
 use super::complete;
 use super::constants::MAX_PENDING_OUT;
+use super::custom_commands::{self, CustomCommandSet, ExpandContext};
 use super::filters::{self, Filters};
 use super::settings::DisplaySettings;
 use super::spans::allowed_chat_url;
@@ -217,38 +220,234 @@ pub async fn chat_send(
     #[allow(non_snake_case)]
     replyToId: Option<String>,
 ) -> Result<(), ApiError> {
-    let use_helix = should_send_helix(&state);
     let reply_to = match replyToId.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
     };
-    let channel = {
-        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        if !hub.joined_active() {
-            return Err(ApiError::invalid("канал ещё не подключён"));
-        }
-        hub.active
-            .clone()
-            .ok_or_else(|| ApiError::invalid("нет активного канала"))?
+    let channel = active_send_channel(&state)?;
+    ensure_can_send(&state)?;
+    let text = prepare_outgoing_text(&state, &channel, &text, None)?;
+    dispatch_chat_send(&app, &state, &channel, text, reply_to).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomCommandInvoke {
+    pub trigger: String,
+    #[serde(default)]
+    pub message_login: Option<String>,
+    #[serde(default)]
+    pub message_display: Option<String>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub message_text: Option<String>,
+    #[serde(default)]
+    pub copy_text: Option<String>,
+    #[serde(default)]
+    pub input_text: Option<String>,
+    #[allow(non_snake_case)]
+    #[serde(default)]
+    pub replyToId: Option<String>,
+}
+
+#[tauri::command]
+pub async fn chat_exec_custom_command(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    trigger: String,
+    #[allow(non_snake_case)]
+    messageLogin: Option<String>,
+    #[allow(non_snake_case)]
+    messageDisplay: Option<String>,
+    #[allow(non_snake_case)]
+    messageId: Option<String>,
+    #[allow(non_snake_case)]
+    messageText: Option<String>,
+    #[allow(non_snake_case)]
+    copyText: Option<String>,
+    #[allow(non_snake_case)]
+    inputText: Option<String>,
+    #[allow(non_snake_case)]
+    replyToId: Option<String>,
+) -> Result<(), ApiError> {
+    let invoke = CustomCommandInvoke {
+        trigger,
+        message_login: messageLogin,
+        message_display: messageDisplay,
+        message_id: messageId,
+        message_text: messageText,
+        copy_text: copyText,
+        input_text: inputText,
+        replyToId,
     };
-    if auth::resolved_login_token(&state).is_none() {
+    let reply_to = match invoke
+        .replyToId
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(id) => Some(validate_msg_id(id)?),
+        None => None,
+    };
+    let channel = active_send_channel(&state)?;
+    ensure_can_send(&state)?;
+    let menu = MenuExpand {
+        trigger: invoke.trigger.trim(),
+        message_login: invoke.message_login.as_deref(),
+        message_display: invoke.message_display.as_deref(),
+        message_id: invoke.message_id.as_deref(),
+        message_text: invoke.message_text.as_deref().unwrap_or(""),
+        copy_text: invoke.copy_text.as_deref(),
+        input_text: invoke.input_text.as_deref(),
+    };
+    if menu.trigger.is_empty() {
+        return Err(ApiError::invalid("пустой trigger команды"));
+    }
+    let set = load_custom_commands(&state);
+    if !set.allows_menu_trigger(menu.trigger) {
+        return Err(ApiError::invalid("команда недоступна из меню сообщения"));
+    }
+    let text = prepare_outgoing_text(&state, &channel, "", Some(menu))?;
+    dispatch_chat_send(&app, &state, &channel, text, reply_to).await
+}
+
+struct MenuExpand<'a> {
+    trigger: &'a str,
+    message_login: Option<&'a str>,
+    message_display: Option<&'a str>,
+    message_id: Option<&'a str>,
+    message_text: &'a str,
+    copy_text: Option<&'a str>,
+    input_text: Option<&'a str>,
+}
+
+fn active_send_channel(state: &Shared) -> Result<String, ApiError> {
+    let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+    if !hub.joined_active() {
+        return Err(ApiError::invalid("канал ещё не подключён"));
+    }
+    hub.active
+        .clone()
+        .ok_or_else(|| ApiError::invalid("нет активного канала"))
+}
+
+fn ensure_can_send(state: &Shared) -> Result<(), ApiError> {
+    if auth::resolved_login_token(state).is_none() {
         return Err(ApiError::invalid(
             "нужен вход Twitch, чтобы отправлять сообщения",
         ));
     }
+    Ok(())
+}
 
-    if use_helix {
-        return send_via_helix(&app, &state, &channel, &text, reply_to.as_deref()).await;
+fn load_custom_commands(state: &Shared) -> Arc<CustomCommandSet> {
+    match state.custom_commands.lock() {
+        Ok(inner) => Arc::clone(&inner),
+        Err(_) => Arc::new(CustomCommandSet::default()),
+    }
+}
+
+fn build_expand_context(
+    state: &Shared,
+    channel: &str,
+    menu: Option<&MenuExpand<'_>>,
+    composer_text: Option<&str>,
+) -> ExpandContext {
+    let hub = state.hub.lock().ok();
+    let room_id = hub
+        .as_ref()
+        .and_then(|h| h.room_id(channel).map(str::to_string));
+    let channel_live = hub.as_ref().is_some_and(|h| h.channel_live(channel));
+    let stream_game = hub
+        .as_ref()
+        .and_then(|h| h.stream_game(channel).map(str::to_string));
+    let stream_title = hub
+        .as_ref()
+        .and_then(|h| h.stream_title(channel).map(str::to_string));
+    let my_login = auth::resolved_login_token(state).map(|(login, _)| login);
+    let my_user_id = auth::resolved_twitch_user_id(state);
+    if let Some(m) = menu {
+        ExpandContext {
+            channel: channel.to_string(),
+            room_id,
+            channel_live,
+            my_login,
+            my_user_id,
+            stream_game,
+            stream_title,
+            message_login: m.message_login.map(str::to_string),
+            message_display: m.message_display.map(str::to_string),
+            message_id: m.message_id.map(str::to_string),
+            message_text: Some(m.message_text.to_string()),
+            input_text: m
+                .input_text
+                .or(composer_text)
+                .map(str::to_string),
+            copy_text: m.copy_text.map(str::to_string),
+        }
+    } else {
+        ExpandContext {
+            channel: channel.to_string(),
+            room_id,
+            channel_live,
+            my_login,
+            my_user_id,
+            stream_game,
+            stream_title,
+            message_login: None,
+            message_display: None,
+            message_id: None,
+            message_text: None,
+            input_text: composer_text.map(str::to_string),
+            copy_text: None,
+        }
+    }
+}
+
+fn prepare_outgoing_text(
+    state: &Shared,
+    channel: &str,
+    text: &str,
+    menu: Option<MenuExpand<'_>>,
+) -> Result<String, ApiError> {
+    let set = load_custom_commands(state);
+    let expanded = match menu {
+        Some(m) => {
+            let ctx = build_expand_context(state, channel, Some(&m), Some(text));
+            custom_commands::expand_menu_command(&set, m.trigger, m.message_text, &ctx)
+                .ok_or_else(|| ApiError::invalid("команда не найдена"))?
+        }
+        None => {
+            let ctx = build_expand_context(state, channel, None, Some(text));
+            custom_commands::resolve_user_commands(&set, text, &ctx)
+        }
+    };
+    if expanded.chars().count() > MAX_CHAT_CHARS {
+        return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+    }
+    Ok(expanded)
+}
+
+async fn dispatch_chat_send(
+    app: &AppHandle,
+    state: &Shared,
+    channel: &str,
+    text: String,
+    reply_to: Option<String>,
+) -> Result<(), ApiError> {
+    if should_send_helix(state) {
+        return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;
     }
 
     let mut payload = format_outgoing(&text)?;
-    let allow_dup = knob_bool(&state, "behaviour.allowDuplicateMessages", true);
+    let allow_dup = knob_bool(state, "behaviour.allowDuplicateMessages", true);
     if allow_dup {
         let last = state
             .last_sent
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
-        if last.get(&channel).map(|s| s.as_str()) == Some(payload.as_str()) {
+        if last.get(channel).map(|s| s.as_str()) == Some(payload.as_str()) {
             payload = prepare_duplicate_message(&payload);
         }
     }
@@ -258,9 +457,9 @@ pub async fn chat_send(
         ));
     }
     if let Err(err) = send_cmd(
-        &state,
+        state,
         IrcCmd::Privmsg {
-            channel: channel.clone(),
+            channel: channel.to_string(),
             text: payload,
             reply_to,
         },
@@ -270,8 +469,12 @@ pub async fn chat_send(
         state.release_outbound(1);
         return Err(err);
     }
-    super::provider_activity::post_send_activity(state.inner().clone(), channel);
+    super::provider_activity::post_send_activity(state.clone(), channel.to_string());
     Ok(())
+}
+
+fn custom_command_triggers(state: &Shared) -> Vec<String> {
+    load_custom_commands(state).triggers().to_vec()
 }
 
 async fn send_via_helix(
@@ -500,7 +703,13 @@ pub fn chat_complete(
         return Ok(Vec::new());
     }
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
-        return Ok(complete::suggestions(&token, first_word, Vec::new(), Vec::new()));
+        return Ok(complete::suggestions_with_custom(
+            &token,
+            first_word,
+            Vec::new(),
+            Vec::new(),
+            &custom_command_triggers(state.inner()),
+        ));
     }
     let (smart, prefix_only, user_completion_only_with_at, always_include_broadcaster) = {
         let settings = state
@@ -1041,5 +1250,24 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn prepare_outgoing_expands_custom_trigger() {
+        use super::super::settings::{AppSettings, CommandRow};
+        let shared = Shared::new();
+        super::super::settings::rebuild_custom_commands(
+            &shared,
+            &AppSettings {
+                commands: vec![CommandRow {
+                    trigger: "/hello".into(),
+                    command: "hi {1}".into(),
+                    show_in_message_menu: false,
+                }],
+                ..AppSettings::default()
+            },
+        );
+        let text = prepare_outgoing_text(&shared, "xqc", "/hello world", None).unwrap();
+        assert_eq!(text, "hi world");
     }
 }

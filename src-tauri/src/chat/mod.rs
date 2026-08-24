@@ -5,6 +5,7 @@ pub mod bttv_live;
 pub mod channel;
 pub mod chatterino_badges;
 pub mod chatters;
+pub mod custom_commands;
 pub mod commands;
 pub mod complete;
 pub mod constants;

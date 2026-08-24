@@ -101,6 +101,13 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
         if hub.active.as_deref() != Some(channel) {
             return;
         }
+        if status.live {
+            hub.set_stream_meta(
+                channel,
+                status.game_name.clone().filter(|s| !s.is_empty()),
+                status.stream_title.clone().filter(|s| !s.is_empty()),
+            );
+        }
         hub.set_channel_live(channel, status.live)
     };
     if live_changed {

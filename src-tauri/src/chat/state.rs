@@ -10,6 +10,7 @@ use super::batch::encode_batch;
 use super::cheers::CheerCatalog;
 use super::chatters::Chatters;
 use super::emotes::Catalog;
+use super::custom_commands::CustomCommandSet;
 use super::filter_set::ExpressionFilterSet;
 use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule, ReplaceRule};
 use super::helix::BadgeCatalog;
@@ -163,6 +164,7 @@ pub struct Shared {
     pub shared_chat: Arc<Mutex<SharedChatState>>,
     pub expression_filters: Arc<Mutex<Arc<ExpressionFilterSet>>>,
     pub exclude_own_from_filter: Arc<Mutex<bool>>,
+    pub custom_commands: Arc<Mutex<Arc<CustomCommandSet>>>,
 }
 
 pub enum BatchSend {
@@ -217,6 +219,7 @@ impl Shared {
             shared_chat: Arc::new(Mutex::new(SharedChatState::default())),
             expression_filters: Arc::new(Mutex::new(Arc::new(ExpressionFilterSet::default()))),
             exclude_own_from_filter: Arc::new(Mutex::new(false)),
+            custom_commands: Arc::new(Mutex::new(Arc::new(CustomCommandSet::default()))),
         }
     }
 

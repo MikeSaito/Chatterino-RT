@@ -306,7 +306,15 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     super::highlight_sound::rebuild_allowed_paths(shared, &inner.data);
     apply_scrollback_limit(shared, &inner.data.knobs);
     rebuild_expression_filters(shared, &inner.data);
+    rebuild_custom_commands(shared, &inner.data);
     Ok(())
+}
+
+pub fn rebuild_custom_commands(shared: &Shared, data: &AppSettings) {
+    let set = super::custom_commands::CustomCommandSet::compile(&data.commands);
+    if let Ok(mut slot) = shared.custom_commands.lock() {
+        *slot = Arc::new(set);
+    }
 }
 
 pub fn rebuild_expression_filters(shared: &Shared, data: &AppSettings) {
@@ -398,6 +406,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     }
     apply_scrollback_limit(shared, &clean.knobs);
     rebuild_expression_filters(shared, &clean);
+    rebuild_custom_commands(shared, &clean);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }
@@ -593,6 +602,12 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     for row in &mut raw.commands {
         trim_cell(&mut row.trigger)?;
         trim_cell(&mut row.command)?;
+        if row.trigger.chars().count() > super::custom_commands::MAX_COMMAND_FIELD_CHARS {
+            return Err(ApiError::invalid("слишком длинный trigger команды"));
+        }
+        if row.command.chars().count() > super::custom_commands::MAX_COMMAND_FIELD_CHARS {
+            return Err(ApiError::invalid("слишком длинный текст команды"));
+        }
     }
     for row in &mut raw.highlight_messages {
         trim_cell(&mut row.pattern)?;

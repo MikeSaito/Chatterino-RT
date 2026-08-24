@@ -161,6 +161,8 @@ async function boot(): Promise<void> {
   const replyLabelEl = replyLabel;
   const replyCancelBtn = replyCancel;
   const contextMenuEl = contextMenu;
+  const contextCustomHost = document.querySelector<HTMLElement>("#chat-context-custom");
+  const contextCustomSep = document.querySelector<HTMLElement>("#chat-context-custom-sep");
   const loginEl = authLogin;
   const signinBtn = authSignin;
   const logoutBtn = authLogout;
@@ -208,9 +210,11 @@ async function boot(): Promise<void> {
   const app = await createChatApp(canvas, canvasHost);
   const textures = new TextureLru();
   let bootKnobs: AppSettings["knobs"] = {};
+  let menuCommands: AppSettings["commands"] = [];
   try {
     const bootSettings = await invoke<AppSettings>("settings_get");
     bootKnobs = bootSettings.knobs ?? {};
+    menuCommands = menuCommandsFromSettings(bootSettings);
   } catch {
     bootKnobs = {};
   }
@@ -381,6 +385,7 @@ async function boot(): Promise<void> {
       searchEngineUrl = String(data.knobs["behaviour.searchEngineUrl"] ?? "");
       searchEngineName = String(data.knobs["behaviour.searchEngineName"] ?? "");
       headerKnobs = parseHeaderKnobs(data.knobs);
+      menuCommands = menuCommandsFromSettings(data);
       emoteTooltipCtl?.refresh();
       repaintChannelTitle();
     },
@@ -674,8 +679,24 @@ async function boot(): Promise<void> {
       return;
     }
     const action = btn.dataset.action;
+    const customTrigger = btn.dataset.customCmd;
     const target = contextTarget;
     hideContextMenu();
+    if (customTrigger) {
+      void invoke("chat_exec_custom_command", {
+        trigger: customTrigger,
+        messageLogin: target.login || null,
+        messageDisplay: target.nick || target.login || null,
+        messageId: target.msgId || null,
+        messageText: target.text || null,
+        copyText: target.text || null,
+        inputText: messageInput.value,
+        replyToId: null,
+      }).catch((err) => {
+        statusEl.textContent = formatError(err);
+      });
+      return;
+    }
     if (action === "copy") {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
@@ -930,6 +951,23 @@ async function boot(): Promise<void> {
 
   function openContextMenu(ctx: SlotContext): void {
     contextTarget = ctx;
+    if (contextCustomHost && contextCustomSep) {
+      contextCustomHost.replaceChildren();
+      const cmds = menuCommands.filter(
+        (row) => row.showInMessageMenu && String(row.trigger ?? "").trim(),
+      );
+      for (const row of cmds) {
+        const trigger = String(row.trigger).trim();
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.customCmd = trigger;
+        btn.textContent = trigger;
+        contextCustomHost.appendChild(btn);
+      }
+      const showCustom = cmds.length > 0;
+      contextCustomHost.hidden = !showCustom;
+      contextCustomSep.hidden = !showCustom;
+    }
     const replyBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="reply"]');
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
@@ -1529,6 +1567,15 @@ function formatError(err: unknown): string {
     }
   }
   return String(err);
+}
+
+function menuCommandsFromSettings(data: AppSettings): AppSettings["commands"] {
+  if (!Array.isArray(data.commands)) {
+    return [];
+  }
+  return data.commands.filter(
+    (row) => row.showInMessageMenu && String(row.trigger ?? "").trim(),
+  );
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

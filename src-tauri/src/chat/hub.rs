@@ -16,6 +16,8 @@ pub struct Hub {
     recent_loaded: HashSet<String>,
     /// IRC disconnect time per channel (epoch ms) for reconnect gap fill.
     disconnect_at_ms: HashMap<String, u64>,
+    stream_game: HashMap<String, String>,
+    stream_title: HashMap<String, String>,
     scrollback_limit: usize,
 }
 
@@ -28,6 +30,8 @@ impl Default for Hub {
             room_ids: HashMap::new(),
             recent_loaded: HashSet::new(),
             disconnect_at_ms: HashMap::new(),
+            stream_game: HashMap::new(),
+            stream_title: HashMap::new(),
             scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
         }
     }
@@ -257,7 +261,39 @@ impl Hub {
 
     /// Returns true when the stored live flag changed.
     pub fn set_channel_live(&mut self, channel: &str, live: bool) -> bool {
+        if !live {
+            self.stream_game.remove(channel);
+            self.stream_title.remove(channel);
+        }
         self.buffer(channel).set_live(live)
+    }
+
+    pub fn set_stream_meta(
+        &mut self,
+        channel: &str,
+        game: Option<String>,
+        title: Option<String>,
+    ) {
+        match game {
+            Some(v) => {
+                self.stream_game.insert(channel.to_string(), v);
+            }
+            None => {}
+        }
+        match title {
+            Some(v) => {
+                self.stream_title.insert(channel.to_string(), v);
+            }
+            None => {}
+        }
+    }
+
+    pub fn stream_game(&self, channel: &str) -> Option<&str> {
+        self.stream_game.get(channel).map(|s| s.as_str())
+    }
+
+    pub fn stream_title(&self, channel: &str) -> Option<&str> {
+        self.stream_title.get(channel).map(|s| s.as_str())
     }
 }
 

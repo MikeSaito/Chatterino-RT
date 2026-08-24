@@ -6,13 +6,41 @@ pub const COMPLETE_LIMIT: usize = 200;
 pub const MIN_QUERY: usize = 2;
 const USER_RESERVE: usize = 32;
 
+pub fn suggestions_with_custom(
+    token: &str,
+    first_word: bool,
+    emote_codes: Vec<String>,
+    chatter_names: Vec<String>,
+    custom_triggers: &[String],
+) -> Vec<String> {
+    if token.chars().count() < MIN_QUERY && token != ":" {
+        return Vec::new();
+    }
+    if token
+        .chars()
+        .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+    {
+        return Vec::new();
+    }
+    if first_word && (token.starts_with('/') || token.starts_with('.')) {
+        return command_items(token, custom_triggers);
+    }
+    if first_word {
+        let custom = custom_trigger_items(token, custom_triggers);
+        if !custom.is_empty() {
+            return custom;
+        }
+    }
+    suggestions_with_rank(token, first_word, emote_codes, chatter_names, true)
+}
+
 pub fn suggestions(
     token: &str,
     first_word: bool,
-    mut emote_codes: Vec<String>,
-    mut chatter_names: Vec<String>,
+    emote_codes: Vec<String>,
+    chatter_names: Vec<String>,
 ) -> Vec<String> {
-    suggestions_with_rank(token, first_word, emote_codes, chatter_names, true)
+    suggestions_with_custom(token, first_word, emote_codes, chatter_names, &[])
 }
 
 pub fn suggestions_with_rank(
@@ -32,7 +60,10 @@ pub fn suggestions_with_rank(
         return Vec::new();
     }
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
-        return command_items(token);
+        return command_items(token, &[]);
+    }
+    if first_word {
+        return custom_trigger_items(token, &[]);
     }
     let with_at = token.starts_with('@');
     let colon_emote = token.starts_with(':');
@@ -262,7 +293,49 @@ pub fn is_known_command(name: &str) -> bool {
     COMMANDS.iter().any(|c| *c == needle)
 }
 
-fn command_items(token: &str) -> Vec<String> {
+fn command_items(token: &str, custom_triggers: &[String]) -> Vec<String> {
+    let mut out = built_in_command_items(token);
+    let rest = token.get(1..).unwrap_or("").to_ascii_lowercase();
+    for trigger in custom_triggers {
+        if !(trigger.starts_with('/') || trigger.starts_with('.')) {
+            continue;
+        }
+        let needle = trigger
+            .trim_start_matches('/')
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
+        if !needle.starts_with(rest.as_str()) {
+            continue;
+        }
+        let item = format!("{trigger} ");
+        if !out.iter().any(|x| x == &item) {
+            out.push(item);
+            if out.len() >= COMPLETE_LIMIT {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn custom_trigger_items(token: &str, custom_triggers: &[String]) -> Vec<String> {
+    let needle = token.to_ascii_lowercase();
+    let mut out = Vec::new();
+    for trigger in custom_triggers {
+        if trigger.starts_with('/') || trigger.starts_with('.') {
+            continue;
+        }
+        if trigger.to_ascii_lowercase().starts_with(needle.as_str()) {
+            out.push(format!("{trigger} "));
+            if out.len() >= COMPLETE_LIMIT {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn built_in_command_items(token: &str) -> Vec<String> {
     let rest = token.get(1..).unwrap_or("").to_ascii_lowercase();
     let mut out = Vec::new();
     for cmd in COMMANDS {

@@ -2,7 +2,8 @@ mod chat;
 mod security;
 
 use chat::commands::{
-    auth_import, auth_logout, auth_start, auth_status, chat_complete, chat_join, chat_leave,
+    auth_import, auth_logout, auth_start, auth_status, chat_complete, chat_exec_custom_command,
+    chat_join, chat_leave,
     chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, chat_user_profile,
     filters_get, filters_set, highlight_sound_pick, highlight_sound_read,
     highlight_cancel_attention, highlight_request_attention, open_chat_link, session_get,
@@ -38,6 +39,7 @@ pub fn run() {
             chat_snapshot,
             chat_subscribe,
             chat_send,
+            chat_exec_custom_command,
             chat_complete,
             chat_search,
             chat_user_profile,
