@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -157,6 +158,32 @@ pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool
         ) {
             return true;
         }
+    }
+    let channel_live = shared
+        .hub
+        .lock()
+        .ok()
+        .map(|hub| hub.channel_live(channel))
+        .unwrap_or(false);
+    let expr_set = match shared.expression_filters.lock() {
+        Ok(inner) => Arc::clone(&inner),
+        Err(_) => Arc::new(super::filter_set::ExpressionFilterSet::fail_closed()),
+    };
+    let exclude_own = shared
+        .exclude_own_from_filter
+        .lock()
+        .ok()
+        .map(|v| *v)
+        .unwrap_or(false);
+    if !super::filter_set::expression_filter_passes(
+        &expr_set,
+        exclude_own,
+        event,
+        channel,
+        channel_live,
+        self_login.as_deref(),
+    ) {
+        return true;
     }
     let ignore_replaces = match shared.ignore_replace_rules.lock() {
         Ok(inner) => inner.clone(),
@@ -1091,7 +1118,7 @@ fn login_is_blacklisted(login: &str, rules: &[BlacklistRule]) -> bool {
     })
 }
 
-fn event_sender_login(event: &ChatEvent) -> Option<&str> {
+pub(crate) fn event_sender_login(event: &ChatEvent) -> Option<&str> {
     match event {
         ChatEvent::Privmsg { login, .. } if !login.is_empty() => Some(login.as_str()),
         ChatEvent::Usernotice { login, privmsg, .. } => login
@@ -3698,5 +3725,25 @@ mod tests {
             }
             _ => panic!("privmsg"),
         }
+    }
+
+    #[test]
+    fn gate_event_expression_filter_drops_non_matching() {
+        use super::super::settings::{AppSettings, FilterRow};
+        use super::super::state::Shared;
+        let shared = Shared::new();
+        let data = AppSettings {
+            filters: vec![FilterRow {
+                name: "only foo".into(),
+                filter: r#"author.name contains "foo""#.into(),
+                valid: true,
+            }],
+            ..AppSettings::default()
+        };
+        super::super::settings::rebuild_expression_filters(&shared, &data);
+        let mut keep = privmsg("foobar", "hi");
+        assert!(!gate_event(&shared, "xqc", &mut keep));
+        let mut drop_ev = privmsg("bar", "hi");
+        assert!(gate_event(&shared, "xqc", &mut drop_ev));
     }
 }

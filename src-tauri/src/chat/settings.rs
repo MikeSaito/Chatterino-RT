@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -281,6 +282,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let mut inner = shared.settings.lock().map_err(|e| e.to_string())?;
     inner.path = path;
     inner.data = data;
+    sync_filter_valid_flags(&mut inner.data.filters);
     let ctx = super::filters::HighlightSoundCtx::from_settings(&inner.data);
     if let Ok(mut slot) = shared.highlight_sound.lock() {
         *slot = ctx;
@@ -303,7 +305,26 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     }
     super::highlight_sound::rebuild_allowed_paths(shared, &inner.data);
     apply_scrollback_limit(shared, &inner.data.knobs);
+    rebuild_expression_filters(shared, &inner.data);
     Ok(())
+}
+
+pub fn rebuild_expression_filters(shared: &Shared, data: &AppSettings) {
+    let (set, _) = super::filter_set::compile_filter_rows(&data.filters);
+    if let Ok(mut slot) = shared.expression_filters.lock() {
+        *slot = Arc::new(set);
+    }
+    let exclude = super::filter_set::exclude_own_from_filter(&data.knobs);
+    if let Ok(mut slot) = shared.exclude_own_from_filter.lock() {
+        *slot = exclude;
+    }
+}
+
+fn sync_filter_valid_flags(rows: &mut [FilterRow]) {
+    let (_, flags) = super::filter_set::compile_filter_rows(rows);
+    for (row, valid) in rows.iter_mut().zip(flags.iter()) {
+        row.valid = *valid;
+    }
 }
 
 pub fn apply_scrollback_limit(shared: &Shared, knobs: &BTreeMap<String, Value>) {
@@ -322,7 +343,8 @@ pub fn snapshot(shared: &Shared) -> Result<AppSettings, ApiError> {
 }
 
 pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, ApiError> {
-    let clean = sanitize(incoming)?;
+    let mut clean = sanitize(incoming)?;
+    sync_filter_valid_flags(&mut clean.filters);
     let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
     if inner.path.as_os_str().is_empty() {
         return Err(ApiError::internal("каталог конфигурации не инициализирован"));
@@ -375,6 +397,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
         spawn_emote_catalog_reload(shared);
     }
     apply_scrollback_limit(shared, &clean.knobs);
+    rebuild_expression_filters(shared, &clean);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }

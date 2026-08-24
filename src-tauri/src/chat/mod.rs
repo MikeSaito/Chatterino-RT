@@ -12,6 +12,8 @@ pub mod cheers;
 pub mod emoji;
 pub mod emotes;
 pub mod eventapi;
+pub mod filter_lang;
+pub mod filter_set;
 pub mod filters;
 pub mod fetch;
 pub mod ffz_badges;
