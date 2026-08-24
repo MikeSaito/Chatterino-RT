@@ -106,10 +106,14 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
                 channel,
                 status.game_name.clone().filter(|s| !s.is_empty()),
                 status.stream_title.clone().filter(|s| !s.is_empty()),
+                status.stream_id.clone().filter(|s| !s.is_empty()),
             );
         }
         hub.set_channel_live(channel, status.live)
     };
+    if live_changed && !status.live {
+        super::logging::close_stream_file(shared, channel);
+    }
     if live_changed {
         let show_title = show_title_in_live_message(shared);
         let text = stream_status_notice_text(

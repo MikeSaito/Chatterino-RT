@@ -108,10 +108,23 @@ impl ChannelBuf {
         sim: &SimilarityCfg,
         stack_style: TimeoutStackStyle,
     ) -> Option<ChatBatch> {
+        self.ingest_logged(event, self_login, sim, stack_style, |_| {})
+    }
+
+    pub fn ingest_logged(
+        &mut self,
+        event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+        stack_style: TimeoutStackStyle,
+        mut on_added: impl FnMut(&ChatEvent),
+    ) -> Option<ChatBatch> {
         let mut flushed: Option<ChatBatch> = None;
         for item in self.expand(event) {
             self.note_send_wait(&item, self_login);
-            if let Some(batch) = self.ingest_one(item, self_login, sim, stack_style) {
+            if let Some(batch) =
+                self.ingest_one(item, self_login, sim, stack_style, &mut on_added)
+            {
                 flushed = Some(merge_batches(flushed, batch));
             }
         }
@@ -126,11 +139,25 @@ impl ChannelBuf {
         sim: &SimilarityCfg,
         stack_style: TimeoutStackStyle,
     ) {
+        self.push_scrollback_only_logged(event, self_login, sim, stack_style, |_| {});
+    }
+
+    pub fn push_scrollback_only_logged(
+        &mut self,
+        event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+        stack_style: TimeoutStackStyle,
+        mut on_added: impl FnMut(&ChatEvent),
+    ) {
         for mut item in self.expand(event) {
             self.note_send_wait(&item, self_login);
             similarity::mark_similar(&self.similarity_recent, &mut item, sim, self_login);
             self.similarity_recent.remember(&item);
-            let _ = self.scrollback.push(item, stack_style);
+            let outcome = self.scrollback.push(item, stack_style);
+            if let PushOutcome::Added(ev) = &outcome {
+                on_added(ev);
+            }
         }
     }
 
@@ -145,6 +172,7 @@ impl ChannelBuf {
         self_login: Option<&str>,
         sim: &SimilarityCfg,
         stack_style: TimeoutStackStyle,
+        on_added: &mut impl FnMut(&ChatEvent),
     ) -> Option<ChatBatch> {
         similarity::mark_similar(&self.similarity_recent, &mut event, sim, self_login);
         self.similarity_recent.remember(&event);
@@ -152,6 +180,9 @@ impl ChannelBuf {
         let live_event = match &outcome {
             PushOutcome::Added(ev) | PushOutcome::Replaced(ev) => ev.clone(),
         };
+        if matches!(outcome, PushOutcome::Added(_)) {
+            on_added(&live_event);
+        }
         if matches!(outcome, PushOutcome::Replaced(_)) && self.pending.upsert_by_id(live_event.clone())
         {
             return None;

@@ -903,6 +903,13 @@ pub fn highlight_sound_pick(
 }
 
 #[tauri::command]
+pub fn logging_pick_directory(
+    state: tauri::State<'_, Shared>,
+) -> Result<String, ApiError> {
+    super::logging::pick_directory(&state)
+}
+
+#[tauri::command]
 pub fn highlight_request_attention(
     app: tauri::AppHandle,
     long_alerts: bool,

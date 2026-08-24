@@ -2025,7 +2025,7 @@ export const SETTINGS_PAGES: PageDef[] = [
                 "Enable logging",
                 false,
               ),
-              lab("log-path-display", "logging.logPath", "Log directory", ""),
+              txt("log-path-display", "logging.logPath", "Log directory", ""),
               btn(
                 "select-log-dir",
                 "__action.selectLogDirectory",

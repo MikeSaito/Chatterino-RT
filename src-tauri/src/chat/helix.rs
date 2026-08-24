@@ -278,6 +278,7 @@ pub struct StreamStatus {
     pub game_name: Option<String>,
     pub stream_title: Option<String>,
     pub started_at: Option<String>,
+    pub stream_id: Option<String>,
 }
 
 pub fn parse_stream_status(value: &Value) -> StreamStatus {
@@ -292,6 +293,7 @@ pub fn parse_stream_status(value: &Value) -> StreamStatus {
             game_name: None,
             stream_title: None,
             started_at: None,
+            stream_id: None,
         };
     };
     StreamStatus {
@@ -312,6 +314,11 @@ pub fn parse_stream_status(value: &Value) -> StreamStatus {
             .map(str::to_string),
         started_at: item
             .get("started_at")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        stream_id: item
+            .get("id")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_string),

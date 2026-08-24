@@ -212,6 +212,7 @@ async fn connect_session(
                     Some(IrcCmd::Part) => {
                         for ch in wanted.iter() {
                             let _ = send_line(&mut write, &format!("PART #{ch}")).await;
+                            super::logging::close_channel(shared, ch);
                         }
                         wanted.clear();
                         in_rooms.clear();
@@ -229,6 +230,7 @@ async fn connect_session(
                         if let Ok(mut hub) = shared.hub.lock() {
                             hub.set_joined(&ch, false);
                         }
+                        super::logging::close_channel(shared, &ch);
                         auth::emit(app, shared);
                         *last_error = None;
                         let status_ch = status_channel(shared, wanted);
@@ -629,6 +631,8 @@ fn dispatch_line(
                 return LineAction::None;
             }
             super::filters::apply_whisper_highlight(shared, &mut event);
+            // One whisper log file (stock /whispers); fan-out must not duplicate.
+            super::logging::try_log(shared, super::logging::whispers_key(), &event, "");
             let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
             let sim = super::similarity::cfg_from_shared(shared);
             let stack_style = super::timeout_stack::style_from_shared(shared);
@@ -744,15 +748,24 @@ fn dispatch_line(
             let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
             let sim = super::similarity::cfg_from_shared(shared);
             let stack_style = super::timeout_stack::style_from_shared(shared);
+            let log_channel = channel.clone();
+            let stream_id = super::logging::resolve_stream_id(shared, &channel);
+            let mut logged: Vec<ChatEvent> = Vec::new();
             let batch = shared.hub.lock().ok().and_then(|mut hub| {
-                hub.ingest(
+                hub.ingest_logged(
                     &channel,
                     event,
                     self_login.as_deref(),
                     &sim,
                     stack_style,
+                    |ev| {
+                        logged.push(ev.clone());
+                    },
                 )
             });
+            for ev in &logged {
+                super::logging::try_log(shared, &log_channel, ev, &stream_id);
+            }
             if let Some(batch) = batch {
                 deliver_batch(app, shared, &batch);
             }

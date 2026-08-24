@@ -28,6 +28,7 @@ unicode-segmentation = "1"
 base64 = "0.22"
 rfd = "0.15"
 regex = "1.13.1"
+chrono = { version = "0.4.45", features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

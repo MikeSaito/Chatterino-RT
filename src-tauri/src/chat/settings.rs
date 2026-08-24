@@ -277,6 +277,7 @@ pub struct SettingsInner {
 pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    super::logging::init_default_base(shared, &dir);
     let path = dir.join(SETTINGS_FILE);
     let data = load_file(&path);
     let mut inner = shared.settings.lock().map_err(|e| e.to_string())?;
@@ -307,6 +308,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     apply_scrollback_limit(shared, &inner.data.knobs);
     rebuild_expression_filters(shared, &inner.data);
     rebuild_custom_commands(shared, &inner.data);
+    rebuild_logging(shared, &inner.data);
     Ok(())
 }
 
@@ -315,6 +317,10 @@ pub fn rebuild_custom_commands(shared: &Shared, data: &AppSettings) {
     if let Ok(mut slot) = shared.custom_commands.lock() {
         *slot = Arc::new(set);
     }
+}
+
+pub fn rebuild_logging(shared: &Shared, data: &AppSettings) {
+    super::logging::rebuild(shared, data);
 }
 
 pub fn rebuild_expression_filters(shared: &Shared, data: &AppSettings) {
@@ -407,6 +413,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     apply_scrollback_limit(shared, &clean.knobs);
     rebuild_expression_filters(shared, &clean);
     rebuild_custom_commands(shared, &clean);
+    rebuild_logging(shared, &clean);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }
@@ -578,6 +585,10 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         super::highlight_sound::validate_sound_path(s)
     }
 
+    fn validate_log_dir(s: &str) -> Result<(), ApiError> {
+        super::logging::validate_log_path(s)
+    }
+
     if raw.nicknames.len() > MAX_TABLE_ROWS
         || raw.commands.len() > MAX_TABLE_ROWS
         || raw.highlight_messages.len() > MAX_TABLE_ROWS
@@ -665,6 +676,9 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
 
     if let Some(Value::String(path)) = raw.knobs.get("highlighting.pathHighlightSound") {
         validate_sound_cell(path)?;
+    }
+    if let Some(Value::String(path)) = raw.knobs.get("logging.logPath") {
+        validate_log_dir(path)?;
     }
 
     Ok(raw)

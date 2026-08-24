@@ -6,8 +6,8 @@ use chat::commands::{
     chat_join, chat_leave,
     chat_part, chat_search, chat_send, chat_snapshot, chat_subscribe, chat_user_profile,
     filters_get, filters_set, highlight_sound_pick, highlight_sound_read,
-    highlight_cancel_attention, highlight_request_attention, open_chat_link, session_get,
-    settings_get, settings_set, streamer_mode_detect, supports_incognito_links,
+    highlight_cancel_attention, highlight_request_attention, logging_pick_directory, open_chat_link,
+    session_get, settings_get, settings_set, streamer_mode_detect, supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -57,6 +57,7 @@ pub fn run() {
             settings_set,
             highlight_sound_read,
             highlight_sound_pick,
+            logging_pick_directory,
             highlight_request_attention,
             highlight_cancel_attention,
             streamer_mode_detect

@@ -408,6 +408,33 @@ export function bindSettingsDialog(opts: {
       schedulePreview();
       return;
     }
+    if (path === "__action.selectLogDirectory") {
+      try {
+        const picked = await invoke<string>("logging_pick_directory");
+        const input = knobInputs.get("logging.logPath");
+        if (input instanceof HTMLInputElement) {
+          input.value = picked;
+        }
+        statusEl.textContent = "";
+        schedulePreview();
+      } catch (e) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not select log directory.";
+        statusEl.textContent = msg;
+      }
+      return;
+    }
+    if (path === "__action.resetLogDirectory") {
+      const input = knobInputs.get("logging.logPath");
+      if (input instanceof HTMLInputElement) {
+        input.value = "";
+      }
+      statusEl.textContent = "";
+      schedulePreview();
+      return;
+    }
     if (path === "__action.resetHotkeys") {
       const api = tableApis.get("hotkeys");
       if (api) {
@@ -507,6 +534,9 @@ export function bindSettingsDialog(opts: {
         el.type = "color";
       } else {
         el.type = "text";
+      }
+      if (knob.path === "logging.logPath") {
+        el.readOnly = true;
       }
       input = el;
     }

@@ -18,6 +18,7 @@ pub struct Hub {
     disconnect_at_ms: HashMap<String, u64>,
     stream_game: HashMap<String, String>,
     stream_title: HashMap<String, String>,
+    stream_id: HashMap<String, String>,
     scrollback_limit: usize,
 }
 
@@ -32,6 +33,7 @@ impl Default for Hub {
             disconnect_at_ms: HashMap::new(),
             stream_game: HashMap::new(),
             stream_title: HashMap::new(),
+            stream_id: HashMap::new(),
             scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
         }
     }
@@ -107,15 +109,32 @@ impl Hub {
         sim: &SimilarityCfg,
         stack_style: TimeoutStackStyle,
     ) -> Option<ChatBatch> {
+        self.ingest_logged(channel, event, self_login, sim, stack_style, |_| {})
+    }
+
+    pub fn ingest_logged(
+        &mut self,
+        channel: &str,
+        event: ChatEvent,
+        self_login: Option<&str>,
+        sim: &SimilarityCfg,
+        stack_style: TimeoutStackStyle,
+        on_added: impl FnMut(&ChatEvent),
+    ) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
             if self.buffers.contains_key(channel) {
-                self.buffer(channel)
-                    .push_scrollback_only(event, self_login, sim, stack_style);
+                self.buffer(channel).push_scrollback_only_logged(
+                    event,
+                    self_login,
+                    sim,
+                    stack_style,
+                    on_added,
+                );
             }
             return None;
         }
         self.buffer(channel)
-            .ingest(event, self_login, sim, stack_style)
+            .ingest_logged(event, self_login, sim, stack_style, on_added)
     }
 
     /// Poll all buffers for changed send-wait labels.
@@ -230,6 +249,9 @@ impl Hub {
         self.room_ids.remove(channel);
         self.recent_loaded.remove(channel);
         self.disconnect_at_ms.remove(channel);
+        self.stream_game.remove(channel);
+        self.stream_title.remove(channel);
+        self.stream_id.remove(channel);
         if self.active.as_deref() == Some(channel) {
             self.active = None;
         }
@@ -242,6 +264,9 @@ impl Hub {
         self.room_ids.clear();
         self.recent_loaded.clear();
         self.disconnect_at_ms.clear();
+        self.stream_game.clear();
+        self.stream_title.clear();
+        self.stream_id.clear();
         self.active = None;
     }
 
@@ -264,6 +289,7 @@ impl Hub {
         if !live {
             self.stream_game.remove(channel);
             self.stream_title.remove(channel);
+            self.stream_id.remove(channel);
         }
         self.buffer(channel).set_live(live)
     }
@@ -273,6 +299,7 @@ impl Hub {
         channel: &str,
         game: Option<String>,
         title: Option<String>,
+        stream_id: Option<String>,
     ) {
         match game {
             Some(v) => {
@@ -286,6 +313,12 @@ impl Hub {
             }
             None => {}
         }
+        match stream_id {
+            Some(v) => {
+                self.stream_id.insert(channel.to_string(), v);
+            }
+            None => {}
+        }
     }
 
     pub fn stream_game(&self, channel: &str) -> Option<&str> {
@@ -294,6 +327,10 @@ impl Hub {
 
     pub fn stream_title(&self, channel: &str) -> Option<&str> {
         self.stream_title.get(channel).map(|s| s.as_str())
+    }
+
+    pub fn stream_id(&self, channel: &str) -> Option<&str> {
+        self.stream_id.get(channel).map(|s| s.as_str())
     }
 }
 

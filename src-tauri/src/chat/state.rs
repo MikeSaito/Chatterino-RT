@@ -22,6 +22,7 @@ use super::twitch_blocks::TwitchBlockSet;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::shared_chat::SharedChatState;
 use super::hub::Hub;
+use super::logging::Logging;
 use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
@@ -165,6 +166,7 @@ pub struct Shared {
     pub expression_filters: Arc<Mutex<Arc<ExpressionFilterSet>>>,
     pub exclude_own_from_filter: Arc<Mutex<bool>>,
     pub custom_commands: Arc<Mutex<Arc<CustomCommandSet>>>,
+    pub logging: Arc<Mutex<Logging>>,
 }
 
 pub enum BatchSend {
@@ -220,6 +222,7 @@ impl Shared {
             expression_filters: Arc::new(Mutex::new(Arc::new(ExpressionFilterSet::default()))),
             exclude_own_from_filter: Arc::new(Mutex::new(false)),
             custom_commands: Arc::new(Mutex::new(Arc::new(CustomCommandSet::default()))),
+            logging: Arc::new(Mutex::new(Logging::default())),
         }
     }
 
@@ -428,15 +431,23 @@ impl Shared {
         let self_login = auth::resolved_login_token(self).map(|(l, _)| l);
         let sim = super::similarity::cfg_from_shared(self);
         let stack_style = super::timeout_stack::style_from_shared(self);
+        let stream_id = super::logging::resolve_stream_id(self, channel);
+        let mut logged: Vec<super::types::ChatEvent> = Vec::new();
         let batch = self.hub.lock().ok().and_then(|mut hub| {
-            hub.ingest(
+            hub.ingest_logged(
                 channel,
                 event,
                 self_login.as_deref(),
                 &sim,
                 stack_style,
+                |ev| {
+                    logged.push(ev.clone());
+                },
             )
         });
+        for ev in &logged {
+            super::logging::try_log(self, channel, ev, &stream_id);
+        }
         if let Some(batch) = batch {
             match self.send_batch(&batch) {
                 BatchSend::Delivered => {}
