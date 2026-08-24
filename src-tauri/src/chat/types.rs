@@ -78,6 +78,11 @@ pub struct EmoteSpan {
     pub url: String,
     #[serde(default)]
     pub zero_width: bool,
+    /// Stacked bits total (stock BitsAmount when emotes.stackBits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits_amount: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits_color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -482,6 +487,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: "https://static-cdn.jtvnw.net/x".into(),
                 zero_width: false,
+                bits_amount: None,
+                bits_color: None,
             }],
             link_spans: vec![],
             mention_spans: vec![],

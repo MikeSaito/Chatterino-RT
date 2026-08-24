@@ -39,6 +39,8 @@ mod tests {
                         provider: "twitch".into(),
                         url: "https://static-cdn.jtvnw.net/x".into(),
                         zero_width: false,
+                        bits_amount: None,
+                        bits_color: None,
                     }],
                     link_spans: vec![],
                     mention_spans: vec![],

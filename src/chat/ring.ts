@@ -98,6 +98,7 @@ type Slot = {
   nick: BitmapText;
   body: BitmapText;
   mentionTexts: BitmapText[];
+  bitsLabel: BitmapText;
   emotes: Sprite[];
   emoteKeys: string[];
   badges: Sprite[];
@@ -182,6 +183,7 @@ export class MessageRing {
   private nickCharWidth = 10 * 0.56;
   private badgeSize = BADGE_SIZE;
   private emoteScale = 1;
+  private stackBits = false;
   private enableEmoteImages = true;
   private enableZeroWidthEmotes = true;
   private removeSpacesBetweenEmotes = false;
@@ -351,6 +353,19 @@ export class MessageRing {
       if (slot.msgId) {
         slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
       }
+    }
+    this.layout();
+  }
+
+  /** Stock emotes.stackBits: one cheer emote + total bits label per message. */
+  configureStackBits(enabled: boolean): void {
+    const on = enabled === true;
+    if (on === this.stackBits) {
+      return;
+    }
+    this.stackBits = on;
+    if (!this.ready) {
+      return;
     }
     this.layout();
   }
@@ -842,6 +857,7 @@ export class MessageRing {
       for (const mt of slot.mentionTexts) {
         mt.style.fontSize = this.fontSize;
       }
+      slot.bitsLabel.style.fontSize = this.fontSize;
       if (forceDirty) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
@@ -849,6 +865,7 @@ export class MessageRing {
         for (const mt of slot.mentionTexts) {
           dirtyBitmapText(mt);
         }
+        dirtyBitmapText(slot.bitsLabel);
       }
     }
   }
@@ -1038,6 +1055,16 @@ export class MessageRing {
         mt.eventMode = "none";
         mentionTexts.push(mt);
       }
+      const bitsLabel = new BitmapText({
+        text: "",
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: this.fontSize,
+          fill: 0x9c34ff,
+        },
+      });
+      bitsLabel.visible = false;
+      bitsLabel.eventMode = "none";
       const badges: Sprite[] = [];
       for (let b = 0; b < BADGE_SLOTS_PER_ROW; b += 1) {
         const spr = new Sprite(Texture.EMPTY);
@@ -1054,6 +1081,7 @@ export class MessageRing {
         nick,
         body,
         ...mentionTexts,
+        bitsLabel,
         ...badges,
         ...emotes,
         disabledGfx,
@@ -1067,6 +1095,7 @@ export class MessageRing {
         nick,
         body,
         mentionTexts,
+        bitsLabel,
         emotes,
         emoteKeys: [],
         badges,
@@ -1343,6 +1372,8 @@ export class MessageRing {
       mt.visible = false;
       mt.text = "";
     }
+    slot.bitsLabel.visible = false;
+    slot.bitsLabel.text = "";
   }
 
   private write(slot: Slot, event: ChatEvent): void {
@@ -1445,6 +1476,9 @@ export class MessageRing {
         const spr = slot.emotes[i];
         const span = drawn.spans[i];
         if (!span) {
+          continue;
+        }
+        if (span.provider === "cheer-mask") {
           continue;
         }
         const key =
@@ -1732,11 +1766,12 @@ export class MessageRing {
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
+    let bitsLabelShown = false;
     const emoteSize = this.emotePixelSize();
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
-      if (!span || !this.enableEmoteImages) {
+      if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
         spr.visible = false;
         continue;
       }
@@ -1770,6 +1805,27 @@ export class MessageRing {
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
+      if (
+        !bitsLabelShown &&
+        this.stackBits &&
+        span.bitsAmount != null &&
+        span.bitsAmount > 0 &&
+        span.bitsColor
+      ) {
+        const tint = parseCheerColor(span.bitsColor);
+        if (tint != null) {
+          slot.bitsLabel.visible = true;
+          slot.bitsLabel.text = ` ${span.bitsAmount}`;
+          slot.bitsLabel.tint = tint;
+          slot.bitsLabel.x = spr.x + emoteSize + 2;
+          slot.bitsLabel.y = spr.y;
+          bitsLabelShown = true;
+        }
+      }
+    }
+    if (!bitsLabelShown) {
+      slot.bitsLabel.visible = false;
+      slot.bitsLabel.text = "";
     }
   }
 
@@ -2511,7 +2567,7 @@ export class MessageRing {
       for (let e = 0; e < slot.emotes.length; e += 1) {
         const spr = slot.emotes[e];
         const span = slot.spansRaw[e];
-        if (!span) {
+        if (!span || span.provider === "cheer-mask") {
           continue;
         }
         const key =
@@ -2591,6 +2647,15 @@ function clampEmoteScale(raw: number): number {
     return 1;
   }
   return Math.min(2, Math.max(0.5, raw));
+}
+
+function parseCheerColor(raw: string | undefined): number | null {
+  const hex = (raw ?? "").trim();
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (m) {
+    return Number.parseInt(m[1], 16);
+  }
+  return null;
 }
 
 /** Force BitmapText GPU rebuild after BitmapFont.uninstall (same text/size skips update). */

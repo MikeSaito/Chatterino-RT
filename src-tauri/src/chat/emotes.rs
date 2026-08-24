@@ -327,6 +327,8 @@ pub fn attach_third_party(
                         provider: def.provider.clone(),
                         url: def.url.clone(),
                         zero_width: def.zero_width,
+                        bits_amount: None,
+                        bits_color: None,
                     });
                 }
             }
@@ -394,6 +396,8 @@ mod tests {
             provider: provider.into(),
             url: "x".into(),
             zero_width,
+            bits_amount: None,
+            bits_color: None,
         }
     }
 

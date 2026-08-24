@@ -498,6 +498,8 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
                 provider: "twitch".to_string(),
                 url: twitch_emote_url(id),
                 zero_width: false,
+                bits_amount: None,
+                bits_color: None,
             });
         }
     }
@@ -899,6 +901,8 @@ mod tests {
             provider: "twitch".into(),
             url: "x".into(),
             zero_width: false,
+            bits_amount: None,
+            bits_color: None,
         }];
         shift_emote_spans_back(&mut spans, 5);
         assert_eq!(spans[0].start, 0);

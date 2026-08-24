@@ -247,6 +247,8 @@ mod tests {
             provider: "twitch".into(),
             url: "x".into(),
             zero_width: false,
+            bits_amount: None,
+            bits_color: None,
         }
     }
 

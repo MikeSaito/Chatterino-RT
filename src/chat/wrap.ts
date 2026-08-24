@@ -7,6 +7,8 @@ export type WrapEmote = {
   start: number;
   end: number;
   zeroWidth?: boolean;
+  /** Stacked bits label width reserve (emotes.stackBits). */
+  bitsAmount?: number;
 };
 
 export type WrapRange = {
@@ -496,7 +498,11 @@ function advanceUnit(
 
 function emoteCols(span: WrapEmote, ctx: WrapCtx): number {
   const codeLen = Math.max(1, span.end - span.start);
-  return Math.max(codeLen, ctx.emoteMinCols);
+  let cols = Math.max(codeLen, ctx.emoteMinCols);
+  if (span.bitsAmount != null && span.bitsAmount > 0) {
+    cols += ` ${span.bitsAmount}`.length;
+  }
+  return cols;
 }
 
 function emoteAt(

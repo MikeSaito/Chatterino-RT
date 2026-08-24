@@ -906,7 +906,19 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             );
             if let Some(n) = *bits {
                 if let Ok(cat) = shared.cheers.lock() {
-                    let extra = attach_cheers(text, emote_spans, &cat, channel, n);
+                    let stack_bits = shared
+                        .settings
+                        .lock()
+                        .ok()
+                        .and_then(|inner| {
+                            inner
+                                .data
+                                .knobs
+                                .get("emotes.stackBits")
+                                .and_then(|v| v.as_bool())
+                        })
+                        .unwrap_or(false);
+                    let extra = attach_cheers(text, emote_spans, &cat, channel, n, stack_bits);
                     emote_spans.extend(extra);
                 }
             }

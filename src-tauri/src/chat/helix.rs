@@ -500,9 +500,20 @@ pub fn parse_cheermote_sets(value: &Value) -> Vec<CheerSet> {
             continue;
         }
         tiers.sort_by(|a, b| b.min_bits.cmp(&a.min_bits));
+        let color = item
+            .get("color")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| {
+                s.len() == 7
+                    && s.starts_with('#')
+                    && s.as_bytes()[1..].iter().all(|b| b.is_ascii_hexdigit())
+            })
+            .map(str::to_string);
         sets.push(CheerSet {
             prefix: prefix.to_string(),
             tiers,
+            color,
         });
     }
     sets.sort_by(|a, b| b.prefix.len().cmp(&a.prefix.len()));
@@ -653,10 +664,11 @@ mod tests {
       ]
     }"#;
 
-    const CHEERS_JSON: &str = r#"{
+    const CHEERS_JSON: &str = r##"{
       "data": [
         {
           "prefix": "Cheer",
+          "color": "#9ACD32",
           "tiers": [
             {
               "min_bits": 1,
@@ -681,7 +693,7 @@ mod tests {
           ]
         }
       ]
-    }"#;
+    }"##;
 
     #[test]
     fn parses_chat_emotes_and_drops_bad_id() {
@@ -742,8 +754,26 @@ mod tests {
         let sets = parse_cheermote_sets(&v);
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].prefix, "Cheer");
+        assert_eq!(sets[0].color.as_deref(), Some("#9ACD32"));
         assert_eq!(sets[0].tiers[0].min_bits, 100);
         assert_eq!(sets[0].tiers[1].min_bits, 1);
+    }
+
+    #[test]
+    fn cheermote_color_rejects_invalid_hex() {
+        let v: serde_json::Value = serde_json::json!({
+            "data": [{
+                "prefix": "Cheer",
+                "color": "<script>",
+                "tiers": [{
+                    "min_bits": 1,
+                    "images": { "dark": { "static": { "1": "https://d3aqoihi2n8ty8.cloudfront.net/actions/cheer/dark/static/1/1.gif" } } }
+                }]
+            }]
+        });
+        let sets = parse_cheermote_sets(&v);
+        assert_eq!(sets.len(), 1);
+        assert!(sets[0].color.is_none());
     }
 
     #[test]

@@ -3206,6 +3206,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: String::new(),
                 zero_width: false,
+                bits_amount: None,
+                bits_color: None,
             });
         }
         apply_ignore_replacements(
@@ -3238,6 +3240,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: String::new(),
                 zero_width: false,
+                bits_amount: None,
+                bits_color: None,
             });
         }
         apply_ignore_replacements(

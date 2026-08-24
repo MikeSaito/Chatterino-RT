@@ -305,6 +305,7 @@ function paintRuntime(
   ring.configureReplyContext({
     hide: data.knobs["appearance.hideReplyContext"] === true,
   });
+  ring.configureStackBits(data.knobs["emotes.stackBits"] === true);
   applyWindowTopMost(data.knobs["appearance.windowTopMost"] === true);
   onDisplay?.(data);
 }

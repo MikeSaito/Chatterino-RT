@@ -5,6 +5,9 @@ export type EmoteSpan = {
   provider: string;
   url: string;
   zeroWidth: boolean;
+  /** Stacked bits total (emotes.stackBits). */
+  bitsAmount?: number;
+  bitsColor?: string;
 };
 
 export type LinkSpan = {
