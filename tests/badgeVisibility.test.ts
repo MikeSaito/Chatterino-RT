@@ -95,4 +95,26 @@ const bttvHidden = filterVisibleBadges(
 );
 assert(bttvHidden.length === 1 && bttvHidden[0].set === "moderator", "bttv filtered");
 
+const sevenTvBadge = { set: "7tv", version: "badge1", source: "7tv" };
+assert(isBadgeVisible(sevenTvBadge, allOn), "7tv on");
+assert(!isBadgeVisible(sevenTvBadge, { ...allOn, sevenTv: false }), "7tv off");
+assert(
+  isBadgeVisible({ set: "bttv", source: "bttv" }, { ...allOn, sevenTv: false }),
+  "bttv unaffected when 7tv off",
+);
+
+const mixedSevenTv = [
+  { set: "moderator", version: "1" },
+  { set: "7tv", version: "badge1", source: "7tv" },
+];
+const sevenTvHidden = filterVisibleBadges(
+  mixedSevenTv,
+  { ...DEFAULT_BADGE_VISIBILITY, sevenTv: false },
+  10,
+);
+assert(
+  sevenTvHidden.length === 1 && sevenTvHidden[0].set === "moderator",
+  "7tv filtered",
+);
+
 console.log("badgeVisibility.test.ts: ok");

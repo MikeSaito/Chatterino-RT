@@ -320,6 +320,8 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
         return Err(ApiError::internal("каталог конфигурации не инициализирован"));
     }
     let prev_flags = super::fetch::EmoteProviderFlags::from_knobs(&inner.data.knobs);
+    let prev_stv_channel_need =
+        super::eventapi::seventv_event_channel_needed_from_knobs(&inner.data.knobs);
     save_file(&inner.path, &clean).map_err(|e| ApiError::internal(&e))?;
     inner.data = clean.clone();
     let ctx = super::filters::HighlightSoundCtx::from_settings(&inner.data);
@@ -356,6 +358,11 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     let bttv_live = super::bttv_live::bttv_live_enabled_from_knobs(&clean.knobs);
     shared.notify_bttv(super::state::BttvCmd::SetEnabled(bttv_live));
     shared.notify_event(super::state::EventCmd::SetEnabled(flags.seventv_event_api));
+    let new_stv_channel_need =
+        super::eventapi::seventv_event_channel_needed_from_knobs(&clean.knobs);
+    if prev_stv_channel_need != new_stv_channel_need {
+        super::eventapi::spawn_event_channel_resync(shared.clone());
+    }
     if prev_flags.catalog_reload_key() != flags.catalog_reload_key() {
         spawn_emote_catalog_reload(shared);
     }
@@ -384,11 +391,7 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
         let Some(login) = active else {
             return;
         };
-        let room_id = shared
-            .snapshot_bttv_wanted()
-            .channel
-            .filter(|c| c.login == login)
-            .map(|c| c.room_id);
+        let room_id = super::eventapi::resolve_twitch_room_id(&shared, &login);
         let Some(room_id) = room_id else {
             if let Ok(mut cat) = shared.catalog.lock() {
                 if !flags.bttv_channel {
@@ -401,7 +404,7 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
                     cat.purge_channel(&login, "7tv");
                 }
             }
-            if !flags.seventv_channel {
+            if !super::eventapi::seventv_event_channel_needed(&shared) {
                 shared.notify_event(super::state::EventCmd::ClearChannel);
             }
             return;
@@ -429,14 +432,19 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
         if !still {
             return;
         }
-        if flags.seventv_channel {
-            if let Some((set_id, user_id)) = stv {
-                shared.notify_event(super::state::EventCmd::SetChannel {
-                    login,
-                    set_id,
-                    user_id,
-                });
-            }
+        if super::eventapi::seventv_event_channel_needed(&shared) {
+            let flags = super::fetch::EmoteProviderFlags::from_shared(&shared);
+            let (set_id, user_id) = if flags.seventv_channel {
+                stv.unwrap_or_default()
+            } else {
+                (String::new(), String::new())
+            };
+            shared.notify_event(super::state::EventCmd::SetChannel {
+                login,
+                room_id,
+                set_id,
+                user_id,
+            });
         } else {
             shared.notify_event(super::state::EventCmd::ClearChannel);
         }

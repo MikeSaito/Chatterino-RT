@@ -419,6 +419,26 @@ fn safe_7tv_file(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
 }
 
+/// Static WEBP badge URL from 7TV cosmetic `data.host` (Chatterino createImageSet useStatic=true).
+pub(crate) fn seventv_badge_url(data: &Value) -> Option<String> {
+    let host = data.get("host")?;
+    let base = host.get("url").and_then(Value::as_str)?;
+    let files = host.get("files")?.as_array()?;
+    for file in files {
+        if file.get("format").and_then(Value::as_str) != Some("WEBP") {
+            continue;
+        }
+        let name = file
+            .get("static_name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .or_else(|| file.get("name").and_then(Value::as_str))
+            .filter(|s| safe_7tv_file(s))?;
+        return seventv_cdn_url(base, name);
+    }
+    None
+}
+
 fn seventv_cdn_url(host: &str, file: &str) -> Option<String> {
     let composed = format!("{}/{file}", abs_url(host));
     let parsed = Url::parse(&composed).ok()?;

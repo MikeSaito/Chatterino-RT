@@ -28,6 +28,7 @@ pub mod provider_activity;
 pub mod recent_messages;
 pub mod room_modes;
 pub mod scrollback;
+pub mod seventv_badges;
 pub mod send_wait;
 pub mod session;
 pub mod settings;

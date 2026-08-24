@@ -969,6 +969,9 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             if let Ok(bttv) = shared.bttv_badges.lock() {
                 bttv.append_for_user(badges, user_id);
             }
+            if let Ok(stv) = shared.seventv_badges.lock() {
+                stv.append_for_user(badges, user_id);
+            }
             emote_spans.sort_by_key(|s| s.start);
             resolve_overlays(text, emote_spans);
             let find_all = shared
@@ -1114,14 +1117,20 @@ fn spawn_channel_assets(
         if !still {
             return;
         }
-        if flags.seventv_channel {
-            if let Some((set_id, user_id)) = stv {
-                events.notify_event(EventCmd::SetChannel {
-                    login: login.clone(),
-                    set_id,
-                    user_id,
-                });
-            }
+        let needs_stv_event = super::eventapi::seventv_event_channel_needed(&events);
+        let flags = fetch::EmoteProviderFlags::from_shared(&events);
+        if needs_stv_event {
+            let (set_id, user_id) = if flags.seventv_channel {
+                stv.unwrap_or_default()
+            } else {
+                (String::new(), String::new())
+            };
+            events.notify_event(EventCmd::SetChannel {
+                login: login.clone(),
+                room_id: room_id.clone(),
+                set_id,
+                user_id,
+            });
         } else {
             events.notify_event(EventCmd::ClearChannel);
         }

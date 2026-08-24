@@ -15,6 +15,7 @@ export type BadgeVisibilityFlags = {
   vanity: boolean;
   ffz: boolean;
   bttv: boolean;
+  sevenTv: boolean;
 };
 
 export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
@@ -25,6 +26,7 @@ export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
   vanity: true,
   ffz: true,
   bttv: true,
+  sevenTv: true,
 };
 
 export type BadgeLike = {
@@ -69,6 +71,9 @@ export function isBadgeVisible(
   if (badge.source === "bttv" || badge.set === "bttv") {
     return flags.bttv;
   }
+  if (badge.source === "7tv" || badge.set === "7tv") {
+    return flags.sevenTv;
+  }
   switch (badgeCategory(badge.set)) {
     case "globalAuthority":
       return flags.globalAuthority;
@@ -112,6 +117,7 @@ export function badgeVisibilityEqual(
     a.subscription === b.subscription &&
     a.vanity === b.vanity &&
     a.ffz === b.ffz &&
-    a.bttv === b.bttv
+    a.bttv === b.bttv &&
+    a.sevenTv === b.sevenTv
   );
 }

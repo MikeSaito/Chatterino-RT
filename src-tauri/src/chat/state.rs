@@ -14,6 +14,7 @@ use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule,
 use super::helix::BadgeCatalog;
 use super::bttv_badges::BttvBadgeCatalog;
 use super::ffz_badges::FfzBadgeCatalog;
+use super::seventv_badges::SeventvBadgeCatalog;
 use super::hub::Hub;
 use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
@@ -39,6 +40,7 @@ pub enum EventCmd {
     SetGlobal { set_id: String },
     SetChannel {
         login: String,
+        room_id: String,
         set_id: String,
         user_id: String,
     },
@@ -88,6 +90,7 @@ impl Default for EventWanted {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventChannelWanted {
     pub login: String,
+    pub room_id: String,
     pub set_id: String,
     pub user_id: String,
 }
@@ -111,6 +114,7 @@ pub struct Shared {
     pub badges: Arc<Mutex<BadgeCatalog>>,
     pub ffz_badges: Arc<Mutex<FfzBadgeCatalog>>,
     pub bttv_badges: Arc<Mutex<BttvBadgeCatalog>>,
+    pub seventv_badges: Arc<Mutex<SeventvBadgeCatalog>>,
     pub cheers: Arc<Mutex<CheerCatalog>>,
     pub irc_tx: Arc<Mutex<Option<mpsc::Sender<IrcCmd>>>>,
     pub event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<EventCmd>>>>,
@@ -164,6 +168,7 @@ impl Shared {
             badges: Arc::new(Mutex::new(BadgeCatalog::default())),
             ffz_badges: Arc::new(Mutex::new(FfzBadgeCatalog::default())),
             bttv_badges: Arc::new(Mutex::new(BttvBadgeCatalog::default())),
+            seventv_badges: Arc::new(Mutex::new(SeventvBadgeCatalog::default())),
             cheers: Arc::new(Mutex::new(CheerCatalog::default())),
             irc_tx: Arc::new(Mutex::new(None)),
             event_tx: Arc::new(Mutex::new(None)),
@@ -274,6 +279,7 @@ impl Shared {
             }
             EventCmd::SetChannel {
                 login,
+                room_id,
                 set_id,
                 user_id,
             } => {
@@ -288,6 +294,7 @@ impl Shared {
                 };
                 wanted.channel = Some(EventChannelWanted {
                     login: login.clone(),
+                    room_id: room_id.clone(),
                     set_id: set_id.clone(),
                     user_id: user_id.clone(),
                 });
@@ -453,6 +460,7 @@ mod tests {
         let shared = Shared::new();
         shared.notify_event(EventCmd::SetChannel {
             login: "xqc".into(),
+            room_id: "999".into(),
             set_id: "set1".into(),
             user_id: "user1".into(),
         });
@@ -461,16 +469,19 @@ mod tests {
         shared.hub.lock().unwrap().set_active(Some("xqc".into()));
         shared.notify_event(EventCmd::SetChannel {
             login: "xqc".into(),
+            room_id: "999".into(),
             set_id: "set1".into(),
             user_id: "user1".into(),
         });
         let wanted = shared.snapshot_event_wanted();
         assert_eq!(wanted.channel.as_ref().map(|c| c.login.as_str()), Some("xqc"));
+        assert_eq!(wanted.channel.as_ref().map(|c| c.room_id.as_str()), Some("999"));
 
         shared.hub.lock().unwrap().set_active(Some("other".into()));
         shared.notify_event(EventCmd::ClearChannel);
         shared.notify_event(EventCmd::SetChannel {
             login: "xqc".into(),
+            room_id: "999".into(),
             set_id: "set1".into(),
             user_id: "user1".into(),
         });
