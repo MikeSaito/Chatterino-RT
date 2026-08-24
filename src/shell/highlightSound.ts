@@ -104,6 +104,24 @@ export async function playHighlightSound(overridePath?: string): Promise<void> {
   ]);
 }
 
+/** Live notifications: always play when Rust gated the event (ignore focus / mention mute). */
+export async function playLiveNotifySound(overridePath?: string): Promise<void> {
+  const now = Date.now();
+  const wait = PLAY_GAP_MS - (now - lastPlay);
+  if (wait > 0) {
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  lastPlay = Date.now();
+  try {
+    const src = await resolveSrc(overridePath?.trim() || undefined);
+    const audio = new Audio(src);
+    audio.volume = 1;
+    await audio.play();
+  } catch {
+    // Autoplay / decode failures are non-fatal.
+  }
+}
+
 async function resolveSrc(overridePath?: string): Promise<string> {
   const path = overridePath?.trim() || customPath;
   if (!path) {

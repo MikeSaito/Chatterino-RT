@@ -26,6 +26,7 @@ pub mod incognito;
 pub mod irc;
 pub mod link_resolver;
 pub mod live_status;
+pub mod live_notifications;
 pub mod logging;
 pub mod membership_batch;
 pub mod parse;

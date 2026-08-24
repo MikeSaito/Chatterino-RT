@@ -124,6 +124,13 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
         );
         shared.post_channel_notice(app, channel, text);
     }
+    super::live_notifications::on_active_channel_status(
+        shared,
+        app,
+        channel,
+        status.live,
+        status.stream_title.as_deref(),
+    );
     let payload = channel_live_payload(channel, &status);
     if status.live || live_changed {
         let _ = app.emit("chat:channel_live", payload);

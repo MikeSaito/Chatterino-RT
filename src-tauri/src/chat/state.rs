@@ -22,6 +22,7 @@ use super::twitch_blocks::TwitchBlockSet;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::shared_chat::SharedChatState;
 use super::hub::Hub;
+use super::live_notifications::LiveNotifyState;
 use super::logging::Logging;
 use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
@@ -167,6 +168,7 @@ pub struct Shared {
     pub exclude_own_from_filter: Arc<Mutex<bool>>,
     pub custom_commands: Arc<Mutex<Arc<CustomCommandSet>>>,
     pub logging: Arc<Mutex<Logging>>,
+    pub live_notify: Arc<Mutex<LiveNotifyState>>,
 }
 
 pub enum BatchSend {
@@ -223,6 +225,7 @@ impl Shared {
             exclude_own_from_filter: Arc::new(Mutex::new(false)),
             custom_commands: Arc::new(Mutex::new(Arc::new(CustomCommandSet::default()))),
             logging: Arc::new(Mutex::new(Logging::default())),
+            live_notify: Arc::new(Mutex::new(LiveNotifyState::default())),
         }
     }
 

@@ -43,6 +43,7 @@ import {
   isStreamerModeActive,
   streamerModeState,
 } from "./shell/streamerMode";
+import { startLiveNotifyListener } from "./shell/liveNotify";
 import { bindUserCard } from "./shell/userCard";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
@@ -751,6 +752,8 @@ async function boot(): Promise<void> {
   replyCancelBtn.addEventListener("click", () => {
     clearReply();
   });
+
+  await startLiveNotifyListener();
 
   await listen<ChatStatus>(CHAT_STATUS_EVENT, (ev) => {
     if (holdStatus) {

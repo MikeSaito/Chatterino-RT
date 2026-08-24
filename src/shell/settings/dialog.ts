@@ -435,6 +435,28 @@ export function bindSettingsDialog(opts: {
       schedulePreview();
       return;
     }
+    if (path === "__action.selectNotificationSound") {
+      try {
+        const picked = await invoke<string>("highlight_sound_pick");
+        const input = knobInputs.get("notifications.notificationPathSound");
+        if (input instanceof HTMLInputElement) {
+          input.value = picked;
+        }
+        const custom = knobInputs.get("notifications.notificationCustomSound");
+        if (custom instanceof HTMLInputElement) {
+          custom.checked = true;
+        }
+        statusEl.textContent = "";
+        schedulePreview();
+      } catch (e) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not pick sound file.";
+        statusEl.textContent = msg;
+      }
+      return;
+    }
     if (path === "__action.resetHotkeys") {
       const api = tableApis.get("hotkeys");
       if (api) {

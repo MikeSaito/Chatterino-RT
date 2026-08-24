@@ -309,6 +309,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     rebuild_expression_filters(shared, &inner.data);
     rebuild_custom_commands(shared, &inner.data);
     rebuild_logging(shared, &inner.data);
+    rebuild_live_notifications(shared, &inner.data);
     Ok(())
 }
 
@@ -321,6 +322,10 @@ pub fn rebuild_custom_commands(shared: &Shared, data: &AppSettings) {
 
 pub fn rebuild_logging(shared: &Shared, data: &AppSettings) {
     super::logging::rebuild(shared, data);
+}
+
+pub fn rebuild_live_notifications(shared: &Shared, data: &AppSettings) {
+    super::live_notifications::rebuild(shared, data);
 }
 
 pub fn rebuild_expression_filters(shared: &Shared, data: &AppSettings) {
@@ -414,6 +419,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     rebuild_expression_filters(shared, &clean);
     rebuild_custom_commands(shared, &clean);
     rebuild_logging(shared, &clean);
+    rebuild_live_notifications(shared, &clean);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     Ok(clean)
 }
@@ -676,6 +682,12 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
 
     if let Some(Value::String(path)) = raw.knobs.get("highlighting.pathHighlightSound") {
         validate_sound_cell(path)?;
+    }
+    if let Some(Value::String(path)) = raw.knobs.get("notifications.notificationPathSound") {
+        let p = path.trim();
+        if !p.is_empty() && !p.starts_with("qrc:") {
+            validate_sound_cell(p)?;
+        }
     }
     if let Some(Value::String(path)) = raw.knobs.get("logging.logPath") {
         validate_log_dir(path)?;

@@ -2163,7 +2163,7 @@ export const SETTINGS_PAGES: PageDef[] = [
                 "notif-sound-path",
                 "notifications.notificationPathSound",
                 "Custom sound file",
-                "qrc:/sounds/ping3.wav",
+                "",
               ),
               btn(
                 "notif-select-sound",

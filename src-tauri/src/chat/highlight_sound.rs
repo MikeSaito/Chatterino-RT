@@ -48,6 +48,15 @@ pub fn allowed_paths_from_settings(data: &super::settings::AppSettings) -> HashS
     {
         set.insert(p.to_string());
     }
+    if let Some(p) = data
+        .knobs
+        .get("notifications.notificationPathSound")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !s.starts_with("qrc:"))
+    {
+        set.insert(p.to_string());
+    }
     for row in &data.highlight_messages {
         let p = row.custom_sound.trim();
         if !p.is_empty() {

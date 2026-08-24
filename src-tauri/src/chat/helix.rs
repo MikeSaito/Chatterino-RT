@@ -296,6 +296,10 @@ pub fn parse_stream_status(value: &Value) -> StreamStatus {
             stream_id: None,
         };
     };
+    parse_stream_item(item)
+}
+
+fn parse_stream_item(item: &Value) -> StreamStatus {
     StreamStatus {
         live: true,
         viewer_count: item
@@ -325,6 +329,26 @@ pub fn parse_stream_status(value: &Value) -> StreamStatus {
     }
 }
 
+/// Parse Helix `/streams` response into login → status (live only entries).
+pub fn parse_streams_by_login(value: &Value) -> std::collections::HashMap<String, StreamStatus> {
+    let mut out = std::collections::HashMap::new();
+    let Some(arr) = value.get("data").and_then(Value::as_array) else {
+        return out;
+    };
+    for item in arr {
+        let Some(login) = item
+            .get("user_login")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        out.insert(login, parse_stream_item(item));
+    }
+    out
+}
+
 pub async fn fetch_channel_stream(
     login: &str,
     token: Option<&str>,
@@ -339,6 +363,44 @@ pub async fn fetch_channel_stream(
         HelixFetch::Ok(v) => Some(parse_stream_status(&v)),
         HelixFetch::Auth | HelixFetch::Fail => None,
     }
+}
+
+const STREAMS_BATCH: usize = 100;
+
+/// Batch Helix `/streams?user_login=` (chunks of 100). Missing logins are absent from the map (offline).
+pub async fn fetch_streams_by_logins(
+    logins: &[String],
+    token: Option<&str>,
+    client_id: &str,
+) -> Option<std::collections::HashMap<String, StreamStatus>> {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return None;
+    };
+    if logins.is_empty() {
+        return Some(std::collections::HashMap::new());
+    }
+    let client = http_client();
+    let mut out = std::collections::HashMap::new();
+    for chunk in logins.chunks(STREAMS_BATCH) {
+        let mut url = Url::parse(&format!("{HELIX}/streams")).ok()?;
+        {
+            let mut q = url.query_pairs_mut();
+            for login in chunk {
+                let trimmed = login.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                q.append_pair("user_login", trimmed);
+            }
+        }
+        match get_helix(&client, &url.to_string(), &client_id, &token).await {
+            HelixFetch::Ok(v) => {
+                out.extend(parse_streams_by_login(&v));
+            }
+            HelixFetch::Auth | HelixFetch::Fail => return None,
+        }
+    }
+    Some(out)
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -1055,6 +1117,21 @@ mod tests {
         let sets = parse_cheermote_sets(&v);
         assert_eq!(sets.len(), 1);
         assert!(sets[0].color.is_none());
+    }
+
+    #[test]
+    fn parse_streams_by_login_maps_entries() {
+        let v = serde_json::json!({
+            "data": [
+                { "id": "1", "user_login": "XQC", "title": "a", "viewer_count": 10 },
+                { "id": "2", "user_login": "lirik", "title": "b" }
+            ]
+        });
+        let map = parse_streams_by_login(&v);
+        assert_eq!(map.len(), 2);
+        assert!(map["xqc"].live);
+        assert_eq!(map["xqc"].stream_title.as_deref(), Some("a"));
+        assert!(map["lirik"].live);
     }
 
     #[test]
