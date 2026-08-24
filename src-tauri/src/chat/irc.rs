@@ -619,13 +619,16 @@ fn dispatch_line(
             super::filters::apply_whisper_highlight(shared, &mut event);
             let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
             let sim = super::similarity::cfg_from_shared(shared);
+            let stack_style = super::timeout_stack::style_from_shared(shared);
             let mut batches = Vec::new();
             if let Ok(mut hub) = shared.hub.lock() {
                 let channels = hub.channels();
                 for ch in channels {
                     let mut ev = event.clone();
                     decorate_event(&mut ev, shared, &ch);
-                    if let Some(batch) = hub.ingest(&ch, ev, self_login.as_deref(), &sim) {
+                    if let Some(batch) =
+                        hub.ingest(&ch, ev, self_login.as_deref(), &sim, stack_style)
+                    {
                         batches.push(batch);
                     }
                 }
@@ -710,8 +713,15 @@ fn dispatch_line(
             decorate_event(&mut event, shared, &channel);
             let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
             let sim = super::similarity::cfg_from_shared(shared);
+            let stack_style = super::timeout_stack::style_from_shared(shared);
             let batch = shared.hub.lock().ok().and_then(|mut hub| {
-                hub.ingest(&channel, event, self_login.as_deref(), &sim)
+                hub.ingest(
+                    &channel,
+                    event,
+                    self_login.as_deref(),
+                    &sim,
+                    stack_style,
+                )
             });
             if let Some(batch) = batch {
                 deliver_batch(app, shared, &batch);

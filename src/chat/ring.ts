@@ -1248,12 +1248,21 @@ export class MessageRing {
       return;
     }
     if (event.kind === "clearchat") {
-      if (event.targetLogin) {
-        this.disableByLogin(event.targetLogin);
-      } else {
-        this.disableAllUserMessages();
+      const existing = this.findSlotByMsgId(event.id);
+      if (!existing) {
+        if (event.targetLogin) {
+          this.disableByLogin(event.targetLogin);
+        } else {
+          this.disableAllUserMessages();
+        }
       }
       if (this.hideModerationActions) {
+        this.layout();
+        return;
+      }
+      if (existing) {
+        this.write(existing, event);
+        this.bumpHighlightMarks();
         this.layout();
         return;
       }
@@ -1619,8 +1628,8 @@ export class MessageRing {
           time,
           nick: "*",
           nickColor: this.themeFills.nickFallback,
-          body: clearchatText(event.targetLogin, event.durationSec),
-          copyText: clearchatText(event.targetLogin, event.durationSec),
+          body: clearchatText(event.targetLogin, event.durationSec, event.stackCount),
+          copyText: clearchatText(event.targetLogin, event.durationSec, event.stackCount),
           leadLen: 0,
           spans: [],
           links: [],
@@ -2738,14 +2747,23 @@ function normalizeEmojiSet(raw: string): string {
   return "Twitter";
 }
 
-function clearchatText(login: string | undefined, durationSec: number | undefined): string {
+function clearchatText(
+  login: string | undefined,
+  durationSec: number | undefined,
+  stackCount?: number,
+): string {
+  let text: string;
   if (!login) {
-    return "чат очищен";
+    text = "чат очищен";
+  } else if (durationSec !== undefined) {
+    text = `${login} тайм-аут ${durationSec}с`;
+  } else {
+    text = `${login} забанен`;
   }
-  if (durationSec !== undefined) {
-    return `${login} тайм-аут ${durationSec}с`;
+  if (stackCount !== undefined && stackCount > 1) {
+    text += ` (${stackCount} раз)`;
   }
-  return `${login} забанен`;
+  return text;
 }
 
 function deletionNoticeText(login: string, body: string, limit: number): string {

@@ -171,6 +171,9 @@ pub enum ChatEvent {
         target_login: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_sec: Option<u32>,
+        /// Stacked CLEARCHAT count (stock Message::count).
+        #[serde(default = "default_stack_count", skip_serializing_if = "stack_count_is_one")]
+        stack_count: u32,
     },
     #[serde(rename = "clearmsg", rename_all = "camelCase")]
     Clearmsg {
@@ -230,6 +233,14 @@ pub enum ChatEvent {
         timestamp_ms: u64,
         text: String,
     },
+}
+
+fn default_stack_count() -> u32 {
+    1
+}
+
+fn stack_count_is_one(count: &u32) -> bool {
+    *count <= 1
 }
 
 impl ChatEvent {
@@ -422,13 +433,17 @@ impl ChatEvent {
                 timestamp_ms,
                 target_login,
                 duration_sec,
+                stack_count,
                 ..
             } => {
-                let text = match (target_login.as_deref(), *duration_sec) {
+                let mut text = match (target_login.as_deref(), *duration_sec) {
                     (None, _) => "чат очищен".to_string(),
                     (Some(login), Some(sec)) => format!("{login} тайм-аут {sec}с"),
                     (Some(login), None) => format!("{login} забанен"),
                 };
+                if *stack_count > 1 {
+                    text.push_str(&format!(" ({stack_count} раз)"));
+                }
                 SearchHit {
                     id: self.search_jump_id().to_string(),
                     timestamp_ms: *timestamp_ms,

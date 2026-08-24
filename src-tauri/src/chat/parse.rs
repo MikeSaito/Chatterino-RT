@@ -186,6 +186,7 @@ fn parse_clearchat(
             timestamp_ms: tags.timestamp(now_ms),
             target_login: trailing.map(|s| s.to_lowercase()).filter(|s| !s.is_empty()),
             duration_sec: tags.get("ban-duration").and_then(|s| s.parse().ok()),
+            stack_count: 1,
         },
         channel,
     }

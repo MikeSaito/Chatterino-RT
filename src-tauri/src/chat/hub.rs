@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::channel::ChannelBuf;
 use super::similarity::SimilarityCfg;
+use super::timeout_stack::TimeoutStackStyle;
 use super::types::{ChatBatch, ChatEvent};
 
 #[derive(Default)]
@@ -53,11 +54,12 @@ impl Hub {
         event: ChatEvent,
         self_login: Option<&str>,
         sim: &SimilarityCfg,
+        stack_style: TimeoutStackStyle,
     ) -> Vec<ChatBatch> {
         let channels = self.channels();
         let mut batches = Vec::new();
         for ch in channels {
-            if let Some(batch) = self.ingest(&ch, event.clone(), self_login, sim) {
+            if let Some(batch) = self.ingest(&ch, event.clone(), self_login, sim, stack_style) {
                 batches.push(batch);
             }
         }
@@ -70,15 +72,17 @@ impl Hub {
         event: ChatEvent,
         self_login: Option<&str>,
         sim: &SimilarityCfg,
+        stack_style: TimeoutStackStyle,
     ) -> Option<ChatBatch> {
         if self.active.as_deref() != Some(channel) {
             if self.buffers.contains_key(channel) {
                 self.buffer(channel)
-                    .push_scrollback_only(event, self_login, sim);
+                    .push_scrollback_only(event, self_login, sim, stack_style);
             }
             return None;
         }
-        self.buffer(channel).ingest(event, self_login, sim)
+        self.buffer(channel)
+            .ingest(event, self_login, sim, stack_style)
     }
 
     /// Poll all buffers for changed send-wait labels.
@@ -200,7 +204,12 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::timeout_stack::TimeoutStackStyle;
     use crate::chat::types::ChatEvent;
+
+    fn no_stack() -> TimeoutStackStyle {
+        TimeoutStackStyle::DontStack
+    }
 
     fn notice(id: &str) -> ChatEvent {
         ChatEvent::Notice {
@@ -214,8 +223,8 @@ mod tests {
     fn ingest_ignores_unknown_inactive() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
-        assert!(hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default()).is_none());
-        assert!(hub.ingest("other", notice("nope"), None, &SimilarityCfg::default()).is_none());
+        assert!(hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default(), no_stack()).is_none());
+        assert!(hub.ingest("other", notice("nope"), None, &SimilarityCfg::default(), no_stack()).is_none());
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
@@ -226,7 +235,7 @@ mod tests {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         hub.buffer("lirik");
-        hub.ingest("lirik", notice("a"), None, &SimilarityCfg::default());
+        hub.ingest("lirik", notice("a"), None, &SimilarityCfg::default(), no_stack());
         hub.set_active(Some("lirik".into()));
         let snap = hub.snapshot("lirik").unwrap();
         assert_eq!(snap.events.len(), 1);
@@ -286,7 +295,7 @@ mod tests {
         hub.buffer("lirik");
         hub.set_joined("lirik", true);
 
-        let batches = hub.ingest_fanout_joined(notice("w"), None, &SimilarityCfg::default());
+        let batches = hub.ingest_fanout_joined(notice("w"), None, &SimilarityCfg::default(), no_stack());
         assert!(batches.is_empty());
         let snap_xqc = hub.snapshot("xqc").unwrap();
         assert_eq!(snap_xqc.events.len(), 1);

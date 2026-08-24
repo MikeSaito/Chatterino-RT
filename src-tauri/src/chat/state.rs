@@ -373,8 +373,15 @@ impl Shared {
         };
         let self_login = auth::resolved_login_token(self).map(|(l, _)| l);
         let sim = super::similarity::cfg_from_shared(self);
+        let stack_style = super::timeout_stack::style_from_shared(self);
         let batch = self.hub.lock().ok().and_then(|mut hub| {
-            hub.ingest(channel, event, self_login.as_deref(), &sim)
+            hub.ingest(
+                channel,
+                event,
+                self_login.as_deref(),
+                &sim,
+                stack_style,
+            )
         });
         if let Some(batch) = batch {
             match self.send_batch(&batch) {

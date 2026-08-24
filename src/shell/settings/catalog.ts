@@ -1677,7 +1677,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "moderation.timeoutStackStyle",
         "Stack timeouts",
         TIMEOUT_STACK,
-        "0",
+        "1",
       ),
       cb(
         "stack-bits",

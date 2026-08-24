@@ -64,6 +64,7 @@ export type ChatEvent =
       timestampMs: number;
       targetLogin?: string;
       durationSec?: number;
+      stackCount?: number;
     }
   | {
       kind: "clearmsg";
