@@ -12,6 +12,7 @@ use super::chatters::Chatters;
 use super::emotes::Catalog;
 use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule, ReplaceRule};
 use super::helix::BadgeCatalog;
+use super::bttv_badges::BttvBadgeCatalog;
 use super::ffz_badges::FfzBadgeCatalog;
 use super::hub::Hub;
 use super::membership_batch::MembershipBatcher;
@@ -109,6 +110,7 @@ pub struct Shared {
     pub catalog: Arc<Mutex<Catalog>>,
     pub badges: Arc<Mutex<BadgeCatalog>>,
     pub ffz_badges: Arc<Mutex<FfzBadgeCatalog>>,
+    pub bttv_badges: Arc<Mutex<BttvBadgeCatalog>>,
     pub cheers: Arc<Mutex<CheerCatalog>>,
     pub irc_tx: Arc<Mutex<Option<mpsc::Sender<IrcCmd>>>>,
     pub event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<EventCmd>>>>,
@@ -161,6 +163,7 @@ impl Shared {
             catalog: Arc::new(Mutex::new(Catalog::default())),
             badges: Arc::new(Mutex::new(BadgeCatalog::default())),
             ffz_badges: Arc::new(Mutex::new(FfzBadgeCatalog::default())),
+            bttv_badges: Arc::new(Mutex::new(BttvBadgeCatalog::default())),
             cheers: Arc::new(Mutex::new(CheerCatalog::default())),
             irc_tx: Arc::new(Mutex::new(None)),
             event_tx: Arc::new(Mutex::new(None)),

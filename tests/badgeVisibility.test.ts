@@ -76,4 +76,23 @@ const ffzHidden = filterVisibleBadges(
 );
 assert(ffzHidden.length === 1 && ffzHidden[0].set === "moderator", "ffz filtered");
 
+const bttvBadge = { set: "bttv", version: "pro", source: "bttv" };
+assert(isBadgeVisible(bttvBadge, allOn), "bttv on");
+assert(!isBadgeVisible(bttvBadge, { ...allOn, bttv: false }), "bttv off");
+assert(
+  isBadgeVisible({ set: "ffz", source: "ffz" }, { ...allOn, bttv: false }),
+  "ffz unaffected when bttv off",
+);
+
+const mixedBttv = [
+  { set: "moderator", version: "1" },
+  { set: "bttv", version: "pro", source: "bttv" },
+];
+const bttvHidden = filterVisibleBadges(
+  mixedBttv,
+  { ...DEFAULT_BADGE_VISIBILITY, bttv: false },
+  10,
+);
+assert(bttvHidden.length === 1 && bttvHidden[0].set === "moderator", "bttv filtered");
+
 console.log("badgeVisibility.test.ts: ok");

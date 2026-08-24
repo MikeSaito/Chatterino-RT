@@ -1,5 +1,6 @@
 //! BetterTTV live emote updates (Chatterino BttvLiveUpdates). MIT reimpl; no C++/Qt.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -23,7 +24,7 @@ pub fn bttv_cdn_url(emote_id: &str) -> String {
 }
 
 pub fn start(shared: Shared) -> Result<(), String> {
-    let enabled = knob_enabled(&shared);
+    let enabled = bttv_live_enabled(&shared);
     {
         let mut wanted = shared
             .bttv_wanted
@@ -42,18 +43,28 @@ pub fn start(shared: Shared) -> Result<(), String> {
     Ok(())
 }
 
-fn knob_enabled(shared: &Shared) -> bool {
+pub fn bttv_live_enabled_from_knobs(knobs: &BTreeMap<String, Value>) -> bool {
+    let live = knobs
+        .get("emotes.enableBTTVLiveUpdates")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if !live {
+        return false;
+    }
+    let flags = EmoteProviderFlags::from_knobs(knobs);
+    let show_badges = knobs
+        .get("appearance.showBadgesBttv")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    flags.bttv_channel || show_badges
+}
+
+pub fn bttv_live_enabled(shared: &Shared) -> bool {
     shared
         .settings
         .lock()
         .ok()
-        .and_then(|inner| {
-            inner
-                .data
-                .knobs
-                .get("emotes.enableBTTVLiveUpdates")
-                .and_then(|v| v.as_bool())
-        })
+        .map(|inner| bttv_live_enabled_from_knobs(&inner.data.knobs))
         .unwrap_or(true)
 }
 
@@ -290,6 +301,14 @@ pub fn apply_event(shared: &Shared, root: &Value) {
     if !wanted.enabled {
         return;
     }
+    let event_type = root.get("name").and_then(Value::as_str).unwrap_or("");
+    let data = root.get("data").unwrap_or(&Value::Null);
+    if event_type == "lookup_user" {
+        if let Ok(mut cat) = shared.bttv_badges.lock() {
+            super::bttv_badges::apply_lookup_user(&mut cat, data);
+        }
+        return;
+    }
     if !EmoteProviderFlags::from_shared(shared).bttv_channel {
         return;
     }
@@ -305,8 +324,6 @@ pub fn apply_event(shared: &Shared, root: &Value) {
     if !active_ok {
         return;
     }
-    let event_type = root.get("name").and_then(Value::as_str).unwrap_or("");
-    let data = root.get("data").unwrap_or(&Value::Null);
     let room_id = match parse_twitch_channel_id(data.get("channel").and_then(Value::as_str)) {
         Some(id) => id,
         None => return,
@@ -359,6 +376,7 @@ fn parse_twitch_channel_id(raw: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::chat::state::BttvChannelWanted;
+    use std::collections::BTreeMap;
 
     fn shared_with_channel(login: &str, room_id: &str) -> Shared {
         let shared = Shared::new();
@@ -435,6 +453,69 @@ mod tests {
         );
         assert!(parse_twitch_channel_id(Some("42")).is_none());
         assert!(parse_twitch_channel_id(Some("twitch:")).is_none());
+    }
+
+    #[test]
+    fn lookup_user_registers_bttv_pro_badge() {
+        let shared = Shared::new();
+        const PRO_URL: &str = "https://cdn.betterttv.net/badge/pro/1";
+        apply_event(
+            &shared,
+            &json!({
+                "name": "lookup_user",
+                "data": {
+                    "providerId": "555",
+                    "badge": { "url": PRO_URL }
+                }
+            }),
+        );
+        let badge = shared
+            .bttv_badges
+            .lock()
+            .unwrap()
+            .badge_for_user("555")
+            .expect("pro badge");
+        assert_eq!(badge.source, "bttv");
+        assert_eq!(badge.url.as_deref(), Some(PRO_URL));
+    }
+
+    #[test]
+    fn lookup_user_works_without_channel_emotes() {
+        let shared = Shared::new();
+        let mut knobs = BTreeMap::new();
+        knobs.insert(
+            "emotes.enableBTTVChannelEmotes".into(),
+            Value::Bool(false),
+        );
+        knobs.insert("appearance.showBadgesBttv".into(), Value::Bool(true));
+        knobs.insert("emotes.enableBTTVLiveUpdates".into(), Value::Bool(true));
+        shared.settings.lock().unwrap().data.knobs = knobs;
+        assert!(bttv_live_enabled_from_knobs(
+            &shared.settings.lock().unwrap().data.knobs
+        ));
+        apply_event(
+            &shared,
+            &json!({
+                "name": "lookup_user",
+                "data": {
+                    "providerId": "1",
+                    "badge": { "url": "https://cdn.betterttv.net/badge/pro/1" }
+                }
+            }),
+        );
+        assert!(shared.bttv_badges.lock().unwrap().badge_for_user("1").is_some());
+    }
+
+    #[test]
+    fn bttv_live_disabled_when_channel_emotes_and_badges_off() {
+        let mut knobs = BTreeMap::new();
+        knobs.insert(
+            "emotes.enableBTTVChannelEmotes".into(),
+            Value::Bool(false),
+        );
+        knobs.insert("appearance.showBadgesBttv".into(), Value::Bool(false));
+        knobs.insert("emotes.enableBTTVLiveUpdates".into(), Value::Bool(true));
+        assert!(!bttv_live_enabled_from_knobs(&knobs));
     }
 
     #[test]

@@ -14,6 +14,7 @@ export type BadgeVisibilityFlags = {
   subscription: boolean;
   vanity: boolean;
   ffz: boolean;
+  bttv: boolean;
 };
 
 export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
@@ -23,6 +24,7 @@ export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
   subscription: true,
   vanity: true,
   ffz: true,
+  bttv: true,
 };
 
 export type BadgeLike = {
@@ -63,6 +65,9 @@ export function isBadgeVisible(
 ): boolean {
   if (badge.source === "ffz" || badge.set === "ffz") {
     return flags.ffz;
+  }
+  if (badge.source === "bttv" || badge.set === "bttv") {
+    return flags.bttv;
   }
   switch (badgeCategory(badge.set)) {
     case "globalAuthority":
@@ -106,6 +111,7 @@ export function badgeVisibilityEqual(
     a.channelAuthority === b.channelAuthority &&
     a.subscription === b.subscription &&
     a.vanity === b.vanity &&
-    a.ffz === b.ffz
+    a.ffz === b.ffz &&
+    a.bttv === b.bttv
   );
 }

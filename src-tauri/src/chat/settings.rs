@@ -353,11 +353,7 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     }
     drop(inner);
     let flags = super::fetch::EmoteProviderFlags::from_knobs(&clean.knobs);
-    let bttv_live = clean
-        .knobs
-        .get("emotes.enableBTTVLiveUpdates")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let bttv_live = super::bttv_live::bttv_live_enabled_from_knobs(&clean.knobs);
     shared.notify_bttv(super::state::BttvCmd::SetEnabled(bttv_live));
     shared.notify_event(super::state::EventCmd::SetEnabled(flags.seventv_event_api));
     if prev_flags.catalog_reload_key() != flags.catalog_reload_key() {

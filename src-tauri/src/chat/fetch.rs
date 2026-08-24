@@ -453,6 +453,21 @@ fn abs_url(raw: &str) -> String {
     }
 }
 
+pub(crate) fn allowed_bttv_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    match parsed.host_str() {
+        Some("cdn.betterttv.net") => Some(parsed.as_str().to_string()),
+        _ => None,
+    }
+}
+
 pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     let composed = abs_url(raw);
     let parsed = Url::parse(&composed).ok()?;

@@ -966,6 +966,9 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             if let Ok(ffz) = shared.ffz_badges.lock() {
                 ffz.append_for_user(badges, user_id);
             }
+            if let Ok(bttv) = shared.bttv_badges.lock() {
+                bttv.append_for_user(badges, user_id);
+            }
             emote_spans.sort_by_key(|s| s.start);
             resolve_overlays(text, emote_spans);
             let find_all = shared
