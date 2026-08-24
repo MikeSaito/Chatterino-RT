@@ -39,9 +39,10 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
     let flags = fetch::EmoteProviderFlags::from_shared(&shared);
-    let (globals_result, _) = tokio::join!(
+    let (globals_result, _, _) = tokio::join!(
         fetch::load_globals(&shared.catalog, flags),
         super::ffz_badges::load(&shared.ffz_badges),
+        super::chatterino_badges::load(&shared.chatterino_badges),
     );
     if let Ok(set_id) = globals_result {
         if flags.seventv_global {
@@ -962,6 +963,9 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             emote_spans.extend(extra);
             if let Ok(cat) = shared.badges.lock() {
                 resolve_badge_urls(badges, &cat, channel);
+            }
+            if let Ok(ch) = shared.chatterino_badges.lock() {
+                ch.append_for_user(badges, user_id);
             }
             if let Ok(ffz) = shared.ffz_badges.lock() {
                 ffz.append_for_user(badges, user_id);

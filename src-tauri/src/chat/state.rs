@@ -13,6 +13,7 @@ use super::emotes::Catalog;
 use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule, ReplaceRule};
 use super::helix::BadgeCatalog;
 use super::bttv_badges::BttvBadgeCatalog;
+use super::chatterino_badges::ChatterinoBadgeCatalog;
 use super::ffz_badges::FfzBadgeCatalog;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::hub::Hub;
@@ -113,6 +114,7 @@ pub struct Shared {
     pub catalog: Arc<Mutex<Catalog>>,
     pub badges: Arc<Mutex<BadgeCatalog>>,
     pub ffz_badges: Arc<Mutex<FfzBadgeCatalog>>,
+    pub chatterino_badges: Arc<Mutex<ChatterinoBadgeCatalog>>,
     pub bttv_badges: Arc<Mutex<BttvBadgeCatalog>>,
     pub seventv_badges: Arc<Mutex<SeventvBadgeCatalog>>,
     pub cheers: Arc<Mutex<CheerCatalog>>,
@@ -167,6 +169,7 @@ impl Shared {
             catalog: Arc::new(Mutex::new(Catalog::default())),
             badges: Arc::new(Mutex::new(BadgeCatalog::default())),
             ffz_badges: Arc::new(Mutex::new(FfzBadgeCatalog::default())),
+            chatterino_badges: Arc::new(Mutex::new(ChatterinoBadgeCatalog::default())),
             bttv_badges: Arc::new(Mutex::new(BttvBadgeCatalog::default())),
             seventv_badges: Arc::new(Mutex::new(SeventvBadgeCatalog::default())),
             cheers: Arc::new(Mutex::new(CheerCatalog::default())),

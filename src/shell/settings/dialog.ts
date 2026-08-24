@@ -288,6 +288,7 @@ function paintRuntime(
     channelAuthority: data.knobs["appearance.showBadgesChannelAuthority"] !== false,
     subscription: data.knobs["appearance.showBadgesSubscription"] !== false,
     vanity: data.knobs["appearance.showBadgesVanity"] !== false,
+    chatterino: data.knobs["appearance.showBadgesChatterino"] !== false,
     ffz: data.knobs["appearance.showBadgesFfz"] !== false,
     bttv: data.knobs["appearance.showBadgesBttv"] !== false,
     sevenTv: data.knobs["appearance.showBadgesSevenTV"] !== false,

@@ -488,6 +488,34 @@ pub(crate) fn allowed_bttv_url(raw: &str) -> Option<String> {
     }
 }
 
+pub(crate) fn allowed_chatterino_badge_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let mut parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    if parsed.host_str() != Some("fourtf.com") {
+        return None;
+    }
+    let path = parsed.path();
+    if !path.starts_with("/chatterino/badges/") {
+        return None;
+    }
+    if !path.to_ascii_lowercase().ends_with(".png") {
+        return None;
+    }
+    let file = path.rsplit('/').next().unwrap_or("");
+    if file.is_empty() || file.contains("..") {
+        return None;
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    Some(parsed.as_str().to_string())
+}
+
 pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     let composed = abs_url(raw);
     let parsed = Url::parse(&composed).ok()?;
@@ -573,6 +601,26 @@ mod tests {
         assert_eq!(
             map.get("Kappa").map(|d| d.url.as_str()),
             Some("https://cdn.frankerfacez.com/emote/42/1")
+        );
+    }
+
+    #[test]
+    fn chatterino_badge_url_allowlist() {
+        assert_eq!(
+            allowed_chatterino_badge_url("https://fourtf.com/chatterino/badges/helper.png"),
+            Some("https://fourtf.com/chatterino/badges/helper.png".into())
+        );
+        assert_eq!(
+            allowed_chatterino_badge_url("//fourtf.com/chatterino/badges/helper.PNG"),
+            Some("https://fourtf.com/chatterino/badges/helper.PNG".into())
+        );
+        assert!(allowed_chatterino_badge_url("http://fourtf.com/chatterino/badges/x.png").is_none());
+        assert!(allowed_chatterino_badge_url("https://evil.example/chatterino/badges/x.png").is_none());
+        assert!(allowed_chatterino_badge_url("https://fourtf.com/other/x.png").is_none());
+        assert!(allowed_chatterino_badge_url("https://user@fourtf.com/chatterino/badges/x.png").is_none());
+        assert_eq!(
+            allowed_chatterino_badge_url("https://fourtf.com/chatterino/badges/x.png?cache=1"),
+            Some("https://fourtf.com/chatterino/badges/x.png".into())
         );
     }
 

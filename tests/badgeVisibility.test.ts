@@ -117,4 +117,33 @@ assert(
   "7tv filtered",
 );
 
+const chatterinoBadge = {
+  set: "chatterino",
+  version: "0",
+  source: "chatterino",
+};
+assert(isBadgeVisible(chatterinoBadge, allOn), "chatterino on");
+assert(
+  !isBadgeVisible(chatterinoBadge, { ...allOn, chatterino: false }),
+  "chatterino off",
+);
+assert(
+  isBadgeVisible({ set: "ffz", source: "ffz" }, { ...allOn, chatterino: false }),
+  "ffz unaffected when chatterino off",
+);
+
+const mixedChatterino = [
+  { set: "moderator", version: "1" },
+  { set: "chatterino", version: "0", source: "chatterino" },
+];
+const chatterinoHidden = filterVisibleBadges(
+  mixedChatterino,
+  { ...DEFAULT_BADGE_VISIBILITY, chatterino: false },
+  10,
+);
+assert(
+  chatterinoHidden.length === 1 && chatterinoHidden[0].set === "moderator",
+  "chatterino filtered",
+);
+
 console.log("badgeVisibility.test.ts: ok");

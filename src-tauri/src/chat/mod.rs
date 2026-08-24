@@ -3,6 +3,7 @@ pub mod batch;
 pub mod bttv_badges;
 pub mod bttv_live;
 pub mod channel;
+pub mod chatterino_badges;
 pub mod chatters;
 pub mod commands;
 pub mod complete;

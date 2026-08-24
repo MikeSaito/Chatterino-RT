@@ -13,6 +13,7 @@ export type BadgeVisibilityFlags = {
   channelAuthority: boolean;
   subscription: boolean;
   vanity: boolean;
+  chatterino: boolean;
   ffz: boolean;
   bttv: boolean;
   sevenTv: boolean;
@@ -24,6 +25,7 @@ export const DEFAULT_BADGE_VISIBILITY: BadgeVisibilityFlags = {
   channelAuthority: true,
   subscription: true,
   vanity: true,
+  chatterino: true,
   ffz: true,
   bttv: true,
   sevenTv: true,
@@ -67,6 +69,9 @@ export function isBadgeVisible(
 ): boolean {
   if (badge.source === "ffz" || badge.set === "ffz") {
     return flags.ffz;
+  }
+  if (badge.source === "chatterino" || badge.set === "chatterino") {
+    return flags.chatterino;
   }
   if (badge.source === "bttv" || badge.set === "bttv") {
     return flags.bttv;
@@ -116,6 +121,7 @@ export function badgeVisibilityEqual(
     a.channelAuthority === b.channelAuthority &&
     a.subscription === b.subscription &&
     a.vanity === b.vanity &&
+    a.chatterino === b.chatterino &&
     a.ffz === b.ffz &&
     a.bttv === b.bttv &&
     a.sevenTv === b.sevenTv
