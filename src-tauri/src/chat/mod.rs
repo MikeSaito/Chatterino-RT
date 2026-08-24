@@ -22,6 +22,7 @@ pub mod live_status;
 pub mod membership_batch;
 pub mod parse;
 pub mod pending;
+pub mod recent_messages;
 pub mod room_modes;
 pub mod scrollback;
 pub mod send_wait;

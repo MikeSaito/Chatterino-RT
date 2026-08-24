@@ -127,6 +127,8 @@ pub struct Shared {
     /// Reserved outbound PRIVMSG slots (chat_send → wire flush).
     pub outbound_pending: Arc<AtomicUsize>,
     pub membership_batch: Arc<Mutex<MembershipBatcher>>,
+    /// In-flight recent-messages fetch per channel login.
+    pub loading_recent: Arc<Mutex<HashSet<String>>>,
 }
 
 pub enum BatchSend {
@@ -168,6 +170,7 @@ impl Shared {
             last_sent: Arc::new(Mutex::new(std::collections::HashMap::new())),
             outbound_pending: Arc::new(AtomicUsize::new(0)),
             membership_batch: Arc::new(Mutex::new(MembershipBatcher::default())),
+            loading_recent: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 

@@ -66,6 +66,9 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
         {
             SessionEnd::Shutdown => break,
             SessionEnd::Reconnect { wait } => {
+                if let Ok(mut hub) = shared.hub.lock() {
+                    hub.clear_recent_loaded_for(&wanted);
+                }
                 let status_ch = status_channel(&shared, &wanted);
                 emit_status(
                     &app,
@@ -256,7 +259,7 @@ async fn connect_session(
                                         |c| c.login == ch && c.room_id == id,
                                     );
                                     if !(has_map && bttv_ok) {
-                                        spawn_channel_assets(shared, ch.clone(), id);
+                                        spawn_channel_assets(app, shared, ch.clone(), id);
                                     }
                                 }
                             }
@@ -406,7 +409,7 @@ async fn connect_session(
                                             } else if let Some(id) =
                                                 loaded_room.get(&ch).cloned()
                                             {
-                                                spawn_channel_assets(shared, ch, id);
+                                                spawn_channel_assets(app, shared, ch, id);
                                             }
                                         } else {
                                             let _ = crate::chat::session::clear_last(shared);
@@ -672,8 +675,21 @@ fn dispatch_line(
                         .lock()
                         .ok()
                         .is_some_and(|h| h.active.as_deref() == Some(channel.as_str()));
-                    if room_changed && is_active {
-                        spawn_channel_assets(shared, channel.clone(), id.to_string());
+                    if room_changed {
+                        if is_active {
+                            spawn_channel_assets(
+                                app,
+                                shared,
+                                channel.clone(),
+                                id.to_string(),
+                            );
+                        } else {
+                            super::recent_messages::spawn_recent_messages(
+                                app.clone(),
+                                shared.clone(),
+                                channel.clone(),
+                            );
+                        }
                     }
                 }
             }
@@ -1024,7 +1040,13 @@ fn spawn_helix_globals(shared: &Shared) {
     });
 }
 
-fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
+fn spawn_channel_assets(
+    app: &AppHandle,
+    shared: &Shared,
+    login: String,
+    room_id: String,
+) {
+    let app = app.clone();
     let cat = shared.catalog.clone();
     let badges = shared.badges.clone();
     let cheers = shared.cheers.clone();
@@ -1067,9 +1089,10 @@ fn spawn_channel_assets(shared: &Shared, login: String, room_id: String) {
             events.notify_event(EventCmd::ClearChannel);
         }
         events.notify_bttv(BttvCmd::SetChannel {
-            login,
+            login: login.clone(),
             room_id: room_for_bttv,
         });
+        super::recent_messages::spawn_recent_messages(app, events, login);
     });
 }
 

@@ -9,6 +9,8 @@ pub struct Hub {
     pub active: Option<String>,
     joined: HashSet<String>,
     buffers: HashMap<String, ChannelBuf>,
+    /// Channels that already received a recent-messages fetch this session.
+    recent_loaded: HashSet<String>,
 }
 
 impl Hub {
@@ -108,6 +110,22 @@ impl Hub {
         Some(buf.snapshot_batch(channel))
     }
 
+    pub fn recent_already_loaded(&self, channel: &str) -> bool {
+        self.recent_loaded.contains(channel)
+    }
+
+    pub fn mark_recent_loaded(&mut self, channel: &str) {
+        self.recent_loaded.insert(channel.to_string());
+    }
+
+    pub fn clear_recent_loaded_for(&mut self, channels: &HashSet<String>) {
+        self.recent_loaded.retain(|ch| !channels.contains(ch));
+    }
+
+    pub fn prepend_history(&mut self, channel: &str, events: Vec<ChatEvent>) -> usize {
+        self.buffer(channel).prepend_history(events)
+    }
+
     pub fn set_active(&mut self, channel: Option<String>) {
         let changed = self.active != channel;
         self.active = channel;
@@ -127,6 +145,7 @@ impl Hub {
             .and_then(|b| b.clear_send_wait_for_drop());
         self.buffers.remove(channel);
         self.joined.remove(channel);
+        self.recent_loaded.remove(channel);
         if self.active.as_deref() == Some(channel) {
             self.active = None;
         }
@@ -136,6 +155,7 @@ impl Hub {
     pub fn clear_all(&mut self) {
         self.buffers.clear();
         self.joined.clear();
+        self.recent_loaded.clear();
         self.active = None;
     }
 

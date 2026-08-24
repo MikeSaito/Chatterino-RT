@@ -5,6 +5,8 @@ use super::send_wait::{self, SendWait};
 use super::similarity::{self, SimilarityCfg, SimilarityRecent};
 use super::types::{ChatBatch, ChatEvent};
 
+use std::collections::HashSet;
+
 pub struct ChannelBuf {
     pub scrollback: Scrollback,
     pub pending: Pending,
@@ -130,6 +132,21 @@ impl ChannelBuf {
         self.pending.take_batch()
     }
 
+    /// Prepend history snapshot events; dedup by id against existing scrollback.
+    pub fn prepend_history(&mut self, events: Vec<ChatEvent>) -> usize {
+        let existing: HashSet<String> = self
+            .scrollback
+            .snapshot()
+            .iter()
+            .map(|e| e.id().to_string())
+            .collect();
+        let filtered: Vec<ChatEvent> = events
+            .into_iter()
+            .filter(|e| !existing.contains(e.id()))
+            .collect();
+        self.scrollback.prepend_front(&filtered)
+    }
+
     pub fn snapshot_batch(&self, channel_id: &str) -> ChatBatch {
         ChatBatch {
             channel_id: channel_id.to_string(),
@@ -174,6 +191,23 @@ mod tests {
             timestamp_ms: 1,
             text: id.to_string(),
         }
+    }
+
+    #[test]
+    fn prepend_history_dedups_existing_ids() {
+        let mut buf = ChannelBuf::new("xqc");
+        assert_eq!(buf.prepend_history(vec![notice("a"), notice("b")]), 2);
+        assert_eq!(buf.prepend_history(vec![notice("b"), notice("c")]), 1);
+        let ids: Vec<String> = buf
+            .scrollback
+            .snapshot()
+            .iter()
+            .map(|e| e.id().to_string())
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids.iter().filter(|id| id.as_str() == "b").count(), 1);
+        assert!(ids.contains(&"a".to_string()));
+        assert!(ids.contains(&"c".to_string()));
     }
 
     #[test]

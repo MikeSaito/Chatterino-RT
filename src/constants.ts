@@ -19,4 +19,5 @@ export const CHAT_AUTH_EVENT = "chat:auth";
 export const CHAT_PIPE_EVENT = "chat:pipe";
 export const CHAT_ROOMS_EVENT = "chat:rooms";
 export const CHAT_SEND_WAIT_EVENT = "chat:send-wait";
+export const CHAT_HISTORY_LOADED_EVENT = "chat:history-loaded";
 export const IPC_QUEUE_MAX = 8;

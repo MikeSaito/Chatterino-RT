@@ -26,6 +26,20 @@ impl Scrollback {
         self.items.push_back(event);
     }
 
+    /// Prepend oldest→newest without evicting the live tail (Chatterino pushFront).
+    pub fn prepend_front(&mut self, events: &[ChatEvent]) -> usize {
+        let space = self.limit.saturating_sub(self.items.len());
+        if space == 0 || events.is_empty() {
+            return 0;
+        }
+        let start = events.len().saturating_sub(space);
+        let slice = &events[start..];
+        for event in slice.iter().rev() {
+            self.items.push_front(event.clone());
+        }
+        slice.len()
+    }
+
     pub fn snapshot(&self) -> Vec<ChatEvent> {
         self.items.iter().cloned().collect()
     }
@@ -177,6 +191,38 @@ mod tests {
     fn search_no_history() {
         let q = Scrollback::new();
         assert!(q.search_ids("x").is_empty());
+    }
+
+    #[test]
+    fn prepend_front_preserves_order_without_evicting_live() {
+        let mut q = Scrollback::new();
+        q.push(notice("live-1", "live"));
+        let history: Vec<ChatEvent> = (0..5)
+            .map(|i| notice(&format!("h-{i}"), &format!("hist {i}")))
+            .collect();
+        let n = q.prepend_front(&history);
+        assert_eq!(n, 5);
+        let snap = q.snapshot();
+        assert_eq!(snap.len(), 6);
+        assert_eq!(snap[0].id(), "h-0");
+        assert_eq!(snap[4].id(), "h-4");
+        assert_eq!(snap[5].id(), "live-1");
+    }
+
+    #[test]
+    fn prepend_front_respects_remaining_space() {
+        let mut q = Scrollback::new();
+        for i in 0..SCROLLBACK_LIMIT {
+            q.push(notice(&i.to_string(), "x"));
+        }
+        let extra = notice("new-live", "live");
+        q.push(extra);
+        assert_eq!(q.len(), SCROLLBACK_LIMIT);
+        let history: Vec<ChatEvent> = (0..10)
+            .map(|i| notice(&format!("hist-{i}"), "h"))
+            .collect();
+        assert_eq!(q.prepend_front(&history), 0);
+        assert_eq!(q.snapshot().first().unwrap().id(), "1");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
+import { CHAT_HISTORY_LOADED_EVENT, CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
 import { decodeBatch } from "./batchDecode";
 import type { ChatBatch } from "./types";
 import type { MessageRing } from "./ring";
@@ -49,6 +49,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
   let resubscribing = false;
   let opBusy = false;
   let unlistenPipe: (() => void) | null = null;
+  let unlistenHistory: (() => void) | null = null;
   const queued: ChatBatch[] = [];
   const ops: Op[] = [];
 
@@ -301,6 +302,20 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     unlistenPipe = unlisten;
   });
 
+  void listen<{ channelId: string }>(CHAT_HISTORY_LOADED_EVENT, (ev) => {
+    if (stopped || ev.payload.channelId !== active) {
+      return;
+    }
+    snapshotQueued = true;
+    void pump();
+  }).then((unlisten) => {
+    if (stopped) {
+      unlisten();
+      return;
+    }
+    unlistenHistory = unlisten;
+  });
+
   return {
     join(channel: string, focus = true) {
       return new Promise<string>((resolve, reject) => {
@@ -337,6 +352,10 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
       if (unlistenPipe) {
         unlistenPipe();
         unlistenPipe = null;
+      }
+      if (unlistenHistory) {
+        unlistenHistory();
+        unlistenHistory = null;
       }
     },
     active: () => active,
