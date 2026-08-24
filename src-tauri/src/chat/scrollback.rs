@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use super::constants::SCROLLBACK_LIMIT;
 use super::types::{ChatEvent, SearchHit};
@@ -38,6 +38,48 @@ impl Scrollback {
             self.items.push_front(event.clone());
         }
         slice.len()
+    }
+
+    /// Insert missing history by timestamp (Chatterino fillInMissingMessages).
+    pub fn fill_in_missing(&mut self, events: &[ChatEvent]) -> usize {
+        if events.is_empty() {
+            return 0;
+        }
+        let existing: HashSet<String> = self
+            .items
+            .iter()
+            .map(|e| e.id().to_string())
+            .collect();
+        let mut incoming: Vec<ChatEvent> = events
+            .iter()
+            .filter(|e| !e.id().is_empty() && !existing.contains(e.id()))
+            .cloned()
+            .collect();
+        if incoming.is_empty() {
+            return 0;
+        }
+        incoming.sort_by_key(|e| e.timestamp_ms());
+        let mut inserted = 0usize;
+        let mut seen = existing;
+        for event in incoming {
+            let id = event.id().to_string();
+            if id.is_empty() || seen.contains(&id) {
+                continue;
+            }
+            seen.insert(id);
+            let ts = event.timestamp_ms();
+            let pos = self
+                .items
+                .iter()
+                .position(|e| e.timestamp_ms() > ts)
+                .unwrap_or(self.items.len());
+            self.items.insert(pos, event);
+            inserted += 1;
+        }
+        while self.items.len() > self.limit {
+            self.items.pop_front();
+        }
+        inserted
     }
 
     pub fn snapshot(&self) -> Vec<ChatEvent> {
@@ -103,6 +145,14 @@ mod tests {
             id: id.to_string(),
             timestamp_ms: 1,
             text: text.to_string(),
+        }
+    }
+
+    fn notice_ts(id: &str, ts: u64) -> ChatEvent {
+        ChatEvent::Notice {
+            id: id.to_string(),
+            timestamp_ms: ts,
+            text: id.to_string(),
         }
     }
 
@@ -223,6 +273,29 @@ mod tests {
             .collect();
         assert_eq!(q.prepend_front(&history), 0);
         assert_eq!(q.snapshot().first().unwrap().id(), "1");
+    }
+
+    #[test]
+    fn fill_in_missing_inserts_in_timestamp_order() {
+        let mut q = Scrollback::new();
+        q.push(notice_ts("a", 100));
+        q.push(notice_ts("c", 300));
+        let gap = vec![notice_ts("b", 200)];
+        assert_eq!(q.fill_in_missing(&gap), 1);
+        let snap = q.snapshot();
+        assert_eq!(snap.len(), 3);
+        assert_eq!(snap[0].id(), "a");
+        assert_eq!(snap[1].id(), "b");
+        assert_eq!(snap[2].id(), "c");
+    }
+
+    #[test]
+    fn fill_in_missing_skips_duplicate_ids() {
+        let mut q = Scrollback::new();
+        q.push(notice_ts("a", 100));
+        let gap = vec![notice_ts("a", 100), notice_ts("b", 150)];
+        assert_eq!(q.fill_in_missing(&gap), 1);
+        assert_eq!(q.snapshot().len(), 2);
     }
 
     #[test]

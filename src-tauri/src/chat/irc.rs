@@ -67,7 +67,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
             SessionEnd::Shutdown => break,
             SessionEnd::Reconnect { wait } => {
                 if let Ok(mut hub) = shared.hub.lock() {
-                    hub.clear_recent_loaded_for(&wanted);
+                    hub.mark_disconnect_at(&wanted, unix_ms());
                 }
                 let status_ch = status_channel(&shared, &wanted);
                 emit_status(
@@ -319,7 +319,8 @@ async fn connect_session(
                                     pong_deadline = None;
                                 }
                                 LineAction::Joined(ch) => {
-                                    in_rooms.insert(ch);
+                                    in_rooms.insert(ch.clone());
+                                    maybe_spawn_gap_fill(app, shared, &ch);
                                     if flush_outgoing(
                                         &mut write,
                                         wanted,
@@ -1106,6 +1107,22 @@ fn spawn_channel_assets(
         });
         super::recent_messages::spawn_recent_messages(app, events, login);
     });
+}
+
+fn maybe_spawn_gap_fill(app: &AppHandle, shared: &Shared, channel: &str) {
+    let after_ms = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.disconnect_at(channel));
+    if let Some(after_ms) = after_ms {
+        super::recent_messages::spawn_gap_fill(
+            app.clone(),
+            shared.clone(),
+            channel.to_string(),
+            after_ms,
+        );
+    }
 }
 
 fn unix_ms() -> u64 {

@@ -41,29 +41,60 @@ pub fn spawn_recent_messages(app: AppHandle, shared: Shared, channel: String) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        let result = load_and_apply(&app, &shared, &channel, limit).await;
+        let result = load_and_apply(&app, &shared, &channel, limit, None, None).await;
         finish_load(&shared, &channel);
         if let Err(err) = result {
             if push_history_notice(&shared, &channel, format!(
                 "Message history service unavailable (Error: {err})"
             )) {
-                let is_active = shared
-                    .hub
-                    .lock()
-                    .ok()
-                    .and_then(|h| h.active.clone())
-                    .is_some_and(|ch| ch == channel);
-                if is_active {
-                    let _ = app.emit(
-                        "chat:history-loaded",
-                        HistoryLoadedPayload {
-                            channel_id: channel.clone(),
-                        },
-                    );
-                }
+                emit_history_loaded_if_active(&app, &shared, &channel);
             }
         }
     });
+}
+
+/// Fill scrollback gap after IRC reconnect (Chatterino loadRecentMessagesReconnect).
+pub fn spawn_gap_fill(app: AppHandle, shared: Shared, channel: String, after_ms: u64) {
+    if !history_enabled(&shared) {
+        return;
+    }
+    let before_ms = now_ms();
+    if after_ms >= before_ms {
+        return;
+    }
+    if !try_begin_gap_load(&shared, &channel) {
+        return;
+    }
+    let took = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|mut h| h.take_disconnect_at(&channel));
+    if took.is_none() {
+        finish_load(&shared, &channel);
+        return;
+    }
+    let limit = gap_limit(after_ms, before_ms, history_limit(&shared));
+    tauri::async_runtime::spawn(async move {
+        let result =
+            load_gap_and_apply(&app, &shared, &channel, limit, after_ms, before_ms).await;
+        finish_load(&shared, &channel);
+        if let Err(err) = result {
+            if push_history_notice(&shared, &channel, format!(
+                "Message history service unavailable (Error: {err})"
+            )) {
+                emit_history_loaded_if_active(&app, &shared, &channel);
+            }
+        }
+    });
+}
+
+fn try_begin_gap_load(shared: &Shared, channel: &str) -> bool {
+    let mut loading = shared
+        .loading_recent
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    loading.insert(channel.to_string())
 }
 
 fn try_begin_load(shared: &Shared, channel: &str) -> bool {
@@ -96,8 +127,11 @@ async fn load_and_apply(
     shared: &Shared,
     channel: &str,
     limit: usize,
+    after_ms: Option<u64>,
+    before_ms: Option<u64>,
 ) -> Result<(), String> {
-    let (messages, error_code) = fetch_recent_messages(channel, limit).await?;
+    let (messages, error_code) =
+        fetch_recent_messages(channel, limit, after_ms, before_ms).await?;
     if !channel_still_open(shared, channel) {
         return Ok(());
     }
@@ -130,20 +164,7 @@ async fn load_and_apply(
                 channel,
                 "Message history could not be loaded: scrollback is full.".to_string(),
             ) {
-                let is_active = shared
-                    .hub
-                    .lock()
-                    .ok()
-                    .and_then(|h| h.active.clone())
-                    .is_some_and(|ch| ch == channel);
-                if is_active {
-                    let _ = app.emit(
-                        "chat:history-loaded",
-                        HistoryLoadedPayload {
-                            channel_id: channel.to_string(),
-                        },
-                    );
-                }
+                emit_history_loaded_if_active(app, shared, channel);
             }
             return Ok(());
         }
@@ -151,22 +172,64 @@ async fn load_and_apply(
     };
 
     if prepended > 0 {
-        let is_active = shared
-            .hub
-            .lock()
-            .ok()
-            .and_then(|h| h.active.clone())
-            .is_some_and(|ch| ch == channel);
-        if is_active {
-            let _ = app.emit(
-                "chat:history-loaded",
-                HistoryLoadedPayload {
-                    channel_id: channel.to_string(),
-                },
-            );
-        }
+        emit_history_loaded_if_active(app, shared, channel);
     }
     Ok(())
+}
+
+async fn load_gap_and_apply(
+    app: &AppHandle,
+    shared: &Shared,
+    channel: &str,
+    limit: usize,
+    after_ms: u64,
+    before_ms: u64,
+) -> Result<(), String> {
+    let (messages, error_code) =
+        fetch_recent_messages(channel, limit, Some(after_ms), Some(before_ms)).await?;
+    if !channel_still_open(shared, channel) {
+        return Ok(());
+    }
+
+    let mut events = build_history_events(shared, channel, &messages);
+    if error_code.as_deref() == Some("channel_not_joined") && !events.is_empty() {
+        events.push(history_notice(
+            "Message history service recovering, there may be gaps in the message history.",
+        ));
+    }
+
+    let merged = {
+        let mut hub = shared
+            .hub
+            .lock()
+            .map_err(|_| "lock".to_string())?;
+        if !hub.has_channel(channel) {
+            return Ok(());
+        }
+        hub.fill_in_missing(channel, events)
+    };
+
+    if merged > 0 {
+        emit_history_loaded_if_active(app, shared, channel);
+    }
+    Ok(())
+}
+
+fn emit_history_loaded_if_active(app: &AppHandle, shared: &Shared, channel: &str) {
+    let is_active = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.active.clone())
+        .is_some_and(|ch| ch == channel);
+    if is_active {
+        let _ = app.emit(
+            "chat:history-loaded",
+            HistoryLoadedPayload {
+                channel_id: channel.to_string(),
+            },
+        );
+    }
 }
 
 fn channel_still_open(shared: &Shared, channel: &str) -> bool {
@@ -242,8 +305,10 @@ fn history_event_kind(event: &ChatEvent) -> bool {
 async fn fetch_recent_messages(
     channel: &str,
     limit: usize,
+    after_ms: Option<u64>,
+    before_ms: Option<u64>,
 ) -> Result<(Vec<String>, Option<String>), String> {
-    let url = build_url(channel, limit)?;
+    let url = build_url(channel, limit, after_ms, before_ms)?;
     let client = http_client();
     let resp = client
         .get(url)
@@ -270,7 +335,12 @@ async fn fetch_recent_messages(
     Ok((messages, error_code))
 }
 
-fn build_url(channel: &str, limit: usize) -> Result<Url, String> {
+fn build_url(
+    channel: &str,
+    limit: usize,
+    after_ms: Option<u64>,
+    before_ms: Option<u64>,
+) -> Result<Url, String> {
     let template = std::env::var("CHATTERINO_RT_RECENT_MESSAGES_URL").unwrap_or_else(|_| {
         "https://recent-messages.robotty.de/api/v2/recent-messages/{channel}".to_string()
     });
@@ -279,8 +349,20 @@ fn build_url(channel: &str, limit: usize) -> Result<Url, String> {
     {
         let mut pairs = url.query_pairs_mut();
         pairs.append_pair("limit", &limit.to_string());
+        if let Some(after) = after_ms {
+            pairs.append_pair("after", &after.to_string());
+        }
+        if let Some(before) = before_ms {
+            pairs.append_pair("before", &before.to_string());
+        }
     }
     Ok(url)
+}
+
+fn gap_limit(after_ms: u64, before_ms: u64, max: usize) -> usize {
+    let gap_sec = before_ms.saturating_sub(after_ms) / 1000;
+    let scaled = ((gap_sec + 1) * 10) as usize;
+    scaled.clamp(MIN_LIMIT, max)
 }
 
 fn http_client() -> reqwest::Client {
@@ -418,8 +500,22 @@ mod tests {
 
     #[test]
     fn build_url_includes_limit() {
-        let url = build_url("xqc", 120).unwrap();
+        let url = build_url("xqc", 120, None, None).unwrap();
         assert!(url.as_str().contains("recent-messages/xqc"));
         assert!(url.as_str().contains("limit=120"));
+    }
+
+    #[test]
+    fn build_url_includes_after_before() {
+        let url = build_url("xqc", 50, Some(1000), Some(2000)).unwrap();
+        assert!(url.as_str().contains("after=1000"));
+        assert!(url.as_str().contains("before=2000"));
+    }
+
+    #[test]
+    fn gap_limit_scales_with_disconnect_duration() {
+        assert_eq!(gap_limit(0, 5000, 800), 60);
+        assert_eq!(gap_limit(0, 90_000, 800), 800);
+        assert_eq!(gap_limit(1000, 1000, 800), MIN_LIMIT);
     }
 }

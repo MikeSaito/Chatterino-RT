@@ -245,6 +245,18 @@ impl ChatEvent {
         }
     }
 
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            ChatEvent::Privmsg { timestamp_ms, .. }
+            | ChatEvent::Clearchat { timestamp_ms, .. }
+            | ChatEvent::Clearmsg { timestamp_ms, .. }
+            | ChatEvent::Usernotice { timestamp_ms, .. }
+            | ChatEvent::Roomstate { timestamp_ms, .. }
+            | ChatEvent::Userstate { timestamp_ms, .. }
+            | ChatEvent::Notice { timestamp_ms, .. } => *timestamp_ms,
+        }
+    }
+
     /// Id stored on the Pixi slot (USERNOTICE with body uses nested privmsg id).
     pub fn search_jump_id(&self) -> &str {
         match self {

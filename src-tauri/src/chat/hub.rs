@@ -11,6 +11,8 @@ pub struct Hub {
     buffers: HashMap<String, ChannelBuf>,
     /// Channels that already received a recent-messages fetch this session.
     recent_loaded: HashSet<String>,
+    /// IRC disconnect time per channel (epoch ms) for reconnect gap fill.
+    disconnect_at_ms: HashMap<String, u64>,
 }
 
 impl Hub {
@@ -118,12 +120,26 @@ impl Hub {
         self.recent_loaded.insert(channel.to_string());
     }
 
-    pub fn clear_recent_loaded_for(&mut self, channels: &HashSet<String>) {
-        self.recent_loaded.retain(|ch| !channels.contains(ch));
+    pub fn mark_disconnect_at(&mut self, channels: &HashSet<String>, at_ms: u64) {
+        for ch in channels {
+            self.disconnect_at_ms.entry(ch.clone()).or_insert(at_ms);
+        }
+    }
+
+    pub fn disconnect_at(&self, channel: &str) -> Option<u64> {
+        self.disconnect_at_ms.get(channel).copied()
+    }
+
+    pub fn take_disconnect_at(&mut self, channel: &str) -> Option<u64> {
+        self.disconnect_at_ms.remove(channel)
     }
 
     pub fn prepend_history(&mut self, channel: &str, events: Vec<ChatEvent>) -> usize {
         self.buffer(channel).prepend_history(events)
+    }
+
+    pub fn fill_in_missing(&mut self, channel: &str, events: Vec<ChatEvent>) -> usize {
+        self.buffer(channel).fill_in_missing(events)
     }
 
     pub fn set_active(&mut self, channel: Option<String>) {
@@ -146,6 +162,7 @@ impl Hub {
         self.buffers.remove(channel);
         self.joined.remove(channel);
         self.recent_loaded.remove(channel);
+        self.disconnect_at_ms.remove(channel);
         if self.active.as_deref() == Some(channel) {
             self.active = None;
         }
@@ -156,6 +173,7 @@ impl Hub {
         self.buffers.clear();
         self.joined.clear();
         self.recent_loaded.clear();
+        self.disconnect_at_ms.clear();
         self.active = None;
     }
 
@@ -238,6 +256,26 @@ mod tests {
         assert!(!hub.set_channel_live("xqc", true));
         assert!(hub.set_channel_live("xqc", false));
         assert!(!hub.channel_live("xqc"));
+    }
+
+    #[test]
+    fn mark_disconnect_at_keeps_earliest_timestamp() {
+        let mut hub = Hub::default();
+        let mut wanted = HashSet::new();
+        wanted.insert("xqc".into());
+        hub.mark_disconnect_at(&wanted, 1000);
+        hub.mark_disconnect_at(&wanted, 2000);
+        assert_eq!(hub.disconnect_at("xqc"), Some(1000));
+    }
+
+    #[test]
+    fn disconnect_at_take_once() {
+        let mut hub = Hub::default();
+        let mut wanted = HashSet::new();
+        wanted.insert("xqc".into());
+        hub.mark_disconnect_at(&wanted, 1000);
+        assert_eq!(hub.take_disconnect_at("xqc"), Some(1000));
+        assert_eq!(hub.take_disconnect_at("xqc"), None);
     }
 
     #[test]

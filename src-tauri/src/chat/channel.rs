@@ -147,6 +147,11 @@ impl ChannelBuf {
         self.scrollback.prepend_front(&filtered)
     }
 
+    /// Merge gap history into scrollback in timestamp order.
+    pub fn fill_in_missing(&mut self, events: Vec<ChatEvent>) -> usize {
+        self.scrollback.fill_in_missing(&events)
+    }
+
     pub fn snapshot_batch(&self, channel_id: &str) -> ChatBatch {
         ChatBatch {
             channel_id: channel_id.to_string(),
