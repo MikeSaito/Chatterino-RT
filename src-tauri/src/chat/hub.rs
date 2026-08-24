@@ -129,6 +129,12 @@ impl Hub {
         self.room_ids.get(channel).map(|s| s.as_str())
     }
 
+    pub fn channel_self_high_rate(&self, channel: &str) -> bool {
+        self.buffers
+            .get(channel)
+            .is_some_and(|b| b.self_high_rate())
+    }
+
     pub fn recent_already_loaded(&self, channel: &str) -> bool {
         self.recent_loaded.contains(channel)
     }

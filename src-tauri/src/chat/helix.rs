@@ -620,6 +620,113 @@ async fn get_helix(
     HelixFetch::Fail
 }
 
+/// Result of POST /chat/messages (Chatterino HelixSentMessage parity).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelixSendOutcome {
+    Sent,
+    Dropped(String),
+    Failed(String),
+}
+
+pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
+    let Some(item) = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+    else {
+        return HelixSendOutcome::Failed("Your message was not sent.".into());
+    };
+    let is_sent = item.get("is_sent").and_then(Value::as_bool).unwrap_or(false);
+    if is_sent {
+        return HelixSendOutcome::Sent;
+    }
+    if let Some(reason) = item.get("drop_reason").and_then(Value::as_object) {
+        let msg = reason
+            .get("message")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Your message was not sent.");
+        return HelixSendOutcome::Dropped(msg.to_string());
+    }
+    HelixSendOutcome::Failed("Your message was not sent.".into())
+}
+
+pub fn map_send_chat_http_error(status: u16, body: &Value) -> String {
+    let message = body
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("(empty message)")
+        .to_string();
+    match status {
+        400 => format!("Failed to send message: {message}"),
+        401 if message
+            .to_ascii_lowercase()
+            .starts_with("user access token requires") =>
+        {
+            "Missing required scope. Re-login with your account and try again.".into()
+        }
+        401 => message,
+        403 => "You are not allowed to send messages in this channel.".into(),
+        422 => "Your message was too long.".into(),
+        _ => format!("Unknown error: {message}"),
+    }
+}
+
+pub async fn send_chat_message(
+    broadcaster_id: &str,
+    sender_id: &str,
+    message: &str,
+    reply_parent_message_id: Option<&str>,
+    token: &str,
+    client_id: &str,
+) -> HelixSendOutcome {
+    let mut body = serde_json::json!({
+        "broadcaster_id": broadcaster_id,
+        "sender_id": sender_id,
+        "message": message,
+    });
+    if let Some(id) = reply_parent_message_id {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("reply_parent_message_id".into(), Value::String(id.to_string()));
+        }
+    }
+    let url = format!("{HELIX}/chat/messages");
+    let client = http_client();
+    let mut delay = Duration::from_millis(200);
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
+        match client
+            .post(&url)
+            .header("Client-Id", client_id)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                match resp.json::<Value>().await {
+                    Ok(v) if status.is_success() => return parse_send_chat_response(&v),
+                    Ok(v) => return HelixSendOutcome::Failed(map_send_chat_http_error(
+                        status.as_u16(),
+                        &v,
+                    )),
+                    Err(e) => last = format!("json: {e}"),
+                }
+            }
+            Err(e) => last = e.to_string(),
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    HelixSendOutcome::Failed(format!("Failed to send message: {last}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,6 +984,45 @@ mod tests {
         assert_eq!(
             badges[0].url.as_deref(),
             Some("https://static-cdn.jtvnw.net/badges/v1/mod/1")
+        );
+    }
+
+    #[test]
+    fn parse_send_chat_response_sent_and_dropped() {
+        let sent = serde_json::json!({
+            "data": [{ "message_id": "1", "is_sent": true }]
+        });
+        assert_eq!(parse_send_chat_response(&sent), HelixSendOutcome::Sent);
+
+        let dropped = serde_json::json!({
+            "data": [{
+                "message_id": "1",
+                "is_sent": false,
+                "drop_reason": { "code": "msg_ratelimit", "message": "Slow down!" }
+            }]
+        });
+        assert_eq!(
+            parse_send_chat_response(&dropped),
+            HelixSendOutcome::Dropped("Slow down!".into())
+        );
+    }
+
+    #[test]
+    fn map_send_chat_http_error_statuses() {
+        let scope = serde_json::json!({
+            "message": "User access token requires scope user:write:chat"
+        });
+        assert_eq!(
+            map_send_chat_http_error(401, &scope),
+            "Missing required scope. Re-login with your account and try again."
+        );
+        assert_eq!(
+            map_send_chat_http_error(403, &serde_json::json!({})),
+            "You are not allowed to send messages in this channel."
+        );
+        assert_eq!(
+            map_send_chat_http_error(422, &serde_json::json!({})),
+            "Your message was too long."
         );
     }
 }

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -210,24 +211,13 @@ pub fn chat_snapshot(
 
 #[tauri::command]
 pub async fn chat_send(
+    app: AppHandle,
     state: tauri::State<'_, Shared>,
     text: String,
     #[allow(non_snake_case)]
     replyToId: Option<String>,
 ) -> Result<(), ApiError> {
-    let mut payload = format_outgoing(&text)?;
-    let allow_dup = {
-        let settings = state
-            .settings
-            .lock()
-            .map_err(|_| ApiError::internal("lock"))?;
-        settings
-            .data
-            .knobs
-            .get("behaviour.allowDuplicateMessages")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true)
-    };
+    let use_helix = should_send_helix(&state);
     let reply_to = match replyToId.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
@@ -246,6 +236,13 @@ pub async fn chat_send(
             "нужен вход Twitch, чтобы отправлять сообщения",
         ));
     }
+
+    if use_helix {
+        return send_via_helix(&app, &state, &channel, &text, reply_to.as_deref()).await;
+    }
+
+    let mut payload = format_outgoing(&text)?;
+    let allow_dup = knob_bool(&state, "behaviour.allowDuplicateMessages", true);
     if allow_dup {
         let last = state
             .last_sent
@@ -275,6 +272,180 @@ pub async fn chat_send(
     }
     super::provider_activity::post_send_activity(state.inner().clone(), channel);
     Ok(())
+}
+
+async fn send_via_helix(
+    app: &AppHandle,
+    state: &Shared,
+    channel: &str,
+    text: &str,
+    reply_to: Option<&str>,
+) -> Result<(), ApiError> {
+    if is_unknown_command_for_helix(text.trim()) {
+        let cmd = text.trim().split_whitespace().next().unwrap_or("");
+        state.post_channel_notice(
+            app,
+            channel,
+            format!("{cmd} is not a known command."),
+        );
+        return Ok(());
+    }
+    let mut payload = format_outgoing_helix(text)?;
+    let high_rate = state
+        .hub
+        .lock()
+        .ok()
+        .is_some_and(|h| h.channel_self_high_rate(channel));
+    let allow_dup = knob_bool(state, "behaviour.allowDuplicateMessages", true);
+    if allow_dup && !high_rate {
+        let last = state
+            .last_sent
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        if last.get(channel).map(|s| s.as_str()) == Some(payload.as_str()) {
+            payload = prepare_duplicate_message(&payload);
+        }
+    }
+    match state
+        .send_rate
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?
+        .prepare(high_rate)
+    {
+        super::send_wait::PrepareSend::Ok => {}
+        super::send_wait::PrepareSend::Notice(msg) => {
+            state.post_channel_notice(app, channel, msg.into());
+            return Ok(());
+        }
+        super::send_wait::PrepareSend::Blocked => return Ok(()),
+    }
+    let room_id = state
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.room_id(channel).map(str::to_string))
+        .or_else(|| {
+            state
+                .snapshot_bttv_wanted()
+                .channel
+                .filter(|c| c.login == channel)
+                .map(|c| c.room_id)
+        });
+    let Some(room_id) = room_id else {
+        state.post_channel_notice(
+            app,
+            channel,
+            "Sending messages in this channel isn't possible.".into(),
+        );
+        return Ok(());
+    };
+    let sender_id = auth::ensure_twitch_user_id(state).await;
+    let Some(sender_id) = sender_id else {
+        state.post_channel_notice(
+            app,
+            channel,
+            "Sending messages in this channel isn't possible.".into(),
+        );
+        return Ok(());
+    };
+    let token = auth::oauth_token(state).ok_or_else(|| {
+        ApiError::invalid("нужен вход Twitch, чтобы отправлять сообщения")
+    })?;
+    let client_id = auth::resolved_client_id(state);
+    if let Ok(mut last) = state.last_sent.lock() {
+        last.insert(channel.to_string(), payload.clone());
+    }
+    super::provider_activity::post_send_activity(state.clone(), channel.to_string());
+    let outcome = super::helix::send_chat_message(
+        &room_id,
+        &sender_id,
+        &payload,
+        reply_to,
+        &token,
+        &client_id,
+    )
+    .await;
+    match outcome {
+        super::helix::HelixSendOutcome::Sent => Ok(()),
+        super::helix::HelixSendOutcome::Dropped(msg) | super::helix::HelixSendOutcome::Failed(msg) => {
+            state.post_channel_notice(app, channel, msg);
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatSendProtocol {
+    Default,
+    Irc,
+    Helix,
+}
+
+fn chat_send_protocol(shared: &Shared) -> ChatSendProtocol {
+    let raw = shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("misc.chatSendProtocol")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Default".into());
+    match raw.as_str() {
+        "Helix" => ChatSendProtocol::Helix,
+        "IRC" => ChatSendProtocol::Irc,
+        _ => ChatSendProtocol::Default,
+    }
+}
+
+fn should_send_helix(shared: &Shared) -> bool {
+    matches!(chat_send_protocol(shared), ChatSendProtocol::Helix)
+}
+
+fn knob_bool(shared: &Shared, key: &str, default: bool) -> bool {
+    shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| inner.data.knobs.get(key).and_then(Value::as_bool))
+        .unwrap_or(default)
+}
+
+// Chatterino TwitchChannel.cpp isUnknownCommand (Helix path only).
+pub fn is_unknown_command_for_helix(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let first = match t.chars().next() {
+        Some(c) => c,
+        None => return false,
+    };
+    let after_first = &t[first.len_utf8()..];
+    match first {
+        '/' => {}
+        '.' => {
+            if after_first.is_empty() {
+                return false;
+            }
+            if after_first.starts_with('.') {
+                return false;
+            }
+        }
+        _ => return false,
+    }
+    if after_first.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let lower: String = after_first.chars().flat_map(|c| c.to_lowercase()).collect();
+    if lower == "me" || lower.starts_with("me ") {
+        return false;
+    }
+    true
 }
 
 #[tauri::command]
@@ -642,6 +813,28 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_string())
 }
 
+pub fn format_outgoing_helix(raw: &str) -> Result<String, ApiError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::invalid("сообщение пустое"));
+    }
+    if trimmed.chars().count() > MAX_CHAT_CHARS {
+        return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+    }
+    if trimmed.chars().any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}')) {
+        return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
+    }
+    if trimmed.starts_with('/') {
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let cmd = parts.next().unwrap_or("");
+        let rest = parts.next().unwrap_or("").trim();
+        if cmd.eq_ignore_ascii_case("/me") && rest.is_empty() {
+            return Err(ApiError::invalid("пустое действие /me"));
+        }
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Chatterino MAGIC_MESSAGE_SUFFIX: space + U+034F (CGJ).
 const MAGIC_MESSAGE_SUFFIX: &str = " \u{034f}";
 
@@ -768,6 +961,73 @@ mod tests {
             prepare_duplicate_message(".timeout user 1s"),
             ".timeout user  1s"
         );
+    }
+
+    #[test]
+    fn chat_send_protocol_modes() {
+        let shared = Shared::new();
+        assert!(!should_send_helix(&shared));
+        {
+            let mut settings = shared.settings.lock().unwrap();
+            settings
+                .data
+                .knobs
+                .insert("misc.chatSendProtocol".into(), Value::String("Helix".into()));
+        }
+        assert!(should_send_helix(&shared));
+        {
+            let mut settings = shared.settings.lock().unwrap();
+            settings
+                .data
+                .knobs
+                .insert("misc.chatSendProtocol".into(), Value::String("IRC".into()));
+        }
+        assert!(!should_send_helix(&shared));
+    }
+
+    #[test]
+    fn is_unknown_command_for_helix_matches_stock() {
+        for input in [
+            "/me hello",
+            ".me hello",
+            "/ hello",
+            ". hello",
+            "/ /hello",
+            ". .hello",
+            ".",
+            "/me",
+            ".me",
+            "..",
+            "...",
+            "hello",
+            "/ me",
+        ] {
+            assert!(
+                !is_unknown_command_for_helix(input),
+                "{input} should not be unknown"
+            );
+        }
+        for input in [
+            "/badcommand",
+            ".badcommand",
+            "/ban user",
+            ".timeout user 1",
+            "//",
+            "./",
+            "/.",
+        ] {
+            assert!(
+                is_unknown_command_for_helix(input),
+                "{input} should be unknown"
+            );
+        }
+    }
+
+    #[test]
+    fn format_outgoing_helix_keeps_me_as_text() {
+        assert_eq!(format_outgoing_helix("/me waves").unwrap(), "/me waves");
+        assert_eq!(format_outgoing_helix("  hello  ").unwrap(), "hello");
+        assert!(format_outgoing_helix("/me ").is_err());
     }
 
     #[test]

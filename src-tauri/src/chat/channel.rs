@@ -13,6 +13,7 @@ pub struct ChannelBuf {
     pub pending: Pending,
     room_modes: Option<RoomModes>,
     send_wait: SendWait,
+    self_high_rate: bool,
     live: bool,
     similarity_recent: SimilarityRecent,
 }
@@ -24,6 +25,7 @@ impl ChannelBuf {
             pending: Pending::new(channel_id),
             room_modes: None,
             send_wait: SendWait::default(),
+            self_high_rate: false,
             live: false,
             similarity_recent: SimilarityRecent::default(),
         }
@@ -31,6 +33,14 @@ impl ChannelBuf {
 
     pub fn is_live(&self) -> bool {
         self.live
+    }
+
+    pub fn self_high_rate(&self) -> bool {
+        self.self_high_rate
+    }
+
+    fn self_rate_limit(&self) -> bool {
+        self.self_high_rate
     }
 
     /// Returns true when the live flag changed.
@@ -60,7 +70,9 @@ impl ChannelBuf {
                 is_mod_tag,
                 ..
             } => {
-                if send_wait::has_high_rate_limit(badges) || *is_mod_tag {
+                self.self_high_rate =
+                    send_wait::has_high_rate_limit(badges) || *is_mod_tag;
+                if self.self_rate_limit() {
                     self.send_wait.clear();
                 }
                 return Vec::new();

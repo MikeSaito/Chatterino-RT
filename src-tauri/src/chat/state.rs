@@ -143,6 +143,7 @@ pub struct Shared {
     pub loading_recent: Arc<Mutex<HashSet<String>>>,
     pub activity: Arc<Mutex<ActivityInner>>,
     pub auth_user_id_fetch: Arc<tokio::sync::Mutex<()>>,
+    pub send_rate: Arc<Mutex<super::send_wait::SendRateState>>,
 }
 
 pub enum BatchSend {
@@ -187,6 +188,7 @@ impl Shared {
             loading_recent: Arc::new(Mutex::new(HashSet::new())),
             activity: Arc::new(Mutex::new(ActivityInner::default())),
             auth_user_id_fetch: Arc::new(tokio::sync::Mutex::new(())),
+            send_rate: Arc::new(Mutex::new(super::send_wait::SendRateState::default())),
         }
     }
 

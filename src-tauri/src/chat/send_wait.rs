@@ -184,6 +184,66 @@ pub fn apply_event(
     }
 }
 
+/// Client-side send rate limit (Chatterino TwitchIrcServer::prepareToSend). MIT reimpl.
+#[derive(Default)]
+pub struct SendRateState {
+    pleb: std::collections::VecDeque<std::time::Instant>,
+    mod_times: std::collections::VecDeque<std::time::Instant>,
+    last_error_speed: Option<std::time::Instant>,
+    last_error_amount: Option<std::time::Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrepareSend {
+    Ok,
+    Notice(&'static str),
+    Blocked,
+}
+
+impl SendRateState {
+    pub fn prepare(&mut self, high_rate: bool) -> PrepareSend {
+        use std::time::{Duration, Instant};
+        const PLEB_GAP: Duration = Duration::from_millis(1100);
+        const MOD_GAP: Duration = Duration::from_millis(100);
+        const WINDOW: Duration = Duration::from_secs(32);
+        const PLEB_MAX: usize = 19;
+        const MOD_MAX: usize = 99;
+        const ERROR_COOLDOWN: Duration = Duration::from_secs(30);
+
+        let now = Instant::now();
+        let (queue, max, gap) = if high_rate {
+            (&mut self.mod_times, MOD_MAX, MOD_GAP)
+        } else {
+            (&mut self.pleb, PLEB_MAX, PLEB_GAP)
+        };
+        while queue.front().is_some_and(|t| *t + WINDOW < now) {
+            queue.pop_front();
+        }
+        if queue.back().is_some_and(|t| *t + gap > now) {
+            if self
+                .last_error_speed
+                .is_none_or(|t| t + ERROR_COOLDOWN < now)
+            {
+                self.last_error_speed = Some(now);
+                return PrepareSend::Notice("You are sending messages too quickly.");
+            }
+            return PrepareSend::Blocked;
+        }
+        if queue.len() >= max {
+            if self
+                .last_error_amount
+                .is_none_or(|t| t + ERROR_COOLDOWN < now)
+            {
+                self.last_error_amount = Some(now);
+                return PrepareSend::Notice("You are sending too many messages.");
+            }
+            return PrepareSend::Blocked;
+        }
+        queue.push_back(now);
+        PrepareSend::Ok
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
