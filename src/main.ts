@@ -45,6 +45,7 @@ import {
 } from "./shell/streamerMode";
 import { startLiveNotifyListener } from "./shell/liveNotify";
 import { bindUserCard } from "./shell/userCard";
+import { parseTimeoutButtons } from "./shell/timeoutButtons";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
@@ -221,6 +222,8 @@ async function boot(): Promise<void> {
   }
   const poolSize = scrollbackLimitFromKnobs(bootKnobs);
   let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
+  let timeoutKnobs: AppSettings["knobs"] = bootKnobs;
+  let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
   const ring = new MessageRing(app, textures, poolSize);
   await ring.init();
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
@@ -317,6 +320,8 @@ async function boot(): Promise<void> {
     },
     onDisplay: (data) => {
       usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(data.knobs);
+      timeoutKnobs = data.knobs ?? {};
+      userCard?.syncMod();
       autoCloseUserPopup =
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
@@ -447,6 +452,8 @@ async function boot(): Promise<void> {
     getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
     getOpenPrivate: () => openLinksIncognito,
     getUsercardLimit: () => usercardScrollbackLimit,
+    getTimeoutButtons: () => parseTimeoutButtons(timeoutKnobs),
+    getSelfLogin: () => lastAuth.login?.trim().toLowerCase() || null,
   });
   if (replyBtn) {
     canvasHost.addEventListener("pointermove", (ev) => {
@@ -572,7 +579,6 @@ async function boot(): Promise<void> {
   let mountedChannel = "";
   let holdStatus = false;
   let sending = false;
-  let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
   let complete: {
     start: number;
     suffix: string;
@@ -1032,6 +1038,7 @@ async function boot(): Promise<void> {
 
   function applyAuth(info: AuthInfo): void {
     lastAuth = info;
+    userCard?.syncMod();
     const signed = Boolean(info.login);
     const pending = Boolean(info.userCode) || Boolean(info.pendingPaste);
     loginEl.textContent = info.login ? info.login : "";

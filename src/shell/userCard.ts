@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent } from "../chat/types";
+import {
+  moderationSlashCommand,
+  type TimeoutButton,
+} from "./timeoutButtons";
 
 export type UserCardOpen = {
   login: string;
@@ -28,7 +32,9 @@ export function bindUserCard(opts: {
   getOpenPrivate?: () => boolean;
   /** misc.scrollbackUsercardLimit (hot on each open). */
   getUsercardLimit: () => number;
-}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void } {
+  getTimeoutButtons: () => TimeoutButton[];
+  getSelfLogin: () => string | null;
+}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncMod: () => void } {
   const {
     modal,
     settingsModal,
@@ -38,6 +44,8 @@ export function bindUserCard(opts: {
     getHideAvatars,
     getOpenPrivate,
     getUsercardLimit,
+    getTimeoutButtons,
+    getSelfLogin,
   } = opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
@@ -47,17 +55,24 @@ export function bindUserCard(opts: {
   const loginEl = modal.querySelector<HTMLElement>("#usercard-login");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
+  const modRow = modal.querySelector<HTMLElement>("#usercard-mod-row");
+  const timeoutsEl = modal.querySelector<HTMLElement>("#usercard-timeouts");
+  const banBtn = modal.querySelector<HTMLButtonElement>("#usercard-ban");
+  const unbanBtn = modal.querySelector<HTMLButtonElement>("#usercard-unban");
+  const statusEl = modal.querySelector<HTMLElement>("#usercard-status");
   const head = modal.querySelector<HTMLElement>(".popup-head");
   if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
     return {
       open: () => undefined,
       close: () => undefined,
       syncAvatars: () => undefined,
+      syncMod: () => undefined,
     };
   }
 
   let currentLogin = "";
   let pinned = false;
+  let modBusy = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -75,6 +90,95 @@ export function bindUserCard(opts: {
     });
   }
 
+  const setStatus = (text: string): void => {
+    if (!statusEl) {
+      return;
+    }
+    if (!text) {
+      statusEl.hidden = true;
+      statusEl.textContent = "";
+      return;
+    }
+    statusEl.hidden = false;
+    statusEl.textContent = text;
+  };
+
+  const setModBusy = (busy: boolean): void => {
+    modBusy = busy;
+    if (banBtn) {
+      banBtn.disabled = busy;
+    }
+    if (unbanBtn) {
+      unbanBtn.disabled = busy;
+    }
+    if (timeoutsEl) {
+      for (const btn of timeoutsEl.querySelectorAll("button")) {
+        btn.disabled = busy;
+      }
+    }
+  };
+
+  const syncModRow = (): void => {
+    if (!modRow || !timeoutsEl) {
+      return;
+    }
+    const self = getSelfLogin()?.trim().toLowerCase() ?? "";
+    const hideSelf = Boolean(self) && self === currentLogin;
+    if (!currentLogin || hideSelf) {
+      modRow.hidden = true;
+      timeoutsEl.replaceChildren();
+      return;
+    }
+    modRow.hidden = false;
+    timeoutsEl.replaceChildren();
+    for (const btnDef of getTimeoutButtons()) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = btnDef.label;
+      btn.title = `Timeout ${btnDef.seconds}s`;
+      btn.dataset.seconds = String(btnDef.seconds);
+      btn.addEventListener("click", () => {
+        void sendMod("timeout", btnDef.seconds);
+      });
+      timeoutsEl.append(btn);
+    }
+  };
+
+  const sendMod = async (
+    kind: "timeout" | "ban" | "unban",
+    seconds?: number,
+  ): Promise<void> => {
+    if (!currentLogin || modBusy || modal.hidden) {
+      return;
+    }
+    const loginAtSend = currentLogin;
+    const text = moderationSlashCommand(kind, loginAtSend, seconds);
+    if (!text) {
+      setStatus("Invalid user.");
+      return;
+    }
+    setStatus("");
+    setModBusy(true);
+    try {
+      await invoke("chat_send", { text, replyToId: null });
+    } catch (e) {
+      if (modal.hidden || currentLogin !== loginAtSend) {
+        return;
+      }
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Could not send moderation command.";
+      setStatus(msg);
+    } finally {
+      if (!modal.hidden && currentLogin === loginAtSend) {
+        setModBusy(false);
+      } else {
+        modBusy = false;
+      }
+    }
+  };
+
   const syncAvatars = (): void => {
     if (modal.hidden || !currentLogin) {
       return;
@@ -90,12 +194,26 @@ export function bindUserCard(opts: {
     modal.hidden = true;
     currentLogin = "";
     pinned = false;
+    modBusy = false;
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
       pinBtn.title = "Pin";
     }
     clearAvatar();
     recent.replaceChildren();
+    setStatus("");
+    if (banBtn) {
+      banBtn.disabled = false;
+    }
+    if (unbanBtn) {
+      unbanBtn.disabled = false;
+    }
+    if (modRow) {
+      modRow.hidden = true;
+    }
+    if (timeoutsEl) {
+      timeoutsEl.replaceChildren();
+    }
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -150,10 +268,12 @@ export function bindUserCard(opts: {
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
     recent.replaceChildren();
+    setStatus("");
     const loading = document.createElement("p");
     loading.className = "usercard-empty";
     loading.textContent = "Loading recent messages…";
     recent.append(loading);
+    syncModRow();
     placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
     void loadAvatar(currentLogin);
@@ -276,6 +396,17 @@ export function bindUserCard(opts: {
     }).catch(() => undefined);
   });
 
+  if (banBtn) {
+    banBtn.addEventListener("click", () => {
+      void sendMod("ban");
+    });
+  }
+  if (unbanBtn) {
+    unbanBtn.addEventListener("click", () => {
+      void sendMod("unban");
+    });
+  }
+
   document.addEventListener("pointerdown", (ev) => {
     if (modal.hidden || pinned || !autoClose()) {
       return;
@@ -294,5 +425,5 @@ export function bindUserCard(opts: {
     }
   });
 
-  return { open, close, syncAvatars };
+  return { open, close, syncAvatars, syncMod: syncModRow };
 }
