@@ -18,6 +18,7 @@ use super::ffz_badges::FfzBadgeCatalog;
 use super::ffz_channel::FfzChannelExtras;
 use super::twitch_blocks::TwitchBlockSet;
 use super::seventv_badges::SeventvBadgeCatalog;
+use super::shared_chat::SharedChatState;
 use super::hub::Hub;
 use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
@@ -158,6 +159,7 @@ pub struct Shared {
     pub auth_user_id_fetch: Arc<tokio::sync::Mutex<()>>,
     pub send_rate: Arc<Mutex<super::send_wait::SendRateState>>,
     pub twitch_blocks: Arc<Mutex<TwitchBlockSet>>,
+    pub shared_chat: Arc<Mutex<SharedChatState>>,
 }
 
 pub enum BatchSend {
@@ -209,6 +211,7 @@ impl Shared {
             auth_user_id_fetch: Arc::new(tokio::sync::Mutex::new(())),
             send_rate: Arc::new(Mutex::new(super::send_wait::SendRateState::default())),
             twitch_blocks: Arc::new(Mutex::new(TwitchBlockSet::default())),
+            shared_chat: Arc::new(Mutex::new(SharedChatState::default())),
         }
     }
 

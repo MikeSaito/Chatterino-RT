@@ -170,6 +170,12 @@ pub enum ChatEvent {
         /// Soft-disabled (similar / R9K); Pixi overlay like MessageFlag::Disabled.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         disabled: bool,
+        /// IRC `source-room-id` for shared chat messages.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_room_id: Option<String>,
+        /// IRC `source-badges` tag (shared chat authority badges from source channel).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        source_badges: Vec<Badge>,
     },
     #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
@@ -544,6 +550,8 @@ mod tests {
             highlight_flash: false,
             whisper: false,
             disabled: false,
+            source_room_id: None,
+            source_badges: vec![],
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["kind"], "privmsg");

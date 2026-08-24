@@ -61,6 +61,8 @@ mod tests {
                     highlight_flash: false,
                     whisper: false,
                 disabled: false,
+            source_room_id: None,
+            source_badges: vec![],
                 },
                 ChatEvent::Roomstate {
                     id: "r".into(),

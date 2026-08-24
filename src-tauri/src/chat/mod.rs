@@ -34,6 +34,7 @@ pub mod seventv_badges;
 pub mod send_wait;
 pub mod session;
 pub mod settings;
+pub mod shared_chat;
 pub mod similarity;
 pub mod spans;
 pub mod state;

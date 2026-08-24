@@ -63,6 +63,10 @@ impl BadgeCatalog {
             .or_else(|| self.global.get(&key))
             .map(String::as_str)
     }
+
+    pub fn has_channel(&self, channel: &str) -> bool {
+        self.channel.contains_key(channel)
+    }
 }
 
 pub fn resolve_badge_urls(badges: &mut [Badge], catalog: &BadgeCatalog, channel: &str) {
@@ -727,6 +731,169 @@ pub async fn send_chat_message(
     HelixSendOutcome::Failed(format!("Failed to send message: {last}"))
 }
 
+pub fn parse_shared_chat_session(value: &Value) -> Vec<String> {
+    let Some(item) = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+    else {
+        return Vec::new();
+    };
+    let Some(arr) = item.get("participants").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for p in arr {
+        let Some(id) = p
+            .get("broadcaster_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        else {
+            continue;
+        };
+        out.push(id.to_string());
+    }
+    out
+}
+
+pub fn parse_user_item(item: &Value) -> Option<(String, UserProfile)> {
+    let id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))?
+        .to_string();
+    let login = item
+        .get("login")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())?
+        .to_ascii_lowercase();
+    let display_name = item
+        .get("display_name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(login.as_str())
+        .to_string();
+    let profile_image_url = item
+        .get("profile_image_url")
+        .and_then(Value::as_str)
+        .and_then(allowed_profile_image_url);
+    Some((
+        id,
+        UserProfile {
+            login,
+            display_name,
+            profile_image_url,
+        },
+    ))
+}
+
+pub fn parse_users_by_id(value: &Value) -> HashMap<String, UserProfile> {
+    let mut out = HashMap::new();
+    let Some(arr) = value.get("data").and_then(Value::as_array) else {
+        return out;
+    };
+    for item in arr {
+        if let Some((id, profile)) = parse_user_item(item) {
+            out.insert(id, profile);
+        }
+    }
+    out
+}
+
+/// Avatar badge URL (18px display) from Twitch profile picture URL.
+pub fn shared_chat_profile_badge_url(profile_url: &str) -> Option<String> {
+    let allowed = allowed_profile_image_url(profile_url)?;
+    if let Some(idx) = allowed.find("300x300") {
+        let mut resized = allowed;
+        resized.replace_range(idx..idx + 7, "28x28");
+        return allowed_profile_image_url(&resized);
+    }
+    allowed_profile_image_url(&allowed)
+}
+
+pub async fn fetch_shared_chat_session(
+    broadcaster_id: &str,
+    token: Option<&str>,
+    client_id: &str,
+) -> Option<Vec<String>> {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return None;
+    };
+    let url = helix_query(
+        "/shared_chat/session",
+        &[("broadcaster_id", broadcaster_id)],
+    );
+    let client = http_client();
+    match get_helix(&client, &url, &client_id, &token).await {
+        HelixFetch::Ok(v) => Some(parse_shared_chat_session(&v)),
+        HelixFetch::Auth | HelixFetch::Fail => None,
+    }
+}
+
+pub async fn fetch_users_by_ids(
+    ids: &[String],
+    token: Option<&str>,
+    client_id: &str,
+) -> HashMap<String, UserProfile> {
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return HashMap::new();
+    };
+    let client = http_client();
+    let mut out = HashMap::new();
+    for chunk in ids.chunks(100) {
+        let url = users_by_id_url(chunk);
+        match get_helix(&client, &url, &client_id, &token).await {
+            HelixFetch::Ok(v) => out.extend(parse_users_by_id(&v)),
+            HelixFetch::Auth | HelixFetch::Fail => break,
+        }
+    }
+    out
+}
+
+pub async fn load_channel_badges_for_login(
+    badges: &Arc<Mutex<BadgeCatalog>>,
+    login: &str,
+    room_id: &str,
+    token: Option<&str>,
+    client_id: &str,
+) {
+    let Some((client_id, token)) = helix_creds(token, client_id) else {
+        return;
+    };
+    if login.is_empty() || room_id.is_empty() {
+        return;
+    }
+    if badges
+        .lock()
+        .ok()
+        .is_some_and(|cat| cat.has_channel(login))
+    {
+        return;
+    }
+    let url = helix_query("/chat/badges", &[("broadcaster_id", room_id)]);
+    let client = http_client();
+    if let HelixFetch::Ok(v) = get_helix(&client, &url, &client_id, &token).await {
+        let map = parse_badge_sets(&v);
+        if let Ok(mut cat) = badges.lock() {
+            cat.replace_channel(login.to_string(), map);
+        }
+    }
+}
+
+fn users_by_id_url(ids: &[String]) -> String {
+    let mut url = Url::parse(&format!("{HELIX}/users")).expect("helix users");
+    {
+        let mut q = url.query_pairs_mut();
+        for id in ids {
+            q.append_pair("id", id);
+        }
+    }
+    url.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,6 +1080,28 @@ mod tests {
         assert_eq!(parsed.game_name.as_deref(), Some("Just Chatting"));
         assert_eq!(parsed.stream_title.as_deref(), Some("hello world"));
         assert_eq!(parsed.started_at.as_deref(), Some("2020-01-01T12:00:00Z"));
+    }
+
+    #[test]
+    fn parse_shared_chat_session_participants() {
+        let v = serde_json::json!({
+            "data": [{
+                "id": "sess1",
+                "participants": [
+                    { "broadcaster_id": "11148817" },
+                    { "broadcaster_id": "1025594235" }
+                ]
+            }]
+        });
+        let ids = parse_shared_chat_session(&v);
+        assert_eq!(ids, vec!["11148817", "1025594235"]);
+    }
+
+    #[test]
+    fn shared_chat_profile_badge_url_resizes_300() {
+        let url = "https://static-cdn.jtvnw.net/jtv_user_pictures/x-profile_image-300x300.png";
+        let out = shared_chat_profile_badge_url(url).expect("url");
+        assert!(out.contains("28x28"));
     }
 
     #[test]

@@ -488,6 +488,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
     request_relogin(&shared).await;
     super::provider_activity::clear_identity_cache(&shared);
     super::twitch_blocks::clear_blocks(&shared);
+    super::shared_chat::clear(&shared);
     emit(&app, &shared);
     Ok(())
 }
@@ -527,6 +528,7 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
     request_relogin(&shared).await;
     super::provider_activity::clear_identity_cache(&shared);
     super::twitch_blocks::clear_blocks(&shared);
+    super::shared_chat::clear(&shared);
     emit(&app, &shared);
 }
 
@@ -642,6 +644,7 @@ async fn persist_and_relogin(
     }
     request_relogin(shared).await;
     super::twitch_blocks::clear_blocks(shared);
+    super::shared_chat::clear(shared);
     super::twitch_blocks::spawn_load_if_enabled(shared);
     emit(app, shared);
     true

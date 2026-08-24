@@ -709,6 +709,11 @@ fn dispatch_line(
                                 channel.clone(),
                             );
                         }
+                        super::shared_chat::spawn_refresh(
+                            shared,
+                            channel.clone(),
+                            id.to_string(),
+                        );
                     }
                 }
             }
@@ -726,6 +731,16 @@ fn dispatch_line(
                 return LineAction::None;
             }
             decorate_event(&mut event, shared, &channel);
+            if matches!(&event, ChatEvent::Privmsg { .. }) {
+                if let Some(rid) = shared
+                    .hub
+                    .lock()
+                    .ok()
+                    .and_then(|h| h.room_id(&channel).map(str::to_string))
+                {
+                    super::shared_chat::maybe_probe(shared, &channel, &rid);
+                }
+            }
             let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
             let sim = super::similarity::cfg_from_shared(shared);
             let stack_style = super::timeout_stack::style_from_shared(shared);
@@ -921,6 +936,8 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             bits,
             user_id,
             reply_to_display_name,
+            source_room_id,
+            source_badges,
             ..
         } => {
             maybe_strip_reply_mention(
@@ -1017,6 +1034,13 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             if let Ok(stv) = shared.seventv_badges.lock() {
                 stv.append_for_user(badges, user_id);
             }
+            super::shared_chat::apply_badges(
+                shared,
+                channel,
+                badges,
+                source_room_id.as_deref(),
+                source_badges,
+            );
             emote_spans.sort_by_key(|s| s.start);
             resolve_overlays(text, emote_spans);
             let find_all = shared

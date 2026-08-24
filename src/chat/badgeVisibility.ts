@@ -67,6 +67,9 @@ export function isBadgeVisible(
   badge: BadgeLike,
   flags: BadgeVisibilityFlags,
 ): boolean {
+  if (badge.set === "shared_chat") {
+    return true;
+  }
   if (badge.source === "ffz" || badge.set === "ffz") {
     return flags.ffz;
   }

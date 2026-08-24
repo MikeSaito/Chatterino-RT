@@ -169,6 +169,8 @@ fn build_privmsg(
         highlight_flash: false,
         whisper,
         disabled: false,
+        source_room_id: tags.get("source-room-id").filter(|s| !s.is_empty()),
+        source_badges: parse_badges(tags.get("source-badges").as_deref()),
     }
 }
 
@@ -251,6 +253,8 @@ fn parse_usernotice(
             highlight_flash: false,
             whisper: false,
         disabled: false,
+            source_room_id: tags.get("source-room-id").filter(|s| !s.is_empty()),
+            source_badges: parse_badges(tags.get("source-badges").as_deref()),
         })
     });
     ParsedLine::Event {
@@ -943,6 +947,31 @@ mod tests {
                 ..
             } => {
                 assert_eq!(msg_id.as_deref(), Some("resub"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_shared_chat_privmsg_tags() {
+        let line = r#"@mod=0;flags=;badge-info=;source-badge-info=;color=#DAA520;user-id=612865661;subscriber=0;id=886028cc-9985-47b9-a273-8164c6d59a76;turbo=0;source-badges=staff/1,moderator/1;room-id=11148817;source-id=eefbae4a-d3a1-4307-8d15-fab0f03fd9b9;source-room-id=1025594235;emotes=;display-name=lahoooo;tmi-sent-ts=1727304317562;badges=staff/1;user-type=staff :lahoooo!lahoooo@lahoooo.tmi.twitch.tv PRIVMSG #pajlada :hello"#;
+        match parse_line(line, 100) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Privmsg {
+                        source_room_id,
+                        source_badges,
+                        badges,
+                        ..
+                    },
+                room_id,
+                ..
+            } => {
+                assert_eq!(room_id.as_deref(), Some("11148817"));
+                assert_eq!(source_room_id.as_deref(), Some("1025594235"));
+                assert_eq!(source_badges.len(), 2);
+                assert_eq!(source_badges[0].set, "staff");
+                assert_eq!(badges.len(), 1);
             }
             other => panic!("{other:?}"),
         }

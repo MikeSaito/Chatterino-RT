@@ -362,6 +362,8 @@ mod tests {
             highlight_flash: true,
             whisper: false,
             disabled: false,
+        source_room_id: None,
+        source_badges: vec![],
         }
     }
 
