@@ -147,14 +147,11 @@ impl Hub {
     }
 
     pub fn set_active(&mut self, channel: Option<String>) {
-        let changed = self.active != channel;
         self.active = channel;
         if let Some(ch) = self.active.clone() {
-            if changed {
-                self.buffer(&ch).set_live(false);
-            } else {
-                self.buffer(&ch);
-            }
+            // Keep per-channel live flag (stock TwitchChannel); tab switch must not
+            // look like an offline→online transition.
+            self.buffer(&ch);
         }
     }
 
@@ -253,6 +250,17 @@ mod tests {
         assert!(hub.is_joined("xqc"));
         hub.set_active(Some("xqc".into()));
         assert!(hub.joined_active());
+    }
+
+    #[test]
+    fn set_active_does_not_reset_live_flag() {
+        let mut hub = Hub::default();
+        hub.set_active(Some("xqc".into()));
+        assert!(hub.set_channel_live("xqc", true));
+        hub.set_active(Some("lirik".into()));
+        hub.set_active(Some("xqc".into()));
+        assert!(hub.channel_live("xqc"));
+        assert!(!hub.set_channel_live("xqc", true));
     }
 
     #[test]
