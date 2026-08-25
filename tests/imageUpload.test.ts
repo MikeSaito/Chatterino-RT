@@ -1,4 +1,5 @@
 import {
+  dataTransferLooksLikeImage,
   formatFromFileName,
   formatFromMime,
   imageFromDataTransfer,
@@ -22,10 +23,6 @@ assert(formatFromMime("image/jpeg") === "jpeg", "mime jpeg");
 assert(formatFromMime("text/plain") === null, "mime plain");
 
 assert(imageFromDataTransfer(null) === null, "null dt");
-assert(
-  (await import("../src/shell/imageUpload.ts")).dataTransferLooksLikeImage(null) ===
-    false,
-  "looks null",
-);
+assert(dataTransferLooksLikeImage(null) === false, "looks null");
 
 console.log("imageUpload tests ok");
