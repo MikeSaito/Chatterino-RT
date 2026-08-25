@@ -986,6 +986,61 @@ pub fn open_chat_link(url: String, private: Option<bool>) -> Result<(), ApiError
 }
 
 #[tauri::command]
+pub async fn image_upload(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    #[allow(non_snake_case)] bytesBase64: String,
+    format: String,
+) -> Result<super::image_uploader::UploadResult, ApiError> {
+    let login = normalize_channel(&channel)?;
+    let fmt = super::image_uploader::normalize_format(&format).map_err(|message| ApiError {
+        code: "invalid_input".into(),
+        message,
+    })?;
+    let cfg = super::image_uploader::load_config(state.inner()).map_err(|message| ApiError {
+        code: "invalid_input".into(),
+        message,
+    })?;
+    let _guard = super::image_uploader::try_begin_upload().map_err(|message| ApiError {
+        code: "busy".into(),
+        message,
+    })?;
+    let bytes = super::image_uploader::decode_bytes(&bytesBase64).map_err(|message| ApiError {
+        code: "invalid_input".into(),
+        message,
+    })?;
+    if bytes.len() > super::image_uploader::MAX_IMAGE_BYTES {
+        return Err(ApiError {
+            code: "invalid_input".into(),
+            message: format!(
+                "Image is too large (max {} MiB).",
+                super::image_uploader::MAX_IMAGE_BYTES / (1024 * 1024)
+            ),
+        });
+    }
+    state.post_channel_notice(&app, &login, "Started upload...".into());
+    let result = super::image_uploader::post_image(&cfg, bytes, fmt).await;
+    match result {
+        Ok(ok) => {
+            state.post_channel_notice(
+                &app,
+                &login,
+                super::image_uploader::success_notice(&ok.link, &ok.deletion_link),
+            );
+            Ok(ok)
+        }
+        Err(message) => {
+            state.post_channel_notice(&app, &login, message.clone());
+            Err(ApiError {
+                code: "internal".into(),
+                message,
+            })
+        }
+    }
+}
+
+#[tauri::command]
 pub fn open_in_streamlink(
     state: tauri::State<'_, Shared>,
     channel: String,

@@ -51,6 +51,11 @@ import {
   parseModActions,
   type ModActionBtn,
 } from "./shell/modActions";
+import {
+  bindImageUploadPaste,
+  parseImageUploadKnobs,
+  type ImageUploadKnobs,
+} from "./shell/imageUpload";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
@@ -234,6 +239,7 @@ async function boot(): Promise<void> {
   let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
   let timeoutKnobs: AppSettings["knobs"] = bootKnobs;
   let customUriScheme = String(bootKnobs["external.customURIScheme"] ?? "").trim();
+  let imageUploadKnobs: ImageUploadKnobs = parseImageUploadKnobs(bootKnobs);
   let modActionBtns: ModActionBtn[] = bootModActions;
   let modSendBusy = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
@@ -283,7 +289,10 @@ async function boot(): Promise<void> {
       }).catch(() => undefined);
     })();
   });
+  let unbindImageUpload: (() => void) | null = null;
   teardownChat = () => {
+    unbindImageUpload?.();
+    unbindImageUpload = null;
     chatIpc?.stop();
     chatIpc = null;
     ring.destroy();
@@ -336,6 +345,7 @@ async function boot(): Promise<void> {
       usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(data.knobs);
       timeoutKnobs = data.knobs ?? {};
       customUriScheme = String(data.knobs["external.customURIScheme"] ?? "").trim();
+      imageUploadKnobs = parseImageUploadKnobs(data.knobs ?? {});
       modActionBtns = parseModActions(data.modActions ?? []);
       ring.setModActions(modActionBtns);
       userCard?.syncMod();
@@ -414,6 +424,14 @@ async function boot(): Promise<void> {
     },
   });
   const ipc = bindChatIpc(ring);
+  unbindImageUpload = bindImageUploadPaste({
+    input: messageInput,
+    getKnobs: () => imageUploadKnobs,
+    getChannel: () => ipc.active(),
+    onError: (message) => {
+      statusEl.textContent = message;
+    },
+  });
 
   if (moderationModeBtn) {
     moderationModeBtn.addEventListener("click", () => {
