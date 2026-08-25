@@ -60,6 +60,7 @@ import {
   type NicknameRule,
 } from "../shell/nicknames";
 import { NickColorCache } from "../shell/nickColorCache";
+import { formatFullCopyText } from "../shell/copyFormat";
 import {
   clipNick,
   collapseWrapLines,
@@ -87,6 +88,8 @@ export type SlotContext = {
   authorLogin: string;
   nick: string;
   text: string;
+  /** Stock Copy full message (timestamp + nick + body). */
+  fullText: string;
   clientX: number;
   clientY: number;
   disabled: boolean;
@@ -161,6 +164,7 @@ type Slot = {
   replyToLogin: string;
   replyToText: string;
   isAction: boolean;
+  isWhisper: boolean;
   /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
   leadLen: number;
 };
@@ -1316,6 +1320,7 @@ export class MessageRing {
         replyToLogin: "",
         replyToText: "",
         isAction: false,
+        isWhisper: false,
         leadLen: 0,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
@@ -1558,6 +1563,7 @@ export class MessageRing {
     slot.replyToLogin = "";
     slot.replyToText = "";
     slot.isAction = false;
+    slot.isWhisper = false;
     slot.leadLen = 0;
     slot.replyHeader.visible = false;
     slot.replyHeader.text = "";
@@ -1642,6 +1648,7 @@ export class MessageRing {
       slot.replyToLogin = event.replyToLogin ?? "";
       slot.replyToText = event.replyToText ?? "";
       slot.isAction = event.action === true;
+      slot.isWhisper = event.whisper === true;
     } else if (
       event.kind === "usernotice" &&
       event.privmsg &&
@@ -1651,11 +1658,13 @@ export class MessageRing {
       slot.replyToLogin = event.privmsg.replyToLogin ?? "";
       slot.replyToText = event.privmsg.replyToText ?? "";
       slot.isAction = event.privmsg.action === true;
+      slot.isWhisper = false;
     } else {
       slot.replyToId = "";
       slot.replyToLogin = "";
       slot.replyToText = "";
       slot.isAction = false;
+      slot.isWhisper = false;
     }
     slot.timestampMs = event.timestampMs;
     slot.spansRaw = drawn.spans;
@@ -2422,6 +2431,16 @@ export class MessageRing {
       authorLogin: slot.login,
       nick: opts?.nick ?? this.contextNick(slot),
       text: slot.copyText || slot.bodyRaw,
+      fullText: formatFullCopyText({
+        time: slot.time.text,
+        nick: slot.nickRaw,
+        body: slot.bodySource || slot.copyText,
+        copyText: slot.copyText,
+        system: slot.system,
+        isAction: slot.isAction,
+        isWhisper: slot.isWhisper,
+        whisperPeer: slot.isWhisper ? this.selfLogin : undefined,
+      }),
       clientX: ev.clientX,
       clientY: ev.clientY,
       disabled: slot.disabled,

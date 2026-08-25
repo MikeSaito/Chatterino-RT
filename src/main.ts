@@ -825,6 +825,10 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
     }
+    if (action === "copy-full" && target.fullText) {
+      void navigator.clipboard.writeText(target.fullText).catch(() => undefined);
+      return;
+    }
     if (action === "copy-id" && target.msgId) {
       void navigator.clipboard.writeText(target.msgId).catch(() => undefined);
       return;
