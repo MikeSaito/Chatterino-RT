@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent } from "../chat/types";
+import { resolveReplyRoot } from "./replyRoot";
 
 export type ReplyThreadOpen = {
   rootId: string;
@@ -58,16 +59,7 @@ export function bindReplyThread(opts: {
 
   const collectThread = (events: Priv[], seedId: string): Priv[] => {
     const byId = new Map(events.map((ev) => [ev.id, ev]));
-    let rootId = seedId;
-    const seen = new Set<string>();
-    while (byId.has(rootId) && !seen.has(rootId)) {
-      seen.add(rootId);
-      const node = byId.get(rootId);
-      if (!node?.replyToId || !byId.has(node.replyToId)) {
-        break;
-      }
-      rootId = node.replyToId;
-    }
+    const rootId = resolveReplyRoot(events, seedId)?.id ?? seedId;
     const out: Priv[] = [];
     const walk = (id: string): void => {
       const node = byId.get(id);

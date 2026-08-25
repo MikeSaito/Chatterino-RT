@@ -60,6 +60,7 @@ import {
   type ImageUploadKnobs,
 } from "./shell/imageUpload";
 import { bindReplyThread } from "./shell/replyThread";
+import { resolveReplyRoot } from "./shell/replyRoot";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
   bindEmoteTooltip,
@@ -72,7 +73,7 @@ import {
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
-import type { AuthInfo, ChannelLive, ChatStatus } from "./chat/types";
+import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
 
 let chatIpc: ChatIpc | null = null;
@@ -680,6 +681,7 @@ async function boot(): Promise<void> {
   let completeSeq = 0;
   let completeInFlight = false;
   let completePending = 0;
+  let replyOriginalSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
   let channelBusy = false;
@@ -861,6 +863,36 @@ async function boot(): Promise<void> {
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
       setReply(target.msgId, target.login, target.text);
       messageInput.focus();
+      return;
+    }
+    if (action === "reply-original" && target.msgId) {
+      const msgId = target.msgId;
+      const seq = ++replyOriginalSeq;
+      void (async () => {
+        const channel = ipc.active().trim();
+        if (!channel) {
+          statusEl.textContent = "нет активного канала";
+          return;
+        }
+        try {
+          const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
+          if (seq !== replyOriginalSeq || ipc.active().trim() !== channel) {
+            return;
+          }
+          const events = (Array.isArray(snap.events) ? snap.events : []).filter(
+            (ev): ev is Extract<ChatEvent, { kind: "privmsg" }> => ev.kind === "privmsg",
+          );
+          const root = resolveReplyRoot(events, msgId);
+          if (!root) {
+            statusEl.textContent = "не удалось найти корень ветки";
+            return;
+          }
+          setReply(root.id, root.login, root.text);
+          messageInput.focus();
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        }
+      })();
       return;
     }
     if (action === "thread" && target.msgId && target.login && !target.disabled) {
@@ -1133,6 +1165,9 @@ async function boot(): Promise<void> {
       contextCustomSep.hidden = !showCustom;
     }
     const replyBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="reply"]');
+    const replyOriginalBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="reply-original"]',
+    );
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
@@ -1151,6 +1186,9 @@ async function boot(): Promise<void> {
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
+    }
+    if (replyOriginalBtn) {
+      replyOriginalBtn.hidden = !ctx.replyToId || !ctx.msgId;
     }
     if (threadBtn) {
       threadBtn.hidden = !ctx.msgId || ctx.disabled;
