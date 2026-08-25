@@ -139,16 +139,35 @@ fn init_propvariant_from_string(
     psz: windows::core::PCWSTR,
     out: &mut windows::Win32::System::Com::StructuredStorage::PROPVARIANT,
 ) -> Result<(), String> {
-    // windows 0.61 не экспортирует InitPropVariantFromString; raw-dylib как в windows-link.
-    #[link(name = "propsys.dll", kind = "raw-dylib", modifiers = "+verbatim")]
-    extern "C" {
-        fn InitPropVariantFromString(
-            psz: windows::core::PCWSTR,
-            ppropvar: *mut windows::Win32::System::Com::StructuredStorage::PROPVARIANT,
-        ) -> windows_core::HRESULT;
+    // SDK Propvarutil.h: InitPropVariantFromString is header-inline (SHStrDupW + VT_LPWSTR),
+    // not an export of propsys.dll — raw-dylib import → STATUS_ENTRYPOINT_NOT_FOUND.
+    use std::mem::ManuallyDrop;
+
+    use windows::Win32::System::Com::StructuredStorage::{
+        PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+    };
+    use windows::Win32::System::Variant::VT_LPWSTR;
+    use windows::Win32::UI::Shell::SHStrDupW;
+
+    unsafe {
+        *out = PROPVARIANT::default();
+        if psz.is_null() {
+            return Err("null AUMID".into());
+        }
+        let dup = SHStrDupW(psz).map_err(|e| e.to_string())?;
+        *out = PROPVARIANT {
+            Anonymous: PROPVARIANT_0 {
+                Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
+                    vt: VT_LPWSTR,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: PROPVARIANT_0_0_0 { pwszVal: dup },
+                }),
+            },
+        };
     }
-    let hr = unsafe { InitPropVariantFromString(psz, out) };
-    hr.ok().map_err(|e| e.to_string())
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -201,9 +220,7 @@ fn read_shortcut_target(lnk: &Path) -> Result<PathBuf, String> {
 fn read_shortcut_aumid(lnk: &Path) -> Result<String, String> {
     use windows::core::Interface;
     use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
-    use windows::Win32::System::Com::StructuredStorage::{
-        PropVariantClear, PropVariantToString, PROPVARIANT,
-    };
+    use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToString};
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
 
     let link = open_shell_link(lnk)?;
