@@ -39,8 +39,10 @@ import {
   ZOOM_LEVELS,
   defaultAppSettingsTables,
   defaultKnobs,
+  visibleSectionKnobs,
   type KnobDef,
   type PageDef,
+  type SectionDef,
   type TableDef,
 } from "./catalog";
 import { mountEditableTable } from "./editableTable";
@@ -1050,6 +1052,29 @@ export function bindSettingsDialog(opts: {
     }
   };
 
+  const appendSettingsSections = (
+    host: HTMLElement,
+    blocks: SectionDef[] | undefined,
+  ): void => {
+    for (const block of blocks ?? []) {
+      const knobs = visibleSectionKnobs(block);
+      if (knobs.length === 0) {
+        continue;
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "settings-block";
+      wrap.dataset.search = block.title;
+      const h = document.createElement("h4");
+      h.className = "settings-section";
+      h.textContent = block.title;
+      wrap.append(h);
+      for (const knob of knobs) {
+        renderKnob(knob, wrap);
+      }
+      host.append(wrap);
+    }
+  };
+
   const buildPage = (page: PageDef): HTMLElement => {
     const section = document.createElement("section");
     section.className = "settings-page";
@@ -1395,19 +1420,7 @@ export function bindSettingsDialog(opts: {
       host.dataset.search = page.search;
       mountTable(host, page.table);
       section.append(host);
-      for (const block of page.sections ?? []) {
-        const wrap = document.createElement("div");
-        wrap.className = "settings-block";
-        wrap.dataset.search = block.title;
-        const h = document.createElement("h4");
-        h.className = "settings-section";
-        h.textContent = block.title;
-        wrap.append(h);
-        for (const knob of block.knobs) {
-          renderKnob(knob, wrap);
-        }
-        section.append(wrap);
-      }
+      appendSettingsSections(section, page.sections);
       return section;
     }
 
@@ -1415,19 +1428,7 @@ export function bindSettingsDialog(opts: {
       const host = document.createElement("div");
       mountTable(host, page.table);
       section.append(host);
-      for (const block of page.sections ?? []) {
-        const wrap = document.createElement("div");
-        wrap.className = "settings-block";
-        wrap.dataset.search = block.title;
-        const h = document.createElement("h4");
-        h.className = "settings-section";
-        h.textContent = block.title;
-        wrap.append(h);
-        for (const knob of block.knobs) {
-          renderKnob(knob, wrap);
-        }
-        section.append(wrap);
-      }
+      appendSettingsSections(section, page.sections);
       return section;
     }
 
@@ -1449,19 +1450,7 @@ export function bindSettingsDialog(opts: {
           mountTable(host, tab.table);
           panel.append(host);
         }
-        for (const block of tab.sections ?? []) {
-          const wrap = document.createElement("div");
-          wrap.className = "settings-block";
-          wrap.dataset.search = block.title;
-          const h = document.createElement("h4");
-          h.className = "settings-section";
-          h.textContent = block.title;
-          wrap.append(h);
-          for (const knob of block.knobs) {
-            renderKnob(knob, wrap);
-          }
-          panel.append(wrap);
-        }
+        appendSettingsSections(panel, tab.sections);
         btn.addEventListener("click", () => {
           tabBar.querySelectorAll(".settings-inner-tab").forEach((el) => {
             el.classList.remove("is-active");
@@ -1481,35 +1470,11 @@ export function bindSettingsDialog(opts: {
         panels.append(panel);
       });
       section.append(tabBar, panels);
-      for (const block of page.sections ?? []) {
-        const wrap = document.createElement("div");
-        wrap.className = "settings-block";
-        wrap.dataset.search = block.title;
-        const h = document.createElement("h4");
-        h.className = "settings-section";
-        h.textContent = block.title;
-        wrap.append(h);
-        for (const knob of block.knobs) {
-          renderKnob(knob, wrap);
-        }
-        section.append(wrap);
-      }
+      appendSettingsSections(section, page.sections);
       return section;
     }
 
-    for (const block of page.sections ?? []) {
-      const wrap = document.createElement("div");
-      wrap.className = "settings-block";
-      wrap.dataset.search = block.title;
-      const h = document.createElement("h4");
-      h.className = "settings-section";
-      h.textContent = block.title;
-      wrap.append(h);
-      for (const knob of block.knobs) {
-        renderKnob(knob, wrap);
-      }
-      section.append(wrap);
-    }
+    appendSettingsSections(section, page.sections);
     return section;
   };
 

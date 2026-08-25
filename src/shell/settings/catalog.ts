@@ -25,11 +25,18 @@ export type KnobDef = {
   /** Stock inverseCheckbox: UI checked means !stored value. */
   inverse?: boolean;
   search?: string;
+  /**
+   * Outside RT v1 runtime. Kept in defaultKnobs / settings.json roundtrip;
+   * Settings dialog does not render the control.
+   */
+  v1Exclude?: boolean;
 };
 
 export type SectionDef = {
   title: string;
   knobs: KnobDef[];
+  /** Entire section hidden from Settings UI; knobs still feed defaultKnobs. */
+  v1Exclude?: boolean;
 };
 
 export type TableColumn = {
@@ -64,6 +71,19 @@ export type PageDef = {
 
 function opt(label: string, value: string): SelectOption {
   return { label, value };
+}
+
+/** Mark knob as v1-exclude (JSON defaults only, no Settings UI). */
+function vx(knob: KnobDef): KnobDef {
+  return { ...knob, v1Exclude: true };
+}
+
+/** Knobs shown in Settings UI for a section. */
+export function visibleSectionKnobs(section: SectionDef): KnobDef[] {
+  if (section.v1Exclude) {
+    return [];
+  }
+  return section.knobs.filter((k) => !k.v1Exclude);
 }
 
 function cb(
@@ -655,15 +675,19 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "1",
         "uiScale fontScale",
       ),
-      sel("tab-layout", "appearance.tabDirection", "Tab layout", TAB_LAYOUT, "Top"),
-      sel(
-        "tab-visibility",
-        "appearance.tabVisibility",
-        "Tab visibility",
-        TAB_VISIBILITY,
-        "AllTabs",
+      vx(
+        sel("tab-layout", "appearance.tabDirection", "Tab layout", TAB_LAYOUT, "Top"),
       ),
-      sel("tab-style", "appearance.tabStyle", "Tab style", TAB_STYLE, "Normal"),
+      vx(
+        sel(
+          "tab-visibility",
+          "appearance.tabVisibility",
+          "Tab visibility",
+          TAB_VISIBILITY,
+          "AllTabs",
+        ),
+      ),
+      vx(sel("tab-style", "appearance.tabStyle", "Tab style", TAB_STYLE, "Normal")),
       txt(
         "chat-font-family",
         "appearance.chatFontFamily",
@@ -705,11 +729,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Show message reply button",
         false,
       ),
-      cb(
-        "show-tab-close",
-        "appearance.showTabCloseButton",
-        "Show tab close button",
-        true,
+      vx(
+        cb(
+          "show-tab-close",
+          "appearance.showTabCloseButton",
+          "Show tab close button",
+          true,
+        ),
       ),
       cb(
         "always-on-top",
@@ -718,27 +744,33 @@ const GENERAL_SECTIONS: SectionDef[] = [
         false,
       ),
       cb("autorun", "behaviour.autorun", "Start with Windows", false),
-      cb(
-        "show-preferences-button",
-        "appearance.hidePreferencesButton",
-        "Show preferences button",
-        false,
-        undefined,
-        true,
+      vx(
+        cb(
+          "show-preferences-button",
+          "appearance.hidePreferencesButton",
+          "Show preferences button",
+          false,
+          undefined,
+          true,
+        ),
       ),
-      cb(
-        "show-user-button",
-        "appearance.hideUserButton",
-        "Show user button",
-        false,
-        undefined,
-        true,
+      vx(
+        cb(
+          "show-user-button",
+          "appearance.hideUserButton",
+          "Show user button",
+          false,
+          undefined,
+          true,
+        ),
       ),
-      cb(
-        "show-tab-live",
-        "appearance.showTabLive",
-        "Mark tabs with live channels",
-        true,
+      vx(
+        cb(
+          "show-tab-live",
+          "appearance.showTabLive",
+          "Mark tabs with live channels",
+          true,
+        ),
       ),
     ],
   },
@@ -1093,23 +1125,29 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Hide moderation actions",
         true,
       ),
-      cb(
-        "sm-hide-restricted",
-        "streamerMode.hideRestrictedUsers",
-        "Hide messages from restricted users",
-        true,
+      vx(
+        cb(
+          "sm-hide-restricted",
+          "streamerMode.hideRestrictedUsers",
+          "Hide messages from restricted users",
+          true,
+        ),
       ),
-      cb(
-        "sm-hide-blocked-terms",
-        "streamerMode.hideBlockedTermText",
-        "Hide blocked terms",
-        true,
+      vx(
+        cb(
+          "sm-hide-blocked-terms",
+          "streamerMode.hideBlockedTermText",
+          "Hide blocked terms",
+          true,
+        ),
       ),
-      cb(
-        "sm-hide-notes",
-        "streamerMode.hideUserNotes",
-        "Hide user notes",
-        true,
+      vx(
+        cb(
+          "sm-hide-notes",
+          "streamerMode.hideUserNotes",
+          "Hide user notes",
+          true,
+        ),
       ),
       cb(
         "sm-mute-mentions",
@@ -1153,12 +1191,14 @@ const GENERAL_SECTIONS: SectionDef[] = [
   },
   {
     title: "Beta",
+    v1Exclude: true,
     knobs: [
       cb("beta-updates", "misc.betaUpdates", "Receive beta updates", false),
     ],
   },
   {
     title: "Browser Integration",
+    v1Exclude: true,
     knobs: [
       cb(
         "attach-any-browser",
@@ -1211,6 +1251,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
   },
   {
     title: "Sound",
+    v1Exclude: true,
     knobs: [
       sel(
         "sound-backend",
@@ -1366,6 +1407,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
   },
   {
     title: "Overlay",
+    v1Exclude: true,
     knobs: [
       sel(
         "overlay-zoom",
@@ -1478,11 +1520,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Open links in incognito/private mode",
         false,
       ),
-      cb(
-        "restart-on-crash",
-        "misc.restartOnCrash",
-        "Restart on crash (requires restart)",
-        false,
+      vx(
+        cb(
+          "restart-on-crash",
+          "misc.restartOnCrash",
+          "Restart on crash (requires restart)",
+          false,
+        ),
       ),
       cb(
         "show-moderation-messages",
@@ -1536,11 +1580,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Automatically close reply thread popup when it loses focus",
         false,
       ),
-      cb(
-        "always-show-pinned",
-        "behaviour.alwaysShowPinnedMessage",
-        "Always show pinned channel message",
-        false,
+      vx(
+        cb(
+          "always-show-pinned",
+          "behaviour.alwaysShowPinnedMessage",
+          "Always show pinned channel message",
+          false,
+        ),
       ),
       cb(
         "lowercase-domains",
@@ -1636,11 +1682,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Highlight received inline whispers",
         false,
       ),
-      cb(
-        "auto-sub-threads",
-        "behaviour.autoSubToParticipatedThreads",
-        "Automatically subscribe to participated reply threads",
-        true,
+      vx(
+        cb(
+          "auto-sub-threads",
+          "behaviour.autoSubToParticipatedThreads",
+          "Automatically subscribe to participated reply threads",
+          true,
+        ),
       ),
       cb(
         "load-history",
@@ -1675,12 +1723,14 @@ const GENERAL_SECTIONS: SectionDef[] = [
         100000,
         100,
       ),
-      sel(
-        "blocked-term-automod",
-        "moderation.showBlockedTermAutomodMessages",
-        "Show blocked term automod messages",
-        SHOW_MOD_STATE,
-        "Always",
+      vx(
+        sel(
+          "blocked-term-automod",
+          "moderation.showBlockedTermAutomodMessages",
+          "Show blocked term automod messages",
+          SHOW_MOD_STATE,
+          "Always",
+        ),
       ),
       sel(
         "stack-timeouts",
@@ -1695,11 +1745,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Combine multiple bit tips into one",
         false,
       ),
-      cb(
-        "highlight-mentions-tab",
-        "highlighting.highlightMentions",
-        "Messages in /mentions highlights tab",
-        true,
+      vx(
+        cb(
+          "highlight-mentions-tab",
+          "highlighting.highlightMentions",
+          "Messages in /mentions highlights tab",
+          true,
+        ),
       ),
       cb(
         "strip-reply-mention",
@@ -1720,11 +1772,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Show send message button",
         false,
       ),
-      cb(
-        "disable-tab-rename",
-        "behaviour.disableTabRenamingOnClick",
-        "Disable renaming of tabs on double-click",
-        false,
+      vx(
+        cb(
+          "disable-tab-rename",
+          "behaviour.disableTabRenamingOnClick",
+          "Disable renaming of tabs on double-click",
+          false,
+        ),
       ),
       num(
         "shared-chat-refresh",
