@@ -1617,24 +1617,21 @@ fn event_user_id(event: &ChatEvent) -> Option<&str> {
 }
 
 fn twitch_block_knobs(shared: &Shared) -> (bool, BlockedUserShow) {
-    shared
+    let enabled = twitch_blocks::twitch_blocks_enabled(shared);
+    let show = shared
         .settings
         .lock()
         .ok()
-        .map(|inner| {
-            let knobs = &inner.data.knobs;
-            let enabled = knobs
-                .get("ignore.enableTwitchBlockedUsers")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            let show = knobs
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
                 .get("ignore.showBlockedUsersMessages")
                 .and_then(|v| v.as_str())
                 .map(BlockedUserShow::from_knob)
-                .unwrap_or(BlockedUserShow::Never);
-            (enabled, show)
         })
-        .unwrap_or((true, BlockedUserShow::Never))
+        .unwrap_or(BlockedUserShow::Never);
+    (enabled, show)
 }
 
 fn sanitize_logins(items: Vec<String>, label: &str) -> Result<Vec<String>, String> {

@@ -386,6 +386,46 @@ export function bindSettingsDialog(opts: {
   let activePage = "general";
   let saving = false;
   let loadReady = false;
+  let blockedUsersRefreshSeq = 0;
+
+  const refreshBlockedUsersList = async (): Promise<void> => {
+    const list = document.querySelector<HTMLUListElement>(
+      "#settings-blocked-users-list",
+    );
+    if (!list) {
+      return;
+    }
+    const seq = ++blockedUsersRefreshSeq;
+    try {
+      const logins = await invoke<string[]>("chat_blocked_users");
+      if (seq !== blockedUsersRefreshSeq) {
+        return;
+      }
+      list.replaceChildren();
+      if (!Array.isArray(logins) || logins.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "settings-blocked-users-empty";
+        empty.textContent = "No blocked users.";
+        list.append(empty);
+        return;
+      }
+      for (const login of logins) {
+        const li = document.createElement("li");
+        li.className = "settings-blocked-users-row";
+        li.textContent = login;
+        list.append(li);
+      }
+    } catch {
+      if (seq !== blockedUsersRefreshSeq) {
+        return;
+      }
+      list.replaceChildren();
+      const err = document.createElement("li");
+      err.className = "settings-blocked-users-empty";
+      err.textContent = "Could not load blocked users.";
+      list.append(err);
+    }
+  };
 
   const refreshCacheResolved = (): void => {
     const el = document.querySelector<HTMLElement>("#settings-cache-resolved");
@@ -815,9 +855,27 @@ export function bindSettingsDialog(opts: {
       block.append(wrap);
       return;
     }
+    if (knob.type === "blocked-list") {
+      const wrap = document.createElement("div");
+      wrap.className = "settings-blocked-users";
+      wrap.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      const caption = document.createElement("p");
+      caption.className = "settings-label-note";
+      caption.textContent = knob.label;
+      const list = document.createElement("ul");
+      list.className = "settings-blocked-users-list";
+      list.id = "settings-blocked-users-list";
+      list.setAttribute("aria-label", "Twitch blocked users");
+      wrap.append(caption, list);
+      block.append(wrap);
+      return;
+    }
     if (knob.type === "label") {
       const p = document.createElement("p");
       p.className = "settings-label-note";
+      if (knob.label.includes("\n")) {
+        p.classList.add("settings-label-note--pre");
+      }
       p.textContent = knob.label;
       p.dataset.search = `${knob.label} ${knob.search ?? ""}`;
       block.append(p);
@@ -1415,6 +1473,9 @@ export function bindSettingsDialog(opts: {
           btn.classList.add("is-active");
           panel.classList.add("is-active");
           panel.hidden = false;
+          if (page.id === "ignores" && tab.id === "users") {
+            void refreshBlockedUsersList();
+          }
         });
         tabBar.append(btn);
         panels.append(panel);

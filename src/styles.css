@@ -583,6 +583,42 @@ body,
   color: var(--c-muted);
 }
 
+.settings-label-note--pre {
+  white-space: pre-line;
+}
+
+.settings-blocked-users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-blocked-users-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.settings-blocked-users-row {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.settings-blocked-users-row:last-child {
+  border-bottom: none;
+}
+
+.settings-blocked-users-empty {
+  padding: 10px;
+  color: var(--c-muted);
+  font-size: 12px;
+}
+
 .settings-action-btn {
   align-self: flex-start;
   font-size: 12px;

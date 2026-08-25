@@ -999,6 +999,13 @@ pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPr
     Ok(super::pronouns::UserPronounsResult { pronouns })
 }
 
+/// Runtime Helix block list logins (Settings Ignores → Users). Empty when anon / unloaded.
+#[tauri::command]
+pub fn chat_blocked_users(state: tauri::State<'_, Shared>) -> Result<Vec<String>, ApiError> {
+    let guard = state.twitch_blocks.lock().map_err(|_| ApiError::internal("lock"))?;
+    Ok(guard.list_logins())
+}
+
 #[tauri::command]
 pub fn supports_incognito_links() -> bool {
     super::incognito::supports_incognito()

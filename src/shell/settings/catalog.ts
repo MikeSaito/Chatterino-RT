@@ -7,7 +7,8 @@ export type KnobType =
   | "number"
   | "color"
   | "button"
-  | "label";
+  | "label"
+  | "blocked-list";
 
 export type SelectOption = { label: string; value: string };
 
@@ -137,6 +138,15 @@ function lab(
   search?: string,
 ): KnobDef {
   return { id, path, label, type: "label", defaultValue, search };
+}
+
+function blockedList(
+  id: string,
+  path: string,
+  label: string,
+  search?: string,
+): KnobDef {
+  return { id, path, label, type: "blocked-list", defaultValue: "", search };
 }
 
 /** Zoom dropdown values (stock ZOOM_LEVELS). Value is scale string. */
@@ -1939,6 +1949,13 @@ export const SETTINGS_PAGES: PageDef[] = [
           {
             title: "Twitch blocked users",
             knobs: [
+              lab(
+                "blocked-users-hint",
+                "__label.twitchBlockedHint",
+                "/block <user> in chat blocks a user.\n/unblock <user> in chat unblocks a user.\nYou can also click on a user to open the usercard.",
+                "",
+                "block unblock usercard",
+              ),
               cb(
                 "enable-twitch-blocked",
                 "ignore.enableTwitchBlockedUsers",
@@ -1952,11 +1969,11 @@ export const SETTINGS_PAGES: PageDef[] = [
                 BLOCKED_SHOW,
                 "0",
               ),
-              lab(
+              blockedList(
                 "blocked-users-list",
-                "__label.twitchBlockedUsers",
-                "List of blocked users (Twitch block list is separate from ignore table above)",
-                "",
+                "__wired.twitchBlockedUsers",
+                "List of blocked users:",
+                "twitch blocked users list block unblock",
               ),
             ],
           },
@@ -2319,7 +2336,7 @@ export function defaultKnobs(): Record<string, boolean | string | number> {
     if (knob.path.startsWith("__wired.") || knob.path.startsWith("__action.") || knob.path.startsWith("__label.")) {
       continue;
     }
-    if (knob.type === "button" || knob.type === "label") {
+    if (knob.type === "button" || knob.type === "label" || knob.type === "blocked-list") {
       continue;
     }
     result[knob.path] = knob.defaultValue;

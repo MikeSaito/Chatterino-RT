@@ -99,6 +99,13 @@ impl TwitchBlockSet {
         self.user_ids.extend(page.user_ids.iter().cloned());
         self.logins.extend(page.logins.iter().cloned());
     }
+
+    /// Sorted display logins for Settings Ignores → Users (stock QListView).
+    pub fn list_logins(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.logins.iter().cloned().collect();
+        out.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        out
+    }
 }
 
 pub fn parse_blocks_page(value: &Value) -> TwitchBlockSet {
@@ -161,15 +168,14 @@ pub async fn load(
     true
 }
 
+/// Load Helix blocks for Settings UI and filter gate. Filtering still respects
+/// `ignore.enableTwitchBlockedUsers`; cache is kept when the knob is off so the
+/// Ignores → Users list matches stock (account blocks independent of checkbox).
 pub fn spawn_load(shared: &Shared) {
     let shared = shared.clone();
     tauri::async_runtime::spawn(async move {
         let mut delay = Duration::from_secs(2);
         loop {
-            if !twitch_blocks_enabled(&shared) {
-                clear_blocks(&shared);
-                return;
-            }
             let Some(user_id) = auth::ensure_twitch_user_id(&shared).await else {
                 clear_blocks(&shared);
                 return;
@@ -189,10 +195,6 @@ pub fn spawn_load(shared: &Shared) {
 }
 
 pub fn spawn_load_if_enabled(shared: &Shared) {
-    if !twitch_blocks_enabled(shared) {
-        clear_blocks(shared);
-        return;
-    }
     spawn_load(shared);
 }
 
@@ -315,6 +317,15 @@ mod tests {
         assert!(set.is_blocked(Some("99"), None));
         assert!(set.is_blocked(None, Some("BlockedUser")));
         assert!(!set.is_blocked(Some("1"), Some("other")));
+    }
+
+    #[test]
+    fn list_logins_sorted_case_insensitive() {
+        let mut set = TwitchBlockSet::default();
+        set.logins.insert("zeta".into());
+        set.logins.insert("alpha".into());
+        set.logins.insert("beta".into());
+        assert_eq!(set.list_logins(), vec!["alpha", "beta", "zeta"]);
     }
 
     #[test]
