@@ -16,42 +16,48 @@ export type WrapRange = {
   end: number;
 };
 
-/** Опции переноса под Size / Enable / Zero-width. */
+/** Advance of a text slice in layout pixels (BitmapFont or test stub). */
+export type MeasureAdvance = (slice: string) => number;
+
+/** Опции переноса: бюджет в px (Chatterino/Twitch proportional wrap). */
 export type WrapOptions = {
-  /** Мин. колонок на non-ZW эмодзи: max(codeLen, emoteMinCols). */
-  emoteMinCols?: number;
+  /**
+   * Мин. ширина non-ZW эмодзи-спрайта в px (Enable images on).
+   * С images off ширина = measureAdvance(code).
+   */
+  emoteMinPx?: number;
+  /** Ширина глифов; default: UTF-16 length (unit tests). */
+  measureAdvance?: MeasureAdvance;
   /** false: коды эмодзи видимы в тексте (Enable images off). */
   maskEmotes?: boolean;
   /** false: zeroWidth игнорируется. */
   enableZeroWidth?: boolean;
-  /** Схлопнуть один ASCII space между соседними non-ZW эмодзи (stock removeSpacesBetweenEmotes). */
+  /** Схлопнуть один ASCII space между соседними non-ZW эмодзи. */
   removeSpacesBetweenEmotes?: boolean;
   /** Диапазоны mention: в renderWrapped заменить пробелами (overlay BitmapText). */
   maskMentions?: readonly WrapRange[];
   /**
-   * Ширина первой строки сообщения (после time/badges/nick).
-   * Последующие строки — на всю ширину (как Twitch / Chatterino flow wrap).
+   * Ширина первой строки (после time/badges/nick).
+   * Последующие — maxWidthPx (Twitch / Chatterino flow wrap).
    */
-  firstLineMaxChars?: number;
+  firstLineMaxWidthPx?: number;
   /**
-   * Optional leading spaces on the first rendered line (tests / callers that
-   * keep a single BitmapText at x=0). MessageRing uses a split body instead.
+   * Optional leading spaces on the first rendered line (tests / single BitmapText).
+   * MessageRing uses a split body instead.
    */
   firstLineIndentCols?: number;
-  /**
-   * Leading spaces on lines 2+ when body.x is 0. Unused when continuation is a
-   * separate BitmapText at the left margin.
-   */
+  /** Leading spaces on lines 2+ when body.x is 0. */
   continuationIndentCols?: number;
 };
 
 type WrapCtx = {
-  emoteMinCols: number;
+  emoteMinPx: number;
+  measureAdvance: MeasureAdvance;
   maskEmotes: boolean;
   enableZeroWidth: boolean;
   removeSpacesBetweenEmotes: boolean;
   maskMentions: readonly WrapRange[];
-  /** Готовые строки: hug только если оба non-ZW на одной линии (stock same-line). */
+  /** Готовые строки: hug только если оба non-ZW на одной линии. */
   lines?: readonly WrapLine[];
 };
 
@@ -79,9 +85,14 @@ const graphemeSegmenter: GraphemeSegmenter | null = (() => {
   return new intl.Segmenter(undefined, { granularity: "grapheme" });
 })();
 
+function defaultAdvance(slice: string): number {
+  return slice.length;
+}
+
 function ctxFrom(opts?: WrapOptions): WrapCtx {
   return {
-    emoteMinCols: Math.max(0, Math.floor(opts?.emoteMinCols ?? 0)),
+    emoteMinPx: Math.max(0, Math.floor(opts?.emoteMinPx ?? 0)),
+    measureAdvance: opts?.measureAdvance ?? defaultAdvance,
     maskEmotes: opts?.maskEmotes !== false,
     maskMentions: opts?.maskMentions ?? [],
     enableZeroWidth: opts?.enableZeroWidth !== false,
@@ -91,15 +102,15 @@ function ctxFrom(opts?: WrapOptions): WrapCtx {
 
 export function wrapBody(
   text: string,
-  maxChars: number,
+  maxWidthPx: number,
   emotes: readonly WrapEmote[],
   opts?: WrapOptions,
 ): WrapLine[] {
   const ctx = ctxFrom(opts);
-  const restW = Math.max(1, Math.floor(maxChars));
+  const restW = Math.max(1, Math.floor(maxWidthPx));
   const firstW = Math.max(
     1,
-    Math.floor(opts?.firstLineMaxChars ?? restW),
+    Math.floor(opts?.firstLineMaxWidthPx ?? restW),
   );
   const n = text.length;
   if (n === 0) {
@@ -155,6 +166,7 @@ export function renderWrapped(
     .join("\n");
 }
 
+/** `col` = visual X in px from line start (not character columns). */
 export function indexToLineCol(
   text: string,
   lines: readonly WrapLine[],
@@ -173,6 +185,7 @@ export function indexToLineCol(
   return null;
 }
 
+/** `col` = visual X in px from line start. */
 export function lineColToIndex(
   text: string,
   lines: readonly WrapLine[],
@@ -205,19 +218,17 @@ export function lineColToIndex(
   return null;
 }
 
-const COLLAPSE_ELLIPSIS_COLS = 3;
-
 export type CollapsedWrap = {
   lines: WrapLine[];
   collapsed: boolean;
 };
 
-/** Stock collpseMessagesMinLines: keep first N wrap lines and trim last line for "...". */
+/** Stock collpseMessagesMinLines: keep first N wrap lines and trim last for "...". */
 export function collapseWrapLines(
   lines: readonly WrapLine[],
   maxLines: number,
   text: string,
-  lineWidth: number,
+  lineWidthPx: number,
   emotes: readonly WrapEmote[],
   opts?: WrapOptions,
 ): CollapsedWrap {
@@ -226,9 +237,10 @@ export function collapseWrapLines(
     return { lines: [...lines], collapsed: false };
   }
   const ctx = ctxFrom(opts);
+  const ellipsisPx = Math.max(1, ctx.measureAdvance("..."));
   const kept = lines.slice(0, maxLines);
   const last = kept[maxLines - 1];
-  const budget = Math.max(1, lineWidth - COLLAPSE_ELLIPSIS_COLS);
+  const budget = Math.max(1, lineWidthPx - ellipsisPx);
   const end = trimLineVisualEnd(text, last.start, last.end, budget, emotes, ctx);
   kept[maxLines - 1] = { start: last.start, end };
   return { lines: kept, collapsed: true };
@@ -257,22 +269,24 @@ function trimLineVisualEnd(
   if (end <= start) {
     return end;
   }
-  let cols = visualWidth(text, start, end, emotes, ctx);
   const row: WrapLine = { start, end };
-  while (cols > maxVisual && cols > 0) {
-    cols -= 1;
-  }
-  if (cols <= 0) {
-    return Math.min(end, nextUtf16(text, start));
-  }
-  const idx = lineColToIndex(text, [row], 0, cols, emotes, {
-    emoteMinCols: ctx.emoteMinCols,
+  const opts: WrapOptions = {
+    emoteMinPx: ctx.emoteMinPx,
+    measureAdvance: ctx.measureAdvance,
     maskEmotes: ctx.maskEmotes,
     enableZeroWidth: ctx.enableZeroWidth,
     removeSpacesBetweenEmotes: ctx.removeSpacesBetweenEmotes,
     maskMentions: ctx.maskMentions,
-  });
-  return idx ?? end;
+  };
+  const total = visualWidth(text, start, end, emotes, ctx);
+  if (total <= maxVisual) {
+    return end;
+  }
+  const idx = lineColToIndex(text, [row], 0, maxVisual, emotes, opts);
+  if (idx == null) {
+    return Math.min(end, nextUtf16(text, start));
+  }
+  return idx;
 }
 
 export function clipNick(nick: string, maxChars: number): string {
@@ -290,7 +304,7 @@ export function clipNick(nick: string, maxChars: number): string {
 }
 
 /**
- * Pixel X of wrap line content (body.x = 0 + leading spaces).
+ * Pixel X of wrap line content.
  * Line 0 after nick; later lines at continuation (timestamp / gutter).
  */
 export function wrapLineOriginX(
@@ -368,7 +382,7 @@ function takeWidth(
   while (i < limit) {
     const step = advanceUnit(text, i, limit, emotes, ctx, { used, width });
     const w = step.width;
-    if (w > 0 && used + w > width && used > 0) {
+    if (w > 0 && used + w > width + 1e-3 && used > 1e-6) {
       break;
     }
     used += w;
@@ -398,6 +412,53 @@ function visualWidth(
   return used;
 }
 
+function spacesForPx(px: number, ctx: WrapCtx): string {
+  const target = Math.max(1, px);
+  const sw = ctx.measureAdvance(" ");
+  if (!(sw > 0)) {
+    return " ".repeat(Math.max(1, Math.round(target)));
+  }
+  const widthOf = (n: number): number =>
+    ctx.measureAdvance(" ".repeat(Math.max(0, n)));
+  let n = Math.max(1, Math.round(target / sw));
+  while (n > 1 && Math.abs(widthOf(n - 1) - target) <= Math.abs(widthOf(n) - target)) {
+    n -= 1;
+  }
+  while (Math.abs(widthOf(n + 1) - target) < Math.abs(widthOf(n) - target)) {
+    n += 1;
+  }
+  return " ".repeat(Math.max(1, n));
+}
+
+/** Ideal emote hole (sprite / code); layout width = measured mask spaces. */
+function emoteIdealPx(
+  span: WrapEmote,
+  text: string,
+  ctx: WrapCtx,
+): number {
+  const code = text.slice(span.start, span.end);
+  const codeW = Math.max(0, ctx.measureAdvance(code));
+  let w = ctx.maskEmotes
+    ? Math.max(Math.max(1, ctx.emoteMinPx), codeW)
+    : Math.max(1, codeW);
+  if (span.bitsAmount != null && span.bitsAmount > 0) {
+    w += Math.max(0, ctx.measureAdvance(` ${span.bitsAmount}`));
+  }
+  return w;
+}
+
+function emoteWidth(
+  span: WrapEmote,
+  text: string,
+  ctx: WrapCtx,
+): number {
+  if (!ctx.maskEmotes) {
+    return emoteIdealPx(span, text, ctx);
+  }
+  // Same advance as maskSlice spaces — no ceil drift vs sprites/hit-test.
+  return ctx.measureAdvance(spacesForPx(emoteIdealPx(span, text, ctx), ctx));
+}
+
 function maskSlice(
   text: string,
   start: number,
@@ -417,13 +478,11 @@ function maskSlice(
       if (mention) {
         const to = Math.min(mention.end, end);
         if (i < to) {
-          const cols = visualWidth(text, i, to, emotes, {
+          const px = visualWidth(text, i, to, emotes, {
             ...ctx,
             maskMentions: [],
           });
-          for (let c = 0; c < cols; c += 1) {
-            kept.push(" ");
-          }
+          kept.push(spacesForPx(px, ctx));
         }
         i = to;
         continue;
@@ -447,10 +506,7 @@ function maskSlice(
     }
     const span = emoteAt(emotes, i, ctx);
     if (span && i === span.start) {
-      const cols = emoteCols(span, ctx);
-      for (let c = 0; c < cols; c += 1) {
-        kept.push(" ");
-      }
+      kept.push(spacesForPx(emoteIdealPx(span, text, ctx), ctx));
       i = span.end;
       continue;
     }
@@ -538,27 +594,41 @@ function advanceUnit(
   ctx: WrapCtx,
   budget?: WrapBudget,
 ): { next: number; width: number } {
+  if (ctx.maskMentions.length > 0) {
+    const mention = mentionAt(ctx.maskMentions, i);
+    if (mention && i >= mention.start && i < mention.end) {
+      if (i !== mention.start) {
+        return { next: Math.min(limit, mention.end), width: 0 };
+      }
+      const to = Math.min(mention.end, limit);
+      const ideal = visualWidth(text, mention.start, to, emotes, {
+        ...ctx,
+        maskMentions: [],
+      });
+      return {
+        next: to,
+        width: ctx.measureAdvance(spacesForPx(ideal, ctx)),
+      };
+    }
+  }
   if (collapsed(text, emotes, i, ctx, budget)) {
     return { next: Math.min(limit, nextUtf16(text, i)), width: 0 };
   }
   const span = emoteAt(emotes, i, ctx);
   if (span && i === span.start) {
-    return { next: Math.min(limit, span.end), width: emoteCols(span, ctx) };
+    return {
+      next: Math.min(limit, span.end),
+      width: emoteWidth(span, text, ctx),
+    };
   }
   if (span) {
     return { next: Math.min(limit, span.end), width: 0 };
   }
   const next = nextUnit(text, i, limit);
-  return { next, width: next - i };
-}
-
-function emoteCols(span: WrapEmote, ctx: WrapCtx): number {
-  const codeLen = Math.max(1, span.end - span.start);
-  let cols = Math.max(codeLen, ctx.emoteMinCols);
-  if (span.bitsAmount != null && span.bitsAmount > 0) {
-    cols += ` ${span.bitsAmount}`.length;
-  }
-  return cols;
+  return {
+    next,
+    width: Math.max(0, ctx.measureAdvance(text.slice(i, next))),
+  };
 }
 
 function emoteAt(
@@ -674,7 +744,7 @@ function emotesShareLine(
   return false;
 }
 
-/** Один ASCII space между non-ZW (или после ZW-слоя на base) — stock removeSpacesBetweenEmotes. */
+/** Один ASCII space между non-ZW (или после ZW-слоя на base). */
 function hugSpace(
   text: string,
   emotes: readonly WrapEmote[],
@@ -698,7 +768,7 @@ function hugSpace(
       return false;
     }
   } else if (budget) {
-    if (budget.used + emoteCols(next, ctx) > budget.width) {
+    if (budget.used + emoteWidth(next, text, ctx) > budget.width) {
       return false;
     }
   }

@@ -1946,35 +1946,29 @@ export class MessageRing {
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const fullCols = maxBodyChars(
-      this.app.screen.width,
-      contOriginX,
-      this.charWidth,
-    );
-    const firstCols = maxBodyChars(
-      this.app.screen.width,
-      firstOriginX,
-      this.charWidth,
-    );
+    const edgePad = 8;
+    const fullWidthPx = Math.max(1, Math.floor(paneW - contOriginX - edgePad));
+    const firstWidthPx = Math.max(1, Math.floor(paneW - firstOriginX - edgePad));
     if (showReply) {
       slot.replyHeader.x = contOriginX;
-      slot.replyHeader.text = clipReplyHeader(
+      slot.replyHeader.text = clipReplyHeaderToWidth(
         formatReplyHeader(slot.replyToLogin, slot.replyToText),
-        Math.max(8, fullCols),
+        fullWidthPx,
+        (s) => this.measureBitmapTextWidth("ChatFont", s),
       );
       dirtyBitmapText(slot.replyHeader);
     }
-    const layoutOpts = this.wrapOpts(slot, undefined, firstCols);
+    const layoutOpts = this.wrapOpts(slot, undefined, firstWidthPx);
     const wrapped = wrapBody(
       slot.bodyRaw,
-      fullCols,
+      fullWidthPx,
       slot.spansRaw,
       layoutOpts,
     );
     const maxLines =
       slot.collapsible && !slot.expanded ? this.collapseMessagesMinLines : 0;
     const collapseWidth =
-      maxLines === 1 ? firstCols : fullCols;
+      maxLines === 1 ? firstWidthPx : fullWidthPx;
     const { lines, collapsed } = collapseWrapLines(
       wrapped,
       maxLines,
@@ -1995,7 +1989,7 @@ export class MessageRing {
       this.boldUsernames || this.colorUsernames
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
-    const renderOpts = this.wrapOpts(slot, overlayMentions, firstCols);
+    const renderOpts = this.wrapOpts(slot, overlayMentions, firstWidthPx);
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
     slot.body.text = withCollapsedEllipsis(
@@ -2064,8 +2058,7 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x =
-        wrapLineOriginX(firstOriginX, pos.line, contOriginX) +
-        pos.col * this.charWidth;
+        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
       spr.y = contentY + 1 + pos.line * this.lineHeight;
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, emoteSize);
@@ -2202,13 +2195,20 @@ export class MessageRing {
         if (!start || !end || start.line !== end.line) {
           continue;
         }
-        const cols = Math.max(1, end.col - start.col + 1);
+        const mentionFont =
+          this.boldUsernames ? "ChatNickFont" : "ChatFont";
+        const mentionW = Math.max(
+          1,
+          this.measureBitmapTextWidth(
+            mentionFont,
+            slot.bodyRaw.slice(a, b),
+          ),
+        );
         slot.mentions
           .rect(
-            wrapLineOriginX(firstOriginX, start.line, contOriginX) +
-              start.col * this.charWidth,
+            wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col,
             contentY + start.line * this.lineHeight,
-            cols * this.charWidth,
+            mentionW,
             this.lineHeight,
           )
           .fill({ color: 0x5c65f9, alpha: 0.35 });
@@ -2265,8 +2265,7 @@ export class MessageRing {
             ? cached
             : this.themeFills.body;
         mt.x =
-          wrapLineOriginX(firstOriginX, pos.line, contOriginX) +
-          pos.col * this.charWidth;
+          wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
         mt.y = contentY + pos.line * this.lineHeight;
         mt.visible = true;
         dirtyBitmapText(mt);
@@ -2657,12 +2656,12 @@ export class MessageRing {
     if (localX < originX) {
       return null;
     }
-    const col = Math.floor((localX - originX) / this.charWidth);
+    const xPx = localX - originX;
     return lineColToIndex(
       slot.bodyRaw,
       slot.wrapLines,
       bodyLine,
-      col,
+      xPx,
       slot.spansRaw,
       this.wrapOpts(slot),
     );
@@ -2884,25 +2883,36 @@ export class MessageRing {
   private wrapOpts(
     slot?: Slot,
     maskMentions?: readonly MentionSpan[],
-    firstLineMaxChars?: number,
+    firstLineMaxWidthPx?: number,
   ): WrapOptions {
     const images = this.enableEmoteImages;
-    const emoteMinCols =
-      images && this.charWidth > 0
-        ? Math.max(1, Math.ceil(this.emotePixelSize() / this.charWidth))
-        : 0;
+    const emoteMinPx = images ? this.emotePixelSize() : 0;
     const chrome = this.boldUsernames || this.colorUsernames;
     const mentions =
       slot && chrome && slot.mentionSpans.length > 0
         ? (maskMentions ?? slot.mentionSpans)
         : undefined;
+    const cache = new Map<string, number>();
+    const measureAdvance = (slice: string): number => {
+      if (!slice) {
+        return 0;
+      }
+      const hit = cache.get(slice);
+      if (hit !== undefined) {
+        return hit;
+      }
+      const w = this.measureBitmapTextWidth("ChatFont", slice);
+      cache.set(slice, w);
+      return w;
+    };
     return {
-      emoteMinCols,
+      emoteMinPx,
+      measureAdvance,
       maskEmotes: images,
       enableZeroWidth: images && this.enableZeroWidthEmotes,
       removeSpacesBetweenEmotes: images && this.removeSpacesBetweenEmotes,
       maskMentions: mentions,
-      firstLineMaxChars,
+      firstLineMaxWidthPx,
     };
   }
 
@@ -3192,10 +3202,6 @@ function badgeTooltipText(set: string): string {
     .join(" ");
 }
 
-function maxBodyChars(paneWidth: number, bodyX: number, charWidth: number): number {
-  return Math.floor(Math.max(1, paneWidth - bodyX - 8) / charWidth);
-}
-
 /** Stock/Twitch-style reply chrome above the message (ChatMediumSmall). */
 function formatReplyHeader(login: string, text: string): string {
   const name = login.trim() || "unknown";
@@ -3209,11 +3215,31 @@ function formatReplyHeader(login: string, text: string): string {
   return `Replying to @${name}: ${snip}`;
 }
 
-function clipReplyHeader(text: string, maxCols: number): string {
-  const limit = Math.max(4, Math.floor(maxCols));
-  const chars = Array.from(text);
-  if (chars.length <= limit) {
+function clipReplyHeaderToWidth(
+  text: string,
+  maxPx: number,
+  measure: (s: string) => number,
+): string {
+  const limit = Math.max(4, Math.floor(maxPx));
+  if (measure(text) <= limit) {
     return text;
   }
-  return `${chars.slice(0, Math.max(1, limit - 3)).join("")}...`;
+  const ellipsis = "...";
+  const ellipsisW = measure(ellipsis);
+  const budget = Math.max(0, limit - ellipsisW);
+  const chars = Array.from(text);
+  let lo = 0;
+  let hi = chars.length;
+  let best = ellipsis;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const candidate = chars.slice(0, mid).join("");
+    if (measure(candidate) <= budget) {
+      best = `${candidate}${ellipsis}`;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
 }

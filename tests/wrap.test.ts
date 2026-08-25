@@ -10,18 +10,21 @@ import {
 } from "../src/chat/wrap.ts";
 import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
 
+/** Deterministic px grid: 1 code unit = 1 px (BitmapFont stub). */
+const adv = (s: string) => s.length;
+
 const text = "Kappa cvHazmat extra";
 const emotes = [
   { start: 0, end: 5, zeroWidth: false },
   { start: 6, end: 14, zeroWidth: true },
 ];
 
-const lines = wrapBody(text, 80, emotes);
+const lines = wrapBody(text, 80, emotes, { measureAdvance: adv });
 if (lines.length !== 1 || lines[0].start !== 0 || lines[0].end !== text.length) {
   throw new Error("expected a single wrap line");
 }
 
-const rendered = renderWrapped(text, lines, emotes);
+const rendered = renderWrapped(text, lines, emotes, { measureAdvance: adv });
 if (rendered.includes("cvHazmat")) {
   throw new Error("zero-width code must not occupy the bitmap line");
 }
@@ -35,45 +38,54 @@ if (rendered.length !== 11) {
   throw new Error(`collapsed overlay should be 11 visible units, got ${rendered.length}`);
 }
 
-const extra = indexToLineCol(text, lines, 15, emotes);
+const extra = indexToLineCol(text, lines, 15, emotes, { measureAdvance: adv });
 if (!extra || extra.line !== 0 || extra.col !== 6) {
   throw new Error(`extra should start at visual col 6, got ${JSON.stringify(extra)}`);
 }
 
-const hit = lineColToIndex(text, lines, 0, 6, emotes);
+const hit = lineColToIndex(text, lines, 0, 6, emotes, { measureAdvance: adv });
 if (hit !== 15) {
   throw new Error(`col 6 should map back to extra, got ${hit}`);
 }
 
 const emojiText = "ab😀c";
-const emojiLines = wrapBody(emojiText, 80, []);
-const inner = lineColToIndex(emojiText, emojiLines, 0, 3, []);
+const emojiLines = wrapBody(emojiText, 80, [], { measureAdvance: adv });
+const inner = lineColToIndex(emojiText, emojiLines, 0, 3, [], {
+  measureAdvance: adv,
+});
 if (inner !== 2) {
   throw new Error(`wide grapheme inner col should map to start, got ${inner}`);
 }
 
-const narrow = wrapBody(text, 6, emotes);
+const narrow = wrapBody(text, 6, emotes, { measureAdvance: adv });
 if (narrow.length < 2) {
   throw new Error("width 6 should wrap after stacked emote and its trailing space");
 }
 
-const wide = wrapBody(text, 80, emotes, { emoteMinCols: 8 });
-const widePos = indexToLineCol(text, wide, 15, emotes, { emoteMinCols: 8 });
+const wideOpts = { measureAdvance: adv, emoteMinPx: 8 } as const;
+const wide = wrapBody(text, 80, emotes, wideOpts);
+const widePos = indexToLineCol(text, wide, 15, emotes, wideOpts);
 if (!widePos || widePos.col !== 9) {
-  throw new Error(`emoteMinCols 8 should place extra at col 9, got ${JSON.stringify(widePos)}`);
+  throw new Error(`emoteMinPx 8 should place extra at col 9, got ${JSON.stringify(widePos)}`);
 }
-const wideMask = renderWrapped(text, wide, emotes, { emoteMinCols: 8 });
+const wideMask = renderWrapped(text, wide, emotes, wideOpts);
 if (wideMask.length !== 14) {
-  throw new Error(`masked line with emoteMinCols 8 should be 14, got ${wideMask.length}`);
+  throw new Error(`masked line with emoteMinPx 8 should be 14, got ${wideMask.length}`);
 }
 
-const noMask = renderWrapped(text, lines, emotes, { maskEmotes: false });
+const noMask = renderWrapped(text, lines, emotes, {
+  measureAdvance: adv,
+  maskEmotes: false,
+});
 if (!noMask.includes("Kappa") || !noMask.includes("cvHazmat")) {
   throw new Error("maskEmotes false must keep emote codes visible");
 }
 
-// Как ring.wrapOpts: images off ⇒ ZW off, иначе visual ≠ bitmap length.
-const imagesOff = { maskEmotes: false, enableZeroWidth: false } as const;
+const imagesOff = {
+  measureAdvance: adv,
+  maskEmotes: false,
+  enableZeroWidth: false,
+} as const;
 const imagesOffLines = wrapBody(text, 80, emotes, imagesOff);
 const imagesOffMask = renderWrapped(text, imagesOffLines, emotes, imagesOff);
 const imagesOffExtra = indexToLineCol(text, imagesOffLines, 15, emotes, imagesOff);
@@ -88,12 +100,21 @@ if (imagesOffMask.length !== text.length) {
   );
 }
 
-const noZw = wrapBody(text, 80, emotes, { enableZeroWidth: false });
-const noZwRender = renderWrapped(text, noZw, emotes, { enableZeroWidth: false });
+const noZw = wrapBody(text, 80, emotes, {
+  measureAdvance: adv,
+  enableZeroWidth: false,
+});
+const noZwRender = renderWrapped(text, noZw, emotes, {
+  measureAdvance: adv,
+  enableZeroWidth: false,
+});
 if (!noZwRender.includes(" ") || noZwRender.length <= 11) {
   throw new Error("ZW off should reserve columns for overlay code");
 }
-const noZwExtra = indexToLineCol(text, noZw, 15, emotes, { enableZeroWidth: false });
+const noZwExtra = indexToLineCol(text, noZw, 15, emotes, {
+  measureAdvance: adv,
+  enableZeroWidth: false,
+});
 if (!noZwExtra || noZwExtra.col !== 15) {
   throw new Error(`ZW off extra at col 15, got ${JSON.stringify(noZwExtra)}`);
 }
@@ -132,7 +153,7 @@ if (!appleMissing.includes("/twitter/64/2640-fe0f.png")) {
 
 const mentionText = "hi @verylongusernameok bye";
 const mentionSpan = { start: 3, end: 22 };
-const mentionOpts = { maskMentions: [mentionSpan] };
+const mentionOpts = { measureAdvance: adv, maskMentions: [mentionSpan] };
 const mentionLines = wrapBody(mentionText, 10, [], mentionOpts);
 const mentionMask = renderWrapped(mentionText, mentionLines, [], mentionOpts);
 if (mentionMask.includes("@") || mentionMask.includes("verylong")) {
@@ -151,7 +172,7 @@ if (mentionMaskUnits !== mentionVisual) {
 
 const snapText = "aaaaaaaa @bob";
 const snapSpan = { start: 9, end: 13 };
-const snapOpts = { maskMentions: [snapSpan] };
+const snapOpts = { measureAdvance: adv, maskMentions: [snapSpan] };
 const snapLines = wrapBody(snapText, 10, [], snapOpts);
 const mid = snapLines.find((l) => l.start > snapSpan.start && l.start < snapSpan.end);
 if (mid) {
@@ -163,9 +184,13 @@ const hugEmotes = [
   { start: 0, end: 5, zeroWidth: false },
   { start: 6, end: 14, zeroWidth: false },
 ];
-const hugOff = wrapBody(hugText, 80, hugEmotes);
-const hugOffMask = renderWrapped(hugText, hugOff, hugEmotes);
-const hugOffSecond = indexToLineCol(hugText, hugOff, 6, hugEmotes);
+const hugOff = wrapBody(hugText, 80, hugEmotes, { measureAdvance: adv });
+const hugOffMask = renderWrapped(hugText, hugOff, hugEmotes, {
+  measureAdvance: adv,
+});
+const hugOffSecond = indexToLineCol(hugText, hugOff, 6, hugEmotes, {
+  measureAdvance: adv,
+});
 if (!hugOffSecond || hugOffSecond.col !== 6) {
   throw new Error(
     `hug off: second emote at col 6, got ${JSON.stringify(hugOffSecond)}`,
@@ -177,7 +202,10 @@ if (hugOffMask.length !== hugText.length) {
   );
 }
 
-const hugOnOpts = { removeSpacesBetweenEmotes: true } as const;
+const hugOnOpts = {
+  measureAdvance: adv,
+  removeSpacesBetweenEmotes: true,
+} as const;
 const hugOn = wrapBody(hugText, 80, hugEmotes, hugOnOpts);
 const hugOnMask = renderWrapped(hugText, hugOn, hugEmotes, hugOnOpts);
 const hugOnSecond = indexToLineCol(hugText, hugOn, 6, hugEmotes, hugOnOpts);
@@ -201,7 +229,10 @@ const doubleEmotes = [
   { start: 0, end: 5, zeroWidth: false },
   { start: 7, end: 15, zeroWidth: false },
 ];
-const doubleOpts = { removeSpacesBetweenEmotes: true } as const;
+const doubleOpts = {
+  measureAdvance: adv,
+  removeSpacesBetweenEmotes: true,
+} as const;
 const doubleLines = wrapBody(doubleText, 80, doubleEmotes, doubleOpts);
 const doubleSecond = indexToLineCol(
   doubleText,
@@ -222,9 +253,18 @@ const hugZwEmotes = [
   { start: 6, end: 14, zeroWidth: true },
   { start: 15, end: 23, zeroWidth: false },
 ];
-const hugZwOpts = { removeSpacesBetweenEmotes: true } as const;
+const hugZwOpts = {
+  measureAdvance: adv,
+  removeSpacesBetweenEmotes: true,
+} as const;
 const hugZwLines = wrapBody(hugZwText, 80, hugZwEmotes, hugZwOpts);
-const hugZwPos = indexToLineCol(hugZwText, hugZwLines, 15, hugZwEmotes, hugZwOpts);
+const hugZwPos = indexToLineCol(
+  hugZwText,
+  hugZwLines,
+  15,
+  hugZwEmotes,
+  hugZwOpts,
+);
 if (!hugZwPos || hugZwPos.col !== 5) {
   throw new Error(
     `ZW layer: hug space after stack, Pog at col 5, got ${JSON.stringify(hugZwPos)}`,
@@ -236,8 +276,9 @@ if (hugZwMask.includes("cvHazmat")) {
 }
 
 const hugWrapOpts = {
+  measureAdvance: adv,
   removeSpacesBetweenEmotes: true,
-  emoteMinCols: 7,
+  emoteMinPx: 7,
 } as const;
 const hugWrapText = "Kappa PogChamp";
 const hugWrapEmotes = [
@@ -248,7 +289,12 @@ const hugWrapLines = wrapBody(hugWrapText, 10, hugWrapEmotes, hugWrapOpts);
 if (hugWrapLines.length < 2) {
   throw new Error("narrow wrap should put second emote on next line");
 }
-const hugWrapMask = renderWrapped(hugWrapText, hugWrapLines, hugWrapEmotes, hugWrapOpts);
+const hugWrapMask = renderWrapped(
+  hugWrapText,
+  hugWrapLines,
+  hugWrapEmotes,
+  hugWrapOpts,
+);
 const hugWrapFirst = hugWrapMask.split("\n")[0] ?? "";
 if (hugWrapFirst.length !== 8) {
   throw new Error(
@@ -269,12 +315,19 @@ if (!hugWrapSecond || hugWrapSecond.line !== 1 || hugWrapSecond.col !== 0) {
 }
 
 const hugImagesOff = {
+  measureAdvance: adv,
   removeSpacesBetweenEmotes: true,
   maskEmotes: false,
   enableZeroWidth: false,
 } as const;
 const hugOffLines = wrapBody(hugText, 80, hugEmotes, hugImagesOff);
-const hugOffPos = indexToLineCol(hugText, hugOffLines, 6, hugEmotes, hugImagesOff);
+const hugOffPos = indexToLineCol(
+  hugText,
+  hugOffLines,
+  6,
+  hugEmotes,
+  hugImagesOff,
+);
 if (!hugOffPos || hugOffPos.col !== 6) {
   throw new Error(
     `images off must not hug spaces, got ${JSON.stringify(hugOffPos)}`,
@@ -290,28 +343,32 @@ if (isScrollbarMarkColor("red") || isScrollbarMarkColor("#fff")) {
 }
 
 const longText = "alpha beta gamma delta epsilon zeta eta theta iota";
-const longLines = wrapBody(longText, 10, []);
+const longLines = wrapBody(longText, 10, [], { measureAdvance: adv });
 if (longLines.length < 3) {
   throw new Error("expected multi-line wrap for collapse test");
 }
-const collapsed = collapseWrapLines(longLines, 2, longText, 10, []);
+const collapsed = collapseWrapLines(longLines, 2, longText, 10, [], {
+  measureAdvance: adv,
+});
 if (!collapsed.collapsed || collapsed.lines.length !== 2) {
   throw new Error(`expected 2 collapsed lines, got ${JSON.stringify(collapsed)}`);
 }
 const collapsedRender = withCollapsedEllipsis(
-  renderWrapped(longText, collapsed.lines, []),
+  renderWrapped(longText, collapsed.lines, [], { measureAdvance: adv }),
   collapsed.collapsed,
 );
 if (!collapsedRender.endsWith("...")) {
   throw new Error(`collapsed render must end with ellipsis, got ${JSON.stringify(collapsedRender)}`);
 }
-const passthrough = collapseWrapLines(longLines, 0, longText, 10, []);
+const passthrough = collapseWrapLines(longLines, 0, longText, 10, [], {
+  measureAdvance: adv,
+});
 if (passthrough.collapsed || passthrough.lines.length !== longLines.length) {
   throw new Error("maxLines 0 must not collapse");
 }
 
 const unbroken = "ХАХАХАХАХАХАХАХАХАХАХАХАХАХАХАХА";
-const unbrokenLines = wrapBody(unbroken, 8, []);
+const unbrokenLines = wrapBody(unbroken, 8, [], { measureAdvance: adv });
 if (unbrokenLines.length < 3) {
   throw new Error(
     `unbroken Cyrillic must wrap by grapheme, got ${unbrokenLines.length} lines`,
@@ -319,10 +376,11 @@ if (unbrokenLines.length < 3) {
 }
 
 const indented = wrapBody("abcdefghijklmnop", 10, [], {
-  firstLineMaxChars: 4,
+  measureAdvance: adv,
+  firstLineMaxWidthPx: 4,
 });
 if (indented.length < 2) {
-  throw new Error("firstLineMaxChars must force early wrap");
+  throw new Error("firstLineMaxWidthPx must force early wrap");
 }
 if (indented[0].end - indented[0].start > 4) {
   throw new Error(
@@ -371,6 +429,32 @@ if (clippedTiny !== "..") {
 const clippedOk = clipNick("ab", 10);
 if (clippedOk !== "ab") {
   throw new Error("short nick must not clip");
+}
+
+// Pixel budget: narrow glyphs fit more chars than max(M) grid would allow.
+const narrowGlyph = (s: string) => s.length * 4;
+const longNarrow = "aaaaaaaaaaaaaaaaaaaaaaaa"; // 24*4=96px
+const roomy = wrapBody(longNarrow, 100, [], { measureAdvance: narrowGlyph });
+if (roomy.length !== 1) {
+  throw new Error(
+    `wide px budget must keep narrow text on one line, got ${roomy.length}`,
+  );
+}
+const tight = wrapBody(longNarrow, 20, [], { measureAdvance: narrowGlyph });
+if (tight.length < 4) {
+  throw new Error(
+    `tight px budget must wrap narrow text, got ${tight.length}`,
+  );
+}
+
+const firstNarrow = wrapBody("abcdefghij", 100, [], {
+  measureAdvance: adv,
+  firstLineMaxWidthPx: 3,
+});
+if (firstNarrow.length < 2 || firstNarrow[0].end !== 3) {
+  throw new Error(
+    `firstLineMaxWidthPx 3 expected end=3, got ${JSON.stringify(firstNarrow[0])}`,
+  );
 }
 
 console.log("wrap tests ok");
