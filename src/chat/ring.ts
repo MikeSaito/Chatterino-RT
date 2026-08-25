@@ -66,6 +66,7 @@ import {
   renderWrapped,
   withCollapsedEllipsis,
   wrapBody,
+  wrapLineOriginX,
   type WrapLine,
   type WrapOptions,
 } from "./wrap";
@@ -99,6 +100,7 @@ type Slot = {
   time: BitmapText;
   nick: BitmapText;
   body: BitmapText;
+  replyHeader: BitmapText;
   mentionTexts: BitmapText[];
   bitsLabel: BitmapText;
   emotes: Sprite[];
@@ -110,7 +112,7 @@ type Slot = {
   modBtnHits: Array<{ x0: number; x1: number; action: string }>;
   msgId: string;
   login: string;
-  /** Текст с префиксами до host-display transform; обновляется при reply-prefix. */
+  /** Текст до host-display transform (whisper/action lead). */
   bodySource: string;
   /** Painted body (may lowercase link hosts). */
   bodyRaw: string;
@@ -123,6 +125,12 @@ type Slot = {
   mentionSpans: MentionSpan[];
   wrapLines: WrapLine[];
   lineCount: number;
+  /** Pixel origin of first body wrap line (ceil-aligned to char grid). */
+  bodyIndent: number;
+  /** Pixel origin of wrap lines 2+ (under timestamp / after mod gutter). */
+  bodyContIndent: number;
+  /** Rows occupied by reply header above the main line. */
+  replyRows: number;
   startRow: number;
   highlightColor: string;
   disabled: boolean;
@@ -142,6 +150,7 @@ type Slot = {
   nickDisplay: string;
   useNickStyle: boolean;
   replyToLogin: string;
+  replyToText: string;
   isAction: boolean;
   /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
   leadLen: number;
@@ -586,11 +595,6 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
-    for (const slot of this.slots) {
-      if (slot.msgId) {
-        this.reapplyReplyPrefix(slot);
-      }
-    }
     this.layout();
   }
 
@@ -903,6 +907,11 @@ export class MessageRing {
       slot.nick.style.fontSize = this.fontSize;
       slot.body.style.fontSize = this.fontSize;
       slot.body.style.lineHeight = this.lineHeight;
+      slot.replyHeader.style.fontSize = Math.max(
+        8,
+        Math.round(this.fontSize * 0.85),
+      );
+      slot.replyHeader.style.fill = this.themeFills.timestamp;
       for (const mt of slot.mentionTexts) {
         mt.style.fontSize = this.fontSize;
       }
@@ -914,6 +923,7 @@ export class MessageRing {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
+        dirtyBitmapText(slot.replyHeader);
         for (const mt of slot.mentionTexts) {
           dirtyBitmapText(mt);
         }
@@ -1088,6 +1098,16 @@ export class MessageRing {
           lineHeight: this.lineHeight,
         },
       });
+      const replyHeader = new BitmapText({
+        text: "",
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: Math.max(8, Math.round(this.fontSize * 0.85)),
+          fill: this.themeFills.timestamp,
+        },
+      });
+      replyHeader.visible = false;
+      replyHeader.eventMode = "none";
       const emotes: Sprite[] = [];
       for (let e = 0; e < EMOTE_SLOTS_PER_ROW; e += 1) {
         const spr = new Sprite(Texture.EMPTY);
@@ -1147,6 +1167,7 @@ export class MessageRing {
         hl,
         mentions,
         ...modBtns,
+        replyHeader,
         time,
         nick,
         body,
@@ -1164,6 +1185,7 @@ export class MessageRing {
         time,
         nick,
         body,
+        replyHeader,
         mentionTexts,
         bitsLabel,
         emotes,
@@ -1186,6 +1208,9 @@ export class MessageRing {
         mentionSpans: [],
         wrapLines: [{ start: 0, end: 0 }],
         lineCount: 1,
+        bodyIndent: 0,
+        bodyContIndent: 0,
+        replyRows: 0,
         startRow: 0,
         highlightColor: "",
         disabled: false,
@@ -1200,6 +1225,7 @@ export class MessageRing {
         nickDisplay: "",
         useNickStyle: false,
         replyToLogin: "",
+        replyToText: "",
         isAction: false,
         leadLen: 0,
       };
@@ -1422,6 +1448,9 @@ export class MessageRing {
     slot.mentionSpans = [];
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.lineCount = 1;
+    slot.bodyIndent = 0;
+    slot.bodyContIndent = 0;
+    slot.replyRows = 0;
     slot.startRow = 0;
     slot.highlightColor = "";
     slot.disabled = false;
@@ -1436,8 +1465,11 @@ export class MessageRing {
     slot.nickDisplay = "";
     slot.useNickStyle = false;
     slot.replyToLogin = "";
+    slot.replyToText = "";
     slot.isAction = false;
     slot.leadLen = 0;
+    slot.replyHeader.visible = false;
+    slot.replyHeader.text = "";
     slot.highlight.clear();
     slot.mentions.clear();
     slot.disabledGfx.clear();
@@ -1517,6 +1549,7 @@ export class MessageRing {
     if (event.kind === "privmsg") {
       slot.replyToId = event.replyToId ?? "";
       slot.replyToLogin = event.replyToLogin ?? "";
+      slot.replyToText = event.replyToText ?? "";
       slot.isAction = event.action === true;
     } else if (
       event.kind === "usernotice" &&
@@ -1525,10 +1558,12 @@ export class MessageRing {
     ) {
       slot.replyToId = event.privmsg.replyToId ?? "";
       slot.replyToLogin = event.privmsg.replyToLogin ?? "";
+      slot.replyToText = event.privmsg.replyToText ?? "";
       slot.isAction = event.privmsg.action === true;
     } else {
       slot.replyToId = "";
       slot.replyToLogin = "";
+      slot.replyToText = "";
       slot.isAction = false;
     }
     slot.timestampMs = event.timestampMs;
@@ -1591,31 +1626,6 @@ export class MessageRing {
     this.loadBadgeSprites(slot);
   }
 
-  /** Пересобрать @reply / * prefix при смене hideReplyContext без полного rewrite события. */
-  private reapplyReplyPrefix(slot: Slot): void {
-    const core = slot.copyText;
-    const lead = slot.bodySource.slice(0, Math.max(0, slot.leadLen));
-    const newReply =
-      !this.hideReplyContext && slot.replyToLogin
-        ? `@${slot.replyToLogin} `
-        : "";
-    const newAction = slot.isAction ? "* " : "";
-    const newBefore = `${lead}${newReply}${newAction}`;
-    const oldBeforeLen = Math.max(0, slot.bodySource.length - core.length);
-    const delta = newBefore.length - oldBeforeLen;
-    const nextSource = `${newBefore}${core}`;
-    if (delta === 0 && slot.bodySource === nextSource) {
-      return;
-    }
-    slot.bodySource = nextSource;
-    if (delta !== 0) {
-      slot.spansRaw = shiftSpans(slot.spansRaw, delta);
-      slot.linkSpans = shiftSpans(slot.linkSpans, delta);
-      slot.mentionSpans = shiftSpans(slot.mentionSpans, delta);
-    }
-    slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
-  }
-
   private line(event: ChatEvent): Drawn {
     const time = formatTime(event.timestampMs, this.timestampFormat);
     switch (event.kind) {
@@ -1625,9 +1635,6 @@ export class MessageRing {
         if (event.whisper) {
           prefix += "Whisper: ";
           leadLen = prefix.length;
-        }
-        if (!this.hideReplyContext && event.replyToLogin) {
-          prefix += `@${event.replyToLogin} `;
         }
         if (event.action) {
           prefix += "* ";
@@ -1667,9 +1674,6 @@ export class MessageRing {
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
           let innerPrefix = "";
-          if (!this.hideReplyContext && inner.replyToLogin) {
-            innerPrefix += `@${inner.replyToLogin} `;
-          }
           if (inner.action) {
             innerPrefix += "* ";
           }
@@ -1774,7 +1778,34 @@ export class MessageRing {
         ) + gap
       : 0;
     const gutterW = this.paintModGutter(slot);
+    const showReply =
+      !this.hideReplyContext && slot.replyToLogin.length > 0;
+    const replyRows = showReply ? 1 : 0;
+    const contentY = replyRows * this.lineHeight;
+    if (showReply) {
+      slot.replyHeader.visible = true;
+      slot.replyHeader.style.fontSize = Math.max(
+        8,
+        Math.round(this.fontSize * 0.85),
+      );
+      slot.replyHeader.style.fill = this.themeFills.timestamp;
+      slot.replyHeader.x = 0;
+      slot.replyHeader.y = Math.max(
+        0,
+        (this.lineHeight - slot.replyHeader.style.fontSize) / 2,
+      );
+    } else {
+      slot.replyHeader.visible = false;
+      slot.replyHeader.text = "";
+    }
+    for (const mt of slot.modBtns) {
+      if (mt.visible) {
+        mt.y =
+          contentY + Math.max(0, (this.lineHeight - this.fontSize) / 2 - 1);
+      }
+    }
     slot.time.x = gutterW;
+    slot.time.y = contentY;
     slot.time.visible = this.timestampsVisible();
     const badgeVisible = this.visibleBadges(slot);
     const badgeN = badgeVisible.length;
@@ -1789,8 +1820,10 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
+      spr.y = contentY + (this.lineHeight - this.badgeSize) / 2;
     }
     slot.nick.x = gutterW + timeW + badgeBand;
+    slot.nick.y = contentY;
     const paneW = this.app.screen.width;
     // Stock MessageLayout does not ellipsis nicks for body budget. At high zoom,
     // reserving MIN_BODY_CHARS * charWidth starved the nick column (shown as "..").
@@ -1827,26 +1860,62 @@ export class MessageRing {
       ),
       8,
     );
-    const bodyX = gutterW + timeW + badgeBand + nickW + gap;
-    slot.body.x = bodyX;
+    const bodyAfterNick = gutterW + timeW + badgeBand + nickW + gap;
+    // Body BitmapText at x=0 with leading spaces: first line after nick,
+    // later lines under timestamp (gutterW), same char-grid as overlays/hit-test.
+    slot.body.x = 0;
+    slot.body.y = contentY;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const layoutOpts = this.wrapOpts(slot);
-    const bodyCols = maxBodyChars(this.app.screen.width, bodyX, this.charWidth);
+    const cw = Math.max(this.charWidth, 1);
+    const contIndentCols = Math.max(0, Math.ceil(gutterW / cw));
+    const firstIndentCols = Math.max(
+      contIndentCols,
+      Math.ceil(bodyAfterNick / cw),
+    );
+    const firstOriginX = firstIndentCols * cw;
+    const contOriginX = contIndentCols * cw;
+    const fullCols = maxBodyChars(
+      this.app.screen.width,
+      contOriginX,
+      this.charWidth,
+    );
+    const firstCols = maxBodyChars(
+      this.app.screen.width,
+      firstOriginX,
+      this.charWidth,
+    );
+    if (showReply) {
+      slot.replyHeader.x = contOriginX;
+      slot.replyHeader.text = clipReplyHeader(
+        formatReplyHeader(slot.replyToLogin, slot.replyToText),
+        Math.max(8, fullCols),
+      );
+      dirtyBitmapText(slot.replyHeader);
+    }
+    const layoutOpts = this.wrapOpts(
+      slot,
+      undefined,
+      firstCols,
+      firstIndentCols,
+      contIndentCols,
+    );
     const wrapped = wrapBody(
       slot.bodyRaw,
-      bodyCols,
+      fullCols,
       slot.spansRaw,
       layoutOpts,
     );
     const maxLines =
       slot.collapsible && !slot.expanded ? this.collapseMessagesMinLines : 0;
+    const collapseWidth =
+      maxLines === 1 ? firstCols : fullCols;
     const { lines, collapsed } = collapseWrapLines(
       wrapped,
       maxLines,
       slot.bodyRaw,
-      bodyCols,
+      collapseWidth,
       slot.spansRaw,
       layoutOpts,
     );
@@ -1854,12 +1923,21 @@ export class MessageRing {
     slot.root.cursor =
       collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     slot.wrapLines = lines;
-    slot.lineCount = lines.length;
+    slot.lineCount = replyRows + lines.length;
+    slot.bodyIndent = firstOriginX;
+    slot.bodyContIndent = contOriginX;
+    slot.replyRows = replyRows;
     const overlayMentions =
       this.boldUsernames || this.colorUsernames
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
-    const renderOpts = this.wrapOpts(slot, overlayMentions);
+    const renderOpts = this.wrapOpts(
+      slot,
+      overlayMentions,
+      firstCols,
+      firstIndentCols,
+      contIndentCols,
+    );
     slot.body.text = withCollapsedEllipsis(
       renderWrapped(slot.bodyRaw, lines, slot.spansRaw, renderOpts),
       collapsed,
@@ -1868,8 +1946,16 @@ export class MessageRing {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
     this.paintHighlight(slot);
-    this.paintMentions(slot, bodyX, layoutOpts);
-    this.paintMentionTexts(slot, bodyX, lines, renderOpts, overlayMentions);
+    this.paintMentions(slot, firstOriginX, contOriginX, contentY, layoutOpts);
+    this.paintMentionTexts(
+      slot,
+      firstOriginX,
+      contOriginX,
+      contentY,
+      lines,
+      renderOpts,
+      overlayMentions,
+    );
     this.paintDisabled(slot);
     let prevX = 0;
     let prevY = 0;
@@ -1905,8 +1991,10 @@ export class MessageRing {
         continue;
       }
       spr.visible = true;
-      spr.x = bodyX + pos.col * this.charWidth;
-      spr.y = 1 + pos.line * this.lineHeight;
+      spr.x =
+        wrapLineOriginX(firstOriginX, pos.line, contOriginX) +
+        pos.col * this.charWidth;
+      spr.y = contentY + 1 + pos.line * this.lineHeight;
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, emoteSize);
       }
@@ -2008,7 +2096,9 @@ export class MessageRing {
 
   private paintMentions(
     slot: Slot,
-    bodyX: number,
+    firstOriginX: number,
+    contOriginX: number,
+    contentY: number,
     wrapOpts: WrapOptions,
   ): void {
     slot.mentions.clear();
@@ -2043,8 +2133,9 @@ export class MessageRing {
         const cols = Math.max(1, end.col - start.col + 1);
         slot.mentions
           .rect(
-            bodyX + start.col * this.charWidth,
-            start.line * this.lineHeight,
+            wrapLineOriginX(firstOriginX, start.line, contOriginX) +
+              start.col * this.charWidth,
+            contentY + start.line * this.lineHeight,
             cols * this.charWidth,
             this.lineHeight,
           )
@@ -2055,7 +2146,9 @@ export class MessageRing {
 
   private paintMentionTexts(
     slot: Slot,
-    bodyX: number,
+    firstOriginX: number,
+    contOriginX: number,
+    contentY: number,
     lines: readonly WrapLine[],
     wrapOpts: WrapOptions,
     overlayMentions: readonly MentionSpan[],
@@ -2099,8 +2192,10 @@ export class MessageRing {
           this.colorUsernames && cached !== undefined
             ? cached
             : this.themeFills.body;
-        mt.x = bodyX + pos.col * this.charWidth;
-        mt.y = pos.line * this.lineHeight;
+        mt.x =
+          wrapLineOriginX(firstOriginX, pos.line, contOriginX) +
+          pos.col * this.charWidth;
+        mt.y = contentY + pos.line * this.lineHeight;
         mt.visible = true;
         dirtyBitmapText(mt);
       }
@@ -2435,7 +2530,8 @@ export class MessageRing {
       return null;
     }
     const local = ev.getLocalPosition(slot.root);
-    if (local.y < 0 || local.y >= this.lineHeight) {
+    const y0 = slot.replyRows * this.lineHeight;
+    if (local.y < y0 || local.y >= y0 + this.lineHeight) {
       return null;
     }
     for (const hit of slot.modBtnHits) {
@@ -2460,11 +2556,48 @@ export class MessageRing {
       ),
       8,
     );
+    const y0 = slot.replyRows * this.lineHeight;
     return (
       local.x >= slot.nick.x &&
       local.x < slot.nick.x + nickW &&
-      local.y >= 0 &&
-      local.y < this.lineHeight
+      local.y >= y0 &&
+      local.y < y0 + this.lineHeight
+    );
+  }
+
+  /** Map pointer in slot-local coords to a UTF-16 index in bodyRaw. */
+  private bodyIndexAt(
+    slot: Slot,
+    localX: number,
+    slotLocalY: number,
+  ): number | null {
+    const contentY = slot.replyRows * this.lineHeight;
+    if (
+      slotLocalY < contentY ||
+      slotLocalY >= slot.lineCount * this.lineHeight
+    ) {
+      return null;
+    }
+    const bodyLine = Math.floor((slotLocalY - contentY) / this.lineHeight);
+    if (bodyLine < 0 || bodyLine >= slot.wrapLines.length) {
+      return null;
+    }
+    const originX = wrapLineOriginX(
+      slot.bodyIndent,
+      bodyLine,
+      slot.bodyContIndent,
+    );
+    if (localX < originX) {
+      return null;
+    }
+    const col = Math.floor((localX - originX) / this.charWidth);
+    return lineColToIndex(
+      slot.bodyRaw,
+      slot.wrapLines,
+      bodyLine,
+      col,
+      slot.spansRaw,
+      this.wrapOpts(slot),
     );
   }
 
@@ -2473,19 +2606,7 @@ export class MessageRing {
       return null;
     }
     const local = ev.getLocalPosition(slot.root);
-    if (local.x < slot.body.x || local.y < 0) {
-      return null;
-    }
-    const col = Math.floor((local.x - slot.body.x) / this.charWidth);
-    const line = Math.floor(local.y / this.lineHeight);
-    const idx = lineColToIndex(
-      slot.bodyRaw,
-      slot.wrapLines,
-      line,
-      col,
-      slot.spansRaw,
-      this.wrapOpts(slot),
-    );
+    const idx = this.bodyIndexAt(slot, local.x, local.y);
     if (idx === null) {
       return null;
     }
@@ -2497,19 +2618,7 @@ export class MessageRing {
 
   private linkAt(slot: Slot, ev: FederatedPointerEvent): string | undefined {
     const local = ev.getLocalPosition(slot.root);
-    if (local.x < slot.body.x || local.y < 0) {
-      return undefined;
-    }
-    const col = Math.floor((local.x - slot.body.x) / this.charWidth);
-    const line = Math.floor(local.y / this.lineHeight);
-    const idx = lineColToIndex(
-      slot.bodyRaw,
-      slot.wrapLines,
-      line,
-      col,
-      slot.spansRaw,
-      this.wrapOpts(slot),
-    );
+    const idx = this.bodyIndexAt(slot, local.x, local.y);
     if (idx === null) {
       return undefined;
     }
@@ -2597,22 +2706,13 @@ export class MessageRing {
       return null;
     }
     if (
-      localX < slot.body.x ||
+      localX < 0 ||
       slotLocalY < 0 ||
       slotLocalY >= slot.lineCount * this.lineHeight
     ) {
       return null;
     }
-    const col = Math.floor((localX - slot.body.x) / this.charWidth);
-    const line = Math.floor(slotLocalY / this.lineHeight);
-    const idx = lineColToIndex(
-      slot.bodyRaw,
-      slot.wrapLines,
-      line,
-      col,
-      slot.spansRaw,
-      this.wrapOpts(slot),
-    );
+    const idx = this.bodyIndexAt(slot, localX, slotLocalY);
     if (idx === null) {
       return null;
     }
@@ -2636,22 +2736,13 @@ export class MessageRing {
       return null;
     }
     if (
-      localX < slot.body.x ||
+      localX < 0 ||
       slotLocalY < 0 ||
       slotLocalY >= slot.lineCount * this.lineHeight
     ) {
       return null;
     }
-    const col = Math.floor((localX - slot.body.x) / this.charWidth);
-    const line = Math.floor(slotLocalY / this.lineHeight);
-    const idx = lineColToIndex(
-      slot.bodyRaw,
-      slot.wrapLines,
-      line,
-      col,
-      slot.spansRaw,
-      this.wrapOpts(slot),
-    );
+    const idx = this.bodyIndexAt(slot, localX, slotLocalY);
     if (idx === null) {
       return null;
     }
@@ -2726,6 +2817,9 @@ export class MessageRing {
   private wrapOpts(
     slot?: Slot,
     maskMentions?: readonly MentionSpan[],
+    firstLineMaxChars?: number,
+    firstLineIndentCols?: number,
+    continuationIndentCols?: number,
   ): WrapOptions {
     const images = this.enableEmoteImages;
     const emoteMinCols =
@@ -2743,6 +2837,9 @@ export class MessageRing {
       enableZeroWidth: images && this.enableZeroWidthEmotes,
       removeSpacesBetweenEmotes: images && this.removeSpacesBetweenEmotes,
       maskMentions: mentions,
+      firstLineMaxChars,
+      firstLineIndentCols,
+      continuationIndentCols,
     };
   }
 
@@ -3034,4 +3131,26 @@ function badgeTooltipText(set: string): string {
 
 function maxBodyChars(paneWidth: number, bodyX: number, charWidth: number): number {
   return Math.floor(Math.max(1, paneWidth - bodyX - 8) / charWidth);
+}
+
+/** Stock/Twitch-style reply chrome above the message (ChatMediumSmall). */
+function formatReplyHeader(login: string, text: string): string {
+  const name = login.trim() || "unknown";
+  const body = text.replace(/\s+/g, " ").trim();
+  const chars = Array.from(body);
+  const snip =
+    chars.length > 48 ? `${chars.slice(0, 48).join("").trimEnd()}...` : body;
+  if (!snip) {
+    return `Replying to @${name}`;
+  }
+  return `Replying to @${name}: ${snip}`;
+}
+
+function clipReplyHeader(text: string, maxCols: number): string {
+  const limit = Math.max(4, Math.floor(maxCols));
+  const chars = Array.from(text);
+  if (chars.length <= limit) {
+    return text;
+  }
+  return `${chars.slice(0, Math.max(1, limit - 3)).join("")}...`;
 }

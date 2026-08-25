@@ -6,6 +6,7 @@ import {
   renderWrapped,
   withCollapsedEllipsis,
   wrapBody,
+  wrapLineOriginX,
 } from "../src/chat/wrap.ts";
 import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
 
@@ -315,6 +316,52 @@ if (unbrokenLines.length < 3) {
   throw new Error(
     `unbroken Cyrillic must wrap by grapheme, got ${unbrokenLines.length} lines`,
   );
+}
+
+const indented = wrapBody("abcdefghijklmnop", 10, [], {
+  firstLineMaxChars: 4,
+});
+if (indented.length < 2) {
+  throw new Error("firstLineMaxChars must force early wrap");
+}
+if (indented[0].end - indented[0].start > 4) {
+  throw new Error(
+    `first line too long: ${indented[0].end - indented[0].start}`,
+  );
+}
+if (wrapLineOriginX(120, 0) !== 120 || wrapLineOriginX(120, 1) !== 0) {
+  throw new Error("wrapLineOriginX must indent only first line by default");
+}
+if (wrapLineOriginX(120, 1, 24) !== 24) {
+  throw new Error("wrapLineOriginX continuation must use cont origin");
+}
+
+const padded = renderWrapped("hi", [{ start: 0, end: 2 }], [], {
+  firstLineIndentCols: 3,
+});
+if (padded !== "   hi") {
+  throw new Error(`first line pad expected "   hi", got ${JSON.stringify(padded)}`);
+}
+
+const multiPad = renderWrapped(
+  "abcdef",
+  [
+    { start: 0, end: 3 },
+    { start: 3, end: 6 },
+  ],
+  [],
+  { firstLineIndentCols: 4, continuationIndentCols: 2 },
+);
+if (multiPad !== "    abc\n  def") {
+  throw new Error(`multi-line pad mismatch: ${JSON.stringify(multiPad)}`);
+}
+const firstOrigin = 4 * 10;
+const contOrigin = 2 * 10;
+if (wrapLineOriginX(firstOrigin, 0, contOrigin) !== firstOrigin) {
+  throw new Error("first origin must match pad cols * cw");
+}
+if (wrapLineOriginX(firstOrigin, 1, contOrigin) !== contOrigin) {
+  throw new Error("cont origin must match continuation pad");
 }
 
 const clippedTiny = clipNick("nickname", 2);

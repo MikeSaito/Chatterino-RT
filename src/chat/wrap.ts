@@ -28,6 +28,20 @@ export type WrapOptions = {
   removeSpacesBetweenEmotes?: boolean;
   /** Диапазоны mention: в renderWrapped заменить пробелами (overlay BitmapText). */
   maskMentions?: readonly WrapRange[];
+  /**
+   * Ширина первой строки сообщения (после time/badges/nick).
+   * Последующие строки — на всю ширину (как Twitch / Chatterino flow wrap).
+   */
+  firstLineMaxChars?: number;
+  /**
+   * Ведущие пробелы на первой rendered-строке BitmapText (body.x=0),
+   * чтобы текст не перекрывал time/badges/nick.
+   */
+  firstLineIndentCols?: number;
+  /**
+   * Ведущие пробелы на строках 2+ (обычно под timestamp / после mod gutter).
+   */
+  continuationIndentCols?: number;
 };
 
 type WrapCtx = {
@@ -81,14 +95,28 @@ export function wrapBody(
   opts?: WrapOptions,
 ): WrapLine[] {
   const ctx = ctxFrom(opts);
-  const width = Math.max(1, Math.floor(maxChars));
+  const restW = Math.max(1, Math.floor(maxChars));
+  const firstW = Math.max(
+    1,
+    Math.floor(opts?.firstLineMaxChars ?? restW),
+  );
   const n = text.length;
   if (n === 0) {
     return [{ start: 0, end: 0 }];
   }
   const lines: WrapLine[] = [];
+  const widthForNext = (): number =>
+    lines.length === 0 ? firstW : restW;
   for (const para of hardParagraphs(text)) {
-    wrapParagraph(text, para.start, para.end, width, emotes, lines, ctx);
+    wrapParagraph(
+      text,
+      para.start,
+      para.end,
+      widthForNext,
+      emotes,
+      lines,
+      ctx,
+    );
     if (lines.length >= WRAP_MAX_LINES) {
       break;
     }
@@ -111,7 +139,19 @@ export function renderWrapped(
 ): string {
   const ctx = ctxFrom(opts);
   ctx.lines = lines;
-  return lines.map((line) => maskSlice(text, line.start, line.end, emotes, ctx)).join("\n");
+  const firstPad = Math.max(0, Math.floor(opts?.firstLineIndentCols ?? 0));
+  const contPad = Math.max(0, Math.floor(opts?.continuationIndentCols ?? 0));
+  const firstSpaces = firstPad > 0 ? " ".repeat(firstPad) : "";
+  const contSpaces = contPad > 0 ? " ".repeat(contPad) : "";
+  return lines
+    .map((line, i) => {
+      const slice = maskSlice(text, line.start, line.end, emotes, ctx);
+      if (i === 0) {
+        return firstSpaces ? `${firstSpaces}${slice}` : slice;
+      }
+      return contSpaces ? `${contSpaces}${slice}` : slice;
+    })
+    .join("\n");
 }
 
 export function indexToLineCol(
@@ -248,11 +288,25 @@ export function clipNick(nick: string, maxChars: number): string {
   return `${nick.slice(0, keep)}..`;
 }
 
+/**
+ * Pixel X of wrap line content (body.x = 0 + leading spaces).
+ * Line 0 after nick; later lines at continuation (timestamp / gutter).
+ */
+export function wrapLineOriginX(
+  firstIndentPx: number,
+  line: number,
+  continuationPx = 0,
+): number {
+  return line <= 0
+    ? Math.max(0, firstIndentPx)
+    : Math.max(0, continuationPx);
+}
+
 function wrapParagraph(
   text: string,
   from: number,
   to: number,
-  width: number,
+  widthForNext: () => number,
   emotes: readonly WrapEmote[],
   lines: WrapLine[],
   ctx: WrapCtx,
@@ -265,6 +319,7 @@ function wrapParagraph(
     return;
   }
   while (i < to && lines.length < WRAP_MAX_LINES) {
+    const width = Math.max(1, widthForNext());
     let end = takeWidth(text, i, to, width, emotes, ctx);
     if (end < to) {
       end = snapBeforeEmote(i, end, emotes, ctx);
