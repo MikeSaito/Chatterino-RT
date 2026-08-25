@@ -81,6 +81,11 @@ const MIN_BODY_COLS_AFTER_NICK = 1;
 
 export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 
+export type ImageHit = {
+  url: string;
+  kind: "emote" | "badge";
+};
+
 export type SlotContext = {
   msgId: string;
   login: string;
@@ -95,6 +100,9 @@ export type SlotContext = {
   disabled: boolean;
   replyToId: string;
   linkUrl: string;
+  /** CDN URL эmote/badge под курсором (stock addImageContextMenuItems). */
+  imageUrl: string;
+  imageKind: "" | "emote" | "badge";
   /** Stock: View thread when message is in a reply thread. */
   inReplyThread: boolean;
   /** Stock: hidden items only when modifier is exactly Shift. */
@@ -2423,7 +2431,13 @@ export class MessageRing {
   private makeSlotContext(
     slot: Slot,
     ev: FederatedPointerEvent,
-    opts?: { login?: string; nick?: string; linkUrl?: string },
+    opts?: {
+      login?: string;
+      nick?: string;
+      linkUrl?: string;
+      imageUrl?: string;
+      imageKind?: "" | "emote" | "badge";
+    },
   ): SlotContext {
     return {
       msgId: slot.msgId,
@@ -2446,6 +2460,8 @@ export class MessageRing {
       disabled: slot.disabled,
       replyToId: slot.replyToId,
       linkUrl: opts?.linkUrl ?? "",
+      imageUrl: opts?.imageUrl ?? "",
+      imageKind: opts?.imageKind ?? "",
       inReplyThread: this.slotInReplyThread(slot),
       shiftOnly: this.pointerShiftOnly(ev),
     };
@@ -2523,9 +2539,12 @@ export class MessageRing {
       return;
     }
     ev.preventDefault();
+    const imageHit = this.imageHitAt(slot, ev);
     this.onContext(
       this.makeSlotContext(slot, ev, {
         linkUrl: this.linkAt(slot, ev) ?? "",
+        imageUrl: imageHit?.url ?? "",
+        imageKind: imageHit?.kind ?? "",
       }),
     );
   }
@@ -2754,6 +2773,64 @@ export class MessageRing {
         return linkHit;
       }
       return null;
+    }
+    return null;
+  }
+
+  /** Hit-test emote/badge под курсором для context menu (stock addImageContextMenuItems). */
+  private imageHitAt(slot: Slot, ev: FederatedPointerEvent): ImageHit | null {
+    const local = ev.getLocalPosition(slot.root);
+    const localX = local.x;
+    const slotLocalY = local.y;
+    const badgeVisible = this.visibleBadges(slot);
+    for (let b = 0; b < slot.badges.length; b += 1) {
+      const spr = slot.badges[b];
+      const badge = badgeVisible[b];
+      if (!badge?.url || !spr.visible) {
+        continue;
+      }
+      if (!spriteHit(localX, slotLocalY, spr)) {
+        continue;
+      }
+      return { url: badge.url, kind: "badge" };
+    }
+    if (this.enableEmoteImages) {
+      for (let e = slot.emotes.length - 1; e >= 0; e -= 1) {
+        const spr = slot.emotes[e];
+        const span = slot.spansRaw[e];
+        if (!span || !spr.visible) {
+          continue;
+        }
+        if (!spriteHit(localX, slotLocalY, spr)) {
+          continue;
+        }
+        const url = this.emoteLoadUrl(span);
+        if (!url) {
+          return null;
+        }
+        return { url, kind: "emote" };
+      }
+      return null;
+    }
+    if (
+      localX < 0 ||
+      slotLocalY < 0 ||
+      slotLocalY >= slot.lineCount * this.lineHeight
+    ) {
+      return null;
+    }
+    const idx = this.bodyIndexAt(slot, localX, slotLocalY);
+    if (idx === null) {
+      return null;
+    }
+    for (const span of slot.spansRaw) {
+      if (idx >= span.start && idx < span.end) {
+        const url = this.emoteLoadUrl(span);
+        if (!url) {
+          return null;
+        }
+        return { url, kind: "emote" };
+      }
     }
     return null;
   }

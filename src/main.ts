@@ -183,6 +183,7 @@ async function boot(): Promise<void> {
   const contextMenuEl = contextMenu;
   const contextCustomHost = document.querySelector<HTMLElement>("#chat-context-custom");
   const contextCustomSep = document.querySelector<HTMLElement>("#chat-context-custom-sep");
+  const contextImageSep = document.querySelector<HTMLElement>("#chat-context-image-sep");
   const loginEl = authLogin;
   const signinBtn = authSignin;
   const logoutBtn = authLogout;
@@ -881,6 +882,17 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
       return;
     }
+    if (action === "copy-image-link" && target.imageUrl) {
+      void navigator.clipboard.writeText(target.imageUrl).catch(() => undefined);
+      return;
+    }
+    if (action === "open-image-link" && target.imageUrl) {
+      void invoke("open_chat_link", {
+        url: target.imageUrl,
+        private: openLinksIncognito,
+      }).catch(() => undefined);
+      return;
+    }
     if (action === "web-search") {
       if (!searchEnabled) {
         return;
@@ -1244,6 +1256,12 @@ async function boot(): Promise<void> {
       '[data-action="open-link-incognito"]',
     );
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
+    const openImageLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="open-image-link"]',
+    );
+    const copyImageLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="copy-image-link"]',
+    );
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
     }
@@ -1270,6 +1288,23 @@ async function boot(): Promise<void> {
     }
     if (copyJsonBtn) {
       copyJsonBtn.hidden = !(ctx.shiftOnly && ctx.msgId);
+    }
+    const hasImage = Boolean(ctx.imageUrl);
+    const imageKindLabel = ctx.imageKind === "badge" ? "badge" : "emote";
+    if (openImageLinkBtn) {
+      openImageLinkBtn.hidden = !hasImage;
+      openImageLinkBtn.textContent = hasImage
+        ? `Open ${imageKindLabel} link`
+        : "Open 1x link";
+    }
+    if (copyImageLinkBtn) {
+      copyImageLinkBtn.hidden = !hasImage;
+      copyImageLinkBtn.textContent = hasImage
+        ? `Copy ${imageKindLabel} link`
+        : "Copy 1x link";
+    }
+    if (contextImageSep) {
+      contextImageSep.hidden = !hasImage;
     }
     const hasLink = Boolean(ctx.linkUrl);
     if (openLinkBtn) {
