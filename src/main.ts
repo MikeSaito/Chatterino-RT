@@ -822,6 +822,21 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
     }
+    if (
+      (action === "open-link" || action === "open-link-incognito") &&
+      target.linkUrl
+    ) {
+      const forcePrivate = action === "open-link-incognito";
+      const linkUrl = target.linkUrl;
+      void (async () => {
+        const openUrl = await resolveOpenUrlForChatLink(linkUrl, unshortLinks);
+        await invoke("open_chat_link", {
+          url: openUrl,
+          private: forcePrivate,
+        }).catch(() => undefined);
+      })();
+      return;
+    }
     if (action === "copy-link" && target.linkUrl) {
       void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
       return;
@@ -1124,6 +1139,10 @@ async function boot(): Promise<void> {
       '[data-action="open-custom-player"]',
     );
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
+    const openLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-link"]');
+    const openLinkIncognitoBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="open-link-incognito"]',
+    );
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
@@ -1143,8 +1162,15 @@ async function boot(): Promise<void> {
     if (customPlayerBtn) {
       customPlayerBtn.hidden = !(customUriScheme && ipc.active().trim());
     }
+    const hasLink = Boolean(ctx.linkUrl);
+    if (openLinkBtn) {
+      openLinkBtn.hidden = !hasLink;
+    }
+    if (openLinkIncognitoBtn) {
+      openLinkIncognitoBtn.hidden = !hasLink || !supportsIncognito;
+    }
     if (copyLinkBtn) {
-      copyLinkBtn.hidden = !ctx.linkUrl;
+      copyLinkBtn.hidden = !hasLink;
     }
     if (webSearchBtn) {
       const searchUrl =
