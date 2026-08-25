@@ -92,6 +92,8 @@ export type SlotContext = {
   disabled: boolean;
   replyToId: string;
   linkUrl: string;
+  /** Stock: hidden items only when modifier is exactly Shift. */
+  shiftOnly: boolean;
 };
 
 type Slot = {
@@ -2385,6 +2387,30 @@ export class MessageRing {
     this.onScroll?.(this.scroll.snapshot());
   }
 
+  private pointerShiftOnly(ev: FederatedPointerEvent): boolean {
+    return ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  }
+
+  private makeSlotContext(
+    slot: Slot,
+    ev: FederatedPointerEvent,
+    opts?: { login?: string; nick?: string; linkUrl?: string },
+  ): SlotContext {
+    return {
+      msgId: slot.msgId,
+      login: opts?.login ?? slot.login,
+      authorLogin: slot.login,
+      nick: opts?.nick ?? this.contextNick(slot),
+      text: slot.copyText || slot.bodyRaw,
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+      disabled: slot.disabled,
+      replyToId: slot.replyToId,
+      linkUrl: opts?.linkUrl ?? "",
+      shiftOnly: this.pointerShiftOnly(ev),
+    };
+  }
+
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
     // Pixi fires pointertap after rightclick; only LMB opens UserCard / links.
     if (ev.button !== 0) {
@@ -2392,18 +2418,7 @@ export class MessageRing {
     }
     const modAction = this.modActionAt(slot, ev);
     if (modAction && this.onModAction && slot.login) {
-      this.onModAction(modAction, {
-        msgId: slot.msgId,
-        login: slot.login,
-        authorLogin: slot.login,
-        nick: this.contextNick(slot),
-        text: slot.copyText || slot.bodyRaw,
-        clientX: ev.clientX,
-        clientY: ev.clientY,
-        disabled: slot.disabled,
-        replyToId: slot.replyToId,
-        linkUrl: "",
-      });
+      this.onModAction(modAction, this.makeSlotContext(slot, ev));
       return;
     }
     if (slot.collapsed && !slot.expanded) {
@@ -2419,34 +2434,17 @@ export class MessageRing {
       return;
     }
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
-      this.onNickClick({
-        msgId: slot.msgId,
-        login: slot.login,
-        authorLogin: slot.login,
-        nick: this.contextNick(slot),
-        text: slot.copyText || slot.bodyRaw,
-        clientX: ev.clientX,
-        clientY: ev.clientY,
-        disabled: slot.disabled,
-        replyToId: slot.replyToId,
-        linkUrl: "",
-      });
+      this.onNickClick(this.makeSlotContext(slot, ev));
       return;
     }
     const mentionLogin = this.mentionLoginAt(slot, ev);
     if (mentionLogin && this.onNickClick) {
-      this.onNickClick({
-        msgId: slot.msgId,
-        login: mentionLogin,
-        authorLogin: slot.login,
-        nick: mentionLogin,
-        text: slot.copyText || slot.bodyRaw,
-        clientX: ev.clientX,
-        clientY: ev.clientY,
-        disabled: slot.disabled,
-        replyToId: slot.replyToId,
-        linkUrl: "",
-      });
+      this.onNickClick(
+        this.makeSlotContext(slot, ev, {
+          login: mentionLogin,
+          nick: mentionLogin,
+        }),
+      );
       return;
     }
     const url = this.linkAt(slot, ev);
@@ -2466,39 +2464,17 @@ export class MessageRing {
     }
     if (this.nickAt(slot, ev) && slot.login && this.onNickRightClick) {
       ev.preventDefault();
-      this.onNickRightClick(
-        {
-          msgId: slot.msgId,
-          login: slot.login,
-          authorLogin: slot.login,
-          nick: this.contextNick(slot),
-          text: slot.copyText || slot.bodyRaw,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-          disabled: slot.disabled,
-          replyToId: slot.replyToId,
-          linkUrl: "",
-        },
-        ev,
-      );
+      this.onNickRightClick(this.makeSlotContext(slot, ev), ev);
       return;
     }
     const mentionLogin = this.mentionLoginAt(slot, ev);
     if (mentionLogin && this.onNickRightClick) {
       ev.preventDefault();
       this.onNickRightClick(
-        {
-          msgId: slot.msgId,
+        this.makeSlotContext(slot, ev, {
           login: mentionLogin,
-          authorLogin: slot.login,
           nick: mentionLogin,
-          text: slot.copyText || slot.bodyRaw,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-          disabled: slot.disabled,
-          replyToId: slot.replyToId,
-          linkUrl: "",
-        },
+        }),
         ev,
       );
       return;
@@ -2507,18 +2483,11 @@ export class MessageRing {
       return;
     }
     ev.preventDefault();
-    this.onContext({
-      msgId: slot.msgId,
-      login: slot.login,
-      authorLogin: slot.login,
-      nick: this.contextNick(slot),
-      text: slot.copyText || slot.bodyRaw,
-      clientX: ev.clientX,
-      clientY: ev.clientY,
-      disabled: slot.disabled,
-      replyToId: slot.replyToId,
-      linkUrl: this.linkAt(slot, ev) ?? "",
-    });
+    this.onContext(
+      this.makeSlotContext(slot, ev, {
+        linkUrl: this.linkAt(slot, ev) ?? "",
+      }),
+    );
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {

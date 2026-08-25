@@ -822,6 +822,10 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.text).catch(() => undefined);
       return;
     }
+    if (action === "copy-id" && target.msgId) {
+      void navigator.clipboard.writeText(target.msgId).catch(() => undefined);
+      return;
+    }
     if (
       (action === "open-link" || action === "open-link-incognito") &&
       target.linkUrl
@@ -1139,6 +1143,7 @@ async function boot(): Promise<void> {
       '[data-action="open-custom-player"]',
     );
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
+    const copyIdBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-id"]');
     const openLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-link"]');
     const openLinkIncognitoBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-link-incognito"]',
@@ -1161,6 +1166,9 @@ async function boot(): Promise<void> {
     }
     if (customPlayerBtn) {
       customPlayerBtn.hidden = !(customUriScheme && ipc.active().trim());
+    }
+    if (copyIdBtn) {
+      copyIdBtn.hidden = !(ctx.shiftOnly && ctx.msgId);
     }
     const hasLink = Boolean(ctx.linkUrl);
     if (openLinkBtn) {
