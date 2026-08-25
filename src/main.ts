@@ -61,6 +61,7 @@ import {
 } from "./shell/imageUpload";
 import { bindReplyThread } from "./shell/replyThread";
 import { resolveReplyRoot } from "./shell/replyRoot";
+import { findEventByMsgId } from "./shell/eventLookup";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
   bindEmoteTooltip,
@@ -683,6 +684,7 @@ async function boot(): Promise<void> {
   let completePending = 0;
   let replyOriginalSeq = 0;
   let viewThreadSeq = 0;
+  let copyJsonSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
   let channelBusy = false;
@@ -831,6 +833,33 @@ async function boot(): Promise<void> {
     }
     if (action === "copy-id" && target.msgId) {
       void navigator.clipboard.writeText(target.msgId).catch(() => undefined);
+      return;
+    }
+    if (action === "copy-json" && target.msgId) {
+      const msgId = target.msgId;
+      const seq = ++copyJsonSeq;
+      void (async () => {
+        const channel = ipc.active().trim();
+        if (!channel) {
+          statusEl.textContent = "нет активного канала";
+          return;
+        }
+        try {
+          const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
+          if (seq !== copyJsonSeq || ipc.active().trim() !== channel) {
+            return;
+          }
+          const events = Array.isArray(snap.events) ? snap.events : [];
+          const event = findEventByMsgId(events, msgId);
+          if (!event) {
+            statusEl.textContent = "сообщение не найдено в scrollback";
+            return;
+          }
+          await navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        }
+      })();
       return;
     }
     if (
@@ -1209,6 +1238,7 @@ async function boot(): Promise<void> {
     );
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
     const copyIdBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-id"]');
+    const copyJsonBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-json"]');
     const openLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-link"]');
     const openLinkIncognitoBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-link-incognito"]',
@@ -1237,6 +1267,9 @@ async function boot(): Promise<void> {
     }
     if (copyIdBtn) {
       copyIdBtn.hidden = !(ctx.shiftOnly && ctx.msgId);
+    }
+    if (copyJsonBtn) {
+      copyJsonBtn.hidden = !(ctx.shiftOnly && ctx.msgId);
     }
     const hasLink = Boolean(ctx.linkUrl);
     if (openLinkBtn) {
