@@ -8,10 +8,13 @@ import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import {
+  bindStreamPreviewTooltip,
   effectiveHeaderKnobs,
   formatChannelTitle,
   parseHeaderKnobs,
+  parseThumbnailSizeStream,
   type HeaderKnobs,
+  type ThumbnailSizeStream,
 } from "./shell/channelHeader";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindSettingsDialog } from "./shell/settings/dialog";
@@ -264,8 +267,10 @@ async function boot(): Promise<void> {
   let searchEngineUrl = "";
   let searchEngineName = "";
   let headerKnobs: HeaderKnobs = parseHeaderKnobs({});
+  let thumbnailSizeStream: ThumbnailSizeStream = 2;
   const streamByChannel = new Map<string, ChannelLive>();
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
+  let streamPreviewCtl: { hide: () => void; refresh: () => void } | null = null;
   if (emoteTooltip && emoteTooltipImg && emoteTooltipText && canvasHost) {
     emoteTooltipCtl = bindEmoteTooltip({
       host: canvasHost,
@@ -278,6 +283,33 @@ async function boot(): Promise<void> {
       getLinkInfoEnabled: () => linkInfoTooltip,
       getThumbnailSizePx: () => thumbnailSizePx,
       getHideLinkThumbnails: () => hideLinkThumbnails && isStreamerModeActive(),
+    });
+  }
+  const streamTooltip = document.querySelector<HTMLElement>("#stream-tooltip");
+  const streamTooltipImg =
+    document.querySelector<HTMLImageElement>("#stream-tooltip-img");
+  const streamTooltipText =
+    document.querySelector<HTMLElement>("#stream-tooltip-text");
+  if (titleEl && streamTooltip && streamTooltipImg && streamTooltipText) {
+    streamPreviewCtl = bindStreamPreviewTooltip({
+      titleEl,
+      tooltip: streamTooltip,
+      img: streamTooltipImg,
+      text: streamTooltipText,
+      getSize: () => thumbnailSizeStream,
+      getStream: () => {
+        const ch = chatIpc?.active();
+        if (!ch) {
+          return null;
+        }
+        const stream = streamByChannel.get(ch.toLowerCase());
+        return {
+          login: ch,
+          live: stream?.live === true,
+          gameName: stream?.gameName,
+          streamTitle: stream?.streamTitle,
+        };
+      },
     });
   }
   ring.setOnOpenChatLink((url) => {
@@ -293,6 +325,7 @@ async function boot(): Promise<void> {
   teardownChat = () => {
     unbindImageUpload?.();
     unbindImageUpload = null;
+    streamPreviewCtl?.hide();
     chatIpc?.stop();
     chatIpc = null;
     ring.destroy();
@@ -421,9 +454,13 @@ async function boot(): Promise<void> {
       searchEngineUrl = String(data.knobs["behaviour.searchEngineUrl"] ?? "");
       searchEngineName = String(data.knobs["behaviour.searchEngineName"] ?? "");
       headerKnobs = parseHeaderKnobs(data.knobs);
+      thumbnailSizeStream = parseThumbnailSizeStream(
+        data.knobs["appearance.thumbnailSizeStream"],
+      );
       menuCommands = menuCommandsFromSettings(data);
       emoteTooltipCtl?.refresh();
       repaintChannelTitle();
+      streamPreviewCtl?.refresh();
     },
   });
   const ipc = bindChatIpc(ring);
@@ -466,6 +503,7 @@ async function boot(): Promise<void> {
       hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
     });
     titleEl.textContent = formatChannelTitle(ch, stream, knobs);
+    streamPreviewCtl?.refresh();
   };
 
   function applySendWaitForActive(): void {

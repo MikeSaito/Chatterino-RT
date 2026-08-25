@@ -2,6 +2,8 @@ import {
   effectiveHeaderKnobs,
   formatChannelTitle,
   parseHeaderKnobs,
+  parseThumbnailSizeStream,
+  streamPreviewUrl,
   type HeaderKnobs,
 } from "../src/shell/channelHeader.ts";
 import type { ChannelLive } from "../src/chat/types.ts";
@@ -65,5 +67,16 @@ const strippedDigits = stripped.replace(/\D/g, "");
 assert(!strippedDigits.includes("1234"), `no viewers ${stripped}`);
 assert(!/\d+h \d+m/.test(stripped), `no uptime ${stripped}`);
 assert(stripped.includes("Just Chatting"), "game remains");
+
+assert(parseThumbnailSizeStream("2") === 2, "stream thumb default medium");
+assert(parseThumbnailSizeStream(0) === 0, "stream thumb off");
+assert(parseThumbnailSizeStream("9") === 2, "stream thumb bad → medium");
+assert(streamPreviewUrl("XQC", 0) === null, "off → null url");
+assert(
+  streamPreviewUrl("XQC", 2) ===
+    "https://static-cdn.jtvnw.net/previews-ttv/live_user_xqc-160x90.jpg",
+  "medium preview url",
+);
+assert(streamPreviewUrl("bad name!", 1) === null, "invalid login");
 
 console.log("channelHeader.test.ts: ok");
