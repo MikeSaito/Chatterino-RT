@@ -302,6 +302,7 @@ async function boot(): Promise<void> {
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   let autoCloseThreadPopup = false;
+  let showPronouns = false;
   let hideUsercardAvatars = true;
   let userCard: ReturnType<typeof bindUserCard> | null = null;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
@@ -353,9 +354,11 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
+      showPronouns = data.knobs["misc.showPronouns"] === true;
       hideUsercardAvatars =
         data.knobs["streamerMode.hideUsercardAvatars"] !== false;
       userCard?.syncAvatars();
+      userCard?.syncPronouns();
       if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
         replyBtn.hidden = true;
         replyHover = null;
@@ -497,6 +500,7 @@ async function boot(): Promise<void> {
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseUserPopup,
     getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
+    getShowPronouns: () => showPronouns,
     getOpenPrivate: () => openLinksIncognito,
     getUsercardLimit: () => usercardScrollbackLimit,
     getTimeoutButtons: () => parseTimeoutButtons(timeoutKnobs),

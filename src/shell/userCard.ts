@@ -28,13 +28,15 @@ export function bindUserCard(opts: {
   activeChannel: () => string;
   autoClose: () => boolean;
   getHideAvatars: () => boolean;
+  /** misc.showPronouns */
+  getShowPronouns: () => boolean;
   /** misc.openLinksIncognito when private open is supported. */
   getOpenPrivate?: () => boolean;
   /** misc.scrollbackUsercardLimit (hot on each open). */
   getUsercardLimit: () => number;
   getTimeoutButtons: () => TimeoutButton[];
   getSelfLogin: () => string | null;
-}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncMod: () => void } {
+}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncPronouns: () => void; syncMod: () => void } {
   const {
     modal,
     settingsModal,
@@ -42,6 +44,7 @@ export function bindUserCard(opts: {
     activeChannel,
     autoClose,
     getHideAvatars,
+    getShowPronouns,
     getOpenPrivate,
     getUsercardLimit,
     getTimeoutButtons,
@@ -53,6 +56,7 @@ export function bindUserCard(opts: {
   const avatarEl = modal.querySelector<HTMLImageElement>("#usercard-avatar");
   const nameEl = modal.querySelector<HTMLElement>("#usercard-name");
   const loginEl = modal.querySelector<HTMLElement>("#usercard-login");
+  const pronounsEl = modal.querySelector<HTMLElement>("#usercard-pronouns");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
   const modRow = modal.querySelector<HTMLElement>("#usercard-mod-row");
@@ -66,6 +70,7 @@ export function bindUserCard(opts: {
       open: () => undefined,
       close: () => undefined,
       syncAvatars: () => undefined,
+      syncPronouns: () => undefined,
       syncMod: () => undefined,
     };
   }
@@ -82,6 +87,22 @@ export function bindUserCard(opts: {
     avatarEl.hidden = true;
     avatarEl.removeAttribute("src");
     avatarEl.alt = "";
+  };
+
+  const clearPronouns = (): void => {
+    if (!pronounsEl) {
+      return;
+    }
+    pronounsEl.hidden = true;
+    pronounsEl.textContent = "";
+  };
+
+  const setPronounsLabel = (text: string): void => {
+    if (!pronounsEl) {
+      return;
+    }
+    pronounsEl.textContent = text;
+    pronounsEl.hidden = false;
   };
 
   if (avatarEl) {
@@ -190,6 +211,17 @@ export function bindUserCard(opts: {
     void loadAvatar(currentLogin);
   };
 
+  const syncPronouns = (): void => {
+    if (modal.hidden || !currentLogin) {
+      return;
+    }
+    if (!getShowPronouns()) {
+      clearPronouns();
+      return;
+    }
+    void loadPronouns(currentLogin);
+  };
+
   const close = (): void => {
     modal.hidden = true;
     currentLogin = "";
@@ -200,6 +232,7 @@ export function bindUserCard(opts: {
       pinBtn.title = "Pin";
     }
     clearAvatar();
+    clearPronouns();
     recent.replaceChildren();
     setStatus("");
     if (banBtn) {
@@ -259,6 +292,41 @@ export function bindUserCard(opts: {
     }
   };
 
+  const loadPronouns = async (login: string): Promise<void> => {
+    if (!pronounsEl || !getShowPronouns()) {
+      clearPronouns();
+      return;
+    }
+    setPronounsLabel("Pronouns: (loading…)");
+    try {
+      const result = await invoke<{ pronouns: string | null }>("chat_user_pronouns", {
+        login,
+      });
+      if (login !== currentLogin) {
+        return;
+      }
+      if (!getShowPronouns()) {
+        clearPronouns();
+        return;
+      }
+      const text = result.pronouns?.trim();
+      if (text) {
+        setPronounsLabel(`Pronouns: ${text}`);
+      } else {
+        setPronounsLabel("Pronouns: (unspecified)");
+      }
+    } catch {
+      if (login !== currentLogin) {
+        return;
+      }
+      if (!getShowPronouns()) {
+        clearPronouns();
+        return;
+      }
+      setPronounsLabel("Pronouns: (unspecified)");
+    }
+  };
+
   const open = (info: UserCardOpen): void => {
     if (!settingsModal.hidden || !searchModal.hidden) {
       return;
@@ -267,6 +335,7 @@ export function bindUserCard(opts: {
     nameEl.textContent = info.nick || info.login;
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
+    clearPronouns();
     recent.replaceChildren();
     setStatus("");
     const loading = document.createElement("p");
@@ -277,6 +346,7 @@ export function bindUserCard(opts: {
     placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
     void loadAvatar(currentLogin);
+    void loadPronouns(currentLogin);
   };
 
   const loadRecent = async (login: string): Promise<void> => {
@@ -425,5 +495,5 @@ export function bindUserCard(opts: {
     }
   });
 
-  return { open, close, syncAvatars, syncMod: syncModRow };
+  return { open, close, syncAvatars, syncPronouns, syncMod: syncModRow };
 }

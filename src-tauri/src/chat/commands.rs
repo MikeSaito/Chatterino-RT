@@ -965,6 +965,18 @@ pub async fn chat_user_profile(
 }
 
 #[tauri::command]
+pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPronounsResult, ApiError> {
+    let normalized = normalize_channel(&login)?;
+    let pronouns = super::pronouns::lookup(&normalized)
+        .await
+        .map_err(|e| ApiError {
+            code: "pronouns_error".into(),
+            message: e,
+        })?;
+    Ok(super::pronouns::UserPronounsResult { pronouns })
+}
+
+#[tauri::command]
 pub fn supports_incognito_links() -> bool {
     super::incognito::supports_incognito()
 }

@@ -1187,6 +1187,10 @@ button:disabled {
   color: var(--c-muted);
 }
 
+.usercard-pronouns[hidden] {
+  display: none;
+}
+
 .popup-actions,
 .popup-foot {
   padding: 8px 12px;
