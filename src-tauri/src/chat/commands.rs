@@ -873,7 +873,12 @@ pub fn chat_search(
     if !hub.has_channel(&normalized) {
         return Ok(SearchResult { hits: Vec::new() });
     }
-    let hits = hub.buffer(&normalized).scrollback.search_hits(&query);
+    let room_id = hub.room_id(&normalized).map(str::to_string);
+    let hits = hub.buffer(&normalized).scrollback.search_hits(
+        &query,
+        &normalized,
+        room_id.as_deref(),
+    );
     Ok(SearchResult { hits })
 }
 

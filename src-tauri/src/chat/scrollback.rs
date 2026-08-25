@@ -108,10 +108,14 @@ impl Scrollback {
         self.items.iter().cloned().collect()
     }
 
-    /// Case-insensitive substring match (Chatterino SubstringPredicate).
-    /// Empty query: full snapshot capped (SearchPopup with no predicates).
-    /// Chronological order; prefer newest when capped.
-    pub fn search_hits(&self, query: &str) -> Vec<SearchHit> {
+    /// Stock SearchPopup predicates (AND). Empty query: full snapshot capped.
+    /// Chronological order; prefer newest when capped. `channel`/`room_id` for `in:`/`is:shared`.
+    pub fn search_hits(
+        &self,
+        query: &str,
+        channel: &str,
+        room_id: Option<&str>,
+    ) -> Vec<SearchHit> {
         let cap = self.limit;
         let needle = query.trim();
         if needle.is_empty() {
@@ -125,10 +129,13 @@ impl Scrollback {
                 .map(ChatEvent::to_search_hit)
                 .collect();
         }
-        let needle_lower = needle.to_lowercase();
+        let preds = crate::chat::search_pred::parse_predicates(needle);
         let mut newest_first = Vec::new();
         for event in self.items.iter().rev() {
-            if event.matches_substring(&needle_lower) {
+            if matches!(event, ChatEvent::Clearmsg { .. }) {
+                continue;
+            }
+            if crate::chat::search_pred::applies_all(&preds, event, channel, room_id) {
                 newest_first.push(event.to_search_hit());
                 if newest_first.len() >= cap {
                     break;
@@ -141,7 +148,7 @@ impl Scrollback {
 
     #[cfg(test)]
     pub fn search_ids(&self, query: &str) -> Vec<String> {
-        self.search_hits(query)
+        self.search_hits(query, "test", None)
             .into_iter()
             .map(|h| h.id)
             .collect()
@@ -380,7 +387,7 @@ mod tests {
             },
             TimeoutStackStyle::DontStack,
         );
-        let hits = q.search_hits("dev");
+        let hits = q.search_hits("dev", "test", None);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].text.contains("(3 раз)"));
     }

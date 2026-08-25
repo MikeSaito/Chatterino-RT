@@ -51,9 +51,10 @@ export function bindSearchPopup(opts: {
   const backdrop = modal.querySelector<HTMLElement>("#search-backdrop");
   const titleEl = modal.querySelector<HTMLElement>("#search-title");
   const input = modal.querySelector<HTMLInputElement>("#search-input");
+  const clearBtn = modal.querySelector<HTMLButtonElement>("#search-clear");
   const view = modal.querySelector<HTMLElement>("#search-view");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#search-close");
-  if (!dialog || !backdrop || !titleEl || !input || !view || !closeBtn) {
+  if (!dialog || !backdrop || !titleEl || !input || !clearBtn || !view || !closeBtn) {
     return {
       onChannelChanged: () => undefined,
       open: () => undefined,
@@ -141,9 +142,14 @@ export function bindSearchPopup(opts: {
     }
   };
 
+  const syncClear = (): void => {
+    clearBtn.hidden = input.value.trim().length === 0;
+  };
+
   const runSearch = async (raw: string): Promise<void> => {
     const q = raw.trim();
     hasQuery = q.length > 0;
+    syncClear();
     const channel = activeChannel();
     boundChannel = channel;
     paintTitle();
@@ -195,6 +201,7 @@ export function bindSearchPopup(opts: {
     hasQuery = false;
     boundChannel = "";
     input.value = "";
+    syncClear();
     view.replaceChildren();
     ring.clearFindHit();
     const focusBack = restoreFocus;
@@ -220,6 +227,7 @@ export function bindSearchPopup(opts: {
     paintTitle();
     modal.hidden = false;
     setAppInert(true);
+    syncClear();
     input.focus();
     input.select();
     void runSearch(input.value);
@@ -250,6 +258,14 @@ export function bindSearchPopup(opts: {
     close();
   });
 
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    syncClear();
+    window.clearTimeout(timer);
+    void runSearch("");
+    input.focus();
+  });
+
   backdrop.addEventListener("click", () => {
     close();
   });
@@ -269,6 +285,7 @@ export function bindSearchPopup(opts: {
   });
 
   input.addEventListener("input", () => {
+    syncClear();
     scheduleSearch();
   });
 

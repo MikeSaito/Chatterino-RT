@@ -253,6 +253,7 @@ body,
 
 #search-input-row {
   display: flex;
+  align-items: center;
   padding: 8px;
   gap: 8px;
   flex-shrink: 0;
@@ -263,6 +264,25 @@ body,
   flex: 1;
   min-width: 0;
   font-size: 13px;
+}
+
+#search-clear {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#search-clear:hover {
+  color: var(--c-fg);
+  background: var(--c-header-bg);
 }
 
 #search-view {

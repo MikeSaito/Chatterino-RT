@@ -181,11 +181,20 @@
           <label class="sr-only" for="search-input">Type to search</label>
           <input
             id="search-input"
-            type="search"
+            type="text"
             placeholder="Type to search"
             autocomplete="off"
             spellcheck="false"
           />
+          <button
+            type="button"
+            id="search-clear"
+            title="Clear"
+            hidden
+            aria-label="Clear search"
+          >
+            ×
+          </button>
         </div>
         <div id="search-view" role="list" aria-label="Результаты поиска"></div>
       </div>
