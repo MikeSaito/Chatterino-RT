@@ -123,6 +123,11 @@ export type ChatStatus = {
   message?: string;
 };
 
+export type ViewerRole = {
+  isMod: boolean;
+  isBroadcaster: boolean;
+};
+
 export type ChannelLive = {
   channel: string;
   live: boolean;

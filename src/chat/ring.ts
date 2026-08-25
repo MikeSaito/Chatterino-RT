@@ -285,6 +285,7 @@ export class MessageRing {
   private onModAction:
     | ((action: string, ctx: SlotContext) => void)
     | undefined;
+  private onViewerRoleChange: (() => void) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -345,6 +346,10 @@ export class MessageRing {
 
   setOnModAction(cb: (action: string, ctx: SlotContext) => void): void {
     this.onModAction = cb;
+  }
+
+  setOnViewerRoleChange(cb: () => void): void {
+    this.onViewerRoleChange = cb;
   }
 
   setModerationMode(on: boolean): void {
@@ -1467,8 +1472,12 @@ export class MessageRing {
         return;
       }
     }
-    if (event.kind === "roomstate" || event.kind === "userstate") {
-      // Legacy raw roomstate / userstate in old snapshots — skip; live path side-effects only.
+    if (event.kind === "userstate") {
+      this.onViewerRoleChange?.();
+      return;
+    }
+    if (event.kind === "roomstate") {
+      // Legacy raw roomstate in old snapshots — skip; live path side-effects only.
       return;
     }
     const slot = this.slots[this.head];

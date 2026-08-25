@@ -158,9 +158,15 @@
           <button type="button" id="usercard-open-twitch">Open on Twitch</button>
         </div>
         <div id="usercard-mod-row" class="usercard-mod-row" hidden>
-          <button type="button" id="usercard-unban" title="Unban">Unban</button>
+          <div id="usercard-roles" class="usercard-roles" hidden>
+            <button type="button" id="usercard-mod" title="Mod">Mod</button>
+            <button type="button" id="usercard-unmod" title="Unmod">Unmod</button>
+            <button type="button" id="usercard-vip" title="VIP">VIP</button>
+            <button type="button" id="usercard-unvip" title="UnVIP">UnVIP</button>
+          </div>
+          <button type="button" id="usercard-unban" title="Unban" hidden>Unban</button>
           <div id="usercard-timeouts" class="usercard-timeouts" aria-label="Timeout durations"></div>
-          <button type="button" id="usercard-ban" title="Ban">Ban</button>
+          <button type="button" id="usercard-ban" title="Ban" hidden>Ban</button>
         </div>
         <p id="usercard-status" class="usercard-status" hidden></p>
         <div id="usercard-recent" aria-label="Recent messages"></div>

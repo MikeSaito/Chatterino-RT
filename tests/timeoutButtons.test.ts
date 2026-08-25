@@ -44,5 +44,9 @@ assert(moderationSlashCommand("unban", "bob") === "/unban bob", "unban");
 assert(moderationSlashCommand("timeout", "", 1) === null, "empty");
 assert(moderationSlashCommand("timeout", "bad name", 1) === null, "space");
 assert(moderationSlashCommand("timeout", "bob", 0) === null, "secs");
+assert(moderationSlashCommand("mod", "bob") === "/mod bob", "mod");
+assert(moderationSlashCommand("unmod", "bob") === "/unmod bob", "unmod");
+assert(moderationSlashCommand("vip", "bob") === "/vip bob", "vip");
+assert(moderationSlashCommand("unvip", "bob") === "/unvip bob", "unvip");
 
 console.log("timeoutButtons tests ok");

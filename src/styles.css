@@ -1383,6 +1383,16 @@ button:disabled {
   display: none;
 }
 
+.usercard-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.usercard-roles[hidden] {
+  display: none;
+}
+
 .usercard-timeouts {
   display: flex;
   flex-wrap: wrap;

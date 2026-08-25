@@ -1022,6 +1022,27 @@ pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPr
     Ok(super::pronouns::UserPronounsResult { pronouns })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewerRoleDto {
+    pub is_mod: bool,
+    pub is_broadcaster: bool,
+}
+
+#[tauri::command]
+pub fn chat_viewer_role(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<ViewerRoleDto, ApiError> {
+    let normalized = normalize_channel(&channel)?;
+    let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+    let role = hub.viewer_role(&normalized, auth::resolved_twitch_user_id(&state).as_deref());
+    Ok(ViewerRoleDto {
+        is_mod: role.is_mod,
+        is_broadcaster: role.is_broadcaster,
+    })
+}
+
 /// Runtime Helix block list logins (Settings Ignores → Users). Empty when anon / unloaded.
 #[tauri::command]
 pub fn chat_blocked_users(state: tauri::State<'_, Shared>) -> Result<Vec<String>, ApiError> {

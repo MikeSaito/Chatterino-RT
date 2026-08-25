@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatEvent } from "../chat/types";
+import type { ChatEvent, ViewerRole } from "../chat/types";
 import {
   moderationSlashCommand,
+  type ModerationCommandKind,
   type TimeoutButton,
 } from "./timeoutButtons";
 
@@ -80,6 +81,11 @@ export function bindUserCard(opts: {
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
   const modRow = modal.querySelector<HTMLElement>("#usercard-mod-row");
+  const rolesEl = modal.querySelector<HTMLElement>("#usercard-roles");
+  const roleModBtn = modal.querySelector<HTMLButtonElement>("#usercard-mod");
+  const roleUnmodBtn = modal.querySelector<HTMLButtonElement>("#usercard-unmod");
+  const roleVipBtn = modal.querySelector<HTMLButtonElement>("#usercard-vip");
+  const roleUnvipBtn = modal.querySelector<HTMLButtonElement>("#usercard-unvip");
   const timeoutsEl = modal.querySelector<HTMLElement>("#usercard-timeouts");
   const banBtn = modal.querySelector<HTMLButtonElement>("#usercard-ban");
   const unbanBtn = modal.querySelector<HTMLButtonElement>("#usercard-unban");
@@ -99,6 +105,7 @@ export function bindUserCard(opts: {
   let pinned = false;
   let modBusy = false;
   let currentUserId = "";
+  let modRowSeq = 0;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -249,6 +256,18 @@ export function bindUserCard(opts: {
     if (unbanBtn) {
       unbanBtn.disabled = busy;
     }
+    if (roleModBtn) {
+      roleModBtn.disabled = busy;
+    }
+    if (roleUnmodBtn) {
+      roleUnmodBtn.disabled = busy;
+    }
+    if (roleVipBtn) {
+      roleVipBtn.disabled = busy;
+    }
+    if (roleUnvipBtn) {
+      roleUnvipBtn.disabled = busy;
+    }
     if (timeoutsEl) {
       for (const btn of timeoutsEl.querySelectorAll("button")) {
         btn.disabled = busy;
@@ -256,34 +275,93 @@ export function bindUserCard(opts: {
     }
   };
 
-  const syncModRow = (): void => {
-    if (!modRow || !timeoutsEl) {
-      return;
-    }
-    const self = getSelfLogin()?.trim().toLowerCase() ?? "";
-    const hideSelf = Boolean(self) && self === currentLogin;
-    if (!currentLogin || hideSelf) {
+  const hideModRow = (): void => {
+    if (modRow) {
       modRow.hidden = true;
-      timeoutsEl.replaceChildren();
-      return;
     }
-    modRow.hidden = false;
-    timeoutsEl.replaceChildren();
-    for (const btnDef of getTimeoutButtons()) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = btnDef.label;
-      btn.title = `Timeout ${btnDef.seconds}s`;
-      btn.dataset.seconds = String(btnDef.seconds);
-      btn.addEventListener("click", () => {
-        void sendMod("timeout", btnDef.seconds);
-      });
-      timeoutsEl.append(btn);
+    if (rolesEl) {
+      rolesEl.hidden = true;
+    }
+    if (banBtn) {
+      banBtn.hidden = true;
+    }
+    if (unbanBtn) {
+      unbanBtn.hidden = true;
+    }
+    if (timeoutsEl) {
+      timeoutsEl.replaceChildren();
     }
   };
 
+  const refreshModUi = (): void => {
+    if (!modRow || !timeoutsEl) {
+      return;
+    }
+    const loginAtStart = currentLogin;
+    const self = getSelfLogin()?.trim().toLowerCase() ?? "";
+    const hideSelf = Boolean(self) && self === loginAtStart;
+    if (!loginAtStart || hideSelf) {
+      hideModRow();
+      return;
+    }
+    const channel = activeChannel().trim();
+    if (!channel) {
+      hideModRow();
+      return;
+    }
+    hideModRow();
+    const seq = ++modRowSeq;
+    void (async () => {
+      try {
+        const role = await invoke<ViewerRole>("chat_viewer_role", { channel });
+        if (
+          seq !== modRowSeq ||
+          loginAtStart !== currentLogin ||
+          activeChannel().trim() !== channel
+        ) {
+          return;
+        }
+        const showMod = role.isMod;
+        const showRoles = role.isBroadcaster;
+        if (!showMod && !showRoles) {
+          hideModRow();
+          return;
+        }
+        modRow.hidden = false;
+        if (rolesEl) {
+          rolesEl.hidden = !showRoles;
+        }
+        if (banBtn) {
+          banBtn.hidden = !showMod;
+        }
+        if (unbanBtn) {
+          unbanBtn.hidden = !showMod;
+        }
+        timeoutsEl.replaceChildren();
+        if (showMod) {
+          for (const btnDef of getTimeoutButtons()) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = btnDef.label;
+            btn.title = `Timeout ${btnDef.seconds}s`;
+            btn.dataset.seconds = String(btnDef.seconds);
+            btn.addEventListener("click", () => {
+              void sendMod("timeout", btnDef.seconds);
+            });
+            timeoutsEl.append(btn);
+          }
+        }
+      } catch {
+        if (seq !== modRowSeq || loginAtStart !== currentLogin) {
+          return;
+        }
+        hideModRow();
+      }
+    })();
+  };
+
   const sendMod = async (
-    kind: "timeout" | "ban" | "unban",
+    kind: ModerationCommandKind,
     seconds?: number,
   ): Promise<void> => {
     if (!currentLogin || modBusy || modal.hidden) {
@@ -360,12 +438,8 @@ export function bindUserCard(opts: {
     if (unbanBtn) {
       unbanBtn.disabled = false;
     }
-    if (modRow) {
-      modRow.hidden = true;
-    }
-    if (timeoutsEl) {
-      timeoutsEl.replaceChildren();
-    }
+    modRowSeq += 1;
+    hideModRow();
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -476,7 +550,7 @@ export function bindUserCard(opts: {
     loading.className = "usercard-empty";
     loading.textContent = "Loading recent messages…";
     recent.append(loading);
-    syncModRow();
+    refreshModUi();
     placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
     void loadProfile(currentLogin);
@@ -627,6 +701,26 @@ export function bindUserCard(opts: {
       void sendMod("unban");
     });
   }
+  if (roleModBtn) {
+    roleModBtn.addEventListener("click", () => {
+      void sendMod("mod");
+    });
+  }
+  if (roleUnmodBtn) {
+    roleUnmodBtn.addEventListener("click", () => {
+      void sendMod("unmod");
+    });
+  }
+  if (roleVipBtn) {
+    roleVipBtn.addEventListener("click", () => {
+      void sendMod("vip");
+    });
+  }
+  if (roleUnvipBtn) {
+    roleUnvipBtn.addEventListener("click", () => {
+      void sendMod("unvip");
+    });
+  }
 
   document.addEventListener("pointerdown", (ev) => {
     if (modal.hidden || pinned || !autoClose()) {
@@ -646,5 +740,5 @@ export function bindUserCard(opts: {
     }
   });
 
-  return { open, close, syncAvatars, syncPronouns, syncMod: syncModRow };
+  return { open, close, syncAvatars, syncPronouns, syncMod: refreshModUi };
 }

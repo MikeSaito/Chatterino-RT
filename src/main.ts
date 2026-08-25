@@ -737,6 +737,9 @@ async function boot(): Promise<void> {
       }
     })();
   });
+  ring.setOnViewerRoleChange(() => {
+    userCard?.syncMod();
+  });
   ring.setOnNickClick((ctx) => {
     hideContextMenu();
     userCard.open({
@@ -1739,6 +1742,7 @@ async function boot(): Promise<void> {
     }
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
+    userCard?.syncMod();
   }
 
   function drainChannelQueue(): void {

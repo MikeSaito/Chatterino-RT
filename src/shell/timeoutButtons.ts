@@ -89,9 +89,18 @@ export function parseTimeoutButtons(knobs: KnobMap): TimeoutButton[] {
   return out;
 }
 
+export type ModerationCommandKind =
+  | "timeout"
+  | "ban"
+  | "unban"
+  | "mod"
+  | "unmod"
+  | "vip"
+  | "unvip";
+
 /** Build slash command for chat_send. Login must already be normalized. */
 export function moderationSlashCommand(
-  kind: "timeout" | "ban" | "unban",
+  kind: ModerationCommandKind,
   login: string,
   seconds?: number,
 ): string | null {
@@ -108,5 +117,17 @@ export function moderationSlashCommand(
   if (kind === "ban") {
     return `/ban ${user}`;
   }
-  return `/unban ${user}`;
+  if (kind === "unban") {
+    return `/unban ${user}`;
+  }
+  if (kind === "mod") {
+    return `/mod ${user}`;
+  }
+  if (kind === "unmod") {
+    return `/unmod ${user}`;
+  }
+  if (kind === "vip") {
+    return `/vip ${user}`;
+  }
+  return `/unvip ${user}`;
 }
