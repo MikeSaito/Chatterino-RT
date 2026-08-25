@@ -50,5 +50,6 @@ pub mod streamer_mode;
 pub mod streamlink;
 pub mod custom_player;
 pub mod timeout_stack;
+pub mod toast_shortcut;
 pub mod twitch_blocks;
 pub mod types;

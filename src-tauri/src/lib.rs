@@ -25,6 +25,7 @@ pub fn run() {
             chat::filters::init(app.handle(), &shared)?;
             chat::session::init(app.handle(), &shared)?;
             chat::settings::init(app.handle(), &shared)?;
+            chat::toast_shortcut::apply_from_settings(&shared);
             chat::eventapi::start(shared.clone())?;
             chat::bttv_live::start(shared.clone())?;
             chat::live_status::start(app.handle().clone(), shared.clone());
