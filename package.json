@@ -29,6 +29,7 @@
     "test:timeout-buttons": "node --experimental-strip-types ./tests/timeoutButtons.test.ts",
     "test:mod-actions": "node --experimental-strip-types ./tests/modActions.test.ts",
     "test:image-upload": "node --experimental-strip-types ./tests/imageUpload.test.ts",
+    "test:image-uploader-sharex": "node --experimental-strip-types ./tests/imageUploaderSharex.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

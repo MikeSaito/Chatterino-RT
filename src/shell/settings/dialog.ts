@@ -42,6 +42,11 @@ import {
   type TableDef,
 } from "./catalog";
 import { mountEditableTable } from "./editableTable";
+import {
+  exportImageUploaderSettings,
+  importImageUploaderSettings,
+  validateImportJson,
+} from "../imageUploaderSharex";
 
 export type AppSettings = {
   fontScale: number;
@@ -464,6 +469,135 @@ export function bindSettingsDialog(opts: {
       }
       statusEl.textContent = "";
       schedulePreview();
+      return;
+    }
+    if (path === "__action.exportImageUploader") {
+      const read = (key: string): string => {
+        const input = knobInputs.get(key);
+        if (!(input instanceof HTMLInputElement)) {
+          return "";
+        }
+        return input.value;
+      };
+      const payload = exportImageUploaderSettings({
+        url: read("external.imageUploaderUrl"),
+        formField: read("external.imageUploaderFormField"),
+        link: read("external.imageUploaderLink"),
+        deletionLink: read("external.imageUploaderDeletionLink"),
+        headers: read("external.imageUploaderHeaders"),
+      });
+      const text = JSON.stringify(payload, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        statusEl.textContent =
+          "Image uploader settings have been copied to clipboard as JSON.";
+      } catch {
+        window.prompt("Copy image uploader settings JSON:", text);
+        statusEl.textContent =
+          "Clipboard unavailable; JSON shown in the prompt for manual copy.";
+      }
+      return;
+    }
+    if (path === "__action.importImageUploader") {
+      let clipboardText = "";
+      try {
+        clipboardText = await navigator.clipboard.readText();
+      } catch {
+        const pasted = window.prompt(
+          "Clipboard unavailable. Paste image uploader settings JSON:",
+          "",
+        );
+        if (pasted === null) {
+          return;
+        }
+        clipboardText = pasted;
+      }
+      const validated = validateImportJson(clipboardText);
+      if (!validated.ok) {
+        statusEl.textContent = `Error validating image uploader import: ${validated.error}.`;
+        return;
+      }
+      const imported = importImageUploaderSettings(validated.value);
+      if (!imported) {
+        statusEl.textContent =
+          "No valid image uploader settings found in the JSON.";
+        return;
+      }
+      if (
+        !window.confirm(
+          "This will overwrite your current image uploader settings. Continue?",
+        )
+      ) {
+        return;
+      }
+      if (saving || !loadReady) {
+        statusEl.textContent = "Settings are busy; try import again.";
+        return;
+      }
+      saving = true;
+      okBtn.disabled = true;
+      cancelBtn.disabled = true;
+      const patch: Record<string, string | boolean> = {
+        "external.imageUploaderEnabled": true,
+        "external.imageUploaderUrl": imported.url,
+        "external.imageUploaderFormField": imported.formField,
+        "external.imageUploaderLink": imported.link,
+      };
+      if (imported.deletionLink !== null) {
+        patch["external.imageUploaderDeletionLink"] = imported.deletionLink;
+      }
+      if (imported.headers !== null) {
+        patch["external.imageUploaderHeaders"] = imported.headers;
+      }
+      const persistDraft: AppSettings = {
+        ...baseline,
+        knobs: { ...baseline.knobs, ...patch },
+      };
+      try {
+        const saved = await invoke<AppSettings>("settings_set", {
+          settings: persistDraft,
+        });
+        baseline = {
+          ...emptySettings(),
+          ...saved,
+          knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
+          enableSelfHighlight: baselineFilters.enableSelfHighlight,
+        };
+        const writeText = (key: string, value: string): void => {
+          const input = knobInputs.get(key);
+          if (input instanceof HTMLInputElement) {
+            input.value = value;
+          }
+        };
+        writeText("external.imageUploaderUrl", imported.url);
+        writeText("external.imageUploaderFormField", imported.formField);
+        writeText("external.imageUploaderLink", imported.link);
+        if (imported.deletionLink !== null) {
+          writeText(
+            "external.imageUploaderDeletionLink",
+            imported.deletionLink,
+          );
+        }
+        if (imported.headers !== null) {
+          writeText("external.imageUploaderHeaders", imported.headers);
+        }
+        const enabled = knobInputs.get("external.imageUploaderEnabled");
+        if (enabled instanceof HTMLInputElement) {
+          enabled.checked = true;
+        }
+        statusEl.textContent =
+          "Image uploader settings have been imported successfully!";
+        schedulePreview();
+      } catch (e) {
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not save imported image uploader settings.";
+      } finally {
+        saving = false;
+        okBtn.disabled = !loadReady;
+        cancelBtn.disabled = false;
+      }
       return;
     }
     statusEl.textContent = "This action is not available in Chatterino RT yet.";
