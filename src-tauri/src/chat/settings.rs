@@ -310,6 +310,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     rebuild_custom_commands(shared, &inner.data);
     rebuild_logging(shared, &inner.data);
     rebuild_live_notifications(shared, &inner.data);
+    super::autorun::sync_knob_from_registry(&mut inner.data.knobs);
     Ok(())
 }
 
@@ -354,11 +355,12 @@ pub fn apply_scrollback_limit(shared: &Shared, knobs: &BTreeMap<String, Value>) 
 }
 
 pub fn snapshot(shared: &Shared) -> Result<AppSettings, ApiError> {
-    shared
+    let mut inner = shared
         .settings
         .lock()
-        .map(|inner| inner.data.clone())
-        .map_err(|_| ApiError::internal("lock"))
+        .map_err(|_| ApiError::internal("lock"))?;
+    super::autorun::sync_knob_from_registry(&mut inner.data.knobs);
+    Ok(inner.data.clone())
 }
 
 pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, ApiError> {
@@ -368,10 +370,18 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     if inner.path.as_os_str().is_empty() {
         return Err(ApiError::internal("каталог конфигурации не инициализирован"));
     }
+    let prev_autorun = super::autorun::is_registered();
+    if let Err(e) = super::autorun::apply_knob_to_registry(&clean.knobs) {
+        return Err(ApiError::internal(&e));
+    }
+    super::autorun::sync_knob_from_registry(&mut clean.knobs);
     let prev_flags = super::fetch::EmoteProviderFlags::from_knobs(&inner.data.knobs);
     let prev_stv_channel_need =
         super::eventapi::seventv_event_channel_needed_from_knobs(&inner.data.knobs);
-    save_file(&inner.path, &clean).map_err(|e| ApiError::internal(&e))?;
+    if let Err(e) = save_file(&inner.path, &clean) {
+        let _ = super::autorun::set_registered(prev_autorun);
+        return Err(ApiError::internal(&e));
+    }
     inner.data = clean.clone();
     let ctx = super::filters::HighlightSoundCtx::from_settings(&inner.data);
     if let Ok(mut slot) = shared.highlight_sound.lock() {

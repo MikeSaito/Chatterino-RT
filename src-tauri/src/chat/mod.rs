@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod autorun;
 pub mod batch;
 pub mod bttv_badges;
 pub mod bttv_live;

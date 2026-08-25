@@ -139,8 +139,9 @@ fn init_propvariant_from_string(
     psz: windows::core::PCWSTR,
     out: &mut windows::Win32::System::Com::StructuredStorage::PROPVARIANT,
 ) -> Result<(), String> {
-    #[link(name = "propsys")]
-    unsafe extern "system" {
+    // windows 0.61 не экспортирует InitPropVariantFromString; raw-dylib как в windows-link.
+    #[link(name = "propsys.dll", kind = "raw-dylib", modifiers = "+verbatim")]
+    extern "C" {
         fn InitPropVariantFromString(
             psz: windows::core::PCWSTR,
             ppropvar: *mut windows::Win32::System::Com::StructuredStorage::PROPVARIANT,
