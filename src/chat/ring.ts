@@ -1,11 +1,13 @@
 import {
   BitmapFont,
+  BitmapFontManager,
   BitmapText,
   Container,
   FederatedPointerEvent,
   Graphics,
   Rectangle,
   Sprite,
+  TextStyle,
   Texture,
   type Application,
 } from "pixi.js";
@@ -99,7 +101,10 @@ type Slot = {
   disabledGfx: Graphics;
   time: BitmapText;
   nick: BitmapText;
+  /** First wrap line (x after nick). */
   body: BitmapText;
+  /** Wrap lines 2+ (x under timestamp); empty when single-line. */
+  bodyCont: BitmapText;
   replyHeader: BitmapText;
   mentionTexts: BitmapText[];
   bitsLabel: BitmapText;
@@ -194,7 +199,6 @@ export class MessageRing {
   private fontSize = 10;
   private lineHeight = Math.ceil(10 * (22 / 15));
   private charWidth = 10 * 0.56;
-  private nickCharWidth = 10 * 0.56;
   private badgeSize = BADGE_SIZE;
   private emoteScale = 1;
   private stackBits = false;
@@ -735,6 +739,7 @@ export class MessageRing {
     for (const slot of this.slots) {
       slot.time.style.fill = this.themeFills.timestamp;
       slot.body.style.fill = this.themeFills.body;
+      slot.bodyCont.style.fill = this.themeFills.body;
       slot.nick.style.fill = 0xffffff;
       if (slot.useNickStyle) {
         slot.nick.tint = resolveNickColor({
@@ -749,6 +754,7 @@ export class MessageRing {
       dirtyBitmapText(slot.time);
       dirtyBitmapText(slot.nick);
       dirtyBitmapText(slot.body);
+      dirtyBitmapText(slot.bodyCont);
     }
     this.layout();
   }
@@ -892,12 +898,74 @@ export class MessageRing {
     );
     this.charWidth = metrics.charWidth;
     this.lineHeight = metrics.lineHeight;
-    const nickMetrics = measureFontMetrics(
+  }
+
+  /**
+   * Width of painted BitmapText (measurement units × layout.scale).
+   * Canvas measureTextWidth drifts from ChatFont/ChatNickFont advances.
+   */
+  private measureBitmapTextWidth(fontFamily: string, text: string): number {
+    if (!text) {
+      return 0;
+    }
+    try {
+      const style = new TextStyle({
+        fontFamily,
+        fontSize: this.fontSize,
+        fill: "#ffffff",
+      });
+      const m = BitmapFontManager.measureText(text, style, false);
+      const w = m.width * m.scale;
+      if (w > 0) {
+        return w;
+      }
+    } catch {
+      // Font not installed yet.
+    }
+    const weight =
+      fontFamily === "ChatNickFont"
+        ? this.nickBoldScale
+        : this.chatFontWeight;
+    return measureTextWidth(
       this.chatFontFamily,
-      qtWeightToCss(this.nickBoldScale),
-      effective,
+      qtWeightToCss(weight),
+      this.fontSize,
+      text,
     );
-    this.nickCharWidth = nickMetrics.charWidth;
+  }
+
+  /** Ellipsis nick to fit maxPx in ChatNickFont (optional trailing ':'). */
+  private clipNickToWidth(
+    nick: string,
+    maxPx: number,
+    withColon: boolean,
+  ): string {
+    const suffix = withColon ? ":" : "";
+    const limit = Math.max(8, maxPx);
+    if (
+      this.measureBitmapTextWidth("ChatNickFont", `${nick}${suffix}`) <= limit
+    ) {
+      return `${nick}${suffix}`;
+    }
+    let lo = 0;
+    let hi = nick.length;
+    let best = withColon ? ":" : "..";
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const candidate =
+        mid <= 0
+          ? withColon
+            ? ":"
+            : ".."
+          : `${clipNick(nick, Math.max(2, mid))}${suffix}`;
+      if (this.measureBitmapTextWidth("ChatNickFont", candidate) <= limit) {
+        best = candidate;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best;
   }
 
   private applyFontStylesToSlots(forceDirty: boolean): void {
@@ -907,6 +975,8 @@ export class MessageRing {
       slot.nick.style.fontSize = this.fontSize;
       slot.body.style.fontSize = this.fontSize;
       slot.body.style.lineHeight = this.lineHeight;
+      slot.bodyCont.style.fontSize = this.fontSize;
+      slot.bodyCont.style.lineHeight = this.lineHeight;
       slot.replyHeader.style.fontSize = Math.max(
         8,
         Math.round(this.fontSize * 0.85),
@@ -923,6 +993,7 @@ export class MessageRing {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
+        dirtyBitmapText(slot.bodyCont);
         dirtyBitmapText(slot.replyHeader);
         for (const mt of slot.mentionTexts) {
           dirtyBitmapText(mt);
@@ -1098,6 +1169,18 @@ export class MessageRing {
           lineHeight: this.lineHeight,
         },
       });
+      body.eventMode = "none";
+      const bodyCont = new BitmapText({
+        text: "",
+        style: {
+          fontFamily: "ChatFont",
+          fontSize: this.fontSize,
+          fill: this.themeFills.body,
+          lineHeight: this.lineHeight,
+        },
+      });
+      bodyCont.visible = false;
+      bodyCont.eventMode = "none";
       const replyHeader = new BitmapText({
         text: "",
         style: {
@@ -1162,15 +1245,16 @@ export class MessageRing {
         mt.eventMode = "none";
         modBtns.push(mt);
       }
-      // disabled overlay last — поверх текста/эмодзи как MessageLayout fillRect
+      // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
         hl,
         mentions,
         ...modBtns,
         replyHeader,
         time,
-        nick,
         body,
+        bodyCont,
+        nick,
         ...mentionTexts,
         bitsLabel,
         ...badges,
@@ -1185,6 +1269,7 @@ export class MessageRing {
         time,
         nick,
         body,
+        bodyCont,
         replyHeader,
         mentionTexts,
         bitsLabel,
@@ -1435,6 +1520,8 @@ export class MessageRing {
     slot.time.text = "";
     slot.nick.text = "";
     slot.body.text = "";
+    slot.bodyCont.text = "";
+    slot.bodyCont.visible = false;
     slot.msgId = "";
     slot.login = "";
     slot.bodySource = "";
@@ -1770,12 +1857,7 @@ export class MessageRing {
       ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
       : "";
     const timeW = this.timestampsVisible()
-      ? measureTextWidth(
-          this.chatFontFamily,
-          qtWeightToCss(this.chatFontWeight),
-          this.fontSize,
-          timeSample,
-        ) + gap
+      ? this.measureBitmapTextWidth("ChatFont", timeSample) + gap
       : 0;
     const gutterW = this.paintModGutter(slot);
     const showReply =
@@ -1829,13 +1911,11 @@ export class MessageRing {
     // reserving MIN_BODY_CHARS * charWidth starved the nick column (shown as "..").
     // Clip only when the full nick cannot leave at least one body column.
     const prefixW = gutterW + timeW + badgeBand;
+    const nickColon =
+      slot.useNickStyle && !slot.isAction && slot.nickRaw.length > 0;
+    const nickForWidth = nickColon ? `${slot.nickRaw}:` : slot.nickRaw;
     const fullNickW = Math.max(
-      measureTextWidth(
-        this.chatFontFamily,
-        qtWeightToCss(this.nickBoldScale),
-        this.fontSize,
-        slot.nickRaw,
-      ),
+      this.measureBitmapTextWidth("ChatNickFont", nickForWidth),
       8,
     );
     const maxNickPx = Math.max(
@@ -1843,39 +1923,29 @@ export class MessageRing {
       paneW - prefixW - gap - 8 - MIN_BODY_COLS_AFTER_NICK * this.charWidth,
     );
     if (fullNickW > maxNickPx) {
-      const nickMaxChars = Math.max(
-        2,
-        Math.floor(maxNickPx / this.nickCharWidth),
+      slot.nick.text = this.clipNickToWidth(
+        slot.nickRaw,
+        maxNickPx,
+        nickColon,
       );
-      slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
     } else {
-      slot.nick.text = slot.nickRaw;
+      slot.nick.text = nickForWidth;
     }
+    dirtyBitmapText(slot.nick);
     const nickW = Math.max(
-      measureTextWidth(
-        this.chatFontFamily,
-        qtWeightToCss(this.nickBoldScale),
-        this.fontSize,
-        slot.nick.text,
-      ),
+      this.measureBitmapTextWidth("ChatNickFont", slot.nick.text),
       8,
     );
-    const bodyAfterNick = gutterW + timeW + badgeBand + nickW + gap;
-    // Body BitmapText at x=0 with leading spaces: first line after nick,
-    // later lines under timestamp (gutterW), same char-grid as overlays/hit-test.
-    slot.body.x = 0;
+    const firstOriginX = gutterW + timeW + badgeBand + nickW + gap;
+    const contOriginX = gutterW;
+    // Split body: first wrap line after nick; lines 2+ under timestamp (no space-pad).
+    slot.body.x = firstOriginX;
     slot.body.y = contentY;
+    slot.bodyCont.x = contOriginX;
+    slot.bodyCont.y = contentY + this.lineHeight;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const cw = Math.max(this.charWidth, 1);
-    const contIndentCols = Math.max(0, Math.ceil(gutterW / cw));
-    const firstIndentCols = Math.max(
-      contIndentCols,
-      Math.ceil(bodyAfterNick / cw),
-    );
-    const firstOriginX = firstIndentCols * cw;
-    const contOriginX = contIndentCols * cw;
     const fullCols = maxBodyChars(
       this.app.screen.width,
       contOriginX,
@@ -1894,13 +1964,7 @@ export class MessageRing {
       );
       dirtyBitmapText(slot.replyHeader);
     }
-    const layoutOpts = this.wrapOpts(
-      slot,
-      undefined,
-      firstCols,
-      firstIndentCols,
-      contIndentCols,
-    );
+    const layoutOpts = this.wrapOpts(slot, undefined, firstCols);
     const wrapped = wrapBody(
       slot.bodyRaw,
       fullCols,
@@ -1931,17 +1995,25 @@ export class MessageRing {
       this.boldUsernames || this.colorUsernames
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
-    const renderOpts = this.wrapOpts(
-      slot,
-      overlayMentions,
-      firstCols,
-      firstIndentCols,
-      contIndentCols,
-    );
+    const renderOpts = this.wrapOpts(slot, overlayMentions, firstCols);
+    const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
+    const restLines = lines.slice(1);
     slot.body.text = withCollapsedEllipsis(
-      renderWrapped(slot.bodyRaw, lines, slot.spansRaw, renderOpts),
-      collapsed,
+      renderWrapped(slot.bodyRaw, firstOnly, slot.spansRaw, renderOpts),
+      collapsed && restLines.length === 0,
     );
+    dirtyBitmapText(slot.body);
+    if (restLines.length === 0) {
+      slot.bodyCont.visible = false;
+      slot.bodyCont.text = "";
+    } else {
+      slot.bodyCont.visible = true;
+      slot.bodyCont.text = withCollapsedEllipsis(
+        renderWrapped(slot.bodyRaw, restLines, slot.spansRaw, renderOpts),
+        collapsed,
+      );
+      dirtyBitmapText(slot.bodyCont);
+    }
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
@@ -2548,12 +2620,7 @@ export class MessageRing {
     }
     const local = ev.getLocalPosition(slot.root);
     const nickW = Math.max(
-      measureTextWidth(
-        this.chatFontFamily,
-        qtWeightToCss(this.nickBoldScale),
-        this.fontSize,
-        slot.nick.text,
-      ),
+      this.measureBitmapTextWidth("ChatNickFont", slot.nick.text),
       8,
     );
     const y0 = slot.replyRows * this.lineHeight;
@@ -2818,8 +2885,6 @@ export class MessageRing {
     slot?: Slot,
     maskMentions?: readonly MentionSpan[],
     firstLineMaxChars?: number,
-    firstLineIndentCols?: number,
-    continuationIndentCols?: number,
   ): WrapOptions {
     const images = this.enableEmoteImages;
     const emoteMinCols =
@@ -2838,8 +2903,6 @@ export class MessageRing {
       removeSpacesBetweenEmotes: images && this.removeSpacesBetweenEmotes,
       maskMentions: mentions,
       firstLineMaxChars,
-      firstLineIndentCols,
-      continuationIndentCols,
     };
   }
 

@@ -34,12 +34,13 @@ export type WrapOptions = {
    */
   firstLineMaxChars?: number;
   /**
-   * Ведущие пробелы на первой rendered-строке BitmapText (body.x=0),
-   * чтобы текст не перекрывал time/badges/nick.
+   * Optional leading spaces on the first rendered line (tests / callers that
+   * keep a single BitmapText at x=0). MessageRing uses a split body instead.
    */
   firstLineIndentCols?: number;
   /**
-   * Ведущие пробелы на строках 2+ (обычно под timestamp / после mod gutter).
+   * Leading spaces on lines 2+ when body.x is 0. Unused when continuation is a
+   * separate BitmapText at the left margin.
    */
   continuationIndentCols?: number;
 };
