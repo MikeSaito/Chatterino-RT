@@ -61,7 +61,15 @@ async function showToast(payload: LiveNotifyPayload): Promise<void> {
         void invoke("open_in_streamlink", { channel }).catch(() => undefined);
         return;
       }
-      // OpenInBrowser / OpenInCustomPlayer (URI deferred) / unknown → browser.
+      if (action === "OpenInCustomPlayer") {
+        const channel = (payload.channel || "").trim();
+        if (!channel) {
+          return;
+        }
+        void invoke("open_in_custom_player", { channel }).catch(() => undefined);
+        return;
+      }
+      // OpenInBrowser / unknown → browser.
       const url = payload.openUrl?.trim();
       if (!url) {
         return;

@@ -46,6 +46,7 @@ pub mod spans;
 pub mod state;
 pub mod streamer_mode;
 pub mod streamlink;
+pub mod custom_player;
 pub mod timeout_stack;
 pub mod twitch_blocks;
 pub mod types;

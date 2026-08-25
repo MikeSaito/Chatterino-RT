@@ -1007,6 +1007,27 @@ pub fn open_in_streamlink(
     })
 }
 
+#[tauri::command]
+pub fn open_in_custom_player(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<(), ApiError> {
+    super::custom_player::open_for_channel(state.inner(), &channel).map_err(|message| {
+        let code = if message.contains("channel name")
+            || message.contains("URI scheme")
+            || message.contains("forbidden")
+        {
+            "invalid_input"
+        } else {
+            "internal"
+        };
+        ApiError {
+            code: code.into(),
+            message,
+        }
+    })
+}
+
 pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
     let s = raw.trim().trim_start_matches('#').to_lowercase();
     if s.is_empty() || s.len() > 25 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {

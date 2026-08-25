@@ -233,6 +233,7 @@ async function boot(): Promise<void> {
   const poolSize = scrollbackLimitFromKnobs(bootKnobs);
   let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
   let timeoutKnobs: AppSettings["knobs"] = bootKnobs;
+  let customUriScheme = String(bootKnobs["external.customURIScheme"] ?? "").trim();
   let modActionBtns: ModActionBtn[] = bootModActions;
   let modSendBusy = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
@@ -334,6 +335,7 @@ async function boot(): Promise<void> {
     onDisplay: (data) => {
       usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(data.knobs);
       timeoutKnobs = data.knobs ?? {};
+      customUriScheme = String(data.knobs["external.customURIScheme"] ?? "").trim();
       modActionBtns = parseModActions(data.modActions ?? []);
       ring.setModActions(modActionBtns);
       userCard?.syncMod();
@@ -815,6 +817,17 @@ async function boot(): Promise<void> {
       void invoke("open_in_streamlink", { channel }).catch((err) => {
         statusEl.textContent = formatError(err);
       });
+      return;
+    }
+    if (action === "open-custom-player") {
+      const channel = ipc.active().trim();
+      if (!channel) {
+        statusEl.textContent = "нет активного канала";
+        return;
+      }
+      void invoke("open_in_custom_player", { channel }).catch((err) => {
+        statusEl.textContent = formatError(err);
+      });
     }
   });
 
@@ -1047,6 +1060,9 @@ async function boot(): Promise<void> {
     const streamlinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-streamlink"]',
     );
+    const customPlayerBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="open-custom-player"]',
+    );
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
     if (replyBtn) {
@@ -1063,6 +1079,9 @@ async function boot(): Promise<void> {
     }
     if (streamlinkBtn) {
       streamlinkBtn.hidden = !ipc.active().trim();
+    }
+    if (customPlayerBtn) {
+      customPlayerBtn.hidden = !(customUriScheme && ipc.active().trim());
     }
     if (copyLinkBtn) {
       copyLinkBtn.hidden = !ctx.linkUrl;
