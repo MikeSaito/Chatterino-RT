@@ -804,6 +804,17 @@ async function boot(): Promise<void> {
         url: `https://www.twitch.tv/${target.login}`,
         private: openLinksIncognito,
       }).catch(() => undefined);
+      return;
+    }
+    if (action === "open-streamlink") {
+      const channel = ipc.active().trim();
+      if (!channel) {
+        statusEl.textContent = "нет активного канала";
+        return;
+      }
+      void invoke("open_in_streamlink", { channel }).catch((err) => {
+        statusEl.textContent = formatError(err);
+      });
     }
   });
 
@@ -1033,6 +1044,9 @@ async function boot(): Promise<void> {
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
+    const streamlinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
+      '[data-action="open-streamlink"]',
+    );
     const copyLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="copy-link"]');
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
     if (replyBtn) {
@@ -1046,6 +1060,9 @@ async function boot(): Promise<void> {
     }
     if (twitchBtn) {
       twitchBtn.hidden = !ctx.login;
+    }
+    if (streamlinkBtn) {
+      streamlinkBtn.hidden = !ipc.active().trim();
     }
     if (copyLinkBtn) {
       copyLinkBtn.hidden = !ctx.linkUrl;

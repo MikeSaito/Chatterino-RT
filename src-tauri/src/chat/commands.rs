@@ -985,6 +985,28 @@ pub fn open_chat_link(url: String, private: Option<bool>) -> Result<(), ApiError
         .map_err(|e| ApiError::internal(&e.to_string()))
 }
 
+#[tauri::command]
+pub fn open_in_streamlink(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<(), ApiError> {
+    super::streamlink::open_for_channel(state.inner(), &channel).map_err(|message| {
+        let code = if message.contains("channel name")
+            || message.contains("custom path")
+            || message.contains("options")
+            || message.contains("Unable to find")
+        {
+            "invalid_input"
+        } else {
+            "internal"
+        };
+        ApiError {
+            code: code.into(),
+            message,
+        }
+    })
+}
+
 pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
     let s = raw.trim().trim_start_matches('#').to_lowercase();
     if s.is_empty() || s.len() > 25 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
