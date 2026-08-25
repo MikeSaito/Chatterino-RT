@@ -72,7 +72,8 @@ import {
 
 const TIME_GAP = 8;
 const BADGE_GAP = 2;
-const MIN_BODY_CHARS = 24;
+/** Soft-clip nick only when it would leave less than this many body columns. */
+const MIN_BODY_COLS_AFTER_NICK = 1;
 
 export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 
@@ -1791,12 +1792,32 @@ export class MessageRing {
     }
     slot.nick.x = gutterW + timeW + badgeBand;
     const paneW = this.app.screen.width;
-    const nickMaxPx = Math.max(
+    // Stock MessageLayout does not ellipsis nicks for body budget. At high zoom,
+    // reserving MIN_BODY_CHARS * charWidth starved the nick column (shown as "..").
+    // Clip only when the full nick cannot leave at least one body column.
+    const prefixW = gutterW + timeW + badgeBand;
+    const fullNickW = Math.max(
+      measureTextWidth(
+        this.chatFontFamily,
+        qtWeightToCss(this.nickBoldScale),
+        this.fontSize,
+        slot.nickRaw,
+      ),
       8,
-      paneW - gutterW - timeW - badgeBand - gap - 8 - MIN_BODY_CHARS * this.charWidth,
     );
-    const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.nickCharWidth));
-    slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
+    const maxNickPx = Math.max(
+      8,
+      paneW - prefixW - gap - 8 - MIN_BODY_COLS_AFTER_NICK * this.charWidth,
+    );
+    if (fullNickW > maxNickPx) {
+      const nickMaxChars = Math.max(
+        2,
+        Math.floor(maxNickPx / this.nickCharWidth),
+      );
+      slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
+    } else {
+      slot.nick.text = slot.nickRaw;
+    }
     const nickW = Math.max(
       measureTextWidth(
         this.chatFontFamily,

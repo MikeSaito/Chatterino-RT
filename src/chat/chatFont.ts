@@ -104,15 +104,18 @@ export function measureFontMetrics(
     };
   }
   ctx.font = `${cssWeight} ${size}px ${cssFontFamily(family)}`;
-  const m = ctx.measureText("M");
-  const charWidth = m.width > 0 ? m.width : size * 0.56;
+  const latin = ctx.measureText("M");
+  // Cyrillic chat: "Ш" is often wider than "M"; underestimating columns skips wrap.
+  const cyr = ctx.measureText("Ш");
+  const charWidth = Math.max(latin.width, cyr.width, size * 0.56);
+  const ascentSample = latin.width >= cyr.width ? latin : cyr;
   const ascent =
-    typeof m.actualBoundingBoxAscent === "number"
-      ? m.actualBoundingBoxAscent
+    typeof ascentSample.actualBoundingBoxAscent === "number"
+      ? ascentSample.actualBoundingBoxAscent
       : size * 0.8;
   const descent =
-    typeof m.actualBoundingBoxDescent === "number"
-      ? m.actualBoundingBoxDescent
+    typeof ascentSample.actualBoundingBoxDescent === "number"
+      ? ascentSample.actualBoundingBoxDescent
       : size * 0.2;
   const lineHeight = Math.max(1, Math.ceil(ascent + descent + size * 0.15));
   return { charWidth, lineHeight };

@@ -1,4 +1,5 @@
 import {
+  clipNick,
   collapseWrapLines,
   indexToLineCol,
   lineColToIndex,
@@ -306,6 +307,23 @@ if (!collapsedRender.endsWith("...")) {
 const passthrough = collapseWrapLines(longLines, 0, longText, 10, []);
 if (passthrough.collapsed || passthrough.lines.length !== longLines.length) {
   throw new Error("maxLines 0 must not collapse");
+}
+
+const unbroken = "ХАХАХАХАХАХАХАХАХАХАХАХАХАХАХАХА";
+const unbrokenLines = wrapBody(unbroken, 8, []);
+if (unbrokenLines.length < 3) {
+  throw new Error(
+    `unbroken Cyrillic must wrap by grapheme, got ${unbrokenLines.length} lines`,
+  );
+}
+
+const clippedTiny = clipNick("nickname", 2);
+if (clippedTiny !== "..") {
+  throw new Error(`clipNick(2) expected "..", got ${JSON.stringify(clippedTiny)}`);
+}
+const clippedOk = clipNick("ab", 10);
+if (clippedOk !== "ab") {
+  throw new Error("short nick must not clip");
 }
 
 console.log("wrap tests ok");
