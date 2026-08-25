@@ -92,6 +92,8 @@ export type SlotContext = {
   disabled: boolean;
   replyToId: string;
   linkUrl: string;
+  /** Stock: View thread when message is in a reply thread. */
+  inReplyThread: boolean;
   /** Stock: hidden items only when modifier is exactly Shift. */
   shiftOnly: boolean;
 };
@@ -2391,6 +2393,24 @@ export class MessageRing {
     return ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
   }
 
+  private slotInReplyThread(slot: Slot): boolean {
+    if (slot.replyToId) {
+      return true;
+    }
+    const msgId = slot.msgId;
+    if (!msgId) {
+      return false;
+    }
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const other = this.slots[(start + i) % this.poolSize];
+      if (other.msgId && other.replyToId === msgId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private makeSlotContext(
     slot: Slot,
     ev: FederatedPointerEvent,
@@ -2407,6 +2427,7 @@ export class MessageRing {
       disabled: slot.disabled,
       replyToId: slot.replyToId,
       linkUrl: opts?.linkUrl ?? "",
+      inReplyThread: this.slotInReplyThread(slot),
       shiftOnly: this.pointerShiftOnly(ev),
     };
   }

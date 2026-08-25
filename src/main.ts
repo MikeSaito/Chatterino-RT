@@ -682,6 +682,7 @@ async function boot(): Promise<void> {
   let completeInFlight = false;
   let completePending = 0;
   let replyOriginalSeq = 0;
+  let viewThreadSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
   let channelBusy = false;
@@ -896,11 +897,36 @@ async function boot(): Promise<void> {
       return;
     }
     if (action === "thread" && target.msgId && target.login && !target.disabled) {
-      replyThread.open({
-        rootId: target.replyToId || target.msgId,
-        login: target.login,
-        text: target.text,
-      });
+      const msgId = target.msgId;
+      const seq = ++viewThreadSeq;
+      void (async () => {
+        const channel = ipc.active().trim();
+        if (!channel) {
+          statusEl.textContent = "нет активного канала";
+          return;
+        }
+        try {
+          const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
+          if (seq !== viewThreadSeq || ipc.active().trim() !== channel) {
+            return;
+          }
+          const events = (Array.isArray(snap.events) ? snap.events : []).filter(
+            (ev): ev is Extract<ChatEvent, { kind: "privmsg" }> => ev.kind === "privmsg",
+          );
+          const root = resolveReplyRoot(events, msgId);
+          if (!root) {
+            statusEl.textContent = "не удалось найти корень ветки";
+            return;
+          }
+          replyThread.open({
+            rootId: root.id,
+            login: root.login,
+            text: root.text,
+          });
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        }
+      })();
       return;
     }
     if (action === "user" && target.login) {
@@ -1191,7 +1217,7 @@ async function boot(): Promise<void> {
       replyOriginalBtn.hidden = !ctx.replyToId || !ctx.msgId;
     }
     if (threadBtn) {
-      threadBtn.hidden = !ctx.msgId || ctx.disabled;
+      threadBtn.hidden = !ctx.inReplyThread || !ctx.msgId || ctx.disabled;
     }
     if (userBtn) {
       userBtn.hidden = !ctx.login;
