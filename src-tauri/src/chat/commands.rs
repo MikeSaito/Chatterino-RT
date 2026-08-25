@@ -985,6 +985,44 @@ pub fn open_chat_link(url: String, private: Option<bool>) -> Result<(), ApiError
         .map_err(|e| ApiError::internal(&e.to_string()))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutInfo {
+    pub version: String,
+    pub settings_directory: String,
+}
+
+fn settings_directory_path(shared: &Shared) -> Result<std::path::PathBuf, ApiError> {
+    let guard = shared
+        .settings
+        .lock()
+        .map_err(|_| ApiError::internal("settings lock"))?;
+    let file = &guard.path;
+    if file.as_os_str().is_empty() {
+        return Err(ApiError::internal("settings path unset"));
+    }
+    let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| {
+        ApiError::internal("settings directory missing")
+    })?;
+    Ok(dir.to_path_buf())
+}
+
+#[tauri::command]
+pub fn about_info(state: tauri::State<'_, Shared>) -> Result<AboutInfo, ApiError> {
+    let dir = settings_directory_path(state.inner())?;
+    Ok(AboutInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        settings_directory: dir.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn open_settings_directory(state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
+    let dir = settings_directory_path(state.inner())?;
+    tauri_plugin_opener::open_path(&dir, None::<&str>)
+        .map_err(|e| ApiError::internal(&e.to_string()))
+}
+
 #[tauri::command]
 pub async fn image_upload(
     app: AppHandle,
@@ -1218,6 +1256,14 @@ mod tests {
         assert!(normalize_channel("").is_err());
         assert!(normalize_channel("has space").is_err());
         assert_eq!(normalize_channel("#XQC").unwrap(), "xqc");
+    }
+
+    #[test]
+    fn settings_directory_from_file_path() {
+        let file = std::path::PathBuf::from("/tmp/app/settings.json");
+        let dir = file.parent().expect("parent");
+        assert_eq!(dir, std::path::Path::new("/tmp/app"));
+        assert_eq!(env!("CARGO_PKG_VERSION").is_empty(), false);
     }
 
     #[test]

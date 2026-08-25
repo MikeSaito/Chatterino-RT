@@ -462,6 +462,18 @@ export function bindSettingsDialog(opts: {
       }
       return;
     }
+    if (path === "__action.openAppData") {
+      try {
+        await invoke("open_settings_directory");
+        statusEl.textContent = "";
+      } catch (e) {
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not open settings directory.";
+      }
+      return;
+    }
     if (path === "__action.resetHotkeys") {
       const api = tableApis.get("hotkeys");
       if (api) {
@@ -806,15 +818,142 @@ export function bindSettingsDialog(opts: {
       const name = document.createElement("p");
       name.className = "settings-about-name";
       name.textContent = "Chatterino RT";
-      const about = document.createElement("p");
-      about.className = "settings-empty";
-      about.textContent =
-        "Hybrid Tauri + Pixi. Chat behaviour follows Chatterino 2 logic (MIT) without Qt windows.";
-      const oss = document.createElement("p");
-      oss.className = "settings-empty";
-      oss.textContent =
-        "Open source: Tauri, PixiJS, and Twitch IRC. Settings UI layout mirrors stock Chatterino.";
-      section.append(name, about, oss);
+
+      const versionBlock = document.createElement("div");
+      versionBlock.className = "settings-about-block";
+      versionBlock.dataset.search = "version settings directory";
+      const versionTitle = document.createElement("h4");
+      versionTitle.className = "settings-section";
+      versionTitle.textContent = "Version";
+      const versionLine = document.createElement("p");
+      versionLine.className = "settings-about-meta";
+      versionLine.textContent = "Loading…";
+      const dirRow = document.createElement("div");
+      dirRow.className = "settings-about-dir";
+      const dirLabel = document.createElement("p");
+      dirLabel.className = "settings-about-meta";
+      dirLabel.textContent = "Settings directory:";
+      const dirPath = document.createElement("code");
+      dirPath.className = "settings-about-path";
+      dirPath.textContent = "…";
+      const openDirBtn = document.createElement("button");
+      openDirBtn.type = "button";
+      openDirBtn.className = "settings-action-btn";
+      openDirBtn.textContent = "Open settings directory";
+      openDirBtn.addEventListener("click", () => {
+        void invoke("open_settings_directory")
+          .then(() => {
+            statusEl.textContent = "";
+          })
+          .catch((e: unknown) => {
+            statusEl.textContent =
+              e && typeof e === "object" && "message" in e
+                ? String((e as { message: unknown }).message)
+                : "Could not open settings directory.";
+          });
+      });
+      dirRow.append(dirLabel, dirPath, openDirBtn);
+      versionBlock.append(versionTitle, versionLine, dirRow);
+
+      const chatterinoBlock = document.createElement("div");
+      chatterinoBlock.className = "settings-about-block";
+      chatterinoBlock.dataset.search = "wiki features discord chatterino";
+      const chatterinoTitle = document.createElement("h4");
+      chatterinoTitle.className = "settings-section";
+      chatterinoTitle.textContent = "About Chatterino…";
+      const chatterinoLinks = document.createElement("ul");
+      chatterinoLinks.className = "settings-about-links";
+      const aboutLinks: Array<{ label: string; url: string }> = [
+        { label: "Chatterino Wiki", url: "https://wiki.chatterino.com" },
+        {
+          label: "Features",
+          url: "https://chatterino.com/#features",
+        },
+        {
+          label: "Discord",
+          url: "https://discord.gg/7Y5AYhAK4z",
+        },
+      ];
+      for (const item of aboutLinks) {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-about-link";
+        btn.textContent = item.label;
+        btn.addEventListener("click", () => {
+          void invoke("open_chat_link", { url: item.url })
+            .then(() => {
+              statusEl.textContent = "";
+            })
+            .catch((e: unknown) => {
+              statusEl.textContent =
+                e && typeof e === "object" && "message" in e
+                  ? String((e as { message: unknown }).message)
+                  : "Could not open link.";
+            });
+        });
+        li.append(btn);
+        chatterinoLinks.append(li);
+      }
+      chatterinoBlock.append(chatterinoTitle, chatterinoLinks);
+
+      const mit = document.createElement("p");
+      mit.className = "settings-about-meta";
+      mit.dataset.search = "mit license chatterino";
+      mit.textContent =
+        "Chat behaviour reimplements Chatterino 2 logic under the MIT License. This is not a Qt/C++ port and does not ship stock Chatterino assets.";
+
+      const ossBlock = document.createElement("div");
+      ossBlock.className = "settings-about-block";
+      ossBlock.dataset.search = "open source license tauri pixi";
+      const ossTitle = document.createElement("h4");
+      ossTitle.className = "settings-section";
+      ossTitle.textContent = "Open source software used…";
+      const ossLinks = document.createElement("ul");
+      ossLinks.className = "settings-about-links";
+      const ossItems: Array<{ label: string; url: string }> = [
+        { label: "Tauri", url: "https://tauri.app/" },
+        { label: "PixiJS", url: "https://pixijs.com/" },
+        { label: "@msgpack/msgpack", url: "https://github.com/msgpack/msgpack-javascript" },
+        { label: "Tokio", url: "https://tokio.rs/" },
+        { label: "Reqwest", url: "https://github.com/seanmonstar/reqwest" },
+        { label: "Serde", url: "https://serde.rs/" },
+      ];
+      for (const item of ossItems) {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-about-link";
+        btn.textContent = item.label;
+        btn.addEventListener("click", () => {
+          void invoke("open_chat_link", { url: item.url })
+            .then(() => {
+              statusEl.textContent = "";
+            })
+            .catch((e: unknown) => {
+              statusEl.textContent =
+                e && typeof e === "object" && "message" in e
+                  ? String((e as { message: unknown }).message)
+                  : "Could not open link.";
+            });
+        });
+        li.append(btn);
+        ossLinks.append(li);
+      }
+      ossBlock.append(ossTitle, ossLinks);
+
+      section.append(name, versionBlock, chatterinoBlock, mit, ossBlock);
+
+      void invoke<{ version: string; settingsDirectory: string }>("about_info")
+        .then((info) => {
+          versionLine.textContent = `Chatterino RT ${info.version}`;
+          dirPath.textContent = info.settingsDirectory;
+        })
+        .catch(() => {
+          versionLine.textContent = "Chatterino RT (version unavailable)";
+          dirPath.textContent = "(unavailable)";
+        });
+
       return section;
     }
 
