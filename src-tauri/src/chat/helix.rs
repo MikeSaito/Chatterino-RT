@@ -406,26 +406,35 @@ pub async fn fetch_streams_by_logins(
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UserProfile {
+    pub id: String,
     pub login: String,
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follower_count: Option<u64>,
 }
 
 pub fn allowed_profile_image_url(raw: &str) -> Option<String> {
     allowed_https_host(raw, BADGE_HOSTS)
 }
 
-pub fn parse_user_profile(value: &Value) -> Option<UserProfile> {
-    let item = value
-        .get("data")
-        .and_then(Value::as_array)
-        .and_then(|data| data.first())?;
+fn parse_user_id(item: &Value) -> Option<String> {
+    item.get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+fn parse_user_from_item(item: &Value) -> Option<UserProfile> {
+    let id = parse_user_id(item)?;
     let login = item
         .get("login")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())?
-        .to_lowercase();
+        .to_ascii_lowercase();
     let display_name = item
         .get("display_name")
         .and_then(Value::as_str)
@@ -436,11 +445,54 @@ pub fn parse_user_profile(value: &Value) -> Option<UserProfile> {
         .get("profile_image_url")
         .and_then(Value::as_str)
         .and_then(allowed_profile_image_url);
+    let created_at = item
+        .get("created_at")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     Some(UserProfile {
+        id,
         login,
         display_name,
         profile_image_url,
+        created_at,
+        follower_count: None,
     })
+}
+
+pub fn parse_user_profile(value: &Value) -> Option<UserProfile> {
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+        .and_then(parse_user_from_item)
+}
+
+pub fn parse_channel_followers_total(value: &Value) -> Option<u64> {
+    value.get("total").and_then(|t| {
+        t.as_u64()
+            .or_else(|| t.as_i64().and_then(|n| u64::try_from(n).ok()))
+    })
+}
+
+pub async fn fetch_channel_followers(
+    broadcaster_id: &str,
+    token: &str,
+    client_id: &str,
+) -> Option<u64> {
+    if broadcaster_id.is_empty() || !broadcaster_id.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let url = helix_query(
+        "/channels/followers",
+        &[("broadcaster_id", broadcaster_id), ("first", "1")],
+    );
+    let client = http_client();
+    match get_helix(&client, &url, client_id, token).await {
+        HelixFetch::Ok(v) => parse_channel_followers_total(&v),
+        HelixFetch::Auth | HelixFetch::Fail => None,
+    }
 }
 
 pub async fn fetch_user_profile(
@@ -826,34 +878,8 @@ pub fn parse_shared_chat_session(value: &Value) -> Vec<String> {
 }
 
 pub fn parse_user_item(item: &Value) -> Option<(String, UserProfile)> {
-    let id = item
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))?
-        .to_string();
-    let login = item
-        .get("login")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())?
-        .to_ascii_lowercase();
-    let display_name = item
-        .get("display_name")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(login.as_str())
-        .to_string();
-    let profile_image_url = item
-        .get("profile_image_url")
-        .and_then(Value::as_str)
-        .and_then(allowed_profile_image_url);
-    Some((
-        id,
-        UserProfile {
-            login,
-            display_name,
-            profile_image_url,
-        },
-    ))
+    let profile = parse_user_from_item(item)?;
+    Some((profile.id.clone(), profile))
 }
 
 pub fn parse_users_by_id(value: &Value) -> HashMap<String, UserProfile> {
@@ -1192,21 +1218,27 @@ mod tests {
     fn parse_user_profile_and_reject_bad_avatar() {
         let ok = serde_json::json!({
             "data": [{
+                "id": "44322889",
                 "login": "XQC",
                 "display_name": "xQc",
+                "created_at": "2011-11-11T00:00:00Z",
                 "profile_image_url": "https://static-cdn.jtvnw.net/jtv_user_pictures/x.png"
             }]
         });
         let parsed = parse_user_profile(&ok).expect("profile");
+        assert_eq!(parsed.id, "44322889");
         assert_eq!(parsed.login, "xqc");
         assert_eq!(parsed.display_name, "xQc");
+        assert_eq!(parsed.created_at.as_deref(), Some("2011-11-11T00:00:00Z"));
         assert_eq!(
             parsed.profile_image_url.as_deref(),
             Some("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png")
         );
+        assert!(parsed.follower_count.is_none());
 
         let bad_img = serde_json::json!({
             "data": [{
+                "id": "44322889",
                 "login": "xqc",
                 "display_name": "xQc",
                 "profile_image_url": "javascript:alert(1)"
@@ -1217,6 +1249,29 @@ mod tests {
 
         assert!(allowed_profile_image_url("https://evil.example/a.png").is_none());
         assert!(parse_user_profile(&serde_json::json!({ "data": [] })).is_none());
+    }
+
+    #[test]
+    fn parse_channel_followers_total_reads_total() {
+        let ok = serde_json::json!({ "total": 12345, "data": [] });
+        assert_eq!(parse_channel_followers_total(&ok), Some(12345));
+        assert_eq!(
+            parse_channel_followers_total(&serde_json::json!({ "data": [] })),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_user_profile_rejects_missing_or_bad_id() {
+        let missing_id = serde_json::json!({
+            "data": [{ "login": "xqc", "display_name": "xQc" }]
+        });
+        assert!(parse_user_profile(&missing_id).is_none());
+
+        let bad_id = serde_json::json!({
+            "data": [{ "id": "abc", "login": "xqc", "display_name": "xQc" }]
+        });
+        assert!(parse_user_profile(&bad_id).is_none());
     }
 
     #[test]

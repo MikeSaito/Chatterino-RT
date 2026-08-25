@@ -988,6 +988,29 @@ pub async fn chat_user_profile(
 }
 
 #[tauri::command]
+pub async fn chat_user_followers(
+    state: tauri::State<'_, Shared>,
+    broadcaster_id: String,
+) -> Result<Option<u64>, ApiError> {
+    let id = broadcaster_id.trim();
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError {
+            code: "invalid_id".into(),
+            message: "некорректный user id".into(),
+        });
+    }
+    let token = auth::oauth_token(&state);
+    let client_id = auth::resolved_client_id(&state);
+    let Some((client_id, token)) = super::helix::helix_creds(token.as_deref(), &client_id) else {
+        return Err(ApiError {
+            code: "auth_required".into(),
+            message: "нужен вход Twitch для профиля".into(),
+        });
+    };
+    Ok(super::helix::fetch_channel_followers(id, &token, &client_id).await)
+}
+
+#[tauri::command]
 pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPronounsResult, ApiError> {
     let normalized = normalize_channel(&login)?;
     let pronouns = super::pronouns::lookup(&normalized)

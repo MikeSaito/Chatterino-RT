@@ -13,10 +13,22 @@ export type UserCardOpen = {
 };
 
 type UserProfile = {
+  id: string;
   login: string;
   displayName: string;
   profileImageUrl?: string | null;
+  createdAt?: string | null;
+  followerCount?: number | null;
 };
+
+function formatFollowerCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+function formatCreatedDate(iso: string): string {
+  const idx = iso.indexOf("T");
+  return idx >= 0 ? iso.slice(0, idx) : iso;
+}
 
 /**
  * SPA UserInfoPopup: плавающая карточка у курсора (DraggablePopup), без fullscreen dim.
@@ -57,6 +69,14 @@ export function bindUserCard(opts: {
   const nameEl = modal.querySelector<HTMLElement>("#usercard-name");
   const loginEl = modal.querySelector<HTMLElement>("#usercard-login");
   const pronounsEl = modal.querySelector<HTMLElement>("#usercard-pronouns");
+  const localizedRow = modal.querySelector<HTMLElement>("#usercard-localized");
+  const localizedText = modal.querySelector<HTMLElement>("#usercard-localized-text");
+  const copyLocalizedBtn = modal.querySelector<HTMLButtonElement>("#usercard-copy-localized");
+  const userIdRow = modal.querySelector<HTMLElement>("#usercard-userid");
+  const userIdText = modal.querySelector<HTMLElement>("#usercard-userid-text");
+  const copyIdBtn = modal.querySelector<HTMLButtonElement>("#usercard-copy-id");
+  const followersEl = modal.querySelector<HTMLElement>("#usercard-followers");
+  const createdEl = modal.querySelector<HTMLElement>("#usercard-created");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
   const modRow = modal.querySelector<HTMLElement>("#usercard-mod-row");
@@ -78,6 +98,7 @@ export function bindUserCard(opts: {
   let currentLogin = "";
   let pinned = false;
   let modBusy = false;
+  let currentUserId = "";
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -95,6 +116,31 @@ export function bindUserCard(opts: {
     }
     pronounsEl.hidden = true;
     pronounsEl.textContent = "";
+  };
+
+  const clearMeta = (): void => {
+    if (localizedRow) {
+      localizedRow.hidden = true;
+    }
+    if (localizedText) {
+      localizedText.textContent = "";
+    }
+    if (userIdRow) {
+      userIdRow.hidden = true;
+    }
+    if (userIdText) {
+      userIdText.textContent = "";
+    }
+    if (followersEl) {
+      followersEl.hidden = true;
+      followersEl.textContent = "";
+      followersEl.removeAttribute("title");
+    }
+    if (createdEl) {
+      createdEl.hidden = true;
+      createdEl.textContent = "";
+      createdEl.removeAttribute("title");
+    }
   };
 
   const setPronounsLabel = (text: string): void => {
@@ -122,6 +168,77 @@ export function bindUserCard(opts: {
     }
     statusEl.hidden = false;
     statusEl.textContent = text;
+  };
+
+  const showMetaUnavailable = (): void => {
+    if (userIdText && userIdRow) {
+      userIdText.textContent = "ID: (not available)";
+      userIdRow.hidden = false;
+    }
+    if (followersEl) {
+      followersEl.textContent = "Followers: (not available)";
+      followersEl.hidden = false;
+    }
+    if (createdEl) {
+      createdEl.textContent = "Created: (not available)";
+      createdEl.removeAttribute("title");
+      createdEl.hidden = false;
+    }
+  };
+
+  const applyProfileMeta = (profile: UserProfile, login: string): void => {
+    currentUserId = /^\d+$/.test(profile.id) ? profile.id : "";
+    const displayName = profile.displayName.trim();
+    if (displayName && displayName.toLowerCase() !== login) {
+      nameEl.textContent = login;
+      if (localizedText) {
+        localizedText.textContent = displayName;
+      }
+      if (localizedRow) {
+        localizedRow.hidden = false;
+      }
+    } else if (localizedRow) {
+      localizedRow.hidden = true;
+      nameEl.textContent = displayName || login;
+    }
+
+    if (userIdText && userIdRow) {
+      userIdText.textContent = currentUserId ? `ID: ${currentUserId}` : "ID: (not available)";
+      userIdRow.hidden = false;
+    }
+
+    if (followersEl) {
+      followersEl.textContent = "Followers: (not available)";
+      followersEl.hidden = false;
+    }
+
+    if (createdEl) {
+      const created = profile.createdAt?.trim() ?? "";
+      if (created) {
+        createdEl.textContent = `Created: ${formatCreatedDate(created)}`;
+        createdEl.title = created;
+        createdEl.hidden = false;
+      } else {
+        createdEl.textContent = "Created: (not available)";
+        createdEl.removeAttribute("title");
+        createdEl.hidden = false;
+      }
+    }
+  };
+
+  const applyProfileAvatar = (profile: UserProfile, login: string): void => {
+    if (!avatarEl || getHideAvatars()) {
+      clearAvatar();
+      return;
+    }
+    const url = profile.profileImageUrl?.trim() ?? "";
+    if (!url) {
+      clearAvatar();
+      return;
+    }
+    avatarEl.alt = profile.displayName || login;
+    avatarEl.src = url;
+    avatarEl.hidden = false;
   };
 
   const setModBusy = (busy: boolean): void => {
@@ -208,7 +325,7 @@ export function bindUserCard(opts: {
       clearAvatar();
       return;
     }
-    void loadAvatar(currentLogin);
+    void loadProfile(currentLogin);
   };
 
   const syncPronouns = (): void => {
@@ -225,6 +342,7 @@ export function bindUserCard(opts: {
   const close = (): void => {
     modal.hidden = true;
     currentLogin = "";
+    currentUserId = "";
     pinned = false;
     modBusy = false;
     if (pinBtn) {
@@ -233,6 +351,7 @@ export function bindUserCard(opts: {
     }
     clearAvatar();
     clearPronouns();
+    clearMeta();
     recent.replaceChildren();
     setStatus("");
     if (banBtn) {
@@ -262,32 +381,45 @@ export function bindUserCard(opts: {
     dialog.style.top = `${top}px`;
   };
 
-  const loadAvatar = async (login: string): Promise<void> => {
-    if (!avatarEl || getHideAvatars()) {
-      clearAvatar();
+  const loadFollowers = async (userId: string, login: string): Promise<void> => {
+    if (!followersEl || !/^\d+$/.test(userId)) {
       return;
     }
+    try {
+      const count = await invoke<number | null>("chat_user_followers", {
+        broadcasterId: userId,
+      });
+      if (login !== currentLogin || userId !== currentUserId) {
+        return;
+      }
+      followersEl.textContent =
+        count == null
+          ? "Followers: (not available)"
+          : `Followers: ${formatFollowerCount(count)}`;
+      followersEl.hidden = false;
+    } catch {
+      if (login !== currentLogin) {
+        return;
+      }
+      followersEl.textContent = "Followers: (not available)";
+      followersEl.hidden = false;
+    }
+  };
+
+  const loadProfile = async (login: string): Promise<void> => {
     try {
       const profile = await invoke<UserProfile>("chat_user_profile", { login });
       if (login !== currentLogin) {
         return;
       }
-      if (getHideAvatars()) {
-        clearAvatar();
-        return;
-      }
-      const url = profile.profileImageUrl?.trim() ?? "";
-      if (!url) {
-        clearAvatar();
-        return;
-      }
-      avatarEl.alt = profile.displayName || login;
-      avatarEl.src = url;
-      avatarEl.hidden = false;
+      applyProfileMeta(profile, login);
+      applyProfileAvatar(profile, login);
+      void loadFollowers(profile.id, login);
     } catch {
       if (login !== currentLogin) {
         return;
       }
+      showMetaUnavailable();
       clearAvatar();
     }
   };
@@ -336,6 +468,8 @@ export function bindUserCard(opts: {
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
     clearPronouns();
+    clearMeta();
+    showMetaUnavailable();
     recent.replaceChildren();
     setStatus("");
     const loading = document.createElement("p");
@@ -345,7 +479,7 @@ export function bindUserCard(opts: {
     syncModRow();
     placeNear(info.clientX, info.clientY);
     void loadRecent(currentLogin);
-    void loadAvatar(currentLogin);
+    void loadProfile(currentLogin);
     void loadPronouns(currentLogin);
   };
 
@@ -418,6 +552,23 @@ export function bindUserCard(opts: {
       pinned = !pinned;
       pinBtn.classList.toggle("is-pinned", pinned);
       pinBtn.title = pinned ? "Unpin" : "Pin";
+    });
+  }
+
+  if (copyLocalizedBtn && localizedText) {
+    copyLocalizedBtn.addEventListener("click", () => {
+      const text = localizedText.textContent?.trim() ?? "";
+      if (text) {
+        void navigator.clipboard.writeText(text).catch(() => undefined);
+      }
+    });
+  }
+
+  if (copyIdBtn) {
+    copyIdBtn.addEventListener("click", () => {
+      if (/^\d+$/.test(currentUserId)) {
+        void navigator.clipboard.writeText(currentUserId).catch(() => undefined);
+      }
     });
   }
 
