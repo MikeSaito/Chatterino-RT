@@ -52,7 +52,7 @@ import {
   type ModActionBtn,
 } from "./shell/modActions";
 import {
-  bindImageUploadPaste,
+  bindImageUpload,
   parseImageUploadKnobs,
   type ImageUploadKnobs,
 } from "./shell/imageUpload";
@@ -424,7 +424,7 @@ async function boot(): Promise<void> {
     },
   });
   const ipc = bindChatIpc(ring);
-  unbindImageUpload = bindImageUploadPaste({
+  unbindImageUpload = bindImageUpload({
     input: messageInput,
     getKnobs: () => imageUploadKnobs,
     getChannel: () => ipc.active(),
