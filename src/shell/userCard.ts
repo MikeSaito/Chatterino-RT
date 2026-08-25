@@ -22,6 +22,11 @@ type UserProfile = {
   followerCount?: number | null;
 };
 
+type IgnoreHighlightsState = {
+  ignored: boolean;
+  regexLocked: boolean;
+};
+
 function formatFollowerCount(value: number): string {
   return value.toLocaleString("en-US");
 }
@@ -91,6 +96,8 @@ export function bindUserCard(opts: {
   const unbanBtn = modal.querySelector<HTMLButtonElement>("#usercard-unban");
   const blockRow = modal.querySelector<HTMLElement>("#usercard-block-row");
   const blockCheckbox = modal.querySelector<HTMLInputElement>("#usercard-block");
+  const ignoreHighlightsRow = modal.querySelector<HTMLElement>("#usercard-ignore-highlights-row");
+  const ignoreHighlightsCheckbox = modal.querySelector<HTMLInputElement>("#usercard-ignore-highlights");
   const statusEl = modal.querySelector<HTMLElement>("#usercard-status");
   const head = modal.querySelector<HTMLElement>(".popup-head");
   if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
@@ -111,6 +118,9 @@ export function bindUserCard(opts: {
   let blockSeq = 0;
   let blockBusy = false;
   let suppressBlockChange = false;
+  let ignoreHighlightsSeq = 0;
+  let ignoreHighlightsBusy = false;
+  let suppressIgnoreHighlightsChange = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -237,6 +247,7 @@ export function bindUserCard(opts: {
       }
     }
     void loadBlockState(login, profile.id);
+    void loadIgnoreHighlightsState(login);
   };
 
   const applyProfileAvatar = (profile: UserProfile, login: string): void => {
@@ -332,6 +343,94 @@ export function bindUserCard(opts: {
       blockCheckbox.disabled = true;
     }
     syncBlockRowVisibility();
+  };
+
+  const hideIgnoreHighlightsRow = (): void => {
+    if (ignoreHighlightsRow) {
+      ignoreHighlightsRow.hidden = true;
+    }
+    if (ignoreHighlightsCheckbox) {
+      suppressIgnoreHighlightsChange = true;
+      ignoreHighlightsCheckbox.checked = false;
+      suppressIgnoreHighlightsChange = false;
+      ignoreHighlightsCheckbox.disabled = false;
+      ignoreHighlightsCheckbox.removeAttribute("title");
+    }
+  };
+
+  const syncIgnoreHighlightsRowVisibility = (): void => {
+    if (!ignoreHighlightsRow || !ignoreHighlightsCheckbox) {
+      return;
+    }
+    const self = getSelfLogin()?.trim().toLowerCase() ?? "";
+    const hide = !currentLogin || !self || self === currentLogin;
+    if (hide) {
+      hideIgnoreHighlightsRow();
+      return;
+    }
+    ignoreHighlightsRow.hidden = false;
+  };
+
+  const applyIgnoreHighlightsUi = (state: IgnoreHighlightsState): void => {
+    if (!ignoreHighlightsCheckbox) {
+      return;
+    }
+    suppressIgnoreHighlightsChange = true;
+    ignoreHighlightsCheckbox.checked = state.ignored;
+    suppressIgnoreHighlightsChange = false;
+    if (ignoreHighlightsBusy) {
+      ignoreHighlightsCheckbox.disabled = true;
+      return;
+    }
+    ignoreHighlightsCheckbox.disabled = state.regexLocked;
+    if (state.regexLocked) {
+      ignoreHighlightsCheckbox.title = "Name matched by regex";
+    } else {
+      ignoreHighlightsCheckbox.removeAttribute("title");
+    }
+  };
+
+  const resetIgnoreHighlightsUi = (): void => {
+    ignoreHighlightsSeq += 1;
+    ignoreHighlightsBusy = false;
+    if (ignoreHighlightsCheckbox) {
+      suppressIgnoreHighlightsChange = true;
+      ignoreHighlightsCheckbox.checked = false;
+      suppressIgnoreHighlightsChange = false;
+      ignoreHighlightsCheckbox.disabled = true;
+      ignoreHighlightsCheckbox.removeAttribute("title");
+    }
+    syncIgnoreHighlightsRowVisibility();
+  };
+
+  const loadIgnoreHighlightsState = async (login: string): Promise<void> => {
+    if (!ignoreHighlightsRow || !ignoreHighlightsCheckbox) {
+      return;
+    }
+    const seq = ++ignoreHighlightsSeq;
+    syncIgnoreHighlightsRowVisibility();
+    if (ignoreHighlightsRow.hidden) {
+      return;
+    }
+    ignoreHighlightsCheckbox.disabled = true;
+    try {
+      const state = await invoke<IgnoreHighlightsState>("chat_user_ignore_highlights", { login });
+      if (seq !== ignoreHighlightsSeq || login !== currentLogin) {
+        return;
+      }
+      if (!ignoreHighlightsBusy) {
+        applyIgnoreHighlightsUi(state);
+      }
+    } catch {
+      if (seq !== ignoreHighlightsSeq || login !== currentLogin) {
+        return;
+      }
+      suppressIgnoreHighlightsChange = true;
+      ignoreHighlightsCheckbox.checked = false;
+      suppressIgnoreHighlightsChange = false;
+      ignoreHighlightsCheckbox.disabled = true;
+      ignoreHighlightsCheckbox.removeAttribute("title");
+    }
   };
 
   const loadBlockState = async (login: string, userId: string): Promise<void> => {
@@ -521,6 +620,9 @@ export function bindUserCard(opts: {
     blockSeq += 1;
     blockBusy = false;
     hideBlockRow();
+    ignoreHighlightsSeq += 1;
+    ignoreHighlightsBusy = false;
+    hideIgnoreHighlightsRow();
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -627,6 +729,7 @@ export function bindUserCard(opts: {
     currentLogin = info.login.toLowerCase();
     currentUserId = "";
     resetBlockUi();
+    resetIgnoreHighlightsUi();
     nameEl.textContent = info.nick || info.login;
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
@@ -641,6 +744,7 @@ export function bindUserCard(opts: {
     recent.append(loading);
     refreshModUi();
     placeNear(info.clientX, info.clientY);
+    void loadIgnoreHighlightsState(currentLogin);
     void loadRecent(currentLogin);
     void loadProfile(currentLogin);
     void loadPronouns(currentLogin);
@@ -844,6 +948,55 @@ export function bindUserCard(opts: {
           blockBusy = false;
           if (login === currentLogin && !modal.hidden) {
             blockCheckbox.disabled = false;
+          }
+        }
+      })();
+    });
+  }
+  if (ignoreHighlightsCheckbox) {
+    ignoreHighlightsCheckbox.addEventListener("change", () => {
+      if (
+        suppressIgnoreHighlightsChange ||
+        ignoreHighlightsBusy ||
+        !currentLogin ||
+        modal.hidden
+      ) {
+        return;
+      }
+      const login = currentLogin;
+      const wantIgnored = ignoreHighlightsCheckbox.checked;
+      void (async () => {
+        ignoreHighlightsBusy = true;
+        ignoreHighlightsCheckbox.disabled = true;
+        try {
+          await invoke("chat_set_user_ignore_highlights", {
+            login,
+            ignored: wantIgnored,
+          });
+          if (login !== currentLogin || modal.hidden) {
+            return;
+          }
+          setStatus(
+            wantIgnored
+              ? `Highlights ignored for @${login}`
+              : `Highlights restored for @${login}`,
+          );
+        } catch (e) {
+          if (login !== currentLogin || modal.hidden) {
+            return;
+          }
+          suppressIgnoreHighlightsChange = true;
+          ignoreHighlightsCheckbox.checked = !wantIgnored;
+          suppressIgnoreHighlightsChange = false;
+          const msg =
+            e && typeof e === "object" && "message" in e
+              ? String((e as { message: unknown }).message)
+              : "Could not update ignore highlights.";
+          setStatus(msg);
+        } finally {
+          ignoreHighlightsBusy = false;
+          if (login === currentLogin && !modal.hidden) {
+            void loadIgnoreHighlightsState(login);
           }
         }
       })();

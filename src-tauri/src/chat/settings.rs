@@ -363,6 +363,36 @@ pub fn snapshot(shared: &Shared) -> Result<AppSettings, ApiError> {
     Ok(inner.data.clone())
 }
 
+/// Patch highlight blacklist rows, persist settings.json, refresh runtime cache only.
+pub fn mutate_highlight_blacklist(
+    shared: &Shared,
+    mutator: impl FnOnce(&mut Vec<HighlightBlacklistRow>) -> Result<(), String>,
+) -> Result<(), ApiError> {
+    let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
+    if inner.path.as_os_str().is_empty() {
+        return Err(ApiError::internal("settings path unset"));
+    }
+    let mut next = inner.data.clone();
+    mutator(&mut next.highlight_blacklist)
+        .map_err(|message| ApiError::internal(&message))?;
+    if next.highlight_blacklist.len() > MAX_TABLE_ROWS {
+        return Err(ApiError::internal("highlight blacklist limit reached"));
+    }
+    for row in &mut next.highlight_blacklist {
+        row.username = row.username.trim().to_string();
+        if row.username.len() > MAX_CELL {
+            return Err(ApiError::internal("highlight blacklist username too long"));
+        }
+    }
+    save_file(&inner.path, &next).map_err(|e| ApiError::internal(&e))?;
+    inner.data.highlight_blacklist = next.highlight_blacklist;
+    let blacklist = super::filters::blacklist_rules_from_settings(&inner.data);
+    if let Ok(mut slot) = shared.highlight_blacklist.lock() {
+        *slot = blacklist;
+    }
+    Ok(())
+}
+
 pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, ApiError> {
     let mut clean = sanitize(incoming)?;
     sync_filter_valid_flags(&mut clean.filters);

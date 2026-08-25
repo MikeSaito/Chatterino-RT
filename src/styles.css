@@ -1384,6 +1384,20 @@ button:disabled {
   display: none;
 }
 
+.usercard-ignore-highlights-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 12px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.usercard-ignore-highlights-row[hidden] {
+  display: none;
+}
+
 .usercard-mod-row {
   display: flex;
   flex-wrap: wrap;

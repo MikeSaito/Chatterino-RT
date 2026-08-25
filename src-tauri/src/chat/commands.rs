@@ -1084,6 +1084,25 @@ pub async fn chat_set_user_blocked(
 }
 
 #[tauri::command]
+pub fn chat_user_ignore_highlights(
+    state: tauri::State<'_, Shared>,
+    login: String,
+) -> Result<super::highlight_blacklist::IgnoreHighlightsState, ApiError> {
+    super::highlight_blacklist::query_state(&state, login.trim())
+        .map_err(|message| ApiError::internal(&message))
+}
+
+#[tauri::command]
+pub fn chat_set_user_ignore_highlights(
+    state: tauri::State<'_, Shared>,
+    login: String,
+    ignored: bool,
+) -> Result<(), ApiError> {
+    super::highlight_blacklist::set_user_ignore_highlights(&state, login.trim(), ignored)
+        .map_err(|message| ApiError::internal(&message))
+}
+
+#[tauri::command]
 pub fn supports_incognito_links() -> bool {
     super::incognito::supports_incognito()
 }

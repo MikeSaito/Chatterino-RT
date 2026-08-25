@@ -22,6 +22,7 @@ pub mod fetch;
 pub mod ffz_badges;
 pub mod ffz_channel;
 pub mod helix;
+pub mod highlight_blacklist;
 pub mod highlight_sound;
 pub mod hub;
 pub mod image_uploader;

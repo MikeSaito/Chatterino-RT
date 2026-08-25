@@ -1100,7 +1100,7 @@ pub fn ignore_user_rules_from_settings(data: &super::settings::AppSettings) -> V
         .collect()
 }
 
-fn login_is_blacklisted(login: &str, rules: &[BlacklistRule]) -> bool {
+pub(crate) fn login_is_blacklisted(login: &str, rules: &[BlacklistRule]) -> bool {
     if login.is_empty() || rules.is_empty() {
         return false;
     }
