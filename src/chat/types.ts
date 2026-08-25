@@ -132,8 +132,14 @@ export type ChannelLive = {
   startedAt?: string;
 };
 
+export type AuthAccountRow = {
+  login: string;
+  userId?: string;
+};
+
 export type AuthInfo = {
   login?: string;
+  accounts?: AuthAccountRow[];
   canSend: boolean;
   fromEnv: boolean;
   userCode?: string;

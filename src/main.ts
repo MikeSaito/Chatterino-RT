@@ -1156,7 +1156,7 @@ async function boot(): Promise<void> {
     signinBtn.hidden = signed || pending;
     signinBtn.disabled = pending;
     logoutBtn.hidden = !((signed && !info.fromEnv) || pending);
-    logoutBtn.textContent = signed ? "Выйти" : "Отмена";
+    logoutBtn.textContent = pending ? "Отмена" : "Выйти";
     pasteEl.hidden = !info.pendingPaste;
     importBtn.hidden = !info.pendingPaste;
     if (info.userCode) {

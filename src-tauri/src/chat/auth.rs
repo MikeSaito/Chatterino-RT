@@ -31,7 +31,8 @@ pub struct StoredCreds {
 #[derive(Default)]
 pub struct AuthInner {
     pub path: PathBuf,
-    pub disk: Option<StoredCreds>,
+    pub accounts: Vec<StoredCreds>,
+    pub current_login: Option<String>,
     pub cached_user_id: Option<String>,
     pub pending_user_code: Option<String>,
     pub pending_paste: bool,
@@ -41,9 +42,18 @@ pub struct AuthInner {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AccountRow {
+    pub login: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
+    pub accounts: Vec<AccountRow>,
     pub can_send: bool,
     pub from_env: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,8 +102,32 @@ impl AuthFail {
     }
 }
 
+#[derive(Clone, Default)]
+struct AuthStore {
+    accounts: Vec<StoredCreds>,
+    current_login: Option<String>,
+}
+
 #[derive(Deserialize)]
-struct DiskFile {
+struct DiskAccount {
+    login: String,
+    token: String,
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    user_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DiskMulti {
+    #[serde(default)]
+    current: String,
+    #[serde(default)]
+    accounts: Vec<DiskAccount>,
+}
+
+#[derive(Deserialize)]
+struct DiskLegacy {
     login: String,
     token: String,
     #[serde(default)]
@@ -103,12 +137,18 @@ struct DiskFile {
 }
 
 #[derive(Serialize)]
-struct DiskFileOut<'a> {
+struct DiskAccountOut<'a> {
     login: &'a str,
     token: &'a str,
     client_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_id: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DiskMultiOut<'a> {
+    current: &'a str,
+    accounts: Vec<DiskAccountOut<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -120,16 +160,53 @@ struct DeviceJson {
     verification_uri: String,
 }
 
+fn current_creds(inner: &AuthInner) -> Option<&StoredCreds> {
+    let login = inner.current_login.as_deref()?;
+    inner.accounts.iter().find(|c| c.login == login)
+}
+
+fn current_creds_mut(inner: &mut AuthInner) -> Option<&mut StoredCreds> {
+    let login = inner.current_login.clone()?;
+    inner.accounts.iter_mut().find(|c| c.login == login)
+}
+
+fn apply_store(inner: &mut AuthInner, store: AuthStore) {
+    inner.accounts = store.accounts;
+    inner.current_login = store
+        .current_login
+        .filter(|l| inner.accounts.iter().any(|a| &a.login == l))
+        .or_else(|| inner.accounts.first().map(|a| a.login.clone()));
+    inner.cached_user_id = current_creds(inner).and_then(|c| c.user_id.clone());
+}
+
+fn account_rows(inner: &AuthInner) -> Vec<AccountRow> {
+    inner
+        .accounts
+        .iter()
+        .map(|c| AccountRow {
+            login: c.login.clone(),
+            user_id: c.user_id.clone(),
+        })
+        .collect()
+}
+
+fn upsert_account(accounts: &mut Vec<StoredCreds>, creds: StoredCreds) {
+    if let Some(slot) = accounts.iter_mut().find(|c| c.login == creds.login) {
+        *slot = creds;
+    } else {
+        accounts.push(creds);
+    }
+}
+
 pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(AUTH_FILE);
-    let disk = load_file(&path);
+    let store = load_file(&path);
     {
         let mut inner = shared.auth.lock().map_err(|e| e.to_string())?;
         inner.path = path;
-        inner.disk = disk.clone();
-        inner.cached_user_id = disk.and_then(|c| c.user_id);
+        apply_store(&mut inner, store);
     }
     emit(app, shared);
     let app_chk = app.clone();
@@ -145,22 +222,24 @@ pub fn emit(app: &AppHandle, shared: &Shared) {
 }
 
 pub fn snapshot(shared: &Shared) -> AuthInfo {
-    let (pending, pending_paste, disk, last_message) = match shared.auth.lock() {
+    let (pending, pending_paste, accounts, current_login, last_message) = match shared.auth.lock()
+    {
         Ok(inner) => (
             inner.pending_user_code.clone(),
             inner.pending_paste,
-            inner.disk.clone(),
+            account_rows(&inner),
+            inner.current_login.clone(),
             inner.last_message.clone(),
         ),
-        Err(_) => (None, false, None, None),
+        Err(_) => (None, false, Vec::new(), None, None),
     };
     let env_pair = env_login_token();
     let from_env = env_pair.is_some();
     let login = env_pair
         .as_ref()
         .map(|(l, _)| l.clone())
-        .or_else(|| disk.as_ref().map(|c| c.login.clone()));
-    let has_token = env_pair.is_some() || disk.is_some();
+        .or(current_login);
+    let has_token = env_pair.is_some() || login.is_some();
     let active = shared.hub.lock().ok();
     let can_send = has_token
         && login.is_some()
@@ -170,6 +249,11 @@ pub fn snapshot(shared: &Shared) -> AuthInfo {
     AuthInfo {
         can_send,
         login,
+        accounts: if from_env {
+            Vec::new()
+        } else {
+            accounts
+        },
         from_env,
         user_code: pending,
         pending_paste,
@@ -181,13 +265,9 @@ pub fn resolved_login_token(shared: &Shared) -> Option<(String, String)> {
     if let Some(pair) = env_login_token() {
         return Some(pair);
     }
-    shared
-        .auth
-        .lock()
-        .ok()?
-        .disk
-        .as_ref()
-        .map(|c| (c.login.clone(), c.token.clone()))
+    let inner = shared.auth.lock().ok()?;
+    let c = current_creds(&inner)?;
+    Some((c.login.clone(), c.token.clone()))
 }
 
 pub fn oauth_token(shared: &Shared) -> Option<String> {
@@ -203,9 +283,7 @@ pub fn resolved_twitch_user_id(shared: &Shared) -> Option<String> {
     if let Some(id) = inner.cached_user_id.as_deref().filter(|s| valid_twitch_user_id(s)) {
         return Some(id.to_string());
     }
-    inner
-        .disk
-        .as_ref()
+    current_creds(&inner)
         .and_then(|c| c.user_id.as_deref())
         .filter(|s| valid_twitch_user_id(s))
         .map(str::to_string)
@@ -217,7 +295,7 @@ pub fn set_cached_twitch_user_id(shared: &Shared, user_id: String) {
     }
     if let Ok(mut inner) = shared.auth.lock() {
         inner.cached_user_id = Some(user_id.clone());
-        if let Some(disk) = inner.disk.as_mut() {
+        if let Some(disk) = current_creds_mut(&mut inner) {
             disk.user_id = Some(user_id);
         }
     }
@@ -248,7 +326,7 @@ pub fn resolved_client_id(shared: &Shared) -> String {
         .auth
         .lock()
         .ok()
-        .and_then(|inner| inner.disk.as_ref().map(|c| c.client_id.clone()))
+        .and_then(|inner| current_creds(&inner).map(|c| c.client_id.clone()))
         .filter(|id| !id.is_empty() && id != "YOUR_API_KEY_HERE")
     {
         return id;
@@ -282,6 +360,11 @@ pub fn allowed_oauth_url(raw: &str) -> Result<String, String> {
 }
 
 pub async fn start_login(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
+    if env_login_token().is_some() {
+        return Err(AuthFail::config(
+            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
+        ));
+    }
     if oauth_client_id() == CHATTERINO_CLIENT_ID {
         start_chatterino_page(app, shared).await
     } else {
@@ -467,28 +550,131 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
 }
 
 pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
-    let (path, gen) = {
+    if env_login_token().is_some() {
+        return Err(AuthFail::config(
+            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
+        ));
+    }
+    let (cancel_only, current) = {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
+        let pending = inner.pending_paste || inner.pending_user_code.is_some();
+        if pending {
+            inner.poll_gen = inner.poll_gen.wrapping_add(1);
+            inner.pending_user_code = None;
+            inner.pending_paste = false;
+            inner.last_message = None;
+            (true, None)
+        } else {
+            (false, inner.current_login.clone())
+        }
+    };
+    if cancel_only {
+        emit(&app, &shared);
+        return Ok(());
+    }
+    let Some(login) = current else {
+        emit(&app, &shared);
+        return Ok(());
+    };
+    remove_account(app, shared, login).await
+}
+
+pub async fn select_account(
+    app: AppHandle,
+    shared: Shared,
+    login: String,
+) -> Result<(), AuthFail> {
+    if env_login_token().is_some() {
+        return Err(AuthFail::config(
+            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
+        ));
+    }
+    let login = login.trim().to_lowercase();
+    if !valid_login(&login) {
+        return Err(AuthFail::invalid("некорректный login"));
+    }
+    {
+        let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
+        if !inner.accounts.iter().any(|c| c.login == login) {
+            return Err(AuthFail::invalid("аккаунт не найден"));
+        }
+        if inner.current_login.as_deref() == Some(login.as_str()) {
+            return Ok(());
+        }
+        let prev = AuthStore {
+            accounts: inner.accounts.clone(),
+            current_login: inner.current_login.clone(),
+        };
         inner.poll_gen = inner.poll_gen.wrapping_add(1);
         inner.pending_user_code = None;
         inner.pending_paste = false;
-        inner.disk = None;
-        inner.cached_user_id = None;
         inner.last_message = None;
-        (inner.path.clone(), inner.poll_gen)
-    };
-    if let Err(e) = remove_auth_file(&path) {
-        if let Ok(mut inner) = shared.auth.lock() {
-            if inner.poll_gen == gen {
-                inner.disk = load_file(&path);
-            }
+        inner.current_login = Some(login);
+        inner.cached_user_id = current_creds(&inner).and_then(|c| c.user_id.clone());
+        let store = AuthStore {
+            accounts: inner.accounts.clone(),
+            current_login: inner.current_login.clone(),
+        };
+        let path = inner.path.clone();
+        if let Err(e) = save_store(&path, &store) {
+            apply_store(&mut inner, prev);
+            return Err(AuthFail::internal(e));
         }
-        return Err(e);
     }
-    request_relogin(&shared).await;
-    super::provider_activity::clear_identity_cache(&shared);
-    super::twitch_blocks::clear_blocks(&shared);
-    super::shared_chat::clear(&shared);
+    after_identity_change(&shared).await;
+    emit(&app, &shared);
+    Ok(())
+}
+
+pub async fn remove_account(
+    app: AppHandle,
+    shared: Shared,
+    login: String,
+) -> Result<(), AuthFail> {
+    if env_login_token().is_some() {
+        return Err(AuthFail::config(
+            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
+        ));
+    }
+    let login = login.trim().to_lowercase();
+    if !valid_login(&login) {
+        return Err(AuthFail::invalid("некорректный login"));
+    }
+    let was_current = {
+        let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
+        let idx = inner
+            .accounts
+            .iter()
+            .position(|c| c.login == login)
+            .ok_or_else(|| AuthFail::invalid("аккаунт не найден"))?;
+        let was_current = inner.current_login.as_deref() == Some(login.as_str());
+        let prev = AuthStore {
+            accounts: inner.accounts.clone(),
+            current_login: inner.current_login.clone(),
+        };
+        inner.poll_gen = inner.poll_gen.wrapping_add(1);
+        inner.pending_user_code = None;
+        inner.pending_paste = false;
+        inner.last_message = None;
+        inner.accounts.remove(idx);
+        if was_current {
+            inner.current_login = inner.accounts.first().map(|c| c.login.clone());
+            inner.cached_user_id = current_creds(&inner).and_then(|c| c.user_id.clone());
+        }
+        let store = AuthStore {
+            accounts: inner.accounts.clone(),
+            current_login: inner.current_login.clone(),
+        };
+        let path = inner.path.clone();
+        if let Err(e) = persist_store_or_remove(&path, &store) {
+            apply_store(&mut inner, prev);
+            return Err(e);
+        }
+        was_current
+    };
+    if was_current {
+        after_identity_change(&shared).await;
+    }
     emit(&app, &shared);
     Ok(())
 }
@@ -503,33 +689,37 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
         emit(&app, &shared);
         return;
     }
-    let (path, gen) = {
-        let Ok(mut inner) = shared.auth.lock() else {
-            return;
-        };
-        inner.poll_gen = inner.poll_gen.wrapping_add(1);
-        inner.pending_user_code = None;
-        inner.pending_paste = false;
-        inner.disk = None;
-        inner.cached_user_id = None;
-        inner.last_message = Some(message.to_string());
-        (inner.path.clone(), inner.poll_gen)
-    };
-    if let Err(e) = remove_auth_file(&path) {
+    let current = shared
+        .auth
+        .lock()
+        .ok()
+        .and_then(|inner| inner.current_login.clone());
+    let Some(login) = current else {
         if let Ok(mut inner) = shared.auth.lock() {
-            if inner.poll_gen == gen {
-                inner.disk = load_file(&path);
-                inner.last_message = Some(e.message);
-            }
+            inner.last_message = Some(message.to_string());
+        }
+        emit(&app, &shared);
+        return;
+    };
+    if let Err(e) = remove_account(app.clone(), shared.clone(), login).await {
+        if let Ok(mut inner) = shared.auth.lock() {
+            inner.last_message = Some(e.message);
         }
         emit(&app, &shared);
         return;
     }
-    request_relogin(&shared).await;
-    super::provider_activity::clear_identity_cache(&shared);
-    super::twitch_blocks::clear_blocks(&shared);
-    super::shared_chat::clear(&shared);
+    if let Ok(mut inner) = shared.auth.lock() {
+        inner.last_message = Some(message.to_string());
+    }
     emit(&app, &shared);
+}
+
+async fn after_identity_change(shared: &Shared) {
+    request_relogin(shared).await;
+    super::provider_activity::clear_identity_cache(shared);
+    super::twitch_blocks::clear_blocks(shared);
+    super::shared_chat::clear(shared);
+    super::twitch_blocks::spawn_load_if_enabled(shared);
 }
 
 struct PollJob {
@@ -604,48 +794,51 @@ async fn persist_and_relogin(
     client_id: String,
     user_id: Option<String>,
 ) -> bool {
-    let path = {
-        let inner = match shared.auth.lock() {
+    if env_login_token().is_some() {
+        finish_pending(app, shared, gen, Some("вход задан через env"));
+        return false;
+    }
+    let save_err = {
+        let mut inner = match shared.auth.lock() {
             Ok(g) => g,
             Err(_) => return false,
         };
         if inner.poll_gen != gen {
             return false;
         }
-        inner.path.clone()
+        let path = inner.path.clone();
+        let mut accounts = inner.accounts.clone();
+        upsert_account(
+            &mut accounts,
+            StoredCreds {
+                login: login.clone(),
+                token,
+                client_id,
+                user_id: user_id.filter(|id| valid_twitch_user_id(id)),
+            },
+        );
+        let store = AuthStore {
+            accounts,
+            current_login: Some(login),
+        };
+        if let Err(e) = save_store(&path, &store) {
+            inner.last_message = Some(e);
+            inner.pending_user_code = None;
+            inner.pending_paste = false;
+            true
+        } else {
+            apply_store(&mut inner, store);
+            inner.pending_user_code = None;
+            inner.pending_paste = false;
+            inner.last_message = None;
+            false
+        }
     };
-    if let Err(e) = save_file(&path, &login, &token, &client_id, user_id.as_deref()) {
-        finish_pending(app, shared, gen, Some(&e));
+    if save_err {
+        emit(app, shared);
         return false;
     }
-    {
-        let mut inner = match shared.auth.lock() {
-            Ok(g) => g,
-            Err(_) => {
-                let _ = remove_auth_file(&path);
-                return false;
-            }
-        };
-        if inner.poll_gen != gen {
-            drop(inner);
-            let _ = remove_auth_file(&path);
-            return false;
-        }
-        inner.disk = Some(StoredCreds {
-            login: login.clone(),
-            token,
-            client_id,
-            user_id: user_id.filter(|id| valid_twitch_user_id(id)),
-        });
-        inner.cached_user_id = inner.disk.as_ref().and_then(|c| c.user_id.clone());
-        inner.pending_user_code = None;
-        inner.pending_paste = false;
-        inner.last_message = None;
-    }
-    request_relogin(shared).await;
-    super::twitch_blocks::clear_blocks(shared);
-    super::shared_chat::clear(shared);
-    super::twitch_blocks::spawn_load_if_enabled(shared);
+    after_identity_change(shared).await;
     emit(app, shared);
     true
 }
@@ -654,16 +847,18 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
     if env_login_token().is_some() {
         return;
     }
-    let (token, gen) = match shared.auth.lock() {
-        Ok(inner) => match inner.disk.as_ref() {
-            Some(c) => (c.token.clone(), inner.poll_gen),
+    let (token, gen, login) = match shared.auth.lock() {
+        Ok(inner) => match current_creds(&inner) {
+            Some(c) => (c.token.clone(), inner.poll_gen, c.login.clone()),
             None => return,
         },
         Err(_) => return,
     };
     if validate_login(&http_client(), &token).await.is_err() {
         let still = shared.auth.lock().ok().is_some_and(|inner| {
-            inner.poll_gen == gen && inner.disk.as_ref().is_some_and(|c| c.token == token)
+            inner.poll_gen == gen
+                && current_creds(&inner)
+                    .is_some_and(|c| c.login == login && c.token == token)
         });
         if still {
             reject_session(app, shared, "сохранённый вход недействителен").await;
@@ -905,9 +1100,50 @@ fn valid_login(login: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-fn load_file(path: &Path) -> Option<StoredCreds> {
-    let raw = fs::read_to_string(path).ok()?;
-    let parsed: DiskFile = serde_json::from_str(&raw).ok()?;
+fn load_file(path: &Path) -> AuthStore {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return AuthStore::default();
+    };
+    parse_auth_json(&raw).unwrap_or_default()
+}
+
+fn parse_auth_json(raw: &str) -> Option<AuthStore> {
+    if let Ok(multi) = serde_json::from_str::<DiskMulti>(raw) {
+        if !multi.accounts.is_empty() || !multi.current.is_empty() {
+            let mut accounts = Vec::new();
+            for row in multi.accounts {
+                if let Some(c) = normalize_disk_account(row) {
+                    upsert_account(&mut accounts, c);
+                }
+            }
+            let current = multi.current.trim().to_lowercase();
+            let current_login = if valid_login(&current) && accounts.iter().any(|a| a.login == current)
+            {
+                Some(current)
+            } else {
+                accounts.first().map(|a| a.login.clone())
+            };
+            return Some(AuthStore {
+                accounts,
+                current_login,
+            });
+        }
+    }
+    let legacy: DiskLegacy = serde_json::from_str(raw).ok()?;
+    let creds = normalize_disk_account(DiskAccount {
+        login: legacy.login,
+        token: legacy.token,
+        client_id: legacy.client_id,
+        user_id: legacy.user_id,
+    })?;
+    let login = creds.login.clone();
+    Some(AuthStore {
+        accounts: vec![creds],
+        current_login: Some(login),
+    })
+}
+
+fn normalize_disk_account(parsed: DiskAccount) -> Option<StoredCreds> {
     let login = parsed.login.trim().to_lowercase();
     let token = parsed.token.trim().trim_start_matches("oauth:").to_string();
     if !valid_login(&login) || token.is_empty() || token == "YOUR_API_KEY_HERE" {
@@ -921,9 +1157,7 @@ fn load_file(path: &Path) -> Option<StoredCreds> {
         } else {
             parsed.client_id.trim().to_string()
         },
-        user_id: parsed
-            .user_id
-            .filter(|id| valid_twitch_user_id(id)),
+        user_id: parsed.user_id.filter(|id| valid_twitch_user_id(id)),
     })
 }
 
@@ -938,26 +1172,34 @@ fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
     }
 }
 
-fn save_file(
-    path: &Path,
-    login: &str,
-    token: &str,
-    client_id: &str,
-    user_id: Option<&str>,
-) -> Result<(), String> {
+fn persist_store_or_remove(path: &Path, store: &AuthStore) -> Result<(), AuthFail> {
+    if store.accounts.is_empty() {
+        remove_auth_file(path)
+    } else {
+        save_store(path, store).map_err(AuthFail::internal)
+    }
+}
+
+fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         return Err("каталог конфигурации не задан".into());
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string(&DiskFileOut {
-        login,
-        token,
-        client_id,
-        user_id: user_id.filter(|id| valid_twitch_user_id(id)),
-    })
-    .map_err(|e| e.to_string())?;
+    let current = store.current_login.as_deref().unwrap_or("");
+    let accounts: Vec<DiskAccountOut<'_>> = store
+        .accounts
+        .iter()
+        .map(|c| DiskAccountOut {
+            login: &c.login,
+            token: &c.token,
+            client_id: &c.client_id,
+            user_id: c.user_id.as_deref().filter(|id| valid_twitch_user_id(id)),
+        })
+        .collect();
+    let json = serde_json::to_string(&DiskMultiOut { current, accounts })
+        .map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -1009,5 +1251,62 @@ mod tests {
             .is_err());
         assert!(parse_chatterino_blob("").is_err());
         assert!(parse_chatterino_blob("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn migrates_legacy_auth_json() {
+        let raw = format!(
+            r#"{{"login":"Alice","token":"tok","client_id":"{CHATTERINO_CLIENT_ID}","user_id":"9"}}"#
+        );
+        let store = parse_auth_json(&raw).unwrap();
+        assert_eq!(store.accounts.len(), 1);
+        assert_eq!(store.accounts[0].login, "alice");
+        assert_eq!(store.current_login.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn parses_multi_auth_json() {
+        let raw = r#"{
+            "current":"bob",
+            "accounts":[
+                {"login":"alice","token":"t1","client_id":"cid","user_id":"1"},
+                {"login":"bob","token":"t2","client_id":"cid","user_id":"2"}
+            ]
+        }"#;
+        let store = parse_auth_json(raw).unwrap();
+        assert_eq!(store.accounts.len(), 2);
+        assert_eq!(store.current_login.as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn upsert_replaces_same_login() {
+        let mut accounts = vec![StoredCreds {
+            login: "alice".into(),
+            token: "old".into(),
+            client_id: "c".into(),
+            user_id: Some("1".into()),
+        }];
+        upsert_account(
+            &mut accounts,
+            StoredCreds {
+                login: "alice".into(),
+                token: "new".into(),
+                client_id: "c".into(),
+                user_id: Some("1".into()),
+            },
+        );
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].token, "new");
+    }
+
+    #[test]
+    fn auth_info_rows_have_no_token_field() {
+        let json = serde_json::to_string(&AccountRow {
+            login: "alice".into(),
+            user_id: Some("1".into()),
+        })
+        .unwrap();
+        assert!(!json.contains("token"));
+        assert!(json.contains("alice"));
     }
 }

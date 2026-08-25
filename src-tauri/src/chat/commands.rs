@@ -684,6 +684,24 @@ pub async fn auth_logout(app: AppHandle, state: tauri::State<'_, Shared>) -> Res
 }
 
 #[tauri::command]
+pub async fn auth_select(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    login: String,
+) -> Result<(), ApiError> {
+    Ok(auth::select_account(app, state.inner().clone(), login).await?)
+}
+
+#[tauri::command]
+pub async fn auth_remove(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    login: String,
+) -> Result<(), ApiError> {
+    Ok(auth::remove_account(app, state.inner().clone(), login).await?)
+}
+
+#[tauri::command]
 pub fn chat_complete(
     state: tauri::State<'_, Shared>,
     token: String,

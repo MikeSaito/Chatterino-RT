@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { MessageRing } from "../../chat/ring";
-import type { Filters } from "../../chat/types";
+import type { AuthInfo, Filters } from "../../chat/types";
+import { CHAT_AUTH_EVENT } from "../../constants";
 import { configureHighlightSound } from "../highlightSound";
 import { configureHighlightFlash } from "../highlightFlash";
 import {
@@ -1147,11 +1149,186 @@ export function bindSettingsDialog(opts: {
       const note = document.createElement("p");
       note.className = "settings-empty";
       note.textContent =
-        "Twitch login is in the chat sidebar. Add / Remove / reorder of multiple accounts will use the same auth commands.";
+        "Select an account to use for chat. Add uses the same Chatterino login flow as the sidebar.";
       const list = document.createElement("ul");
       list.className = "settings-accounts-list";
       list.id = "settings-accounts-list";
-      section.append(note, list);
+      const actions = document.createElement("div");
+      actions.className = "settings-accounts-actions";
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.textContent = "Add";
+      const selectBtn = document.createElement("button");
+      selectBtn.type = "button";
+      selectBtn.textContent = "Select";
+      selectBtn.disabled = true;
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "Remove";
+      removeBtn.disabled = true;
+      const status = document.createElement("p");
+      status.className = "settings-accounts-status";
+      status.hidden = true;
+      actions.append(addBtn, selectBtn, removeBtn);
+      section.append(note, list, actions, status);
+
+      let selectedLogin: string | null = null;
+
+      const setStatus = (text: string): void => {
+        if (!text) {
+          status.hidden = true;
+          status.textContent = "";
+          return;
+        }
+        status.hidden = false;
+        status.textContent = text;
+      };
+
+      const syncActionButtons = (fromEnv: boolean): void => {
+        if (fromEnv) {
+          addBtn.disabled = true;
+          selectBtn.disabled = true;
+          removeBtn.disabled = true;
+          return;
+        }
+        addBtn.disabled = false;
+        selectBtn.disabled = !selectedLogin;
+        removeBtn.disabled = !selectedLogin;
+      };
+
+      const paintAccounts = (info: AuthInfo): void => {
+        list.replaceChildren();
+        if (info.fromEnv) {
+          note.textContent =
+            "Account is fixed by TWITCH_LOGIN / TWITCH_OAUTH_TOKEN. Multi-account controls are disabled.";
+          selectedLogin = null;
+          syncActionButtons(true);
+          return;
+        }
+        note.textContent =
+          "Highlight a row, then Select to switch or Remove. Add uses the Chatterino login flow.";
+        const accounts = Array.isArray(info.accounts) ? info.accounts : [];
+        if (accounts.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "settings-accounts-empty";
+          empty.textContent = "No saved accounts.";
+          list.append(empty);
+          selectedLogin = null;
+          syncActionButtons(false);
+          return;
+        }
+        if (
+          selectedLogin &&
+          !accounts.some((a) => a.login.toLowerCase() === selectedLogin)
+        ) {
+          selectedLogin = null;
+        }
+        for (const row of accounts) {
+          const login = row.login.toLowerCase();
+          const li = document.createElement("li");
+          li.className = "settings-accounts-row";
+          if (info.login?.toLowerCase() === login) {
+            li.classList.add("is-current");
+          }
+          if (selectedLogin === login) {
+            li.classList.add("is-selected");
+          }
+          const label = document.createElement("span");
+          label.className = "settings-accounts-login";
+          label.textContent = row.login;
+          const meta = document.createElement("span");
+          meta.className = "settings-accounts-meta";
+          const bits: string[] = [];
+          if (info.login?.toLowerCase() === login) {
+            bits.push("current");
+          }
+          if (row.userId) {
+            bits.push(`id ${row.userId}`);
+          }
+          meta.textContent = bits.join(" · ");
+          li.append(label, meta);
+          li.addEventListener("click", () => {
+            selectedLogin = login;
+            for (const el of list.querySelectorAll(".settings-accounts-row")) {
+              el.classList.toggle("is-selected", el === li);
+            }
+            syncActionButtons(false);
+          });
+          li.addEventListener("dblclick", () => {
+            selectedLogin = login;
+            syncActionButtons(false);
+            setStatus("");
+            void invoke("auth_select", { login }).catch((err) => {
+              setStatus(formatError(err));
+            });
+          });
+          list.append(li);
+        }
+        syncActionButtons(false);
+      };
+
+      const refresh = async (): Promise<void> => {
+        try {
+          paintAccounts(await invoke<AuthInfo>("auth_status"));
+        } catch (err) {
+          setStatus(formatError(err));
+        }
+      };
+
+      addBtn.addEventListener("click", () => {
+        setStatus("");
+        void (async () => {
+          try {
+            const started = await invoke<{ mode: string }>("auth_start");
+            if (started.mode === "paste") {
+              const blob = window.prompt(
+                "Paste the Chatterino login line (oauth_token=…;username=…;…)",
+              );
+              if (!blob) {
+                return;
+              }
+              await invoke("auth_import", { blob });
+              setStatus("");
+              await refresh();
+            } else {
+              setStatus("Complete device login in the browser.");
+            }
+          } catch (err) {
+            setStatus(formatError(err));
+          }
+        })();
+      });
+
+      selectBtn.addEventListener("click", () => {
+        if (!selectedLogin) {
+          return;
+        }
+        const login = selectedLogin;
+        setStatus("");
+        void invoke("auth_select", { login }).catch((err) => {
+          setStatus(formatError(err));
+        });
+      });
+
+      removeBtn.addEventListener("click", () => {
+        if (!selectedLogin) {
+          return;
+        }
+        const login = selectedLogin;
+        setStatus("");
+        void invoke("auth_remove", { login })
+          .then(() => {
+            selectedLogin = null;
+            return refresh();
+          })
+          .catch((err) => setStatus(formatError(err)));
+      });
+
+      void refresh();
+      void listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
+        paintAccounts(ev.payload);
+      });
+
       return section;
     }
 
