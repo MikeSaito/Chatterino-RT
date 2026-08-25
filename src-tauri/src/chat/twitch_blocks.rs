@@ -100,12 +100,88 @@ impl TwitchBlockSet {
         self.logins.extend(page.logins.iter().cloned());
     }
 
+    pub fn insert_user(&mut self, user_id: &str, login: &str) {
+        if !user_id.is_empty() && user_id.chars().all(|c| c.is_ascii_digit()) {
+            self.user_ids.insert(user_id.to_string());
+        }
+        let key = login.trim().to_ascii_lowercase();
+        if !key.is_empty() {
+            self.logins.insert(key);
+        }
+    }
+
+    pub fn remove_user(&mut self, user_id: &str, login: &str) {
+        if !user_id.is_empty() {
+            self.user_ids.remove(user_id);
+        }
+        let key = login.trim().to_ascii_lowercase();
+        if !key.is_empty() {
+            self.logins.remove(&key);
+        }
+    }
+
     /// Sorted display logins for Settings Ignores → Users (stock QListView).
     pub fn list_logins(&self) -> Vec<String> {
         let mut out: Vec<String> = self.logins.iter().cloned().collect();
         out.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
         out
     }
+}
+
+pub fn is_user_blocked(blocks: &TwitchBlockSet, user_id: &str, login: &str) -> bool {
+    blocks.is_blocked(
+        (!user_id.is_empty()).then_some(user_id),
+        (!login.trim().is_empty()).then_some(login.trim()),
+    )
+}
+
+fn validate_target_user_id(raw: &str) -> Result<String, String> {
+    let id = raw.trim();
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return Err("invalid user id".into());
+    }
+    Ok(id.to_string())
+}
+
+fn validate_target_login(raw: &str) -> Result<String, String> {
+    let login = raw.trim().to_ascii_lowercase();
+    if login.is_empty() || login.len() > 25 || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("invalid login".into());
+    }
+    Ok(login)
+}
+
+pub async fn set_user_blocked(
+    shared: &Shared,
+    target_user_id: &str,
+    target_login: &str,
+    blocked: bool,
+) -> Result<(), String> {
+    let target_id = validate_target_user_id(target_user_id)?;
+    let target_login = validate_target_login(target_login)?;
+    if let Some(self_id) = auth::resolved_twitch_user_id(shared) {
+        if self_id == target_id {
+            return Err("cannot block yourself".into());
+        }
+    }
+    let Some(token) = auth::oauth_token(shared) else {
+        return Err("not logged in".into());
+    };
+    let client_id = auth::resolved_client_id(shared);
+    let client = http_client();
+    if blocked {
+        put_block(&client, &client_id, &token, &target_id).await?;
+    } else {
+        delete_block(&client, &client_id, &token, &target_id).await?;
+    }
+    if let Ok(mut guard) = shared.twitch_blocks.lock() {
+        if blocked {
+            guard.insert_user(&target_id, &target_login);
+        } else {
+            guard.remove_user(&target_id, &target_login);
+        }
+    }
+    Ok(())
 }
 
 pub fn parse_blocks_page(value: &Value) -> TwitchBlockSet {
@@ -233,6 +309,15 @@ async fn fetch_all_blocks(user_id: &str, token: &str, client_id: &str) -> Option
     Some(out)
 }
 
+fn block_target_url(target_user_id: &str) -> Option<String> {
+    let mut url = Url::parse(&format!("{HELIX}/users/blocks")).ok()?;
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("target_user_id", target_user_id);
+    }
+    Some(url.to_string())
+}
+
 fn blocks_url(user_id: &str, cursor: Option<&str>) -> Option<String> {
     let mut url = Url::parse(&format!("{HELIX}/users/blocks")).ok()?;
     {
@@ -288,6 +373,65 @@ async fn get_json(
     None
 }
 
+async fn put_block(
+    client: &reqwest::Client,
+    client_id: &str,
+    token: &str,
+    target_user_id: &str,
+) -> Result<(), String> {
+    let url = block_target_url(target_user_id).ok_or_else(|| "block url".to_string())?;
+    mutate_block(client, reqwest::Method::PUT, &url, client_id, token).await
+}
+
+async fn delete_block(
+    client: &reqwest::Client,
+    client_id: &str,
+    token: &str,
+    target_user_id: &str,
+) -> Result<(), String> {
+    let url = block_target_url(target_user_id).ok_or_else(|| "block url".to_string())?;
+    mutate_block(client, reqwest::Method::DELETE, &url, client_id, token).await
+}
+
+async fn mutate_block(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    client_id: &str,
+    token: &str,
+) -> Result<(), String> {
+    let mut delay = Duration::from_millis(200);
+    for attempt in 0..ATTEMPTS {
+        match client
+            .request(method.clone(), url)
+            .header("Client-Id", client_id)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => return Ok(()),
+            Ok(resp) if resp.status().as_u16() == 401 => {
+                return Err("authorization failed; sign in again".into());
+            }
+            Ok(resp) if resp.status().as_u16() == 403 => {
+                return Err("missing block permission; sign in again".into());
+            }
+            Ok(resp) => {
+                if attempt + 1 >= ATTEMPTS {
+                    return Err(format!("Helix block failed ({})", resp.status()));
+                }
+            }
+            Err(e) if attempt + 1 >= ATTEMPTS => return Err(e.to_string()),
+            Err(_) => {}
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay = delay.saturating_mul(2);
+        }
+    }
+    Err("Helix block request failed".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,6 +470,24 @@ mod tests {
         set.logins.insert("alpha".into());
         set.logins.insert("beta".into());
         assert_eq!(set.list_logins(), vec!["alpha", "beta", "zeta"]);
+    }
+
+    #[test]
+    fn insert_and_remove_user_updates_sets() {
+        let mut set = TwitchBlockSet::default();
+        set.insert_user("123", "Foo");
+        assert!(set.is_blocked(Some("123"), Some("foo")));
+        set.remove_user("123", "Foo");
+        assert!(!set.is_blocked(Some("123"), Some("foo")));
+    }
+
+    #[test]
+    fn is_user_blocked_helper() {
+        let mut set = TwitchBlockSet::default();
+        set.insert_user("99", "blocked");
+        assert!(is_user_blocked(&set, "99", "blocked"));
+        assert!(is_user_blocked(&set, "", "blocked"));
+        assert!(!is_user_blocked(&set, "1", "other"));
     }
 
     #[test]

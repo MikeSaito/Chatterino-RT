@@ -1051,6 +1051,39 @@ pub fn chat_blocked_users(state: tauri::State<'_, Shared>) -> Result<Vec<String>
 }
 
 #[tauri::command]
+pub fn chat_user_blocked(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)]
+    userId: String,
+    login: String,
+) -> Result<bool, ApiError> {
+    let guard = state.twitch_blocks.lock().map_err(|_| ApiError::internal("lock"))?;
+    Ok(super::twitch_blocks::is_user_blocked(&guard, userId.trim(), login.trim()))
+}
+
+#[tauri::command]
+pub async fn chat_set_user_blocked(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)]
+    userId: String,
+    login: String,
+    blocked: bool,
+) -> Result<(), ApiError> {
+    super::twitch_blocks::set_user_blocked(&state, userId.trim(), login.trim(), blocked)
+        .await
+        .map_err(|message| ApiError {
+            code: if message.contains("not logged in") {
+                "auth".into()
+            } else if message.contains("permission") {
+                "forbidden".into()
+            } else {
+                "helix_error".into()
+            },
+            message,
+        })
+}
+
+#[tauri::command]
 pub fn supports_incognito_links() -> bool {
     super::incognito::supports_incognito()
 }

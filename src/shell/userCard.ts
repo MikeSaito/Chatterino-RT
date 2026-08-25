@@ -89,6 +89,8 @@ export function bindUserCard(opts: {
   const timeoutsEl = modal.querySelector<HTMLElement>("#usercard-timeouts");
   const banBtn = modal.querySelector<HTMLButtonElement>("#usercard-ban");
   const unbanBtn = modal.querySelector<HTMLButtonElement>("#usercard-unban");
+  const blockRow = modal.querySelector<HTMLElement>("#usercard-block-row");
+  const blockCheckbox = modal.querySelector<HTMLInputElement>("#usercard-block");
   const statusEl = modal.querySelector<HTMLElement>("#usercard-status");
   const head = modal.querySelector<HTMLElement>(".popup-head");
   if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
@@ -106,6 +108,9 @@ export function bindUserCard(opts: {
   let modBusy = false;
   let currentUserId = "";
   let modRowSeq = 0;
+  let blockSeq = 0;
+  let blockBusy = false;
+  let suppressBlockChange = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -231,6 +236,7 @@ export function bindUserCard(opts: {
         createdEl.hidden = false;
       }
     }
+    void loadBlockState(login, profile.id);
   };
 
   const applyProfileAvatar = (profile: UserProfile, login: string): void => {
@@ -290,6 +296,78 @@ export function bindUserCard(opts: {
     }
     if (timeoutsEl) {
       timeoutsEl.replaceChildren();
+    }
+  };
+
+  const hideBlockRow = (): void => {
+    if (blockRow) {
+      blockRow.hidden = true;
+    }
+    if (blockCheckbox) {
+      blockCheckbox.checked = false;
+      blockCheckbox.disabled = false;
+    }
+  };
+
+  const syncBlockRowVisibility = (): void => {
+    if (!blockRow || !blockCheckbox) {
+      return;
+    }
+    const self = getSelfLogin()?.trim().toLowerCase() ?? "";
+    const hide = !currentLogin || !self || self === currentLogin;
+    if (hide) {
+      hideBlockRow();
+      return;
+    }
+    blockRow.hidden = false;
+  };
+
+  const resetBlockUi = (): void => {
+    blockSeq += 1;
+    blockBusy = false;
+    if (blockCheckbox) {
+      suppressBlockChange = true;
+      blockCheckbox.checked = false;
+      suppressBlockChange = false;
+      blockCheckbox.disabled = true;
+    }
+    syncBlockRowVisibility();
+  };
+
+  const loadBlockState = async (login: string, userId: string): Promise<void> => {
+    if (!blockRow || !blockCheckbox) {
+      return;
+    }
+    const seq = ++blockSeq;
+    syncBlockRowVisibility();
+    if (blockRow.hidden) {
+      return;
+    }
+    if (!/^\d+$/.test(userId)) {
+      blockCheckbox.disabled = true;
+      blockCheckbox.checked = false;
+      return;
+    }
+    blockCheckbox.disabled = true;
+    try {
+      const blocked = await invoke<boolean>("chat_user_blocked", { userId, login });
+      if (seq !== blockSeq || login !== currentLogin || userId !== currentUserId) {
+        return;
+      }
+      if (!blockBusy) {
+        suppressBlockChange = true;
+        blockCheckbox.checked = blocked;
+        suppressBlockChange = false;
+      }
+      blockCheckbox.disabled = blockBusy;
+    } catch {
+      if (seq !== blockSeq || login !== currentLogin) {
+        return;
+      }
+      suppressBlockChange = true;
+      blockCheckbox.checked = false;
+      suppressBlockChange = false;
+      blockCheckbox.disabled = true;
     }
   };
 
@@ -440,6 +518,9 @@ export function bindUserCard(opts: {
     }
     modRowSeq += 1;
     hideModRow();
+    blockSeq += 1;
+    blockBusy = false;
+    hideBlockRow();
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -495,6 +576,12 @@ export function bindUserCard(opts: {
       }
       showMetaUnavailable();
       clearAvatar();
+      if (blockCheckbox) {
+        suppressBlockChange = true;
+        blockCheckbox.checked = false;
+        suppressBlockChange = false;
+        blockCheckbox.disabled = true;
+      }
     }
   };
 
@@ -538,6 +625,8 @@ export function bindUserCard(opts: {
       return;
     }
     currentLogin = info.login.toLowerCase();
+    currentUserId = "";
+    resetBlockUi();
     nameEl.textContent = info.nick || info.login;
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
@@ -699,6 +788,65 @@ export function bindUserCard(opts: {
   if (unbanBtn) {
     unbanBtn.addEventListener("click", () => {
       void sendMod("unban");
+    });
+  }
+  if (blockCheckbox) {
+    blockCheckbox.addEventListener("change", () => {
+      if (suppressBlockChange || blockBusy || !currentLogin || modal.hidden) {
+        return;
+      }
+      const login = currentLogin;
+      const userId = currentUserId;
+      if (!/^\d+$/.test(userId)) {
+        suppressBlockChange = true;
+        blockCheckbox.checked = false;
+        suppressBlockChange = false;
+        return;
+      }
+      const wantBlocked = blockCheckbox.checked;
+      if (wantBlocked) {
+        const ok = window.confirm(
+          `Blocking ${login} can cause unintended side-effects like unfollowing.\n\nAre you sure you want to block ${login}?`,
+        );
+        if (!ok) {
+          suppressBlockChange = true;
+          blockCheckbox.checked = false;
+          suppressBlockChange = false;
+          return;
+        }
+      }
+      void (async () => {
+        blockBusy = true;
+        blockCheckbox.disabled = true;
+        try {
+          await invoke("chat_set_user_blocked", {
+            userId,
+            login,
+            blocked: wantBlocked,
+          });
+          if (login !== currentLogin || modal.hidden) {
+            return;
+          }
+          setStatus(wantBlocked ? `Blocked @${login}` : `Unblocked @${login}`);
+        } catch (e) {
+          if (login !== currentLogin || modal.hidden) {
+            return;
+          }
+          suppressBlockChange = true;
+          blockCheckbox.checked = !wantBlocked;
+          suppressBlockChange = false;
+          const msg =
+            e && typeof e === "object" && "message" in e
+              ? String((e as { message: unknown }).message)
+              : "Could not update block.";
+          setStatus(msg);
+        } finally {
+          blockBusy = false;
+          if (login === currentLogin && !modal.hidden) {
+            blockCheckbox.disabled = false;
+          }
+        }
+      })();
     });
   }
   if (roleModBtn) {

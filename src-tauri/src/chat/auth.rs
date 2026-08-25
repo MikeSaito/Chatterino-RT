@@ -11,7 +11,8 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
-const DEVICE_SCOPES: &str = "chat:read chat:write user:read:blocked_users";
+const DEVICE_SCOPES: &str =
+    "chat:read chat:write user:read:blocked_users user:manage:blocked_users";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";

@@ -1370,6 +1370,20 @@ button:disabled {
   border-bottom: 1px solid var(--c-border);
 }
 
+.usercard-block-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 12px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.usercard-block-row[hidden] {
+  display: none;
+}
+
 .usercard-mod-row {
   display: flex;
   flex-wrap: wrap;
