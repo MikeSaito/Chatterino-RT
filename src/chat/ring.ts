@@ -15,7 +15,9 @@ import {
   BADGE_SLOTS_PER_ROW,
   EMOTE_SLOTS_PER_ROW,
   MENTION_SLOTS_PER_ROW,
+  MOD_ACTION_SLOTS_PER_ROW,
 } from "../constants";
+import type { ModActionBtn } from "../shell/modActions";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import { resolveEmojiUrl } from "./emoteUrl";
 import {
@@ -103,6 +105,8 @@ type Slot = {
   badges: Sprite[];
   badgeKeys: string[];
   badgesRaw: Badge[];
+  modBtns: BitmapText[];
+  modBtnHits: Array<{ x0: number; x1: number; action: string }>;
   msgId: string;
   login: string;
   /** Текст с префиксами до host-display transform; обновляется при reply-prefix. */
@@ -201,6 +205,9 @@ export class MessageRing {
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
   private showReplyButton = false;
+  private moderationMode = false;
+  private modActions: ModActionBtn[] = [];
+  private selfLogin = "";
   private linksDoubleClickOnly = false;
   /** Stock links.lowercaseDomains (default on). */
   private lowercaseDomains = true;
@@ -245,6 +252,9 @@ export class MessageRing {
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
   private onNickRightClick: ((ctx: SlotContext, ev: FederatedPointerEvent) => void) | undefined;
   private onOpenChatLink: ((url: string) => void) | undefined;
+  private onModAction:
+    | ((action: string, ctx: SlotContext) => void)
+    | undefined;
 
   constructor(
     private readonly app: Application,
@@ -301,6 +311,42 @@ export class MessageRing {
 
   setOnOpenChatLink(cb: (url: string) => void): void {
     this.onOpenChatLink = cb;
+  }
+
+  setOnModAction(cb: (action: string, ctx: SlotContext) => void): void {
+    this.onModAction = cb;
+  }
+
+  setModerationMode(on: boolean): void {
+    if (this.moderationMode === on) {
+      return;
+    }
+    this.moderationMode = on;
+    if (this.ready) {
+      this.layout();
+    }
+  }
+
+  moderationModeOn(): boolean {
+    return this.moderationMode;
+  }
+
+  setModActions(actions: ModActionBtn[]): void {
+    this.modActions = actions.slice(0, MOD_ACTION_SLOTS_PER_ROW);
+    if (this.ready) {
+      this.layout();
+    }
+  }
+
+  setSelfLogin(login: string | null | undefined): void {
+    const next = (login ?? "").trim().toLowerCase();
+    if (this.selfLogin === next) {
+      return;
+    }
+    this.selfLogin = next;
+    if (this.ready && this.moderationMode) {
+      this.layout();
+    }
   }
 
   configureLastReadIndicator(opts: {
@@ -859,12 +905,18 @@ export class MessageRing {
       for (const mt of slot.mentionTexts) {
         mt.style.fontSize = this.fontSize;
       }
+      for (const mt of slot.modBtns) {
+        mt.style.fontSize = this.fontSize;
+      }
       slot.bitsLabel.style.fontSize = this.fontSize;
       if (forceDirty) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
         for (const mt of slot.mentionTexts) {
+          dirtyBitmapText(mt);
+        }
+        for (const mt of slot.modBtns) {
           dirtyBitmapText(mt);
         }
         dirtyBitmapText(slot.bitsLabel);
@@ -1075,10 +1127,25 @@ export class MessageRing {
         spr.y = (this.lineHeight - this.badgeSize) / 2;
         badges.push(spr);
       }
+      const modBtns: BitmapText[] = [];
+      for (let m = 0; m < MOD_ACTION_SLOTS_PER_ROW; m += 1) {
+        const mt = new BitmapText({
+          text: "",
+          style: {
+            fontFamily: "ChatFont",
+            fontSize: this.fontSize,
+            fill: 0xffaa88,
+          },
+        });
+        mt.visible = false;
+        mt.eventMode = "none";
+        modBtns.push(mt);
+      }
       // disabled overlay last — поверх текста/эмодзи как MessageLayout fillRect
       root.addChild(
         hl,
         mentions,
+        ...modBtns,
         time,
         nick,
         body,
@@ -1103,6 +1170,8 @@ export class MessageRing {
         badges,
         badgeKeys: [],
         badgesRaw: [],
+        modBtns,
+        modBtnHits: [],
         msgId: "",
         login: "",
         bodySource: "",
@@ -1383,6 +1452,11 @@ export class MessageRing {
       mt.visible = false;
       mt.text = "";
     }
+    for (const mt of slot.modBtns) {
+      mt.visible = false;
+      mt.text = "";
+    }
+    slot.modBtnHits = [];
     slot.bitsLabel.visible = false;
     slot.bitsLabel.text = "";
   }
@@ -1698,7 +1772,8 @@ export class MessageRing {
           timeSample,
         ) + gap
       : 0;
-    slot.time.x = 0;
+    const gutterW = this.paintModGutter(slot);
+    slot.time.x = gutterW;
     slot.time.visible = this.timestampsVisible();
     const badgeVisible = this.visibleBadges(slot);
     const badgeN = badgeVisible.length;
@@ -1712,13 +1787,13 @@ export class MessageRing {
         continue;
       }
       spr.visible = true;
-      spr.x = timeW + i * (this.badgeSize + BADGE_GAP);
+      spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
     }
-    slot.nick.x = timeW + badgeBand;
+    slot.nick.x = gutterW + timeW + badgeBand;
     const paneW = this.app.screen.width;
     const nickMaxPx = Math.max(
       8,
-      paneW - timeW - badgeBand - gap - 8 - MIN_BODY_CHARS * this.charWidth,
+      paneW - gutterW - timeW - badgeBand - gap - 8 - MIN_BODY_CHARS * this.charWidth,
     );
     const nickMaxChars = Math.max(2, Math.floor(nickMaxPx / this.nickCharWidth));
     slot.nick.text = clipNick(slot.nickRaw, nickMaxChars);
@@ -1731,7 +1806,7 @@ export class MessageRing {
       ),
       8,
     );
-    const bodyX = timeW + badgeBand + nickW + gap;
+    const bodyX = gutterW + timeW + badgeBand + nickW + gap;
     slot.body.x = bodyX;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
@@ -1755,7 +1830,8 @@ export class MessageRing {
       layoutOpts,
     );
     slot.collapsed = collapsed;
-    slot.root.cursor = collapsed ? "pointer" : "default";
+    slot.root.cursor =
+      collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     slot.wrapLines = lines;
     slot.lineCount = lines.length;
     const overlayMentions =
@@ -2127,6 +2203,22 @@ export class MessageRing {
     if (ev.button !== 0) {
       return;
     }
+    const modAction = this.modActionAt(slot, ev);
+    if (modAction && this.onModAction && slot.login) {
+      this.onModAction(modAction, {
+        msgId: slot.msgId,
+        login: slot.login,
+        authorLogin: slot.login,
+        nick: this.contextNick(slot),
+        text: slot.copyText || slot.bodyRaw,
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+        disabled: slot.disabled,
+        replyToId: slot.replyToId,
+        linkUrl: "",
+      });
+      return;
+    }
     if (slot.collapsed && !slot.expanded) {
       slot.expanded = true;
       this.paintClip(slot);
@@ -2243,6 +2335,10 @@ export class MessageRing {
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {
+    if (this.modActionAt(slot, ev)) {
+      slot.root.cursor = "pointer";
+      return;
+    }
     if (this.nickAt(slot, ev) && slot.login) {
       slot.root.cursor = "pointer";
       return;
@@ -2251,7 +2347,82 @@ export class MessageRing {
       slot.root.cursor = "pointer";
       return;
     }
+    if (slot.collapsed && !slot.expanded) {
+      slot.root.cursor = "pointer";
+      return;
+    }
     slot.root.cursor = this.linkAt(slot, ev) ? "pointer" : "default";
+  }
+
+  private showModGutter(slot: Slot): boolean {
+    if (!this.moderationMode || this.modActions.length === 0) {
+      return false;
+    }
+    if (!slot.collapsible || !slot.login || slot.system) {
+      return false;
+    }
+    if (this.selfLogin && slot.login === this.selfLogin) {
+      return false;
+    }
+    return true;
+  }
+
+  /** Left moderation buttons; returns gutter width in px. */
+  private paintModGutter(slot: Slot): number {
+    slot.modBtnHits = [];
+    if (!this.showModGutter(slot)) {
+      for (const mt of slot.modBtns) {
+        mt.visible = false;
+        mt.text = "";
+      }
+      return 0;
+    }
+    const padX = Math.max(3, Math.round(3 * this.fontScale));
+    const btnGap = Math.max(4, Math.round(4 * this.fontScale));
+    let x = 0;
+    for (let i = 0; i < slot.modBtns.length; i += 1) {
+      const mt = slot.modBtns[i]!;
+      const action = this.modActions[i];
+      if (!action) {
+        mt.visible = false;
+        mt.text = "";
+        continue;
+      }
+      mt.text = action.label;
+      mt.visible = true;
+      mt.x = x + padX;
+      mt.y = Math.max(0, (this.lineHeight - this.fontSize) / 2 - 1);
+      const labelW = measureTextWidth(
+        this.chatFontFamily,
+        qtWeightToCss(this.chatFontWeight),
+        this.fontSize,
+        action.label,
+      );
+      const btnW = labelW + padX * 2;
+      slot.modBtnHits.push({
+        x0: x,
+        x1: x + btnW,
+        action: action.action,
+      });
+      x += btnW + btnGap;
+    }
+    return x > 0 ? Math.max(0, x - btnGap) : 0;
+  }
+
+  private modActionAt(slot: Slot, ev: FederatedPointerEvent): string | null {
+    if (slot.modBtnHits.length === 0) {
+      return null;
+    }
+    const local = ev.getLocalPosition(slot.root);
+    if (local.y < 0 || local.y >= this.lineHeight) {
+      return null;
+    }
+    for (const hit of slot.modBtnHits) {
+      if (local.x >= hit.x0 && local.x < hit.x1) {
+        return hit.action;
+      }
+    }
+    return null;
   }
 
   private nickAt(slot: Slot, ev: FederatedPointerEvent): boolean {

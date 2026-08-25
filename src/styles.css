@@ -141,6 +141,25 @@ body,
   white-space: nowrap;
 }
 
+#moderation-mode-btn {
+  flex-shrink: 0;
+  padding: 0.2em 0.65em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--c-header-text);
+  background: transparent;
+  border: 1px solid var(--c-header-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#moderation-mode-btn[aria-pressed="true"] {
+  background: #7a3b2e;
+  border-color: #a8553f;
+  color: #fff;
+}
+
 #streamer-badge {
   flex-shrink: 0;
   padding: 0.15em 0.55em;

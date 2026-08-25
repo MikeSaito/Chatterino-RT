@@ -46,6 +46,11 @@ import {
 import { startLiveNotifyListener } from "./shell/liveNotify";
 import { bindUserCard } from "./shell/userCard";
 import { parseTimeoutButtons } from "./shell/timeoutButtons";
+import {
+  expandModAction,
+  parseModActions,
+  type ModActionBtn,
+} from "./shell/modActions";
 import { bindReplyThread } from "./shell/replyThread";
 import { bindEmotePopup } from "./shell/emotePopup";
 import {
@@ -87,6 +92,9 @@ async function boot(): Promise<void> {
   const joinBtn = form?.querySelector<HTMLButtonElement>("button[type=submit]");
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
+  const moderationModeBtn = document.querySelector<HTMLButtonElement>(
+    "#moderation-mode-btn",
+  );
   const player = document.querySelector<HTMLElement>("#player-slot");
   const status = document.querySelector<HTMLElement>("#status");
   const composer = document.querySelector<HTMLFormElement>("#composer");
@@ -213,19 +221,24 @@ async function boot(): Promise<void> {
   const textures = new TextureLru();
   let bootKnobs: AppSettings["knobs"] = {};
   let menuCommands: AppSettings["commands"] = [];
+  let bootModActions: ModActionBtn[] = [];
   try {
     const bootSettings = await invoke<AppSettings>("settings_get");
     bootKnobs = bootSettings.knobs ?? {};
     menuCommands = menuCommandsFromSettings(bootSettings);
+    bootModActions = parseModActions(bootSettings.modActions ?? []);
   } catch {
     bootKnobs = {};
   }
   const poolSize = scrollbackLimitFromKnobs(bootKnobs);
   let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
   let timeoutKnobs: AppSettings["knobs"] = bootKnobs;
+  let modActionBtns: ModActionBtn[] = bootModActions;
+  let modSendBusy = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
   const ring = new MessageRing(app, textures, poolSize);
   await ring.init();
+  ring.setModActions(modActionBtns);
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
     document.querySelector<HTMLImageElement>("#emote-tooltip-img");
@@ -321,6 +334,8 @@ async function boot(): Promise<void> {
     onDisplay: (data) => {
       usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(data.knobs);
       timeoutKnobs = data.knobs ?? {};
+      modActionBtns = parseModActions(data.modActions ?? []);
+      ring.setModActions(modActionBtns);
       userCard?.syncMod();
       autoCloseUserPopup =
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
@@ -397,6 +412,18 @@ async function boot(): Promise<void> {
     },
   });
   const ipc = bindChatIpc(ring);
+
+  if (moderationModeBtn) {
+    moderationModeBtn.addEventListener("click", () => {
+      const next = !ring.moderationModeOn();
+      ring.setModerationMode(next);
+      moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
+      moderationModeBtn.classList.toggle("is-active", next);
+      if (next && modActionBtns.length === 0) {
+        settingsCtl.open();
+      }
+    });
+  }
 
   let repaintChannelTitle = (): void => {
     if (!titleEl) {
@@ -616,6 +643,31 @@ async function boot(): Promise<void> {
 
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
+  });
+  ring.setOnModAction((action, ctx) => {
+    hideContextMenu();
+    if (modSendBusy) {
+      return;
+    }
+    const text = expandModAction(action, {
+      userName: ctx.login,
+      msgId: ctx.msgId,
+      channel: ipc.active() || "",
+    });
+    if (!text) {
+      statusEl.textContent = "Could not build moderation command.";
+      return;
+    }
+    modSendBusy = true;
+    void (async () => {
+      try {
+        await invoke("chat_send", { text, replyToId: null });
+      } catch (err) {
+        statusEl.textContent = formatError(err);
+      } finally {
+        modSendBusy = false;
+      }
+    })();
   });
   ring.setOnNickClick((ctx) => {
     hideContextMenu();
@@ -1038,6 +1090,7 @@ async function boot(): Promise<void> {
 
   function applyAuth(info: AuthInfo): void {
     lastAuth = info;
+    ring.setSelfLogin(info.login);
     userCard?.syncMod();
     const signed = Boolean(info.login);
     const pending = Boolean(info.userCode) || Boolean(info.pendingPaste);

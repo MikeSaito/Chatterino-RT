@@ -27,6 +27,7 @@
     "test:web-search": "node --experimental-strip-types ./tests/webSearch.test.ts",
     "test:nicknames": "node --experimental-strip-types ./tests/nicknames.test.ts",
     "test:timeout-buttons": "node --experimental-strip-types ./tests/timeoutButtons.test.ts",
+    "test:mod-actions": "node --experimental-strip-types ./tests/modActions.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
