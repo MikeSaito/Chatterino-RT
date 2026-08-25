@@ -692,6 +692,12 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     if let Some(Value::String(path)) = raw.knobs.get("logging.logPath") {
         validate_log_dir(path)?;
     }
+    if let Some(Value::String(path)) = raw.knobs.get("cache.path") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            super::cache::validate_absolute_dir_path(trimmed)?;
+        }
+    }
 
     Ok(raw)
 }

@@ -1024,6 +1024,27 @@ pub fn open_settings_directory(state: tauri::State<'_, Shared>) -> Result<(), Ap
 }
 
 #[tauri::command]
+pub fn cache_info(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+) -> Result<super::cache::CacheInfo, ApiError> {
+    super::cache::info(&app, state.inner())
+}
+
+#[tauri::command]
+pub fn cache_pick_directory() -> Result<String, ApiError> {
+    super::cache::pick_directory()
+}
+
+#[tauri::command]
+pub fn cache_clear(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+) -> Result<(), ApiError> {
+    super::cache::clear(&app, state.inner())
+}
+
+#[tauri::command]
 pub async fn image_upload(
     app: AppHandle,
     state: tauri::State<'_, Shared>,

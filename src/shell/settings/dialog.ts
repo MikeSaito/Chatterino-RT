@@ -385,6 +385,20 @@ export function bindSettingsDialog(opts: {
   let saving = false;
   let loadReady = false;
 
+  const refreshCacheResolved = (): void => {
+    const el = document.querySelector<HTMLElement>("#settings-cache-resolved");
+    if (!el) {
+      return;
+    }
+    void invoke<{ path: string; isCustom: boolean }>("cache_info")
+      .then((info) => {
+        el.textContent = info.path;
+      })
+      .catch(() => {
+        el.textContent = "(unavailable)";
+      });
+  };
+
   const handleSettingsAction = async (path: string): Promise<void> => {
     if (path === "__action.highlightSoundChange") {
       try {
@@ -471,6 +485,158 @@ export function bindSettingsDialog(opts: {
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
             : "Could not open settings directory.";
+      }
+      return;
+    }
+    if (path === "__action.chooseCachePath") {
+      if (saving || !loadReady) {
+        statusEl.textContent = "Settings are busy; try again.";
+        return;
+      }
+      saving = true;
+      okBtn.disabled = true;
+      cancelBtn.disabled = true;
+      let picked = "";
+      try {
+        picked = await invoke<string>("cache_pick_directory");
+      } catch (e) {
+        saving = false;
+        okBtn.disabled = !loadReady;
+        cancelBtn.disabled = false;
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not select cache directory.";
+        return;
+      }
+      if (!loadReady) {
+        saving = false;
+        okBtn.disabled = true;
+        cancelBtn.disabled = false;
+        return;
+      }
+      const prev =
+        knobInputs.get("cache.path") instanceof HTMLInputElement
+          ? (knobInputs.get("cache.path") as HTMLInputElement).value
+          : String(baseline.knobs["cache.path"] ?? "");
+      try {
+        const persistDraft: AppSettings = {
+          ...baseline,
+          knobs: { ...baseline.knobs, "cache.path": picked },
+        };
+        const saved = await invoke<AppSettings>("settings_set", {
+          settings: persistDraft,
+        });
+        baseline = {
+          ...emptySettings(),
+          ...saved,
+          knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
+          enableSelfHighlight: baselineFilters.enableSelfHighlight,
+        };
+        const input = knobInputs.get("cache.path");
+        if (input instanceof HTMLInputElement) {
+          input.value = picked;
+        }
+        statusEl.textContent = "";
+        refreshCacheResolved();
+        schedulePreview();
+      } catch (e) {
+        const input = knobInputs.get("cache.path");
+        if (input instanceof HTMLInputElement) {
+          input.value = prev;
+        }
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not save cache path.";
+      } finally {
+        saving = false;
+        okBtn.disabled = !loadReady;
+        cancelBtn.disabled = false;
+      }
+      return;
+    }
+    if (path === "__action.resetCachePath") {
+      if (saving || !loadReady) {
+        statusEl.textContent = "Settings are busy; try again.";
+        return;
+      }
+      saving = true;
+      okBtn.disabled = true;
+      cancelBtn.disabled = true;
+      const prev =
+        knobInputs.get("cache.path") instanceof HTMLInputElement
+          ? (knobInputs.get("cache.path") as HTMLInputElement).value
+          : String(baseline.knobs["cache.path"] ?? "");
+      try {
+        const persistDraft: AppSettings = {
+          ...baseline,
+          knobs: { ...baseline.knobs, "cache.path": "" },
+        };
+        const saved = await invoke<AppSettings>("settings_set", {
+          settings: persistDraft,
+        });
+        baseline = {
+          ...emptySettings(),
+          ...saved,
+          knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
+          enableSelfHighlight: baselineFilters.enableSelfHighlight,
+        };
+        const input = knobInputs.get("cache.path");
+        if (input instanceof HTMLInputElement) {
+          input.value = "";
+        }
+        statusEl.textContent = "";
+        refreshCacheResolved();
+        schedulePreview();
+      } catch (e) {
+        const input = knobInputs.get("cache.path");
+        if (input instanceof HTMLInputElement) {
+          input.value = prev;
+        }
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not reset cache path.";
+      } finally {
+        saving = false;
+        okBtn.disabled = !loadReady;
+        cancelBtn.disabled = false;
+      }
+      return;
+    }
+    if (path === "__action.clearCache") {
+      if (saving || !loadReady) {
+        statusEl.textContent = "Settings are busy; try again.";
+        return;
+      }
+      if (
+        !window.confirm(
+          "Are you sure that you want to clear your cache? Emotes may take longer to load next time Chatterino RT is started.",
+        )
+      ) {
+        return;
+      }
+      if (saving) {
+        statusEl.textContent = "Settings are busy; try again.";
+        return;
+      }
+      saving = true;
+      okBtn.disabled = true;
+      cancelBtn.disabled = true;
+      try {
+        await invoke("cache_clear");
+        statusEl.textContent = "Cache cleared.";
+        refreshCacheResolved();
+      } catch (e) {
+        statusEl.textContent =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not clear cache.";
+      } finally {
+        saving = false;
+        okBtn.disabled = !loadReady;
+        cancelBtn.disabled = false;
       }
       return;
     }
@@ -627,6 +793,26 @@ export function bindSettingsDialog(opts: {
   };
 
   const renderKnob = (knob: KnobDef, block: HTMLElement): void => {
+    if (knob.id === "cache-path-display") {
+      const wrap = document.createElement("div");
+      wrap.className = "settings-cache-path";
+      wrap.dataset.search = "cache path directory";
+      const caption = document.createElement("p");
+      caption.className = "settings-label-note";
+      caption.textContent = "Cache saved at";
+      const resolved = document.createElement("code");
+      resolved.className = "settings-about-path";
+      resolved.id = "settings-cache-resolved";
+      resolved.textContent = "…";
+      const hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.id = "settings-knob-cache-path";
+      hidden.dataset.path = "cache.path";
+      knobInputs.set("cache.path", hidden);
+      wrap.append(caption, resolved, hidden);
+      block.append(wrap);
+      return;
+    }
     if (knob.type === "label") {
       const p = document.createElement("p");
       p.className = "settings-label-note";
@@ -1173,6 +1359,8 @@ export function bindSettingsDialog(opts: {
         input.checked = input.dataset.inverse === "1" ? !stored : stored;
       } else if (input instanceof HTMLInputElement && input.type === "number") {
         input.value = String(typeof raw === "number" ? raw : Number(raw) || 0);
+      } else if (input instanceof HTMLInputElement && input.type === "hidden") {
+        input.value = raw != null ? String(raw) : "";
       } else if (raw != null) {
         input.value = String(raw);
       }
@@ -1181,6 +1369,7 @@ export function bindSettingsDialog(opts: {
       api.setRows(tablePathGet(data, path));
     }
     wrapApply(ring, data, onDisplay);
+    refreshCacheResolved();
   };
 
   let previewTimer = 0;

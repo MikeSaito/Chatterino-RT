@@ -2,6 +2,7 @@ pub mod auth;
 pub mod batch;
 pub mod bttv_badges;
 pub mod bttv_live;
+pub mod cache;
 pub mod channel;
 pub mod chatterino_badges;
 pub mod chatters;

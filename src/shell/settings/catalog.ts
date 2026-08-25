@@ -1193,8 +1193,8 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Temporary files (Cache)",
         "Files that are used often (such as emotes) are saved to disk to reduce bandwidth usage and to speed up loading.",
       ),
-      lab("cache-path-display", "cache.path", "Cache path", ""),
-      btn("__action.chooseCachePath", "cache.path", "Choose cache path"),
+      lab("cache-path-display", "__label.cachePathDisplay", "Cache path", ""),
+      btn("__action.chooseCachePath", "__action.chooseCachePath", "Choose cache path"),
       btn("__action.resetCachePath", "__action.resetCachePath", "Reset"),
       btn("__action.clearCache", "__action.clearCache", "Clear Cache"),
     ],
@@ -2323,6 +2323,9 @@ export function defaultKnobs(): Record<string, boolean | string | number> {
       continue;
     }
     result[knob.path] = knob.defaultValue;
+  }
+  if (result["cache.path"] === undefined) {
+    result["cache.path"] = "";
   }
   return result;
 }
