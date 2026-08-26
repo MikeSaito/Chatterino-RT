@@ -1,5 +1,8 @@
 import {
+  bindingFromEvent,
+  bindingsMatch,
   matchEvent,
+  formatBinding,
   normalizeHotkeyRows,
   parseBinding,
   resolveAction,
@@ -81,4 +84,38 @@ if (stepZoom(1, 1) <= 1) {
 }
 if (stepZoom(1, -1) >= 1) {
   throw new Error("zoom out must decrease");
+}
+
+const fromEvent = bindingFromEvent(plainF);
+if (!fromEvent || !fromEvent.ctrl || fromEvent.key !== "f") {
+  throw new Error(`bindingFromEvent Ctrl+F failed: ${JSON.stringify(fromEvent)}`);
+}
+
+const modifierOnly = bindingFromEvent({
+  key: "Control",
+  ctrlKey: true,
+  altKey: false,
+  shiftKey: false,
+  metaKey: false,
+} as KeyboardEvent);
+if (modifierOnly !== null) {
+  throw new Error("modifier-only key must return null");
+}
+
+if (formatBinding(f!) !== "Ctrl+F") {
+  throw new Error(`formatBinding failed: ${formatBinding(f!)}`);
+}
+
+if (!bindingsMatch("Ctrl+F", fromEvent!)) {
+  throw new Error("bindingsMatch Ctrl+F must match");
+}
+
+const shiftedBinding = bindingFromEvent(shifted);
+if (shiftedBinding && bindingsMatch("Ctrl+F", shiftedBinding)) {
+  throw new Error("Ctrl+Shift+F must not match Ctrl+F");
+}
+
+const plusBinding = parseBinding("Ctrl++");
+if (!plusBinding || !bindingsMatch("Ctrl+=", plusBinding)) {
+  throw new Error("Ctrl+= must match Ctrl++ binding");
 }

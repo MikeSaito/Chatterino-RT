@@ -60,6 +60,18 @@ Optional `.env` next to the process (see `.env.example`):
 
 Rust lives in `src-tauri/` and is formatted with [rustfmt](https://github.com/rust-lang/rustfmt). TypeScript and PixiJS live in `src/`.
 
+## Validation
+
+```shell
+cd src-tauri
+cargo test
+cd ..
+npm test
+npm run build
+```
+
+`npm test` runs all files in `tests/*.test.ts`. Per-file runners remain as `npm run test:*` for debugging.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
