@@ -927,7 +927,7 @@ button {
 #auth-signin,
 #usercard-open-twitch,
 #usercard-add-notes,
-#replythread-reply,
+#replythread-send,
 #notes-ok {
   color: #ffffff;
   background: #9147ff;
@@ -939,7 +939,7 @@ button {
 #auth-signin:hover:not(:disabled),
 #usercard-open-twitch:hover:not(:disabled),
 #usercard-add-notes:hover:not(:disabled),
-#replythread-reply:hover:not(:disabled),
+#replythread-send:hover:not(:disabled),
 #notes-ok:hover:not(:disabled) {
   background: #772ce8;
   filter: none;
@@ -1565,8 +1565,7 @@ button:disabled {
   font-size: 13px;
 }
 
-.usercard-msg,
-.replythread-msg {
+.usercard-msg {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px;
@@ -1576,7 +1575,13 @@ button:disabled {
 }
 
 .replythread-msg {
-  display: block;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  align-items: baseline;
   width: 100%;
   text-align: left;
   border: 0;
@@ -1584,8 +1589,11 @@ button:disabled {
   background: transparent;
   color: inherit;
   font: inherit;
-  padding: 6px 8px;
   cursor: pointer;
+}
+
+.replythread-msg:not(:has(.replythread-msg-time)) {
+  grid-template-columns: auto 1fr;
 }
 
 .replythread-msg.is-root {
@@ -1594,6 +1602,62 @@ button:disabled {
 
 .replythread-msg.is-selected {
   background: #2a2140;
+}
+
+.replythread-msg-time {
+  color: var(--c-muted);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
+
+.replythread-msg-nick {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.replythread-msg-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.replythread-foot {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+}
+
+#replythread-input {
+  flex: 1;
+  min-height: 52px;
+  resize: vertical;
+  max-height: 120px;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  background: var(--c-window-bg);
+  color: inherit;
+}
+
+#replythread-input:disabled {
+  opacity: 0.6;
+}
+
+#replythread-send {
+  flex-shrink: 0;
+  min-width: 64px;
+}
+
+#replythread-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#replythread-pin.is-pinned {
+  background: #3a2a55;
+  border-color: #9147ff;
 }
 
 .usercard-msg-time {

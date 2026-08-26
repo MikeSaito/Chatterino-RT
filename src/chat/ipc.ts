@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CHAT_HISTORY_LOADED_EVENT, CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
 import { decodeBatch } from "./batchDecode";
-import type { ChatBatch } from "./types";
+import type { ChatBatch, ChatEvent } from "./types";
 import type { MessageRing } from "./ring";
 import { notifyHighlightSounds } from "../shell/highlightSound";
 import { notifyHighlightFlash } from "../shell/highlightFlash";
@@ -37,7 +37,12 @@ type Op =
       reject: (e: unknown) => void;
     };
 
-export function bindChatIpc(ring: MessageRing): ChatIpc {
+export type BindChatIpcOpts = {
+  afterBatch?: (events: ChatEvent[]) => void;
+};
+
+export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc {
+  const afterBatch = opts?.afterBatch;
   let lastSeq = 0;
   let active = "";
   let epoch = 0;
@@ -60,6 +65,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     }
     lastSeq = snap.seq;
     ring.applySnapshot(snap.events);
+    afterBatch?.(snap.events);
     return true;
   };
 
@@ -100,6 +106,7 @@ export function bindChatIpc(ring: MessageRing): ChatIpc {
     ring.pushMany(batch.events);
     notifyHighlightSounds(batch.events);
     notifyHighlightFlash(batch.events);
+    afterBatch?.(batch.events);
   };
 
   const scheduleRetry = () => {

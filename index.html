@@ -213,11 +213,15 @@
       <div id="replythread-dialog" role="dialog" aria-modal="true" aria-labelledby="replythread-title">
         <header class="popup-head">
           <h2 id="replythread-title">Thread</h2>
-          <button type="button" id="replythread-close" title="Close">×</button>
+          <div class="popup-head-actions">
+            <button type="button" id="replythread-pin" title="Pin" hidden>Pin</button>
+            <button type="button" id="replythread-close" title="Close">×</button>
+          </div>
         </header>
         <div id="replythread-view"></div>
-        <footer class="popup-foot">
-          <button type="button" id="replythread-reply">Reply</button>
+        <footer class="popup-foot replythread-foot">
+          <textarea id="replythread-input" rows="2" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>
+          <button type="button" id="replythread-send">Send</button>
         </footer>
       </div>
     </div>

@@ -3148,7 +3148,7 @@ function eventLogin(event: ChatEvent): string {
   return "";
 }
 
-function formatTime(ms: number, format: string): string {
+export function formatTime(ms: number, format: string): string {
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) {
     return "--:--";

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent } from "../chat/types";
-import { resolveReplyRoot } from "./replyRoot";
+import { formatTime } from "../chat/ring";
+import { collectReplyThread, isInReplyThread } from "./replyRoot";
 
 export type ReplyThreadOpen = {
   rootId: string;
@@ -10,117 +11,338 @@ export type ReplyThreadOpen = {
 
 type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
+type ReplyTarget = { id: string; login: string; text: string };
+
 /**
- * SPA ReplyThreadPopup: ветка ответов (DOM), без второго PIXI.
+ * SPA ReplyThreadPopup: ветка ответов (DOM), inline send, live append.
  */
 export function bindReplyThread(opts: {
   modal: HTMLElement;
   settingsModal: HTMLElement;
   activeChannel: () => string;
   autoClose: () => boolean;
-  onReply: (id: string, login: string, text: string) => void;
-}): { open: (info: ReplyThreadOpen) => void; close: () => void } {
-  const { modal, settingsModal, activeChannel, autoClose, onReply } = opts;
+  getCanSend: () => boolean;
+  getSelfLogin: () => string | null;
+  getShowTimestamps: () => boolean;
+  getTimestampFormat: () => string;
+  onStatus?: (message: string) => void;
+}): {
+  open: (info: ReplyThreadOpen) => void;
+  close: () => void;
+  ingestLive: (events: ChatEvent[]) => void;
+  isOpen: () => boolean;
+  syncComposer: () => void;
+} {
+  const {
+    modal,
+    settingsModal,
+    activeChannel,
+    autoClose,
+    getCanSend,
+    getSelfLogin,
+    getShowTimestamps,
+    getTimestampFormat,
+    onStatus,
+  } = opts;
   const dialog = modal.querySelector<HTMLElement>("#replythread-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#replythread-backdrop");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#replythread-close");
+  const pinBtn = modal.querySelector<HTMLButtonElement>("#replythread-pin");
   const titleEl = modal.querySelector<HTMLElement>("#replythread-title");
   const view = modal.querySelector<HTMLElement>("#replythread-view");
-  const replyBtn = modal.querySelector<HTMLButtonElement>("#replythread-reply");
-  if (!dialog || !backdrop || !closeBtn || !titleEl || !view || !replyBtn) {
-    return { open: () => undefined, close: () => undefined };
+  const input = modal.querySelector<HTMLTextAreaElement>("#replythread-input");
+  const sendBtn = modal.querySelector<HTMLButtonElement>("#replythread-send");
+  if (!dialog || !backdrop || !closeBtn || !titleEl || !view || !input || !sendBtn) {
+    return {
+      open: () => undefined,
+      close: () => undefined,
+      ingestLive: () => undefined,
+      isOpen: () => false,
+      syncComposer: () => undefined,
+    };
   }
 
   let current: ReplyThreadOpen | null = null;
-  let replyTarget: { id: string; login: string; text: string } | null = null;
+  let openChannel = "";
+  let replyTarget: ReplyTarget | null = null;
+  let threadMessages: Priv[] = [];
+  let pendingLive: Priv[] = [];
+  let pinned = false;
+  let sending = false;
+  let loading = false;
+  let loadSeq = 0;
+
+  const isOpen = (): boolean => !modal.hidden;
+
+  const channelMatches = (): boolean =>
+    openChannel !== "" && openChannel === activeChannel().trim();
+
+  const scrollToBottom = (): void => {
+    view.scrollTop = view.scrollHeight;
+  };
+
+  const syncPinVisibility = (): void => {
+    if (pinBtn) {
+      pinBtn.hidden = !autoClose();
+    }
+  };
+
+  const syncComposer = (): void => {
+    const canSend = getCanSend() && channelMatches();
+    input.disabled = !canSend || sending;
+    sendBtn.disabled = !canSend || sending || !input.value.trim();
+    const login = getSelfLogin();
+    if (!getCanSend()) {
+      input.placeholder = "Log in to send messages...";
+    } else if (!channelMatches()) {
+      input.placeholder = "Channel changed — close thread";
+    } else if (login) {
+      input.placeholder = `Reply as ${login}...`;
+    } else {
+      input.placeholder = "Reply...";
+    }
+    syncPinVisibility();
+  };
+
+  const selectRow = (row: HTMLElement, target: ReplyTarget): void => {
+    replyTarget = target;
+    view.querySelectorAll(".replythread-msg").forEach((el) => {
+      el.classList.toggle("is-selected", el === row);
+    });
+  };
+
+  const paintRow = (ev: Priv, rootId: string): HTMLButtonElement => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = ev.id === rootId ? "replythread-msg is-root" : "replythread-msg";
+    row.dataset.msgId = ev.id;
+
+    const showTs = getShowTimestamps() && getTimestampFormat() !== "Disable";
+    if (showTs) {
+      const time = document.createElement("span");
+      time.className = "replythread-msg-time";
+      time.textContent = formatTime(ev.timestampMs, getTimestampFormat());
+      row.append(time);
+    }
+
+    const nick = document.createElement("span");
+    nick.className = "replythread-msg-nick";
+    nick.textContent = ev.displayName?.trim() || ev.login;
+    if (ev.color) {
+      nick.style.color = ev.color;
+    }
+
+    const body = document.createElement("span");
+    body.className = "replythread-msg-text";
+    body.textContent = ev.text;
+
+    row.append(nick, body);
+    row.addEventListener("click", () => {
+      selectRow(row, { id: ev.id, login: ev.login, text: ev.text });
+    });
+    return row;
+  };
+
+  const applySelection = (messages: Priv[], preferredId?: string): void => {
+    const pick =
+      (preferredId && messages.find((m) => m.id === preferredId)) ||
+      messages[messages.length - 1];
+    if (!pick) {
+      return;
+    }
+    replyTarget = { id: pick.id, login: pick.login, text: pick.text };
+    view.querySelectorAll(".replythread-msg").forEach((el) => {
+      el.classList.toggle(
+        "is-selected",
+        (el as HTMLElement).dataset.msgId === pick.id,
+      );
+    });
+  };
+
+  const paintThread = (messages: Priv[], rootId: string, preferredId?: string): void => {
+    view.replaceChildren();
+    if (messages.length === 0 && current) {
+      const fallback = document.createElement("div");
+      fallback.className = "replythread-msg is-root";
+      const nick = document.createElement("span");
+      nick.className = "replythread-msg-nick";
+      nick.textContent = current.login;
+      const body = document.createElement("span");
+      body.className = "replythread-msg-text";
+      body.textContent = current.text;
+      fallback.append(nick, body);
+      view.append(fallback);
+      replyTarget = {
+        id: current.rootId,
+        login: current.login,
+        text: current.text,
+      };
+      scrollToBottom();
+      return;
+    }
+    for (const ev of messages) {
+      view.append(paintRow(ev, rootId));
+    }
+    applySelection(messages, preferredId);
+    scrollToBottom();
+  };
+
+  const mergePrivmsgs = (base: Priv[], extra: Priv[]): Priv[] => {
+    const byId = new Map(base.map((m) => [m.id, m]));
+    for (const ev of extra) {
+      if (!byId.has(ev.id)) {
+        byId.set(ev.id, ev);
+      }
+    }
+    return [...byId.values()];
+  };
 
   const close = (): void => {
     modal.hidden = true;
     current = null;
+    openChannel = "";
     replyTarget = null;
+    threadMessages = [];
+    pendingLive = [];
+    loading = false;
+    pinned = false;
+    if (pinBtn) {
+      pinBtn.classList.remove("is-pinned");
+      pinBtn.title = "Pin";
+    }
+    input.value = "";
     view.replaceChildren();
+    syncComposer();
   };
 
   const open = (info: ReplyThreadOpen): void => {
     if (!settingsModal.hidden) {
       return;
     }
+    const channel = activeChannel().trim();
+    openChannel = channel;
     current = info;
     replyTarget = { id: info.rootId, login: info.login, text: info.text };
-    titleEl.textContent = `Thread · @${info.login}`;
-    view.replaceChildren();
-    const root = document.createElement("div");
-    root.className = "replythread-msg is-root";
-    root.textContent = `${info.login}: ${info.text}`;
-    view.append(root);
+    threadMessages = [];
+    pendingLive = [];
+    pinned = false;
+    if (pinBtn) {
+      pinBtn.classList.remove("is-pinned");
+      pinBtn.title = "Pin";
+    }
+    titleEl.textContent = channel
+      ? `Reply Thread - @${info.login} in #${channel}`
+      : `Reply Thread - @${info.login}`;
+    input.value = "";
     modal.hidden = false;
+    syncComposer();
+    syncPinVisibility();
     void loadThread(info);
   };
 
-  const collectThread = (events: Priv[], seedId: string): Priv[] => {
-    const byId = new Map(events.map((ev) => [ev.id, ev]));
-    const rootId = resolveReplyRoot(events, seedId)?.id ?? seedId;
-    const out: Priv[] = [];
-    const walk = (id: string): void => {
-      const node = byId.get(id);
-      if (!node) {
-        return;
-      }
-      out.push(node);
-      for (const ev of events) {
-        if (ev.replyToId === id) {
-          walk(ev.id);
-        }
-      }
-    };
-    walk(rootId);
-    return out;
+  const flushPendingLive = (info: ReplyThreadOpen, events: Priv[]): Priv[] => {
+    const merged = mergePrivmsgs(events, pendingLive);
+    pendingLive = [];
+    return collectReplyThread(merged, info.rootId);
   };
 
   const loadThread = async (info: ReplyThreadOpen): Promise<void> => {
-    const channel = activeChannel();
+    const token = ++loadSeq;
+    const selectedId = replyTarget?.id;
+    loading = true;
+    const channel = openChannel || activeChannel();
     if (!channel) {
+      loading = false;
+      paintThread([], info.rootId, selectedId);
       return;
     }
     try {
       const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
-      if (!current || current.rootId !== info.rootId) {
+      if (token !== loadSeq || !current || current.rootId !== info.rootId) {
         return;
       }
       const events = (Array.isArray(snap.events) ? snap.events : []).filter(
         (ev): ev is Priv => ev.kind === "privmsg",
       );
-      const related = collectThread(events, info.rootId);
-      view.replaceChildren();
-      if (related.length === 0) {
-        const root = document.createElement("div");
-        root.className = "replythread-msg is-root";
-        root.textContent = `${info.login}: ${info.text}`;
-        view.append(root);
-        replyTarget = { id: info.rootId, login: info.login, text: info.text };
+      const related = flushPendingLive(info, events);
+      threadMessages = related;
+      const rootId = related[0]?.id ?? info.rootId;
+      paintThread(related, rootId, selectedId);
+    } catch {
+      if (token !== loadSeq || !current) {
         return;
       }
-      const rootId = related[0]?.id ?? info.rootId;
-      for (const ev of related) {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className =
-          ev.id === rootId ? "replythread-msg is-root" : "replythread-msg";
-        row.textContent = `${ev.login}: ${ev.text}`;
-        row.addEventListener("click", () => {
-          replyTarget = { id: ev.id, login: ev.login, text: ev.text };
-          view.querySelectorAll(".replythread-msg").forEach((el) => {
-            el.classList.toggle("is-selected", el === row);
-          });
-        });
-        view.append(row);
+      paintThread([], info.rootId, selectedId);
+    } finally {
+      if (token === loadSeq) {
+        loading = false;
       }
-      const last = related[related.length - 1];
-      if (last) {
-        replyTarget = { id: last.id, login: last.login, text: last.text };
+    }
+  };
+
+  const appendLive = (ev: Priv): void => {
+    if (!current || !channelMatches()) {
+      return;
+    }
+    if (threadMessages.some((m) => m.id === ev.id)) {
+      return;
+    }
+    if (loading) {
+      if (!pendingLive.some((p) => p.id === ev.id)) {
+        pendingLive.push(ev);
       }
-    } catch {
-      /* keep root row */
+      return;
+    }
+    const pool = [...threadMessages, ev];
+    if (!isInReplyThread(pool, current.rootId, ev.id)) {
+      return;
+    }
+    threadMessages.push(ev);
+    const rootId = threadMessages[0]?.id ?? current.rootId;
+    view.append(paintRow(ev, rootId));
+    applySelection(threadMessages, ev.id);
+    scrollToBottom();
+  };
+
+  const ingestLive = (events: ChatEvent[]): void => {
+    if (modal.hidden || !current || !channelMatches()) {
+      return;
+    }
+    for (const ev of events) {
+      if (ev.kind === "privmsg") {
+        appendLive(ev);
+      }
+    }
+  };
+
+  const sendReply = async (): Promise<void> => {
+    if (!replyTarget || sending || !getCanSend()) {
+      return;
+    }
+    if (!channelMatches()) {
+      onStatus?.("Channel changed; close and reopen the thread.");
+      return;
+    }
+    const text = input.value.trim();
+    if (!text) {
+      return;
+    }
+    sending = true;
+    syncComposer();
+    try {
+      await invoke("chat_send", { text, replyToId: replyTarget.id });
+      input.value = "";
+      onStatus?.("");
+      input.focus();
+    } catch (err) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Send failed";
+      onStatus?.(msg);
+    } finally {
+      sending = false;
+      syncComposer();
     }
   };
 
@@ -128,24 +350,44 @@ export function bindReplyThread(opts: {
     close();
   });
   backdrop.addEventListener("click", () => {
-    close();
-  });
-  replyBtn.addEventListener("click", () => {
-    if (!replyTarget) {
+    if (!autoClose() || pinned) {
       return;
     }
-    onReply(replyTarget.id, replyTarget.login, replyTarget.text);
     close();
   });
+
+  if (pinBtn) {
+    pinBtn.addEventListener("click", () => {
+      pinned = !pinned;
+      pinBtn.classList.toggle("is-pinned", pinned);
+      pinBtn.title = pinned ? "Unpin" : "Pin";
+    });
+  }
+
+  sendBtn.addEventListener("click", () => {
+    void sendReply();
+  });
+
+  input.addEventListener("input", () => {
+    syncComposer();
+  });
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      void sendReply();
+    }
+  });
+
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !modal.hidden) {
+    if (ev.key === "Escape" && !modal.hidden && !pinned) {
       ev.preventDefault();
       close();
     }
   });
 
   document.addEventListener("pointerdown", (ev) => {
-    if (modal.hidden || !autoClose()) {
+    if (modal.hidden || !autoClose() || pinned) {
       return;
     }
     const t = ev.target as Node;
@@ -155,5 +397,7 @@ export function bindReplyThread(opts: {
     close();
   });
 
-  return { open, close };
+  syncPinVisibility();
+
+  return { open, close, ingestLive, isOpen, syncComposer };
 }

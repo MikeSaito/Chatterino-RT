@@ -341,6 +341,10 @@ async function boot(): Promise<void> {
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   let autoCloseThreadPopup = false;
+  let showTimestamps = true;
+  let timestampFormat = "hh:mm";
+  let replyThreadCtl: ReturnType<typeof bindReplyThread> | null = null;
+  let replyThreadLive: ((events: ChatEvent[]) => void) | null = null;
   let showPronouns = false;
   let hideUsercardAvatars = true;
   let hideUserNotes = true;
@@ -394,6 +398,9 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
+      showTimestamps = data.showTimestamps;
+      timestampFormat = data.timestampFormat || "hh:mm";
+      replyThreadCtl?.syncComposer();
       showPronouns = data.knobs["misc.showPronouns"] === true;
       hideUsercardAvatars =
         data.knobs["streamerMode.hideUsercardAvatars"] !== false;
@@ -472,7 +479,11 @@ async function boot(): Promise<void> {
       streamPreviewCtl?.refresh();
     },
   });
-  const ipc = bindChatIpc(ring);
+  const ipc = bindChatIpc(ring, {
+    afterBatch: (events) => {
+      replyThreadLive?.(events);
+    },
+  });
   unbindImageUpload = bindImageUpload({
     input: messageInput,
     getKnobs: () => imageUploadKnobs,
@@ -609,11 +620,16 @@ async function boot(): Promise<void> {
     settingsModal,
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseThreadPopup,
-    onReply: (id, login, text) => {
-      setReply(id, login, text);
-      messageInput.focus();
+    getCanSend: () => lastAuth.canSend,
+    getSelfLogin: () => lastAuth.login?.trim() || null,
+    getShowTimestamps: () => showTimestamps,
+    getTimestampFormat: () => timestampFormat,
+    onStatus: (message) => {
+      statusEl.textContent = message;
     },
   });
+  replyThreadCtl = replyThread;
+  replyThreadLive = replyThread.ingestLive;
   const emotePopup = bindEmotePopup({
     modal: emotepopupModal,
     settingsModal,
@@ -1375,6 +1391,7 @@ async function boot(): Promise<void> {
     lastAuth = info;
     ring.setSelfLogin(info.login);
     userCard?.syncMod();
+    replyThreadCtl?.syncComposer();
     const signed = Boolean(info.login);
     const pending = Boolean(info.userCode) || Boolean(info.pendingPaste);
     loginEl.textContent = info.login ? info.login : "";
@@ -1744,6 +1761,7 @@ async function boot(): Promise<void> {
   }
 
   function applyMounted(joined: string): void {
+    replyThreadCtl?.close();
     channels.remember(joined);
     streamByChannel.delete(joined.toLowerCase());
     ring.setChannelLive(false);
