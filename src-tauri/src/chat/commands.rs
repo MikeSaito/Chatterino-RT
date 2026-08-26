@@ -1022,6 +1022,21 @@ pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPr
     Ok(super::pronouns::UserPronounsResult { pronouns })
 }
 
+#[tauri::command]
+pub async fn chat_user_subage(
+    login: String,
+    channel: String,
+) -> Result<super::ivr::UserSubageResult, ApiError> {
+    let user = normalize_channel(&login)?;
+    let channel = normalize_channel(&channel)?;
+    super::ivr::fetch_subage(&user, &channel)
+        .await
+        .map_err(|message| ApiError {
+            code: "ivr_error".into(),
+            message,
+        })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewerRoleDto {

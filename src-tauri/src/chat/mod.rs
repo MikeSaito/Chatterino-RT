@@ -28,6 +28,7 @@ pub mod hub;
 pub mod image_uploader;
 pub mod incognito;
 pub mod irc;
+pub mod ivr;
 pub mod link_resolver;
 pub mod live_status;
 pub mod live_notifications;

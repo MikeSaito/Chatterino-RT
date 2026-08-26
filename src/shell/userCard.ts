@@ -54,7 +54,7 @@ export function bindUserCard(opts: {
   getUsercardLimit: () => number;
   getTimeoutButtons: () => TimeoutButton[];
   getSelfLogin: () => string | null;
-}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncPronouns: () => void; syncMod: () => void } {
+}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncPronouns: () => void; syncMod: () => void; syncSubage: () => void } {
   const {
     modal,
     settingsModal,
@@ -83,6 +83,8 @@ export function bindUserCard(opts: {
   const copyIdBtn = modal.querySelector<HTMLButtonElement>("#usercard-copy-id");
   const followersEl = modal.querySelector<HTMLElement>("#usercard-followers");
   const createdEl = modal.querySelector<HTMLElement>("#usercard-created");
+  const followageEl = modal.querySelector<HTMLElement>("#usercard-followage");
+  const subageEl = modal.querySelector<HTMLElement>("#usercard-subage");
   const recent = modal.querySelector<HTMLElement>("#usercard-recent");
   const openTwitch = modal.querySelector<HTMLButtonElement>("#usercard-open-twitch");
   const modRow = modal.querySelector<HTMLElement>("#usercard-mod-row");
@@ -107,6 +109,7 @@ export function bindUserCard(opts: {
       syncAvatars: () => undefined,
       syncPronouns: () => undefined,
       syncMod: () => undefined,
+      syncSubage: () => undefined,
     };
   }
 
@@ -121,6 +124,7 @@ export function bindUserCard(opts: {
   let ignoreHighlightsSeq = 0;
   let ignoreHighlightsBusy = false;
   let suppressIgnoreHighlightsChange = false;
+  let subageSeq = 0;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -162,6 +166,20 @@ export function bindUserCard(opts: {
       createdEl.hidden = true;
       createdEl.textContent = "";
       createdEl.removeAttribute("title");
+    }
+    hideSubage();
+  };
+
+  const hideSubage = (): void => {
+    if (followageEl) {
+      followageEl.hidden = true;
+      followageEl.textContent = "";
+      followageEl.removeAttribute("title");
+    }
+    if (subageEl) {
+      subageEl.hidden = true;
+      subageEl.textContent = "";
+      subageEl.removeAttribute("title");
     }
   };
 
@@ -594,6 +612,13 @@ export function bindUserCard(opts: {
     void loadPronouns(currentLogin);
   };
 
+  const syncSubage = (): void => {
+    if (modal.hidden || !currentLogin) {
+      return;
+    }
+    void loadSubage(currentLogin);
+  };
+
   const close = (): void => {
     modal.hidden = true;
     currentLogin = "";
@@ -623,6 +648,8 @@ export function bindUserCard(opts: {
     ignoreHighlightsSeq += 1;
     ignoreHighlightsBusy = false;
     hideIgnoreHighlightsRow();
+    subageSeq += 1;
+    hideSubage();
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -660,6 +687,61 @@ export function bindUserCard(opts: {
       }
       followersEl.textContent = "Followers: (not available)";
       followersEl.hidden = false;
+    }
+  };
+
+  const loadSubage = async (login: string): Promise<void> => {
+    if (!followageEl && !subageEl) {
+      return;
+    }
+    const seq = ++subageSeq;
+    const channel = activeChannel().trim();
+    hideSubage();
+    if (!channel || !login) {
+      return;
+    }
+    try {
+      const result = await invoke<{
+        followage: string | null;
+        followageAgo: string | null;
+        subage: string | null;
+      }>("chat_user_subage", { login, channel });
+      if (seq !== subageSeq || login !== currentLogin || activeChannel().trim() !== channel) {
+        return;
+      }
+      const followText = result.followage?.trim() ?? "";
+      if (followageEl) {
+        if (followText) {
+          followageEl.textContent = followText;
+          const ago = result.followageAgo?.trim() ?? "";
+          if (ago) {
+            followageEl.title = ago;
+          } else {
+            followageEl.removeAttribute("title");
+          }
+          followageEl.hidden = false;
+        } else {
+          followageEl.hidden = true;
+          followageEl.textContent = "";
+          followageEl.removeAttribute("title");
+        }
+      }
+      const subText = result.subage?.trim() ?? "";
+      if (subageEl) {
+        if (subText) {
+          subageEl.textContent = subText;
+          subageEl.removeAttribute("title");
+          subageEl.hidden = false;
+        } else {
+          subageEl.hidden = true;
+          subageEl.textContent = "";
+        }
+      }
+    } catch {
+      if (seq !== subageSeq || login !== currentLogin) {
+        return;
+      }
+      hideSubage();
     }
   };
 
@@ -728,6 +810,7 @@ export function bindUserCard(opts: {
     }
     currentLogin = info.login.toLowerCase();
     currentUserId = "";
+    subageSeq += 1;
     resetBlockUi();
     resetIgnoreHighlightsUi();
     nameEl.textContent = info.nick || info.login;
@@ -745,6 +828,7 @@ export function bindUserCard(opts: {
     refreshModUi();
     placeNear(info.clientX, info.clientY);
     void loadIgnoreHighlightsState(currentLogin);
+    void loadSubage(currentLogin);
     void loadRecent(currentLogin);
     void loadProfile(currentLogin);
     void loadPronouns(currentLogin);
@@ -1041,5 +1125,5 @@ export function bindUserCard(opts: {
     }
   });
 
-  return { open, close, syncAvatars, syncPronouns, syncMod: refreshModUi };
+  return { open, close, syncAvatars, syncPronouns, syncMod: refreshModUi, syncSubage };
 }

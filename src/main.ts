@@ -1743,6 +1743,7 @@ async function boot(): Promise<void> {
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
     userCard?.syncMod();
+    userCard?.syncSubage();
   }
 
   function drainChannelQueue(): void {
