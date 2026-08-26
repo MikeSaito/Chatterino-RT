@@ -18,6 +18,14 @@ const DEV_CSP = [
 
 export default defineConfig(async () => ({
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(root, "index.html"),
+        settings: path.resolve(root, "settings.html"),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@xmldom/xmldom": xmldomStub,

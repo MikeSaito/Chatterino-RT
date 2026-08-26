@@ -318,6 +318,40 @@ function destroyFrameSet(set: EmoteFrameSet, keep: EmoteFrameSet | null): void {
   }
 }
 
+function isFetchBlocked(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    return true;
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes("failed to fetch") || msg.includes("networkerror");
+  }
+  return false;
+}
+
+function loadImageElement(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = "async";
+    const finish = (): void => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        resolve(img);
+      } else {
+        reject(new Error("image has zero dimensions"));
+      }
+    };
+    img.onload = finish;
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = url;
+  });
+}
+
+async function loadTextureSetFromImage(url: string): Promise<EmoteFrameSet> {
+  const img = await loadImageElement(url);
+  const tex = Texture.from(img);
+  return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
+}
+
 async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrameSet> {
   let delay = 200;
   let last: unknown = new Error("texture load failed");
@@ -340,13 +374,20 @@ async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrame
       return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
       last = err;
+      if (isFetchBlocked(err)) {
+        break;
+      }
       if (attempt + 1 < ATTEMPTS) {
         await sleep(delay);
         delay *= 2;
       }
     }
   }
-  throw last;
+  try {
+    return await loadTextureSetFromImage(url);
+  } catch (imgErr) {
+    throw imgErr ?? last;
+  }
 }
 
 async function decodeAnimated(

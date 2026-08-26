@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 
 type EmotePopupTab = "favourite" | "subs" | "channel" | "global" | "emojis";
 
@@ -24,11 +25,10 @@ const EMPTY_BY_TAB: Record<EmotePopupTab, string> = {
  */
 export function bindEmotePopup(opts: {
   modal: HTMLElement;
-  settingsModal: HTMLElement;
   insertEmote: (code: string) => void;
   activeChannel: () => string | null;
 }): { open: () => void; close: () => void } {
-  const { modal, settingsModal, insertEmote, activeChannel } = opts;
+  const { modal, insertEmote, activeChannel } = opts;
   const dialog = modal.querySelector<HTMLElement>("#emotepopup-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#emotepopup-backdrop");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#emotepopup-close");
@@ -66,7 +66,7 @@ export function bindEmotePopup(opts: {
   };
 
   const open = (): void => {
-    if (!settingsModal.hidden) {
+    if (isSettingsWindowOpen()) {
       return;
     }
     const channel = activeChannel()?.trim() || "";

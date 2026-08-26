@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent } from "../chat/types";
 import { formatTime } from "../chat/ring";
 import { collectReplyThread, isInReplyThread } from "./replyRoot";
+import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 
 type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
@@ -20,7 +21,6 @@ type ReplyTarget = { id: string; login: string; text: string };
  */
 export function bindReplyThread(opts: {
   modal: HTMLElement;
-  settingsModal: HTMLElement;
   activeChannel: () => string;
   autoClose: () => boolean;
   getCanSend: () => boolean;
@@ -42,7 +42,6 @@ export function bindReplyThread(opts: {
 } {
   const {
     modal,
-    settingsModal,
     activeChannel,
     autoClose,
     getCanSend,
@@ -239,7 +238,7 @@ export function bindReplyThread(opts: {
   };
 
   const mountOpen = (info: ReplyThreadOpen): void => {
-    if (!settingsModal.hidden) {
+    if (isSettingsWindowOpen()) {
       return;
     }
     const channel = activeChannel().trim();

@@ -1249,6 +1249,26 @@ pub fn open_settings_directory(state: tauri::State<'_, Shared>) -> Result<(), Ap
 }
 
 #[tauri::command]
+pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), ApiError> {
+    let Some(window) = app.get_webview_window("settings") else {
+        return Err(ApiError::internal("settings window unavailable"));
+    };
+    if window.is_visible().unwrap_or(false) {
+        window
+            .set_focus()
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
+    } else {
+        window
+            .show()
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
+        window
+            .set_focus()
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn cache_info(
     app: AppHandle,
     state: tauri::State<'_, Shared>,

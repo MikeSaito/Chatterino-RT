@@ -1,46 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MessageRing } from "../../chat/ring";
 import type { AuthInfo, Filters } from "../../chat/types";
 import { CHAT_AUTH_EVENT } from "../../constants";
-import { configureHighlightSound } from "../highlightSound";
-import { configureHighlightFlash } from "../highlightFlash";
 import {
   bindingFromEvent,
   bindingsMatch,
-  configureHotkeys,
   defaultHotkeyTableRows,
   formatBinding,
   normalizeHotkeyRows,
   stepZoom,
 } from "../hotkeys";
-import {
-  applyResolvedTheme,
-  resolveThemePreset,
-  subscribeSystemTheme,
-} from "../theme";
-import {
-  parseLastReadColor,
-  parseLastReadPattern,
-} from "../lastRead";
-import {
-  parseBoldScale,
-  parseUsernameDisplayMode,
-} from "../nickStyle";
-import { normalizeNicknameRules } from "../nicknames";
-import { applyWindowTopMost } from "../windowTopMost";
+import { subscribeSystemTheme } from "../theme";
 import { presetToEngine } from "../webSearch";
-import { setChatAppBackground } from "../../pixi/app";
-import {
-  configureStreamerMode,
-  isStreamerModeActive,
-  setStreamerModeOnChange,
-  streamerModeState,
-} from "../streamerMode";
+import { setStreamerModeOnChange } from "../streamerMode";
 import {
   SETTINGS_PAGES,
   ZOOM_LEVELS,
-  defaultAppSettingsTables,
   defaultKnobs,
   visibleSectionKnobs,
   type KnobDef,
@@ -54,28 +31,22 @@ import {
   importImageUploaderSettings,
   validateImportJson,
 } from "../imageUploaderSharex";
+import {
+  applySettingsDisplay,
+  emptySettings,
+  filtersFromSettings,
+  migrateFiltersIntoSettings,
+  tablePathGet,
+  type AppSettings as AppliedSettings,
+} from "./settingsApply";
+import {
+  emitSettingsClosed,
+  emitSettingsPreview,
+  emitSettingsSaved,
+} from "./settingsBridge";
+import { setSettingsWindowOpen } from "./settingsWindowState";
 
-export type AppSettings = {
-  fontScale: number;
-  showTimestamps: boolean;
-  hideModerated: boolean;
-  timestampFormat: string;
-  knobs: Record<string, boolean | string | number | null>;
-  nicknames: Record<string, string | boolean>[];
-  commands: Record<string, string | boolean>[];
-  highlightMessages: Record<string, string | boolean>[];
-  highlightUsers: Record<string, string | boolean>[];
-  highlightBadges: Record<string, string | boolean>[];
-  highlightBlacklist: Record<string, string | boolean>[];
-  ignoreMessages: Record<string, string | boolean>[];
-  ignoreUsers: Record<string, string | boolean>[];
-  filters: Record<string, string | boolean>[];
-  enableSelfHighlight: boolean;
-  hotkeys: Record<string, string | boolean>[];
-  modActions: Record<string, string | boolean>[];
-  logChannels: Record<string, string | boolean>[];
-  notifyChannels: Record<string, string | boolean>[];
-};
+export type AppSettings = AppliedSettings;
 
 type TableApi = {
   getRows: () => Record<string, string | boolean>[];
@@ -136,264 +107,50 @@ function focusables(root: HTMLElement): HTMLElement[] {
   return [...nodes].filter((el) => !el.hidden && el.getClientRects().length > 0);
 }
 
-function emptySettings(): AppSettings {
-  return {
-    fontScale: 1,
-    showTimestamps: true,
-    hideModerated: false,
-    timestampFormat: "hh:mm",
-    knobs: { ...defaultKnobs() },
-    enableSelfHighlight: true,
-    ...defaultAppSettingsTables(),
-    hotkeys: defaultHotkeyTableRows(),
-  };
-}
-
-function tablePathGet(data: AppSettings, path: string): Record<string, string | boolean>[] {
-  const key = path as keyof AppSettings;
-  const value = data[key];
-  return Array.isArray(value) ? (value as Record<string, string | boolean>[]) : [];
-}
-
-function filtersFromSettings(data: AppSettings): Filters {
-  return {
-    enableSelfHighlight: data.enableSelfHighlight,
-    ignoreLogins: data.ignoreUsers
-      .filter((row) => row.regex !== true)
-      .map((row) => String(row.username ?? "").trim())
-      .filter(Boolean),
-    ignorePhrases: data.ignoreMessages
-      .filter((row) => row.block !== false)
-      .map((row) => String(row.pattern ?? "").trim())
-      .filter(Boolean),
-    highlightPhrases: data.highlightMessages
-      .map((row) => String(row.pattern ?? "").trim())
-      .filter(Boolean),
-    highlightLogins: data.highlightUsers
-      .map((row) => String(row.username ?? "").trim())
-      .filter(Boolean),
-  };
-}
-
-function migrateFiltersIntoSettings(data: AppSettings, filters: Filters): AppSettings {
-  const next = { ...data, enableSelfHighlight: filters.enableSelfHighlight };
-  if (next.highlightMessages.length === 0 && filters.highlightPhrases.length > 0) {
-    next.highlightMessages = filters.highlightPhrases.map((pattern) => ({
-      pattern,
-      showInMentions: true,
-      flashTaskbar: false,
-      regex: false,
-      caseSensitive: false,
-      playSound: false,
-      customSound: "",
-      color: "",
-    }));
-  }
-  if (next.highlightUsers.length === 0 && filters.highlightLogins.length > 0) {
-    next.highlightUsers = filters.highlightLogins.map((username) => ({
-      username,
-      showInMentions: true,
-      flashTaskbar: false,
-      playSound: false,
-      customSound: "",
-      color: "",
-    }));
-  }
-  if (next.ignoreMessages.length === 0 && filters.ignorePhrases.length > 0) {
-    next.ignoreMessages = filters.ignorePhrases.map((pattern) => ({
-      pattern,
-      regex: false,
-      caseSensitive: false,
-      block: true,
-      replacement: "",
-    }));
-  }
-  if (next.ignoreUsers.length === 0 && filters.ignoreLogins.length > 0) {
-    next.ignoreUsers = filters.ignoreLogins.map((username) => ({
-      username,
-      regex: false,
-    }));
-  }
-  return next;
-}
-
-function applyDisplay(
-  ring: MessageRing,
-  data: AppSettings,
-  onDisplay?: (data: AppSettings) => void,
-): void {
-  configureStreamerMode({
-    mode: String(data.knobs["streamerMode.enabled"] ?? "DetectStreamingSoftware"),
-    muteMentions: data.knobs["streamerMode.muteMentions"] !== false,
-    hideModActions: data.knobs["streamerMode.hideModActions"] !== false,
-    hideViewerCountAndDuration:
-      data.knobs["streamerMode.hideViewerCountAndDuration"] === true,
-  });
-  paintRuntime(ring, data, onDisplay);
-}
-
-function paintRuntime(
-  ring: MessageRing,
-  data: AppSettings,
-  onDisplay?: (data: AppSettings) => void,
-): void {
-  const scaleRaw = Number(data.knobs["emotes.emoteScale"] ?? 1);
-  const sm = streamerModeState();
-  const hideMod =
-    data.knobs["appearance.hideModerationActions"] === true ||
-    (sm.active && sm.hideModActions);
-  const hideDel = data.knobs["appearance.hideDeletionActions"] === true;
-  const delLenRaw = Number(data.knobs["behaviour.deletedMessageLengthLimit"] ?? 50);
-  const delLen = Number.isFinite(delLenRaw) ? delLenRaw : 50;
-  const fadeHistory = data.knobs["appearance.fadeMessageHistory"] !== false;
-  const hideTsLive = data.knobs["appearance.hideMessageTimestampsWhenLive"] === true;
-  const preset = resolveThemePreset({
-    theme: String(data.knobs["appearance.theme"] ?? "Dark"),
-    darkSystem: String(data.knobs["appearance.darkSystemTheme"] ?? "Dark"),
-    lightSystem: String(data.knobs["appearance.lightSystemTheme"] ?? "Light"),
-  });
-  const tokens = applyResolvedTheme(preset);
-  ring.applyThemeFills(tokens.pixi);
-  setChatAppBackground(tokens.pixi.canvasBg);
-  const fontSizeRaw = Number(data.knobs["appearance.chatFontSize"] ?? 10);
-  const fontWeightRaw = Number(data.knobs["appearance.chatFontWeight"] ?? 50);
-  ring.configureChatFont({
-    family: String(data.knobs["appearance.chatFontFamily"] ?? "Segoe UI"),
-    size: Number.isFinite(fontSizeRaw) ? fontSizeRaw : 10,
-    weight: Number.isFinite(fontWeightRaw) ? fontWeightRaw : 50,
-  });
-  ring.applyDisplay(
-    data.fontScale,
-    data.showTimestamps,
-    data.hideModerated,
-    data.timestampFormat,
-    data.knobs["appearance.alternateMessages"] === true,
-    data.knobs["appearance.separateMessages"] === true,
-    Number(data.knobs["appearance.collpseMessagesMinLines"] ?? 0),
-    hideMod,
-    hideDel,
-    delLen,
-    fadeHistory,
-    hideTsLive,
-    data.knobs["appearance.showReplyButton"] === true,
-    data.knobs["links.linksDoubleClickOnly"] === true,
-    {
-      scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
-      images: data.knobs["emotes.enableEmoteImages"] !== false,
-      zeroWidth: data.knobs["emotes.enableZeroWidthEmotes"] !== false,
-      animate: data.knobs["emotes.animateEmotes"] !== false,
-      animateOnlyFocused: data.knobs["appearance.animationsWhenFocused"] === true,
-      removeSpaces: data.knobs["emotes.removeSpacesBetweenEmotes"] === true,
-      emojiSet: String(data.knobs["emotes.emojiSet"] ?? "Twitter"),
-    },
-  );
-  const root = document.documentElement;
-  root.style.setProperty("--chat-ui-scale", String(data.fontScale));
-  configureHighlightSound({
-    alwaysPlay: data.knobs["highlighting.highlightAlwaysPlaySound"] === true,
-    path: String(data.knobs["highlighting.pathHighlightSound"] ?? ""),
-    muted: isStreamerModeActive() && sm.muteMentions,
-  });
-  configureHighlightFlash({
-    longAlerts: data.knobs["highlighting.longAlerts"] === true,
-    muted: isStreamerModeActive() && sm.muteMentions,
-  });
-  configureHotkeys(data.hotkeys ?? []);
-  const hoverRaw = Number(data.knobs["behaviour.pauseOnHoverDuration"] ?? 0);
-  const multRaw = Number(data.knobs["behaviour.mouseScrollMultiplier"] ?? 1);
-  ring.configureScrollBehaviour({
-    pauseOnHoverSec: Number.isFinite(hoverRaw) ? hoverRaw : 0,
-    pauseModifier: String(data.knobs["behaviour.pauseChatModifier"] ?? "None"),
-    wheelMultiplier: Number.isFinite(multRaw) ? multRaw : 1,
-    smoothScrolling: data.knobs["appearance.enableSmoothScrolling"] !== false,
-    smoothScrollingNewMessages:
-      data.knobs["appearance.enableSmoothScrollingNewMessages"] === true,
-  });
-  ring.configureLastReadIndicator({
-    enabled: data.knobs["appearance.showLastMessageIndicator"] === true,
-    pattern: parseLastReadPattern(data.knobs["appearance.lastMessagePattern"]),
-    color: parseLastReadColor(data.knobs["appearance.lastMessageColor"]),
-  });
-  ring.configureBadgeVisibility({
-    globalAuthority: data.knobs["appearance.showBadgesGlobalAuthority"] !== false,
-    predictions: data.knobs["appearance.showBadgesPredictions"] !== false,
-    channelAuthority: data.knobs["appearance.showBadgesChannelAuthority"] !== false,
-    subscription: data.knobs["appearance.showBadgesSubscription"] !== false,
-    vanity: data.knobs["appearance.showBadgesVanity"] !== false,
-    chatterino: data.knobs["appearance.showBadgesChatterino"] !== false,
-    ffz: data.knobs["appearance.showBadgesFfz"] !== false,
-    bttv: data.knobs["appearance.showBadgesBttv"] !== false,
-    sevenTv: data.knobs["appearance.showBadgesSevenTV"] !== false,
-  });
-  ring.configureLowercaseDomains(
-    data.knobs["links.lowercaseDomains"] !== false,
-  );
-  ring.configureNickStyle({
-    colorize: data.knobs["appearance.colorizeNicknames"] !== false,
-    mode: parseUsernameDisplayMode(data.knobs["appearance.usernameDisplayMode"]),
-    boldScale: parseBoldScale(data.knobs["appearance.boldScale"]),
-  });
-  ring.configureNicknames(normalizeNicknameRules(data.nicknames));
-  ring.configureMentionStyle({
-    bold: data.knobs["appearance.boldUsernames"] !== false,
-    color: data.knobs["appearance.colorUsernames"] !== false,
-  });
-  ring.configureReplyContext({
-    hide: data.knobs["appearance.hideReplyContext"] === true,
-  });
-  ring.configureStackBits(data.knobs["emotes.stackBits"] === true);
-  applyWindowTopMost(data.knobs["appearance.windowTopMost"] === true);
-  onDisplay?.(data);
-}
-
-export function bindSettingsDialog(opts: {
-  ring: MessageRing;
-  openBtn: HTMLButtonElement;
-  modal: HTMLElement;
+export function mountSettingsPanel(opts: {
+  root: HTMLElement;
+  ring?: MessageRing;
   onDisplay?: (data: AppSettings) => void;
-  onOpen?: () => void;
 }): {
-  open: () => void;
-  close: () => void;
+  reload: () => Promise<void>;
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
 } {
-  const { ring, openBtn, modal, onDisplay, onOpen } = opts;
+  const { root, ring, onDisplay } = opts;
+  const detached = true;
   let lastSettings: AppSettings | null = null;
-  setStreamerModeOnChange(() => {
-    if (lastSettings) {
-      paintRuntime(ring, lastSettings, onDisplay);
-    }
-  });
-  subscribeSystemTheme(() => {
-    if (!lastSettings) {
-      return;
-    }
-    if (String(lastSettings.knobs["appearance.theme"] ?? "") !== "System") {
-      return;
-    }
-    paintRuntime(ring, lastSettings, onDisplay);
-  });
-  const wrapApply = (
-    r: MessageRing,
-    data: AppSettings,
-    cb?: (data: AppSettings) => void,
-  ): void => {
+  if (ring) {
+    setStreamerModeOnChange(() => {
+      if (lastSettings) {
+        applySettingsDisplay(ring, lastSettings, onDisplay);
+      }
+    });
+    subscribeSystemTheme(() => {
+      if (!lastSettings) {
+        return;
+      }
+      if (String(lastSettings.knobs["appearance.theme"] ?? "") !== "System") {
+        return;
+      }
+      applySettingsDisplay(ring, lastSettings, onDisplay);
+    });
+  }
+  const applyDraft = (data: AppSettings): void => {
     lastSettings = data;
-    applyDisplay(r, data, cb);
+    if (ring) {
+      applySettingsDisplay(ring, data, onDisplay);
+    } else {
+      void emitSettingsPreview(data);
+    }
   };
-  const appRoot = document.querySelector<HTMLElement>("#app");
-  const dialog = modal.querySelector<HTMLElement>("#settings-dialog");
-  const backdrop = modal.querySelector<HTMLElement>("#settings-backdrop");
-  const search = modal.querySelector<HTMLInputElement>("#settings-search");
-  const tabsHost = modal.querySelector<HTMLElement>("#settings-tabs");
-  const pagesHost = modal.querySelector<HTMLElement>("#settings-pages");
-  const okBtn = modal.querySelector<HTMLButtonElement>("#settings-ok");
-  const cancelBtn = modal.querySelector<HTMLButtonElement>("#settings-cancel");
-  const statusEl = modal.querySelector<HTMLElement>("#settings-status");
-  if (!dialog || !backdrop || !search || !tabsHost || !pagesHost || !okBtn || !cancelBtn || !statusEl) {
+  const search = root.querySelector<HTMLInputElement>("#settings-search");
+  const tabsHost = root.querySelector<HTMLElement>("#settings-tabs");
+  const pagesHost = root.querySelector<HTMLElement>("#settings-pages");
+  const okBtn = root.querySelector<HTMLButtonElement>("#settings-ok");
+  const cancelBtn = root.querySelector<HTMLButtonElement>("#settings-cancel");
+  const statusEl = root.querySelector<HTMLElement>("#settings-status");
+  if (!search || !tabsHost || !pagesHost || !okBtn || !cancelBtn || !statusEl) {
     return {
-      open: () => undefined,
-      close: () => undefined,
+      reload: async () => undefined,
       bumpZoom: async () => undefined,
     };
   }
@@ -847,17 +604,6 @@ export function bindSettingsDialog(opts: {
       return;
     }
     statusEl.textContent = "This action is not available in Chatterino RT yet.";
-  };
-
-  const setAppInert = (inert: boolean): void => {
-    if (!appRoot) {
-      return;
-    }
-    if (inert) {
-      appRoot.setAttribute("inert", "");
-    } else {
-      appRoot.removeAttribute("inert");
-    }
   };
 
   const renderKnob = (knob: KnobDef, block: HTMLElement): void => {
@@ -1710,7 +1456,7 @@ export function bindSettingsDialog(opts: {
     for (const [path, api] of tableApis) {
       api.setRows(tablePathGet(data, path));
     }
-    wrapApply(ring, data, onDisplay);
+    applyDraft(data);
     refreshCacheResolved();
   };
 
@@ -1718,7 +1464,7 @@ export function bindSettingsDialog(opts: {
   const schedulePreview = (): void => {
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
-      wrapApply(ring, readDraft(), onDisplay);
+      applyDraft(readDraft());
     }, 50);
   };
 
@@ -1753,18 +1499,22 @@ export function bindSettingsDialog(opts: {
     });
   };
 
-  const closeModal = (restore: boolean): void => {
+  const closePanel = (restore: boolean): void => {
     window.clearTimeout(previewTimer);
     resetHotkeyFilter?.();
     if (restore) {
       paintDraft(baseline);
     }
-    modal.hidden = true;
-    setAppInert(false);
     search.value = "";
     applySearch("");
     statusEl.textContent = "";
-    openBtn.focus();
+    if (detached) {
+      setSettingsWindowOpen(false);
+      void (async () => {
+        await emitSettingsClosed({ restore });
+        await getCurrentWindow().hide();
+      })();
+    }
   };
 
   const refreshIncognitoKnobs = async (): Promise<void> => {
@@ -1792,8 +1542,10 @@ export function bindSettingsDialog(opts: {
     }
   };
 
-  const openModal = async (): Promise<void> => {
-    onOpen?.();
+  const loadPanel = async (): Promise<void> => {
+    if (detached) {
+      setSettingsWindowOpen(true);
+    }
     statusEl.textContent = "";
     loadReady = false;
     okBtn.disabled = true;
@@ -1825,8 +1577,6 @@ export function bindSettingsDialog(opts: {
     }
     paintDraft(baseline);
     void refreshIncognitoKnobs();
-    modal.hidden = false;
-    setAppInert(true);
     showPage(activePage);
     search.focus();
   };
@@ -1853,7 +1603,8 @@ export function bindSettingsDialog(opts: {
       };
       baselineFilters = filters;
       paintDraft(baseline);
-      closeModal(false);
+      await emitSettingsSaved(baseline);
+      closePanel(false);
     } catch (err) {
       if (saved) {
         try {
@@ -1867,6 +1618,7 @@ export function bindSettingsDialog(opts: {
             enableSelfHighlight: baselineFilters.enableSelfHighlight,
           };
           paintDraft(baseline);
+          void emitSettingsPreview(baseline);
         } catch (rollErr) {
           statusEl.textContent = `${formatError(err)}; rollback: ${formatError(rollErr)}`;
           return;
@@ -1883,14 +1635,8 @@ export function bindSettingsDialog(opts: {
   buildPages();
   showPage("general");
 
-  openBtn.addEventListener("click", () => {
-    void openModal();
-  });
-  backdrop.addEventListener("click", () => {
-    closeModal(true);
-  });
   cancelBtn.addEventListener("click", () => {
-    closeModal(true);
+    closePanel(true);
   });
   okBtn.addEventListener("click", () => {
     void saveModal();
@@ -1900,9 +1646,6 @@ export function bindSettingsDialog(opts: {
   });
 
   window.addEventListener("keydown", (ev) => {
-    if (modal.hidden) {
-      return;
-    }
     if (ev.key === "f" && ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
       ev.preventDefault();
       search.focus();
@@ -1911,11 +1654,11 @@ export function bindSettingsDialog(opts: {
     }
     if (ev.key === "Escape") {
       ev.preventDefault();
-      closeModal(true);
+      closePanel(true);
       return;
     }
     if (ev.key === "Tab") {
-      const items = focusables(dialog);
+      const items = focusables(root);
       if (items.length === 0) {
         ev.preventDefault();
         return;
@@ -1924,43 +1667,45 @@ export function bindSettingsDialog(opts: {
       const last = items[items.length - 1];
       const active = document.activeElement as HTMLElement | null;
       if (ev.shiftKey) {
-        if (!active || active === first || !dialog.contains(active)) {
+        if (!active || active === first || !root.contains(active)) {
           ev.preventDefault();
           last.focus();
         }
-      } else if (!active || active === last || !dialog.contains(active)) {
+      } else if (!active || active === last || !root.contains(active)) {
         ev.preventDefault();
         first.focus();
       }
     }
   });
 
-  void (async () => {
-    try {
-      const display = await invoke<AppSettings>("settings_get");
-      const merged = {
-        ...emptySettings(),
-        ...display,
-        knobs: { ...defaultKnobs(), ...(display.knobs ?? {}) },
-        hotkeys: normalizeHotkeyRows(display.hotkeys ?? []).map((r) => ({
-          action: r.action,
-          keybinding: r.keybinding,
-          name: r.name,
-        })),
-      };
-      wrapApply(ring, merged, onDisplay);
-    } catch {
-      wrapApply(ring, emptySettings(), onDisplay);
-    }
-  })();
+  if (detached) {
+    void getCurrentWindow().onCloseRequested((ev) => {
+      ev.preventDefault();
+      closePanel(true);
+    });
+  } else if (ring) {
+    void (async () => {
+      try {
+        const display = await invoke<AppSettings>("settings_get");
+        const merged = {
+          ...emptySettings(),
+          ...display,
+          knobs: { ...defaultKnobs(), ...(display.knobs ?? {}) },
+          hotkeys: normalizeHotkeyRows(display.hotkeys ?? []).map((r) => ({
+            action: r.action,
+            keybinding: r.keybinding,
+            name: r.name,
+          })),
+        };
+        applyDraft(merged);
+      } catch {
+        applyDraft(emptySettings());
+      }
+    })();
+  }
 
   return {
-    open: () => {
-      void openModal();
-    },
-    close: () => {
-      closeModal(true);
-    },
+    reload: loadPanel,
     bumpZoom: (() => {
       let chain: Promise<void> = Promise.resolve();
       return (dir: 1 | -1 | 0): Promise<void> => {
@@ -1994,9 +1739,9 @@ export function bindSettingsDialog(opts: {
               };
               baseline = merged;
               paintDraft(merged);
-              wrapApply(ring, merged, onDisplay);
+              applyDraft(merged);
             } catch {
-              wrapApply(ring, next, onDisplay);
+              applyDraft(next);
             }
           });
         return chain;

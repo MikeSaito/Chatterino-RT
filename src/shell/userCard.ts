@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent, ViewerRole } from "../chat/types";
+import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import {
   moderationSlashCommand,
   type ModerationCommandKind,
@@ -42,7 +43,6 @@ function formatCreatedDate(iso: string): string {
 export function bindUserCard(opts: {
   modal: HTMLElement;
   notesModal: HTMLElement;
-  settingsModal: HTMLElement;
   searchModal: HTMLElement;
   activeChannel: () => string;
   autoClose: () => boolean;
@@ -69,7 +69,6 @@ export function bindUserCard(opts: {
   const {
     modal,
     notesModal,
-    settingsModal,
     searchModal,
     activeChannel,
     autoClose,
@@ -278,7 +277,7 @@ export function bindUserCard(opts: {
     if (!/^\d+$/.test(currentUserId) || !notesEditor || !notesTitle) {
       return;
     }
-    if (!settingsModal.hidden || !searchModal.hidden) {
+    if (isSettingsWindowOpen() || !searchModal.hidden) {
       return;
     }
     notesTitle.textContent = `Editing notes for ${nameEl.textContent?.trim() || currentLogin || "user"}`;
@@ -950,7 +949,7 @@ export function bindUserCard(opts: {
   };
 
   const open = (info: UserCardOpen): void => {
-    if (!settingsModal.hidden || !searchModal.hidden) {
+    if (isSettingsWindowOpen() || !searchModal.hidden) {
       return;
     }
     currentLogin = info.login.toLowerCase();

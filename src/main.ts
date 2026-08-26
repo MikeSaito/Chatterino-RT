@@ -22,7 +22,8 @@ import {
   type ThumbnailSizeStream,
 } from "./shell/channelHeader";
 import { bindSearchPopup } from "./shell/chatFind";
-import { bindSettingsDialog } from "./shell/settings/dialog";
+import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
+import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
 import {
   actionAllowsEditable,
   resolveAction,
@@ -132,7 +133,6 @@ async function boot(): Promise<void> {
   const authDevice = document.querySelector<HTMLElement>("#auth-device");
   const authPaste = document.querySelector<HTMLTextAreaElement>("#auth-paste");
   const authImport = document.querySelector<HTMLButtonElement>("#auth-import");
-  const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
   const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
   const searchModal = document.querySelector<HTMLElement>("#search-modal");
   const notesModal = document.querySelector<HTMLElement>("#notes-modal");
@@ -171,7 +171,6 @@ async function boot(): Promise<void> {
     !authDevice ||
     !authPaste ||
     !authImport ||
-    !settingsModal ||
     !settingsOpen ||
     !searchModal ||
     !notesModal ||
@@ -418,10 +417,9 @@ async function boot(): Promise<void> {
     }
   }
 
-  const settingsCtl = bindSettingsDialog({
+  const settingsCtl = bindSettingsBridge({
     ring,
     openBtn: settingsOpen,
-    modal: settingsModal,
     onOpen: () => {
       hideContextMenu();
     },
@@ -558,7 +556,7 @@ async function boot(): Promise<void> {
       moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
       moderationModeBtn.classList.toggle("is-active", next);
       if (next && modActionBtns.length === 0) {
-        settingsCtl.open();
+        void requestOpenSettingsWindow();
       }
     });
   }
@@ -597,7 +595,7 @@ async function boot(): Promise<void> {
     if (document.visibilityState !== "hidden") {
       return;
     }
-    if (!settingsModal.hidden || !searchModal.hidden) {
+    if (isSettingsWindowOpen() || !searchModal.hidden) {
       return;
     }
     ring.markLastReadAtBottom();
@@ -605,7 +603,6 @@ async function boot(): Promise<void> {
   const chatFindCtl = bindSearchPopup({
     ring,
     modal: searchModal,
-    settingsModal,
     activeChannel: () => ipc.active(),
     onOpen: () => {
       hideContextMenu();
@@ -614,7 +611,6 @@ async function boot(): Promise<void> {
   userCard = bindUserCard({
     modal: usercardModal,
     notesModal,
-    settingsModal,
     searchModal,
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseUserPopup,
@@ -677,7 +673,6 @@ async function boot(): Promise<void> {
   }
   const replyThread = bindReplyThread({
     modal: replythreadModal,
-    settingsModal,
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseThreadPopup,
     getCanSend: () => lastAuth.canSend,
@@ -695,7 +690,6 @@ async function boot(): Promise<void> {
   replyThreadLive = replyThread.ingestLive;
   const emotePopup = bindEmotePopup({
     modal: emotepopupModal,
-    settingsModal,
     activeChannel: () => ipc.active(),
     insertEmote: (code) => {
       const start = messageInput.selectionStart ?? messageInput.value.length;
@@ -724,7 +718,7 @@ async function boot(): Promise<void> {
     if (!actionAllowsEditable(action) && isEditableTarget(ev.target)) {
       return;
     }
-    if (!settingsModal.hidden) {
+    if (isSettingsWindowOpen()) {
       return;
     }
     if (dispatchHotkey(action)) {
@@ -739,7 +733,7 @@ async function boot(): Promise<void> {
       case "openSettings":
         hideContextMenu();
         chatFindCtl.close();
-        settingsCtl.open();
+        void requestOpenSettingsWindow();
         return true;
       case "openEmotesPopup":
         chatFindCtl.close();

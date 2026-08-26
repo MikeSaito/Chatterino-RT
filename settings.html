@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/settings-window.css" />
+    <meta charset="utf-8" />
+    <title>Chatterino Settings</title>
+    <script type="module" src="/src/settings.ts" defer></script>
+  </head>
+  <body class="settings-window-body">
+    <div
+      id="settings-root"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="settings-title"
+    >
+      <header id="settings-dialog-head">
+        <h2 id="settings-title">Chatterino Settings</h2>
+        <label class="sr-only" for="settings-search">Find in settings</label>
+        <input
+          id="settings-search"
+          type="search"
+          placeholder="Find in settings... (Ctrl+F)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </header>
+      <div id="settings-body">
+        <nav id="settings-tabs" aria-label="Settings pages"></nav>
+        <div id="settings-pages"></div>
+      </div>
+      <footer id="settings-dialog-foot">
+        <p id="settings-status"></p>
+        <div id="settings-actions">
+          <button type="button" id="settings-ok">Ok</button>
+          <button type="button" id="settings-cancel">Cancel</button>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing } from "../chat/ring";
+import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 
 /** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
 export type SearchHit = {
@@ -37,7 +38,6 @@ function focusables(root: HTMLElement): HTMLElement[] {
 export function bindSearchPopup(opts: {
   ring: MessageRing;
   modal: HTMLElement;
-  settingsModal: HTMLElement;
   activeChannel: () => string;
   onOpen?: () => void;
 }): {
@@ -45,7 +45,7 @@ export function bindSearchPopup(opts: {
   open: () => void;
   close: () => void;
 } {
-  const { ring, modal, settingsModal, activeChannel, onOpen } = opts;
+  const { ring, modal, activeChannel, onOpen } = opts;
   const appRoot = document.querySelector<HTMLElement>("#app");
   const dialog = modal.querySelector<HTMLElement>("#search-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#search-backdrop");
@@ -212,7 +212,7 @@ export function bindSearchPopup(opts: {
   };
 
   const open = (): void => {
-    if (!settingsModal.hidden) {
+    if (isSettingsWindowOpen()) {
       return;
     }
     onOpen?.();
@@ -297,7 +297,7 @@ export function bindSearchPopup(opts: {
   });
 
   window.addEventListener("keydown", (ev) => {
-    if (modal.hidden || !settingsModal.hidden) {
+    if (modal.hidden || isSettingsWindowOpen()) {
       return;
     }
     if (ev.key === "Escape") {

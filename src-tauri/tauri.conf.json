@@ -43,6 +43,19 @@
         "minWidth": 960,
         "minHeight": 420,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+      },
+      {
+        "label": "settings",
+        "title": "Chatterino Settings",
+        "url": "settings.html",
+        "width": 920,
+        "height": 720,
+        "minWidth": 640,
+        "minHeight": 480,
+        "visible": false,
+        "center": true,
+        "resizable": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }
     ]
   },
