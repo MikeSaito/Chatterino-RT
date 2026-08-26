@@ -938,6 +938,16 @@ pub fn settings_set(
 }
 
 #[tauri::command]
+pub fn chatterino1_commands_available() -> bool {
+    super::chatterino1_import::chatterino1_commands_available()
+}
+
+#[tauri::command]
+pub fn read_chatterino1_commands() -> Result<Vec<super::settings::CommandRow>, ApiError> {
+    super::chatterino1_import::read_chatterino1_commands().map_err(ApiError::invalid)
+}
+
+#[tauri::command]
 pub fn highlight_sound_read(
     state: tauri::State<'_, Shared>,
     path: Option<String>,

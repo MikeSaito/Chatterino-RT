@@ -647,6 +647,33 @@ body,
   font-size: 12px;
 }
 
+.settings-commands-import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.settings-commands-dup-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #d4a017;
+}
+
+.settings-hotkey-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.settings-hotkey-search input {
+  flex: 1;
+  min-width: 160px;
+  font-size: 12px;
+}
+
 .settings-inner-tabs {
   display: flex;
   flex-wrap: wrap;

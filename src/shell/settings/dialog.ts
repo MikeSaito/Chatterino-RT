@@ -6,8 +6,11 @@ import { CHAT_AUTH_EVENT } from "../../constants";
 import { configureHighlightSound } from "../highlightSound";
 import { configureHighlightFlash } from "../highlightFlash";
 import {
+  bindingFromEvent,
+  bindingsMatch,
   configureHotkeys,
   defaultHotkeyTableRows,
+  formatBinding,
   normalizeHotkeyRows,
   stepZoom,
 } from "../hotkeys";
@@ -77,6 +80,9 @@ export type AppSettings = {
 type TableApi = {
   getRows: () => Record<string, string | boolean>[];
   setRows: (rows: Record<string, string | boolean>[]) => void;
+  setRowFilter: (
+    fn: ((row: Record<string, string | boolean>, index: number) => boolean) | null,
+  ) => void;
 };
 
 function formatError(err: unknown): string {
@@ -90,6 +96,23 @@ function formatError(err: unknown): string {
     }
   }
   return "error";
+}
+
+function hasDuplicateCommandTriggers(
+  rows: ReadonlyArray<Record<string, string | boolean>>,
+): boolean {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const trigger = String(row.trigger ?? "").trim();
+    if (!trigger) {
+      continue;
+    }
+    if (seen.has(trigger)) {
+      return true;
+    }
+    seen.add(trigger);
+  }
+  return false;
 }
 
 function nearestZoom(scale: number): number {
@@ -389,6 +412,7 @@ export function bindSettingsDialog(opts: {
   let saving = false;
   let loadReady = false;
   let blockedUsersRefreshSeq = 0;
+  let resetHotkeyFilter: (() => void) | null = null;
 
   const refreshBlockedUsersList = async (): Promise<void> => {
     const list = document.querySelector<HTMLUListElement>(
@@ -1011,6 +1035,7 @@ export function bindSettingsDialog(opts: {
     pagesHost.replaceChildren();
     knobInputs.clear();
     tableApis.clear();
+    resetHotkeyFilter = null;
 
     const groups = [
       ["general"],
@@ -1418,6 +1443,84 @@ export function bindSettingsDialog(opts: {
     if (page.kind === "table" && page.table) {
       const host = document.createElement("div");
       host.dataset.search = page.search;
+      if (page.id === "commands") {
+        const importWrap = document.createElement("div");
+        importWrap.className = "settings-commands-import";
+        const importBtn = document.createElement("button");
+        importBtn.type = "button";
+        importBtn.textContent = "Import commands from Chatterino 1";
+        importBtn.hidden = true;
+        const dupHint = document.createElement("p");
+        dupHint.className = "settings-commands-dup-hint";
+        dupHint.hidden = true;
+        dupHint.textContent =
+          "Multiple commands with the same trigger found. Only one of the commands will work.";
+        importBtn.addEventListener("click", () => {
+          void (async () => {
+            try {
+              const imported = await invoke<
+                Array<{
+                  trigger: string;
+                  command: string;
+                  showInMessageMenu: boolean;
+                }>
+              >("read_chatterino1_commands");
+              const api = tableApis.get("commands");
+              if (!api) {
+                return;
+              }
+              const rows = api.getRows();
+              const byTrigger = new Map<string, number>();
+              rows.forEach((row, index) => {
+                const trigger = String(row.trigger ?? "").trim();
+                if (trigger) {
+                  byTrigger.set(trigger, index);
+                }
+              });
+              let replaced = false;
+              for (const row of imported) {
+                const trigger = String(row.trigger ?? "").trim();
+                if (!trigger) {
+                  continue;
+                }
+                const entry: Record<string, string | boolean> = {
+                  trigger,
+                  command: String(row.command ?? ""),
+                  showInMessageMenu: Boolean(row.showInMessageMenu),
+                };
+                const idx = byTrigger.get(trigger);
+                if (idx !== undefined) {
+                  const prevMenu = rows[idx]?.showInMessageMenu;
+                  entry.showInMessageMenu =
+                    typeof prevMenu === "boolean" ? prevMenu : false;
+                  rows[idx] = entry;
+                  replaced = true;
+                } else {
+                  byTrigger.set(trigger, rows.length);
+                  rows.push(entry);
+                }
+              }
+              api.setRows(rows);
+              dupHint.hidden = !hasDuplicateCommandTriggers(rows);
+              statusEl.textContent = replaced
+                ? `Imported ${imported.length} command(s); duplicate triggers replaced.`
+                : `Imported ${imported.length} command(s).`;
+              schedulePreview();
+            } catch (err) {
+              statusEl.textContent = formatError(err);
+            }
+          })();
+        });
+        importWrap.append(importBtn, dupHint);
+        section.append(importWrap);
+        void invoke<boolean>("chatterino1_commands_available")
+          .then((ok) => {
+            importBtn.hidden = !ok;
+          })
+          .catch(() => {
+            importBtn.hidden = true;
+          });
+      }
       mountTable(host, page.table);
       section.append(host);
       appendSettingsSections(section, page.sections);
@@ -1425,8 +1528,44 @@ export function bindSettingsDialog(opts: {
     }
 
     if (page.kind === "hotkeys" && page.table) {
+      const filterBar = document.createElement("div");
+      filterBar.className = "settings-hotkey-search";
+      const label = document.createElement("label");
+      label.textContent = "Search keybind:";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.readOnly = true;
+      input.placeholder = "Press a key combination…";
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.textContent = "Clear";
+      filterBar.append(label, input, clearBtn);
+      section.append(filterBar);
+
       const host = document.createElement("div");
       mountTable(host, page.table);
+      const hotkeysApi = tableApis.get("hotkeys");
+      if (hotkeysApi) {
+        resetHotkeyFilter = () => {
+          input.value = "";
+          hotkeysApi.setRowFilter(null);
+        };
+        input.addEventListener("keydown", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const captured = bindingFromEvent(ev);
+          if (!captured) {
+            return;
+          }
+          input.value = formatBinding(captured);
+          hotkeysApi.setRowFilter((row) =>
+            bindingsMatch(String(row.keybinding ?? ""), captured),
+          );
+        });
+        clearBtn.addEventListener("click", () => {
+          resetHotkeyFilter?.();
+        });
+      }
       section.append(host);
       appendSettingsSections(section, page.sections);
       return section;
@@ -1616,6 +1755,7 @@ export function bindSettingsDialog(opts: {
 
   const closeModal = (restore: boolean): void => {
     window.clearTimeout(previewTimer);
+    resetHotkeyFilter?.();
     if (restore) {
       paintDraft(baseline);
     }

@@ -182,6 +182,84 @@ export function matchEvent(ev: KeyboardEvent, binding: ParsedBinding): boolean {
   return ek === binding.key;
 }
 
+export function formatBinding(binding: ParsedBinding): string {
+  const parts: string[] = [];
+  if (binding.ctrl) {
+    parts.push("Ctrl");
+  }
+  if (binding.alt) {
+    parts.push("Alt");
+  }
+  if (binding.shift) {
+    parts.push("Shift");
+  }
+  if (binding.meta) {
+    parts.push("Meta");
+  }
+  let keyLabel = binding.key;
+  if (keyLabel === " ") {
+    keyLabel = "Space";
+  } else if (keyLabel === "enter") {
+    keyLabel = "Return";
+  } else if (keyLabel.length === 1) {
+    keyLabel = keyLabel.toUpperCase();
+  } else {
+    keyLabel = keyLabel.charAt(0).toUpperCase() + keyLabel.slice(1);
+  }
+  parts.push(keyLabel);
+  return parts.join("+");
+}
+
+function keysEquivalent(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  if ((a === "=" || a === "+") && (b === "=" || b === "+")) {
+    return true;
+  }
+  if ((a === "-" || a === "_") && (b === "-" || b === "_")) {
+    return true;
+  }
+  return false;
+}
+
+export function bindingFromEvent(ev: KeyboardEvent): ParsedBinding | null {
+  if (
+    ev.key === "Control" ||
+    ev.key === "Alt" ||
+    ev.key === "Shift" ||
+    ev.key === "Meta"
+  ) {
+    return null;
+  }
+  const raw = eventKey(ev);
+  const key = normalizeKeyToken(raw);
+  if (!key) {
+    return null;
+  }
+  return {
+    ctrl: ev.ctrlKey,
+    alt: ev.altKey,
+    shift: ev.shiftKey,
+    meta: ev.metaKey,
+    key,
+  };
+}
+
+export function bindingsMatch(stored: string, captured: ParsedBinding): boolean {
+  const parsed = parseBinding(stored);
+  if (!parsed) {
+    return false;
+  }
+  return (
+    parsed.ctrl === captured.ctrl &&
+    parsed.alt === captured.alt &&
+    parsed.shift === captured.shift &&
+    parsed.meta === captured.meta &&
+    keysEquivalent(parsed.key, captured.key)
+  );
+}
+
 export function resolveAction(ev: KeyboardEvent): HotkeyAction | null {
   for (const row of parsed) {
     if (matchEvent(ev, row.binding)) {

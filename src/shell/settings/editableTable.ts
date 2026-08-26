@@ -20,6 +20,7 @@ export function mountEditableTable(
 ): {
   getRows: () => Record<string, string | boolean>[];
   setRows: (rows: Record<string, string | boolean>[]) => void;
+  setRowFilter: (fn: ((row: Record<string, string | boolean>, index: number) => boolean) | null) => void;
 } {
   host.classList.add("editable-table-host");
   host.replaceChildren();
@@ -56,10 +57,15 @@ export function mountEditableTable(
   host.append(toolbar, table);
 
   let selected = -1;
+  let rowFilter: ((row: Record<string, string | boolean>, index: number) => boolean) | null =
+    null;
 
   const paint = (): void => {
     tbody.replaceChildren();
     model.rows.forEach((row, index) => {
+      if (rowFilter && !rowFilter(row, index)) {
+        return;
+      }
       const tr = document.createElement("tr");
       if (index === selected) {
         tr.classList.add("is-selected");
@@ -136,6 +142,11 @@ export function mountEditableTable(
       }
       tbody.append(tr);
     });
+    const filtered = Boolean(rowFilter);
+    addBtn.disabled = filtered;
+    removeBtn.disabled = filtered;
+    upBtn.disabled = filtered || selected <= 0;
+    downBtn.disabled = filtered || selected < 0 || selected >= model.rows.length - 1;
   };
 
   addBtn.addEventListener("click", () => {
@@ -185,6 +196,11 @@ export function mountEditableTable(
     getRows: () => model.rows.map((row) => ({ ...row })),
     setRows: (rows) => {
       model.rows = rows.map((row) => ({ ...model.blankRow, ...row }));
+      selected = -1;
+      paint();
+    },
+    setRowFilter: (fn) => {
+      rowFilter = fn;
       selected = -1;
       paint();
     },
