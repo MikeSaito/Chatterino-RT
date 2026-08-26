@@ -2,6 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createChatApp, destroyChatApp } from "./pixi/app";
 import { MessageRing, type SlotContext } from "./chat/ring";
+import {
+  deriveEmoteScaleUrls,
+  emoteScaleLinkLabel,
+} from "./chat/emoteImageLinks";
 import { bindChatIpc, type ChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
@@ -187,6 +191,8 @@ async function boot(): Promise<void> {
   const contextCustomHost = document.querySelector<HTMLElement>("#chat-context-custom");
   const contextCustomSep = document.querySelector<HTMLElement>("#chat-context-custom-sep");
   const contextImageSep = document.querySelector<HTMLElement>("#chat-context-image-sep");
+  const contextImageOpen = document.querySelector<HTMLElement>("#chat-context-image-open");
+  const contextImageCopy = document.querySelector<HTMLElement>("#chat-context-image-copy");
   const loginEl = authLogin;
   const signinBtn = authSignin;
   const logoutBtn = authLogout;
@@ -924,15 +930,21 @@ async function boot(): Promise<void> {
       void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
       return;
     }
-    if (action === "copy-image-link" && target.imageUrl) {
-      void navigator.clipboard.writeText(target.imageUrl).catch(() => undefined);
+    if (action === "copy-image-link") {
+      const imageUrl = btn.dataset.url?.trim();
+      if (imageUrl) {
+        void navigator.clipboard.writeText(imageUrl).catch(() => undefined);
+      }
       return;
     }
-    if (action === "open-image-link" && target.imageUrl) {
-      void invoke("open_chat_link", {
-        url: target.imageUrl,
-        private: openLinksIncognito,
-      }).catch(() => undefined);
+    if (action === "open-image-link") {
+      const imageUrl = btn.dataset.url?.trim();
+      if (imageUrl) {
+        void invoke("open_chat_link", {
+          url: imageUrl,
+          private: openLinksIncognito,
+        }).catch(() => undefined);
+      }
       return;
     }
     if (action === "web-search") {
@@ -1266,6 +1278,29 @@ async function boot(): Promise<void> {
     /* first run */
   }
 
+  function fillImageScaleSubmenu(
+    host: HTMLElement | null,
+    action: "open-image-link" | "copy-image-link",
+    links: ReturnType<typeof deriveEmoteScaleUrls>,
+  ): void {
+    if (!host) {
+      return;
+    }
+    const items = host.querySelector<HTMLElement>(".chat-context-submenu-items");
+    if (!items) {
+      return;
+    }
+    items.replaceChildren();
+    for (const link of links) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.action = action;
+      btn.dataset.url = link.url;
+      btn.textContent = emoteScaleLinkLabel(link.factor);
+      items.appendChild(btn);
+    }
+  }
+
   function openContextMenu(ctx: SlotContext): void {
     contextTarget = ctx;
     if (contextCustomHost && contextCustomSep) {
@@ -1306,12 +1341,6 @@ async function boot(): Promise<void> {
       '[data-action="open-link-incognito"]',
     );
     const webSearchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="web-search"]');
-    const openImageLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
-      '[data-action="open-image-link"]',
-    );
-    const copyImageLinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
-      '[data-action="copy-image-link"]',
-    );
     if (replyBtn) {
       replyBtn.hidden = !ctx.login || !ctx.msgId || ctx.disabled;
     }
@@ -1340,21 +1369,22 @@ async function boot(): Promise<void> {
       copyJsonBtn.hidden = !(ctx.shiftOnly && ctx.msgId);
     }
     const hasImage = Boolean(ctx.imageUrl);
-    const imageKindLabel = ctx.imageKind === "badge" ? "badge" : "emote";
-    if (openImageLinkBtn) {
-      openImageLinkBtn.hidden = !hasImage;
-      openImageLinkBtn.textContent = hasImage
-        ? `Open ${imageKindLabel} link`
-        : "Open 1x link";
+    const imageLinks = hasImage
+      ? deriveEmoteScaleUrls(ctx.imageUrl, {
+          provider: ctx.imageProvider || undefined,
+          kind: ctx.imageKind === "badge" || ctx.imageKind === "emote" ? ctx.imageKind : undefined,
+        })
+      : [];
+    if (contextImageOpen) {
+      contextImageOpen.hidden = imageLinks.length === 0;
     }
-    if (copyImageLinkBtn) {
-      copyImageLinkBtn.hidden = !hasImage;
-      copyImageLinkBtn.textContent = hasImage
-        ? `Copy ${imageKindLabel} link`
-        : "Copy 1x link";
+    if (contextImageCopy) {
+      contextImageCopy.hidden = imageLinks.length === 0;
     }
+    fillImageScaleSubmenu(contextImageOpen, "open-image-link", imageLinks);
+    fillImageScaleSubmenu(contextImageCopy, "copy-image-link", imageLinks);
     if (contextImageSep) {
-      contextImageSep.hidden = !hasImage;
+      contextImageSep.hidden = imageLinks.length === 0;
     }
     const hasLink = Boolean(ctx.linkUrl);
     if (openLinkBtn) {
@@ -1377,8 +1407,21 @@ async function boot(): Promise<void> {
     }
     contextMenuEl.hidden = false;
     const pad = 8;
+    const flyoutW = imageLinks.length > 0 ? 128 : 0;
     const rect = contextMenuEl.getBoundingClientRect();
-    const x = Math.min(ctx.clientX, window.innerWidth - rect.width - pad);
+    const nearRight =
+      flyoutW > 0 && ctx.clientX + rect.width + flyoutW > window.innerWidth - pad;
+    for (const el of [contextImageOpen, contextImageCopy]) {
+      el?.classList.toggle("chat-context-submenu-flip", nearRight);
+    }
+    let x = ctx.clientX;
+    if (nearRight) {
+      x = Math.max(pad + flyoutW, Math.min(x, window.innerWidth - rect.width - pad));
+    } else if (flyoutW > 0) {
+      x = Math.min(x, window.innerWidth - rect.width - flyoutW - pad);
+    } else {
+      x = Math.min(x, window.innerWidth - rect.width - pad);
+    }
     const y = Math.min(ctx.clientY, window.innerHeight - rect.height - pad);
     contextMenuEl.style.left = `${Math.max(pad, x)}px`;
     contextMenuEl.style.top = `${Math.max(pad, y)}px`;

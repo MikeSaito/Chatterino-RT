@@ -1811,6 +1811,72 @@ button:disabled {
   background: var(--c-border);
 }
 
+.chat-context-submenu {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-context-submenu[hidden] {
+  display: none;
+}
+
+.chat-context-submenu-label {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  font-size: 13px;
+  cursor: default;
+  pointer-events: none;
+}
+
+.chat-context-submenu-label::after {
+  content: "▶";
+  float: right;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.chat-context-submenu-items {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin: 0;
+  padding: 4px;
+  min-width: 120px;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--c-split-bg);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  z-index: 21;
+}
+
+.chat-context-submenu:hover .chat-context-submenu-items,
+.chat-context-submenu:focus-within .chat-context-submenu-items {
+  display: flex;
+}
+
+.chat-context-submenu-items button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.chat-context-submenu-items button:hover:not(:disabled) {
+  background: var(--c-border);
+}
+
+.chat-context-submenu-flip .chat-context-submenu-items {
+  left: auto;
+  right: 100%;
+}
+
 #auth-box {
   display: flex;
   flex-direction: column;

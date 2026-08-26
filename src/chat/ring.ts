@@ -84,6 +84,7 @@ export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 export type ImageHit = {
   url: string;
   kind: "emote" | "badge";
+  provider?: string;
 };
 
 export type SlotContext = {
@@ -103,6 +104,8 @@ export type SlotContext = {
   /** CDN URL эmote/badge под курсором (stock addImageContextMenuItems). */
   imageUrl: string;
   imageKind: "" | "emote" | "badge";
+  /** Provider эmote под курсором (twitch/bttv/ffz/7tv/…). */
+  imageProvider: string;
   /** Stock: View thread when message is in a reply thread. */
   inReplyThread: boolean;
   /** Stock: hidden items only when modifier is exactly Shift. */
@@ -2446,6 +2449,7 @@ export class MessageRing {
       linkUrl?: string;
       imageUrl?: string;
       imageKind?: "" | "emote" | "badge";
+      imageProvider?: string;
     },
   ): SlotContext {
     return {
@@ -2471,6 +2475,7 @@ export class MessageRing {
       linkUrl: opts?.linkUrl ?? "",
       imageUrl: opts?.imageUrl ?? "",
       imageKind: opts?.imageKind ?? "",
+      imageProvider: opts?.imageProvider ?? "",
       inReplyThread: this.slotInReplyThread(slot),
       shiftOnly: this.pointerShiftOnly(ev),
     };
@@ -2554,6 +2559,7 @@ export class MessageRing {
         linkUrl: this.linkAt(slot, ev) ?? "",
         imageUrl: imageHit?.url ?? "",
         imageKind: imageHit?.kind ?? "",
+        imageProvider: imageHit?.provider ?? "",
       }),
     );
   }
@@ -2801,7 +2807,7 @@ export class MessageRing {
       if (!spriteHit(localX, slotLocalY, spr)) {
         continue;
       }
-      return { url: badge.url, kind: "badge" };
+      return { url: badge.url, kind: "badge", provider: badge.source };
     }
     if (this.enableEmoteImages) {
       for (let e = slot.emotes.length - 1; e >= 0; e -= 1) {
@@ -2817,7 +2823,7 @@ export class MessageRing {
         if (!url) {
           return null;
         }
-        return { url, kind: "emote" };
+        return { url, kind: "emote", provider: span.provider };
       }
       return null;
     }
@@ -2838,7 +2844,7 @@ export class MessageRing {
         if (!url) {
           return null;
         }
-        return { url, kind: "emote" };
+        return { url, kind: "emote", provider: span.provider };
       }
     }
     return null;
