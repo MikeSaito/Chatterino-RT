@@ -19,7 +19,32 @@ use chat::commands::{
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
+
+/// Остановить фоновые IRC/7TV/BTTV/poll задачи перед выходом.
+fn shutdown_background(app: &AppHandle) {
+    if let Some(state) = app.try_state::<Shared>() {
+        if let Ok(guard) = state.irc_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.try_send(IrcCmd::Shutdown);
+            }
+        }
+        state.notify_event(EventCmd::Shutdown);
+        state.notify_bttv(BttvCmd::Shutdown);
+        chat::live_status::shutdown();
+        chat::live_notifications::shutdown();
+        chat::shared_chat::shutdown();
+    }
+}
+
+/// Закрыть все окна и завершить процесс (скрытое settings иначе держит app alive).
+fn quit_app(app: &AppHandle) {
+    shutdown_background(app);
+    if let Some(settings) = app.get_webview_window("settings") {
+        let _ = settings.close();
+    }
+    app.exit(0);
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -42,6 +67,14 @@ pub fn run() {
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                quit_app(window.app_handle());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             chat_join,
@@ -103,19 +136,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app.try_state::<Shared>() {
-                    if let Ok(guard) = state.irc_tx.lock() {
-                        if let Some(tx) = guard.as_ref() {
-                            let _ = tx.try_send(IrcCmd::Shutdown);
-                        }
-                    }
-                    state.notify_event(EventCmd::Shutdown);
-                    state.notify_bttv(BttvCmd::Shutdown);
-                    chat::live_status::shutdown();
-                    chat::live_notifications::shutdown();
-                    chat::shared_chat::shutdown();
+            match event {
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                    shutdown_background(app);
                 }
+                _ => {}
             }
         });
 }
