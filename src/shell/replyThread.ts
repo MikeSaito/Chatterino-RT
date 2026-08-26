@@ -3,13 +3,15 @@ import type { ChatEvent } from "../chat/types";
 import { formatTime } from "../chat/ring";
 import { collectReplyThread, isInReplyThread } from "./replyRoot";
 
+type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
+
 export type ReplyThreadOpen = {
   rootId: string;
   login: string;
   text: string;
+  /** Preloaded privmsgs; skips chat_snapshot in loadThread when set. */
+  events?: Priv[];
 };
-
-type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
 type ReplyTarget = { id: string; login: string; text: string };
 
@@ -25,13 +27,18 @@ export function bindReplyThread(opts: {
   getSelfLogin: () => string | null;
   getShowTimestamps: () => boolean;
   getTimestampFormat: () => string;
+  getHideTimestampsWhenLive: () => boolean;
+  getChannelLive: () => boolean;
   onStatus?: (message: string) => void;
 }): {
   open: (info: ReplyThreadOpen) => void;
+  beginOpen: (info: ReplyThreadOpen) => void;
+  completeOpen: (info: ReplyThreadOpen) => void;
   close: () => void;
   ingestLive: (events: ChatEvent[]) => void;
   isOpen: () => boolean;
   syncComposer: () => void;
+  repaint: () => void;
 } {
   const {
     modal,
@@ -42,6 +49,8 @@ export function bindReplyThread(opts: {
     getSelfLogin,
     getShowTimestamps,
     getTimestampFormat,
+    getHideTimestampsWhenLive,
+    getChannelLive,
     onStatus,
   } = opts;
   const dialog = modal.querySelector<HTMLElement>("#replythread-dialog");
@@ -55,10 +64,13 @@ export function bindReplyThread(opts: {
   if (!dialog || !backdrop || !closeBtn || !titleEl || !view || !input || !sendBtn) {
     return {
       open: () => undefined,
+      beginOpen: () => undefined,
+      completeOpen: () => undefined,
       close: () => undefined,
       ingestLive: () => undefined,
       isOpen: () => false,
       syncComposer: () => undefined,
+      repaint: () => undefined,
     };
   }
 
@@ -111,13 +123,18 @@ export function bindReplyThread(opts: {
     });
   };
 
+  const shouldShowTimestamps = (): boolean =>
+    getShowTimestamps() &&
+    getTimestampFormat() !== "Disable" &&
+    !(getHideTimestampsWhenLive() && getChannelLive());
+
   const paintRow = (ev: Priv, rootId: string): HTMLButtonElement => {
     const row = document.createElement("button");
     row.type = "button";
     row.className = ev.id === rootId ? "replythread-msg is-root" : "replythread-msg";
     row.dataset.msgId = ev.id;
 
-    const showTs = getShowTimestamps() && getTimestampFormat() !== "Disable";
+    const showTs = shouldShowTimestamps();
     if (showTs) {
       const time = document.createElement("span");
       time.className = "replythread-msg-time";
@@ -164,6 +181,12 @@ export function bindReplyThread(opts: {
     if (messages.length === 0 && current) {
       const fallback = document.createElement("div");
       fallback.className = "replythread-msg is-root";
+      if (shouldShowTimestamps()) {
+        const time = document.createElement("span");
+        time.className = "replythread-msg-time";
+        time.textContent = "—";
+        fallback.append(time);
+      }
       const nick = document.createElement("span");
       nick.className = "replythread-msg-nick";
       nick.textContent = current.login;
@@ -215,7 +238,7 @@ export function bindReplyThread(opts: {
     syncComposer();
   };
 
-  const open = (info: ReplyThreadOpen): void => {
+  const mountOpen = (info: ReplyThreadOpen): void => {
     if (!settingsModal.hidden) {
       return;
     }
@@ -237,6 +260,28 @@ export function bindReplyThread(opts: {
     modal.hidden = false;
     syncComposer();
     syncPinVisibility();
+  };
+
+  const beginOpen = (info: ReplyThreadOpen): void => {
+    mountOpen(info);
+    loading = true;
+  };
+
+  const completeOpen = (info: ReplyThreadOpen): void => {
+    if (!current) {
+      return;
+    }
+    current = info;
+    replyTarget = { id: info.rootId, login: info.login, text: info.text };
+    const channel = openChannel || activeChannel().trim();
+    titleEl.textContent = channel
+      ? `Reply Thread - @${info.login} in #${channel}`
+      : `Reply Thread - @${info.login}`;
+    void loadThread(info);
+  };
+
+  const open = (info: ReplyThreadOpen): void => {
+    mountOpen(info);
     void loadThread(info);
   };
 
@@ -257,13 +302,21 @@ export function bindReplyThread(opts: {
       return;
     }
     try {
-      const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
+      let events: Priv[];
+      if (info.events) {
+        events = info.events;
+      } else {
+        const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
+        if (token !== loadSeq || !current || current.rootId !== info.rootId) {
+          return;
+        }
+        events = (Array.isArray(snap.events) ? snap.events : []).filter(
+          (ev): ev is Priv => ev.kind === "privmsg",
+        );
+      }
       if (token !== loadSeq || !current || current.rootId !== info.rootId) {
         return;
       }
-      const events = (Array.isArray(snap.events) ? snap.events : []).filter(
-        (ev): ev is Priv => ev.kind === "privmsg",
-      );
       const related = flushPendingLive(info, events);
       threadMessages = related;
       const rootId = related[0]?.id ?? info.rootId;
@@ -399,5 +452,13 @@ export function bindReplyThread(opts: {
 
   syncPinVisibility();
 
-  return { open, close, ingestLive, isOpen, syncComposer };
+  const repaint = (): void => {
+    if (modal.hidden || !current) {
+      return;
+    }
+    const rootId = threadMessages[0]?.id ?? current.rootId;
+    paintThread(threadMessages, rootId, replyTarget?.id);
+  };
+
+  return { open, beginOpen, completeOpen, close, ingestLive, isOpen, syncComposer, repaint };
 }

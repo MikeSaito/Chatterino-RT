@@ -343,6 +343,7 @@ async function boot(): Promise<void> {
   let autoCloseThreadPopup = false;
   let showTimestamps = true;
   let timestampFormat = "hh:mm";
+  let hideTimestampsWhenLive = false;
   let replyThreadCtl: ReturnType<typeof bindReplyThread> | null = null;
   let replyThreadLive: ((events: ChatEvent[]) => void) | null = null;
   let showPronouns = false;
@@ -400,7 +401,10 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
       showTimestamps = data.showTimestamps;
       timestampFormat = data.timestampFormat || "hh:mm";
+      hideTimestampsWhenLive =
+        data.knobs["appearance.hideMessageTimestampsWhenLive"] === true;
       replyThreadCtl?.syncComposer();
+      replyThreadCtl?.repaint();
       showPronouns = data.knobs["misc.showPronouns"] === true;
       hideUsercardAvatars =
         data.knobs["streamerMode.hideUsercardAvatars"] !== false;
@@ -513,10 +517,12 @@ async function boot(): Promise<void> {
     if (!ch) {
       titleEl.textContent = "";
       ring.setChannelLive(false);
+      replyThreadCtl?.repaint();
       return;
     }
     const stream = streamByChannel.get(ch.toLowerCase());
     ring.setChannelLive(stream?.live ?? false);
+    replyThreadCtl?.repaint();
     const sm = streamerModeState();
     const knobs = effectiveHeaderKnobs(headerKnobs, {
       streamerActive: sm.active,
@@ -624,6 +630,9 @@ async function boot(): Promise<void> {
     getSelfLogin: () => lastAuth.login?.trim() || null,
     getShowTimestamps: () => showTimestamps,
     getTimestampFormat: () => timestampFormat,
+    getHideTimestampsWhenLive: () => hideTimestampsWhenLive,
+    getChannelLive: () =>
+      streamByChannel.get(ipc.active().trim().toLowerCase())?.live ?? false,
     onStatus: (message) => {
       statusEl.textContent = message;
     },
@@ -984,8 +993,14 @@ async function boot(): Promise<void> {
           return;
         }
         try {
+          replyThread.beginOpen({
+            rootId: msgId,
+            login: target.login,
+            text: target.text,
+          });
           const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
           if (seq !== viewThreadSeq || ipc.active().trim() !== channel) {
+            replyThread.close();
             return;
           }
           const events = (Array.isArray(snap.events) ? snap.events : []).filter(
@@ -993,15 +1008,18 @@ async function boot(): Promise<void> {
           );
           const root = resolveReplyRoot(events, msgId);
           if (!root) {
+            replyThread.close();
             statusEl.textContent = "не удалось найти корень ветки";
             return;
           }
-          replyThread.open({
+          replyThread.completeOpen({
             rootId: root.id,
             login: root.login,
             text: root.text,
+            events,
           });
         } catch (err) {
+          replyThread.close();
           statusEl.textContent = formatError(err);
         }
       })();
@@ -1068,7 +1086,6 @@ async function boot(): Promise<void> {
     if (ch !== ipc.active().toLowerCase()) {
       return;
     }
-    ring.setChannelLive(ev.payload.live);
     repaintChannelTitle();
   });
 
