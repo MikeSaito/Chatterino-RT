@@ -1,5 +1,5 @@
 import { Texture } from "pixi.js";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
 import { resolveEmoteUrl } from "./emoteUrl";
 
@@ -324,9 +324,22 @@ type CdnImageBytes = {
   contentType: string | null;
 };
 
+async function fetchCdnViaInvoke(url: string): Promise<{ buf: ArrayBuffer; mime: string }> {
+  const data = await invoke<CdnImageBytes>("fetch_emote_cdn", { url });
+  if (!data.bytes?.length) {
+    throw new Error("empty cdn body");
+  }
+  const buf = new Uint8Array(data.bytes).buffer;
+  const mime = sniffMime(data.contentType, url, buf);
+  return { buf, mime };
+}
+
 async function fetchEmoteBytes(
   url: string,
 ): Promise<{ buf: ArrayBuffer; mime: string }> {
+  if (isTauri()) {
+    return fetchCdnViaInvoke(url);
+  }
   let fetchErr: unknown;
   try {
     const res = await fetch(url, { mode: "cors", credentials: "omit" });
@@ -343,13 +356,7 @@ async function fetchEmoteBytes(
     fetchErr = err;
   }
   try {
-    const data = await invoke<CdnImageBytes>("fetch_emote_cdn", { url });
-    if (!data.bytes?.length) {
-      throw new Error("empty cdn body");
-    }
-    const buf = Uint8Array.from(data.bytes).buffer;
-    const mime = sniffMime(data.contentType, url, buf);
-    return { buf, mime };
+    return await fetchCdnViaInvoke(url);
   } catch (invokeErr) {
     throw invokeErr ?? fetchErr;
   }
