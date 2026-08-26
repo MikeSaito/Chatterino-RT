@@ -9,7 +9,11 @@ This project is not affiliated with Chatterino. It does not copy C++/Qt sources 
 
 ## Download
 
-Packaged installers are not published yet. Build from source with the steps below.
+Pre-built Windows installers are published on [GitHub Releases](https://github.com/MikeSaito/Chatterino-RT/releases).
+
+Download **`Chatterino-RT_*_x64-setup.exe`** (NSIS). The installer embeds the WebView2 bootstrapper when the runtime is missing.
+
+After install: join a channel (anonymous read works); use **Войти** for send. Right-click an emote and check **Open** / **Copy** submenus for 1x–4x CDN links.
 
 ## Building
 
