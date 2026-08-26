@@ -13,9 +13,19 @@ const panel = mountSettingsPanel({ root });
 
 void panel.reload();
 
+let unlistenOpened: (() => void) | null = null;
 void listen(SETTINGS_OPENED_EVENT, () => {
   void panel.reload();
+}).then((unlisten) => {
+  unlistenOpened = unlisten;
 });
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    unlistenOpened?.();
+    unlistenOpened = null;
+  });
+}
 window.addEventListener("keydown", (ev) => {
   if (!ev.ctrlKey || ev.altKey || ev.metaKey) {
     return;

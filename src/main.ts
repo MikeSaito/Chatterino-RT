@@ -86,6 +86,15 @@ import type { AppSettings } from "./shell/settings/dialog";
 
 let chatIpc: ChatIpc | null = null;
 let teardownChat: (() => void) | null = null;
+let bootEpoch = 0;
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    bootEpoch += 1;
+    teardownChat?.();
+    teardownChat = null;
+  });
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   void boot();
@@ -101,6 +110,7 @@ window.addEventListener("pagehide", () => {
 });
 
 async function boot(): Promise<void> {
+  const myEpoch = ++bootEpoch;
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
   const pane = document.querySelector<HTMLElement>("#chat-pane");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
@@ -1298,6 +1308,9 @@ async function boot(): Promise<void> {
       recents?: string[];
       open?: string[];
     }>("session_get");
+    if (myEpoch !== bootEpoch) {
+      return;
+    }
     const recents = Array.isArray(session.recents) ? session.recents : [];
     const open = Array.isArray(session.open) ? session.open : [];
     const focus =

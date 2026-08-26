@@ -5,6 +5,7 @@ import { defineConfig } from "vite";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const xmldomStub = path.resolve(root, "src/pixi/xmldom-stub.ts");
 const host = process.env.TAURI_DEV_HOST;
+const isTauriDev = Boolean(process.env.TAURI_ENV_PLATFORM);
 
 const DEV_CSP = [
   "default-src 'self' customprotocol: asset: http://localhost:1420",
@@ -46,13 +47,15 @@ export default defineConfig(async () => ({
     headers: {
       "Content-Security-Policy": DEV_CSP,
     },
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
+    hmr: isTauriDev
+      ? false
+      : host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
     },
