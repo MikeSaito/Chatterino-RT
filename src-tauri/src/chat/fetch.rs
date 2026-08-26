@@ -255,6 +255,15 @@ fn http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+fn cdn_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("Chatterino-RT/0.1")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
     let mut delay = Duration::from_millis(200);
     let mut last = String::from("no response");
@@ -589,6 +598,92 @@ pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     }
 }
 
+/// Allowlist CDN картинок эмодзи/бейджей для `fetch_emote_cdn` (CORS fallback).
+pub fn allowed_emote_cdn_url(raw: &str) -> Option<String> {
+    allowed_bttv_url(raw)
+        .or_else(|| allowed_ffz_url(raw))
+        .or_else(|| allowed_7tv_cdn_url(raw))
+        .or_else(|| allowed_chatterino_badge_url(raw))
+        .or_else(|| crate::chat::helix::allowed_badge_url(raw))
+        .or_else(|| crate::chat::helix::allowed_cheer_url(raw))
+        .or_else(|| allowed_jsdelivr_emoji_url(raw))
+}
+
+fn allowed_7tv_cdn_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    if parsed.host_str() != Some("cdn.7tv.app") {
+        return None;
+    }
+    let path = parsed.path();
+    if !path.starts_with("/emote/") && !path.starts_with("/badge/") {
+        return None;
+    }
+    Some(parsed.as_str().to_string())
+}
+
+fn allowed_jsdelivr_emoji_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    if parsed.host_str() != Some("cdn.jsdelivr.net") {
+        return None;
+    }
+    if !parsed.path().starts_with("/npm/emoji-datasource-") {
+        return None;
+    }
+    Some(parsed.as_str().to_string())
+}
+
+pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), String> {
+    let allowed = allowed_emote_cdn_url(url).ok_or_else(|| "url not allowed".to_string())?;
+    let client = cdn_http_client();
+    let mut delay = Duration::from_millis(200);
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
+        match client.get(&allowed).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_redirection() {
+                    last = format!("http {status} (redirects not followed)");
+                } else if status.is_success() {
+                    let content_type = resp
+                        .headers()
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string);
+                    match resp.bytes().await {
+                        Ok(bytes) if !bytes.is_empty() => {
+                            return Ok((bytes.to_vec(), content_type));
+                        }
+                        Ok(_) => last = "empty body".to_string(),
+                        Err(e) => last = e.to_string(),
+                    }
+                } else {
+                    last = format!("http {status}");
+                }
+            }
+            Err(e) => last = e.to_string(),
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    Err(last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,6 +816,33 @@ mod tests {
             map.get("Kappa").map(|d| d.url.as_str()),
             Some("https://cdn.frankerfacez.com/emote/42/1")
         );
+    }
+
+    #[test]
+    fn emote_cdn_url_allowlist() {
+        assert_eq!(
+            allowed_emote_cdn_url("https://cdn.betterttv.net/emote/abc/1x"),
+            Some("https://cdn.betterttv.net/emote/abc/1x".into())
+        );
+        assert_eq!(
+            allowed_emote_cdn_url("//cdn.7tv.app/emote/abc/1x.webp"),
+            Some("https://cdn.7tv.app/emote/abc/1x.webp".into())
+        );
+        assert_eq!(
+            allowed_emote_cdn_url("https://cdn.7tv.app/badge/badge1/1x_static.webp"),
+            Some("https://cdn.7tv.app/badge/badge1/1x_static.webp".into())
+        );
+        assert!(allowed_emote_cdn_url("https://cdn.7tv.app/other/x.webp").is_none());
+        assert_eq!(
+            allowed_emote_cdn_url(
+                "https://cdn.jsdelivr.net/npm/emoji-datasource-twitter@15.1.2/img/twitter/64/1f600.png"
+            ),
+            Some(
+                "https://cdn.jsdelivr.net/npm/emoji-datasource-twitter@15.1.2/img/twitter/64/1f600.png"
+                    .into()
+            )
+        );
+        assert!(allowed_emote_cdn_url("https://evil.example/emote/x.png").is_none());
     }
 
     #[test]

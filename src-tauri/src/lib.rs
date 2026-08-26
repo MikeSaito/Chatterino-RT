@@ -12,7 +12,7 @@ use chat::commands::{
     highlight_request_attention, highlight_sound_pick, highlight_sound_read, image_upload,
     logging_pick_directory, open_chat_link, open_in_custom_player, open_in_streamlink,
     open_settings_directory, open_settings_window, read_chatterino1_commands, session_get, settings_get, settings_set,
-    streamer_mode_detect, supports_incognito_links,
+    streamer_mode_detect, supports_incognito_links, fetch_emote_cdn,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -68,6 +68,7 @@ pub fn run() {
             open_chat_link,
             open_settings_directory,
             open_settings_window,
+            fetch_emote_cdn,
             about_info,
             cache_info,
             cache_pick_directory,

@@ -1248,6 +1248,24 @@ pub fn open_settings_directory(state: tauri::State<'_, Shared>) -> Result<(), Ap
         .map_err(|e| ApiError::internal(&e.to_string()))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CdnImageBytes {
+    pub bytes: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
+#[tauri::command]
+pub async fn fetch_emote_cdn(url: String) -> Result<CdnImageBytes, ApiError> {
+    let (bytes, content_type) = super::fetch::fetch_cdn_image(&url)
+        .await
+        .map_err(|message| ApiError::invalid(&message))?;
+    Ok(CdnImageBytes {
+        bytes,
+        content_type,
+    })
+}
+
 #[tauri::command]
 pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), ApiError> {
     let Some(window) = app.get_webview_window("settings") else {

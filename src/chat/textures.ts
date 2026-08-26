@@ -1,4 +1,5 @@
 import { Texture } from "pixi.js";
+import { invoke } from "@tauri-apps/api/core";
 import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
 import { resolveEmoteUrl } from "./emoteUrl";
 
@@ -318,6 +319,11 @@ function destroyFrameSet(set: EmoteFrameSet, keep: EmoteFrameSet | null): void {
   }
 }
 
+type CdnImageBytes = {
+  bytes: number[];
+  contentType: string | null;
+};
+
 function isFetchBlocked(err: unknown): boolean {
   if (err instanceof TypeError) {
     return true;
@@ -329,27 +335,24 @@ function isFetchBlocked(err: unknown): boolean {
   return false;
 }
 
-function loadImageElement(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.decoding = "async";
-    const finish = (): void => {
-      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-        resolve(img);
-      } else {
-        reject(new Error("image has zero dimensions"));
-      }
-    };
-    img.onload = finish;
-    img.onerror = () => reject(new Error("image load failed"));
-    img.src = url;
-  });
-}
-
-async function loadTextureSetFromImage(url: string): Promise<EmoteFrameSet> {
-  const img = await loadImageElement(url);
-  const tex = Texture.from(img);
-  return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
+async function fetchEmoteBytes(
+  url: string,
+): Promise<{ buf: ArrayBuffer; mime: string }> {
+  try {
+    const res = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const buf = await res.arrayBuffer();
+    return { buf, mime: sniffMime(res.headers.get("content-type"), url) };
+  } catch (err) {
+    if (!isFetchBlocked(err)) {
+      throw err;
+    }
+    const data = await invoke<CdnImageBytes>("fetch_emote_cdn", { url });
+    const buf = Uint8Array.from(data.bytes).buffer;
+    return { buf, mime: sniffMime(data.contentType, url) };
+  }
 }
 
 async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrameSet> {
@@ -357,12 +360,7 @@ async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrame
   let last: unknown = new Error("texture load failed");
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     try {
-      const res = await fetch(url, { mode: "cors", credentials: "omit" });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const buf = await res.arrayBuffer();
-      const mime = sniffMime(res.headers.get("content-type"), url);
+      const { buf, mime } = await fetchEmoteBytes(url);
       if (animate) {
         const decoded = await decodeAnimated(buf, mime);
         if (decoded) {
@@ -374,20 +372,13 @@ async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrame
       return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
       last = err;
-      if (isFetchBlocked(err)) {
-        break;
-      }
       if (attempt + 1 < ATTEMPTS) {
         await sleep(delay);
         delay *= 2;
       }
     }
   }
-  try {
-    return await loadTextureSetFromImage(url);
-  } catch (imgErr) {
-    throw imgErr ?? last;
-  }
+  throw last;
 }
 
 async function decodeAnimated(
