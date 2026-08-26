@@ -507,6 +507,8 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
                 zero_width: false,
                 bits_amount: None,
                 bits_color: None,
+                display_width: None,
+                display_height: None,
             });
         }
     }
@@ -910,6 +912,8 @@ mod tests {
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }];
         shift_emote_spans_back(&mut spans, 5);
         assert_eq!(spans[0].start, 0);

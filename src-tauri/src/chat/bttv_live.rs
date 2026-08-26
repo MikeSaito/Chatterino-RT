@@ -345,6 +345,8 @@ pub fn apply_event(shared: &Shared, root: &Value) {
                 provider: "bttv".into(),
                 url: bttv_cdn_url(id),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             };
             if let Ok(mut cat) = shared.catalog.lock() {
                 cat.upsert_bttv(login, code.to_string(), def);

@@ -5,6 +5,9 @@ export type EmoteSpan = {
   provider: string;
   url: string;
   zeroWidth: boolean;
+  /** 7TV author display width (logical 1x pixels). */
+  displayWidth?: number;
+  displayHeight?: number;
   /** Stacked bits total (emotes.stackBits). */
   bitsAmount?: number;
   bitsColor?: string;

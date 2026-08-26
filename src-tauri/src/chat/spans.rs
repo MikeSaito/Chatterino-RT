@@ -249,6 +249,8 @@ mod tests {
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }
     }
 

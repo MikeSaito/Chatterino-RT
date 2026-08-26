@@ -842,6 +842,8 @@ mod tests {
                 provider: "7tv".into(),
                 url: "https://cdn.7tv.app/emote/abc/1x.webp".into(),
                 zero_width: true,
+                display_width: None,
+                display_height: None,
             },
         );
         let data = serde_json::json!({
@@ -866,6 +868,8 @@ mod tests {
                 provider: "7tv".into(),
                 url: "https://cdn.7tv.app/emote/abc/1x.webp".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         let data = serde_json::json!({
@@ -963,6 +967,8 @@ mod tests {
                 provider: "7tv".into(),
                 url: "https://cdn.7tv.app/emote/abc/1x.webp".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         let data = serde_json::json!({

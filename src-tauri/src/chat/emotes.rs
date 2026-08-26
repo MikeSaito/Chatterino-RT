@@ -31,6 +31,9 @@ pub struct EmoteDef {
     pub provider: String,
     pub url: String,
     pub zero_width: bool,
+    /// 7TV author display box (WEBP `width`/`height` from API).
+    pub display_width: Option<u16>,
+    pub display_height: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,6 +343,8 @@ pub fn attach_third_party(
                         zero_width: def.zero_width,
                         bits_amount: None,
                         bits_color: None,
+                        display_width: def.display_width,
+                        display_height: def.display_height,
                     });
                 }
             }
@@ -396,6 +401,8 @@ mod tests {
             provider: provider.into(),
             url: "https://cdn.7tv.app/emote/1/1x.webp".into(),
             zero_width,
+            display_width: None,
+            display_height: None,
         }
     }
 
@@ -409,6 +416,8 @@ mod tests {
             zero_width,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }
     }
 
@@ -644,6 +653,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/eid/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         map.insert("Pog".into(), def("b", "ffz", false));
@@ -656,6 +667,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/eid/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         assert!(cat.lookup("xqc", "OldCode").is_none());
@@ -671,6 +684,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/x/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("ffz"));
@@ -685,6 +700,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/keep/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         cat.upsert_bttv(
@@ -695,6 +712,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/keep/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         assert_eq!(

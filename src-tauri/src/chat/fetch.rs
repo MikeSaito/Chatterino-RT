@@ -300,6 +300,8 @@ fn collect_bttv(value: &Value, map: &mut std::collections::HashMap<String, Emote
                 provider: "bttv".into(),
                 url: format!("https://cdn.betterttv.net/emote/{id}/1x"),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
     }
@@ -337,6 +339,8 @@ fn collect_ffz_sets(value: &Value, map: &mut std::collections::HashMap<String, E
                     provider: "ffz".into(),
                     url,
                     zero_width: false,
+                    display_width: None,
+                    display_height: None,
                 },
             );
         }
@@ -385,7 +389,8 @@ pub(crate) fn parse_active_emote(item: &Value, show_unlisted: bool) -> Option<(S
     let file = data
         .get("host")
         .and_then(|h| h.get("files"))
-        .and_then(Value::as_array)
+        .and_then(Value::as_array);
+    let file_name = file
         .and_then(|files| {
             files.iter().find_map(|f| {
                 let n = f.get("name").and_then(Value::as_str)?;
@@ -397,10 +402,13 @@ pub(crate) fn parse_active_emote(item: &Value, show_unlisted: bool) -> Option<(S
             })
         })
         .unwrap_or("1x.webp");
-    if !safe_7tv_file(file) {
+    if !safe_7tv_file(file_name) {
         return None;
     }
-    let url = seventv_cdn_url(host, file)?;
+    let (display_width, display_height) = file
+        .and_then(|files| seventv_display_size(files, file_name))
+        .unwrap_or((None, None));
+    let url = seventv_cdn_url(host, file_name)?;
     Some((
         name.to_string(),
         EmoteDef {
@@ -408,6 +416,8 @@ pub(crate) fn parse_active_emote(item: &Value, show_unlisted: bool) -> Option<(S
             provider: "7tv".into(),
             url,
             zero_width: is_7tv_zero_width(item),
+            display_width,
+            display_height,
         },
     ))
 }
@@ -430,6 +440,39 @@ fn safe_7tv_file(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+}
+
+fn seventv_dim(v: &Value) -> Option<u16> {
+    if let Some(n) = v.as_u64() {
+        return (n > 0 && n <= u16::MAX as u64).then(|| n as u16);
+    }
+    v.as_f64()
+        .filter(|&n| n.is_finite() && n > 0.0)
+        .map(|n| n.round() as u64)
+        .filter(|&n| n > 0 && n <= u16::MAX as u64)
+        .map(|n| n as u16)
+}
+
+fn seventv_file_dims(entry: &Value) -> Option<(u16, u16)> {
+    let w = entry.get("width").and_then(seventv_dim)?;
+    let h = entry.get("height").and_then(seventv_dim)?;
+    Some((w, h))
+}
+
+/// Logical 1x display box from the WEBP file we load (Chatterino Image::expectedSize).
+fn seventv_display_size(files: &[Value], file_name: &str) -> Option<(Option<u16>, Option<u16>)> {
+    let webp = |f: &&Value| f.get("format").and_then(Value::as_str) == Some("WEBP");
+    let by_name = |name: &str| {
+        files
+            .iter()
+            .find(|f| f.get("name").and_then(Value::as_str) == Some(name))
+    };
+    let entry = by_name(file_name)
+        .filter(|f| webp(f))
+        .or_else(|| by_name("1x.webp").filter(|f| webp(f)))
+        .or_else(|| by_name(file_name))?;
+    let (w, h) = seventv_file_dims(entry)?;
+    Some((Some(w), Some(h)))
 }
 
 /// Static WEBP badge URL from 7TV cosmetic `data.host` (Chatterino createImageSet useStatic=true).
@@ -560,11 +603,74 @@ mod tests {
                     "id": "abc",
                     "host": {
                         "url": "//cdn.7tv.app/emote/abc",
-                        "files": [{"name": "1x.webp"}]
+                        "files": [{"name": "1x.webp", "width": 28, "height": 28}]
                     }
                 }
             }]
         })
+    }
+
+    fn sample_7tv_wide() -> Value {
+        serde_json::json!({
+            "emotes": [{
+                "id": "wide",
+                "name": "wideEmote",
+                "flags": 0,
+                "data": {
+                    "id": "wide",
+                    "host": {
+                        "url": "//cdn.7tv.app/emote/wide",
+                        "files": [{"name": "1x.webp", "width": 56, "height": 28}]
+                    }
+                }
+            }]
+        })
+    }
+
+    #[test]
+    fn seventv_parses_display_size() {
+        let mut map = std::collections::HashMap::new();
+        collect_7tv_set(&sample_7tv_wide(), &mut map, false);
+        let def = map.get("wideEmote").expect("emote");
+        assert_eq!(def.display_width, Some(56));
+        assert_eq!(def.display_height, Some(28));
+    }
+
+    #[test]
+    fn seventv_display_size_prefers_webp_over_avif_name() {
+        let item = serde_json::json!({
+            "name": "mix",
+            "data": {
+                "id": "mix",
+                "host": {
+                    "url": "//cdn.7tv.app/emote/mix",
+                    "files": [
+                        {"name": "1x.avif", "format": "AVIF", "width": 10, "height": 10},
+                        {"name": "1x.webp", "format": "WEBP", "width": 56, "height": 28}
+                    ]
+                }
+            }
+        });
+        let (_, def) = parse_active_emote(&item, false).expect("parsed");
+        assert_eq!(def.display_width, Some(56));
+        assert_eq!(def.display_height, Some(28));
+    }
+
+    #[test]
+    fn seventv_display_size_missing_dims_is_none() {
+        let item = serde_json::json!({
+            "name": "nodim",
+            "data": {
+                "id": "nodim",
+                "host": {
+                    "url": "//cdn.7tv.app/emote/nodim",
+                    "files": [{"name": "1x.webp", "format": "WEBP"}]
+                }
+            }
+        });
+        let (_, def) = parse_active_emote(&item, false).expect("parsed");
+        assert_eq!(def.display_width, None);
+        assert_eq!(def.display_height, None);
     }
 
     #[test]

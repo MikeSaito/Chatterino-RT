@@ -105,6 +105,8 @@ pub fn attach_emoji(text: &str, existing: &[EmoteSpan], set: &str) -> Vec<EmoteS
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         });
     }
     extra
@@ -222,6 +224,8 @@ mod tests {
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }];
         let extra = attach_emoji("😀 rest", &twitch, "Twitter");
         assert!(extra.is_empty());

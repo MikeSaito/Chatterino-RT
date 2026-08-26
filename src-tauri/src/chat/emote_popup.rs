@@ -432,6 +432,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         cat.insert_global(
@@ -441,6 +443,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: "https://example/pog".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         let mut ch = std::collections::HashMap::new();
@@ -451,6 +455,8 @@ mod tests {
                 provider: "bttv".into(),
                 url: "https://cdn.betterttv.net/emote/1/1x".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         ch.insert(
@@ -460,6 +466,8 @@ mod tests {
                 provider: "twitch".into(),
                 url: "https://example/sub".into(),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
         cat.replace_channel("xqc".into(), ch);

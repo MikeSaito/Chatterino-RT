@@ -67,6 +67,7 @@ import { formatFullCopyText } from "../shell/copyFormat";
 import {
   clipNick,
   collapseWrapLines,
+  emoteDisplaySize,
   indexToLineCol,
   lineColToIndex,
   renderWrapped,
@@ -500,7 +501,7 @@ export class MessageRing {
       this.textures.acquire(key);
       void this.textures.load(key, badge.url, false).then((tex) => {
         if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key) {
-          applySpriteTexture(spr, tex, this.badgeSize);
+          applySpriteTexture(spr, tex, this.badgeSize, this.badgeSize);
         }
       });
     }
@@ -887,7 +888,6 @@ export class MessageRing {
     // Zoom changes fontSize without atlas rebuild; BitmapText skips GPU update
     // unless forced — nicks vanish and column gaps drift from stale glyphs.
     this.applyFontStylesToSlots(true);
-    const emoteSize = this.emotePixelSize();
     for (const slot of this.slots) {
       if (slot.msgId && slot.timestampMs) {
         slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
@@ -895,12 +895,15 @@ export class MessageRing {
       for (const spr of slot.badges) {
         spr.y = (this.lineHeight - this.badgeSize) / 2;
         if (spr.visible && spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, this.badgeSize);
+          applySpriteTexture(spr, spr.texture, this.badgeSize, this.badgeSize);
         }
       }
-      for (const spr of slot.emotes) {
-        if (spr.visible && spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, emoteSize);
+      for (let e = 0; e < slot.emotes.length; e += 1) {
+        const spr = slot.emotes[e];
+        const span = slot.spansRaw[e];
+        if (spr.visible && spr.texture !== Texture.EMPTY && span) {
+          const paint = this.emotePaintSize(span);
+          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
         }
       }
     }
@@ -1751,7 +1754,8 @@ export class MessageRing {
             slot.emoteKeys[i] === key &&
             this.animateEmotes === wantAnimate
           ) {
-            applySpriteTexture(spr, tex, this.emotePixelSize());
+            const paint = this.emotePaintSize(span);
+            applySpriteTexture(spr, tex, paint.w, paint.h);
           }
         });
       }
@@ -2072,7 +2076,6 @@ export class MessageRing {
     let prevY = 0;
     let hasPrev = false;
     let bitsLabelShown = false;
-    const emoteSize = this.emotePixelSize();
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
@@ -2080,13 +2083,14 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
+      const paint = this.emotePaintSize(span);
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       if (zw && hasPrev) {
         spr.visible = true;
         spr.x = prevX;
         spr.y = prevY;
         if (spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, emoteSize);
+          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
         }
         continue;
       }
@@ -2107,9 +2111,9 @@ export class MessageRing {
       spr.y =
         contentY +
         pos.line * this.lineHeight +
-        Math.max(1, (this.lineHeight - emoteSize) / 2);
+        Math.max(1, (this.lineHeight - paint.h) / 2);
       if (spr.texture !== Texture.EMPTY) {
-        applySpriteTexture(spr, spr.texture, emoteSize);
+        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
       }
       prevX = spr.x;
       prevY = spr.y;
@@ -2126,7 +2130,7 @@ export class MessageRing {
           slot.bitsLabel.visible = true;
           slot.bitsLabel.text = ` ${span.bitsAmount}`;
           slot.bitsLabel.tint = tint;
-          slot.bitsLabel.x = spr.x + emoteSize + 2;
+          slot.bitsLabel.x = spr.x + paint.w + 2;
           slot.bitsLabel.y = contentY + pos.line * this.lineHeight;
           bitsLabelShown = true;
         }
@@ -3015,6 +3019,10 @@ export class MessageRing {
     );
   }
 
+  private emotePaintSize(span: EmoteSpan): { w: number; h: number } {
+    return emoteDisplaySize(span, this.emotePixelSize());
+  }
+
   private emoteLoadUrl(span: EmoteSpan): string {
     if (span.provider === "emoji") {
       return resolveEmojiUrl(span.emoteId, this.emojiSet);
@@ -3101,7 +3109,8 @@ export class MessageRing {
             slot.emoteKeys[e] === key &&
             this.animateEmotes === wantAnimate
           ) {
-            applySpriteTexture(spr, tex, this.emotePixelSize());
+            const paint = this.emotePaintSize(span);
+            applySpriteTexture(spr, tex, paint.w, paint.h);
           }
         });
       }
@@ -3109,7 +3118,6 @@ export class MessageRing {
   }
 
   private snapEmotesToFirstFrame(): void {
-    const size = this.emotePixelSize();
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
@@ -3119,9 +3127,11 @@ export class MessageRing {
           continue;
         }
         const spr = slot.emotes[e];
+        const span = slot.spansRaw[e];
         const tex = this.textures.frameAt(key, 0) ?? this.textures.get(key);
-        if (tex && spr.visible) {
-          applySpriteTexture(spr, tex, size);
+        if (tex && spr.visible && span) {
+          const paint = this.emotePaintSize(span);
+          applySpriteTexture(spr, tex, paint.w, paint.h);
         }
       }
     }
@@ -3132,7 +3142,6 @@ export class MessageRing {
       return;
     }
     const pos = this.emoteTicker.position();
-    const size = this.emotePixelSize();
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
@@ -3145,12 +3154,14 @@ export class MessageRing {
           continue;
         }
         const spr = slot.emotes[e];
-        if (!spr.visible) {
+        const span = slot.spansRaw[e];
+        if (!spr.visible || !span) {
           continue;
         }
         const tex = this.textures.frameAt(key, pos);
         if (tex && spr.texture !== tex) {
-          applySpriteTexture(spr, tex, size);
+          const paint = this.emotePaintSize(span);
+          applySpriteTexture(spr, tex, paint.w, paint.h);
         }
       }
     }
@@ -3326,10 +3337,15 @@ function parseHighlight(raw: string): { color: number; alpha: number } | undefin
   return { color, alpha };
 }
 
-function applySpriteTexture(spr: Sprite, tex: Texture, size: number): void {
+function applySpriteTexture(
+  spr: Sprite,
+  tex: Texture,
+  width: number,
+  height: number,
+): void {
   spr.texture = tex;
-  spr.width = size;
-  spr.height = size;
+  spr.width = width;
+  spr.height = height;
 }
 
 export type TooltipHit = {

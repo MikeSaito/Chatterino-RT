@@ -1,6 +1,7 @@
 import {
   clipNick,
   collapseWrapLines,
+  emoteDisplaySize,
   indexToLineCol,
   lineColToIndex,
   renderWrapped,
@@ -455,6 +456,53 @@ if (firstNarrow.length < 2 || firstNarrow[0].end !== 3) {
   throw new Error(
     `firstLineMaxWidthPx 3 expected end=3, got ${JSON.stringify(firstNarrow[0])}`,
   );
+}
+
+const wideText = "test rest";
+const wide7tv = [
+  { start: 0, end: 4, zeroWidth: false, displayWidth: 56, displayHeight: 28 },
+];
+const aspectOpts = { measureAdvance: adv, emoteMinPx: 14, maskEmotes: true } as const;
+const square7tv = [{ start: 0, end: 4, zeroWidth: false }];
+const wide7tvMask = renderWrapped(
+  wideText,
+  wrapBody(wideText, 80, wide7tv, aspectOpts),
+  wide7tv,
+  aspectOpts,
+);
+const squareMask = renderWrapped(
+  wideText,
+  wrapBody(wideText, 80, square7tv, aspectOpts),
+  square7tv,
+  aspectOpts,
+);
+if (wide7tvMask.length !== 33) {
+  throw new Error(`wide 7TV mask should be 33 cols, got ${wide7tvMask.length}`);
+}
+if (squareMask.length !== 19) {
+  throw new Error(`square emote mask should be 19 cols, got ${squareMask.length}`);
+}
+if (wide7tvMask.length <= squareMask.length) {
+  throw new Error("wide 7TV should reserve more wrap width than square");
+}
+
+const squareSize = emoteDisplaySize({}, 18);
+if (squareSize.w !== 18 || squareSize.h !== 18) {
+  throw new Error(`missing aspect should be square 18, got ${JSON.stringify(squareSize)}`);
+}
+const wideSize = emoteDisplaySize({ displayWidth: 56, displayHeight: 28 }, 18);
+if (wideSize.w !== 36 || wideSize.h !== 18) {
+  throw new Error(`56x28 at h=18 should be 36x18, got ${JSON.stringify(wideSize)}`);
+}
+const tallSize = emoteDisplaySize({ displayWidth: 27, displayHeight: 32 }, 18);
+if (tallSize.w !== 15 || tallSize.h !== 18) {
+  throw new Error(`27x32 at h=18 should be 15x18, got ${JSON.stringify(tallSize)}`);
+}
+if (emoteDisplaySize({ displayWidth: 0, displayHeight: 28 }, 18).w !== 18) {
+  throw new Error("zero displayWidth should fall back to square");
+}
+if (emoteDisplaySize({ displayWidth: 56 }, 18).w !== 18) {
+  throw new Error("partial aspect should fall back to square");
 }
 
 console.log("wrap tests ok");

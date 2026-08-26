@@ -7,6 +7,8 @@ export type WrapEmote = {
   start: number;
   end: number;
   zeroWidth?: boolean;
+  displayWidth?: number;
+  displayHeight?: number;
   /** Stacked bits label width reserve (emotes.stackBits). */
   bitsAmount?: number;
 };
@@ -18,6 +20,34 @@ export type WrapRange = {
 
 /** Advance of a text slice in layout pixels (BitmapFont or test stub). */
 export type MeasureAdvance = (slice: string) => number;
+
+/** Author display box from provider (7TV WEBP width/height). */
+export type EmoteAspect = {
+  displayWidth?: number;
+  displayHeight?: number;
+};
+
+/** Paint/wrap size: height = row emote box; width follows author aspect (Chatterino stretch). */
+export function emoteDisplaySize(
+  span: EmoteAspect,
+  emoteMinPx: number,
+): { w: number; h: number } {
+  const min = Math.max(1, emoteMinPx);
+  const dw = span.displayWidth;
+  const dh = span.displayHeight;
+  if (
+    typeof dw === "number" &&
+    typeof dh === "number" &&
+    dw > 0 &&
+    dh > 0
+  ) {
+    return {
+      w: Math.max(1, Math.round((min * dw) / dh)),
+      h: min,
+    };
+  }
+  return { w: min, h: min };
+}
 
 /** Опции переноса: бюджет в px (Chatterino/Twitch proportional wrap). */
 export type WrapOptions = {
@@ -438,8 +468,9 @@ function emoteIdealPx(
 ): number {
   const code = text.slice(span.start, span.end);
   const codeW = Math.max(0, ctx.measureAdvance(code));
+  const emoteW = emoteDisplaySize(span, ctx.emoteMinPx).w;
   let w = ctx.maskEmotes
-    ? Math.max(Math.max(1, ctx.emoteMinPx), codeW)
+    ? Math.max(Math.max(1, emoteW), codeW)
     : Math.max(1, codeW);
   if (span.bitsAmount != null && span.bitsAmount > 0) {
     w += Math.max(0, ctx.measureAdvance(` ${span.bitsAmount}`));

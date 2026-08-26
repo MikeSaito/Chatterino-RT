@@ -550,6 +550,8 @@ pub fn parse_chat_emotes(value: &Value) -> HashMap<String, EmoteDef> {
                 provider: "twitch".into(),
                 url: twitch_emote_url(id),
                 zero_width: false,
+                display_width: None,
+                display_height: None,
             },
         );
     }

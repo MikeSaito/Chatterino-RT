@@ -83,6 +83,11 @@ pub struct EmoteSpan {
     pub bits_amount: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bits_color: Option<String>,
+    /// 7TV author display width (logical 1x pixels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_width: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_height: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -532,6 +537,8 @@ mod tests {
                 zero_width: false,
                 bits_amount: None,
                 bits_color: None,
+                display_width: None,
+                display_height: None,
             }],
             link_spans: vec![],
             mention_spans: vec![],

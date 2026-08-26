@@ -116,6 +116,8 @@ fn mask_cheer_word(start: u32, end: u32) -> EmoteSpan {
         zero_width: false,
         bits_amount: None,
         bits_color: None,
+        display_width: None,
+        display_height: None,
     }
 }
 
@@ -135,6 +137,8 @@ fn cheer_span(
         zero_width: false,
         bits_amount,
         bits_color,
+        display_width: None,
+        display_height: None,
     }
 }
 
@@ -288,6 +292,8 @@ mod tests {
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }];
         let extra = attach_cheers("Kappa Cheer1", &twitch, &cat_with_cheer(), "xqc", 1, true);
         assert_eq!(extra.len(), 1);
@@ -313,6 +319,8 @@ mod tests {
             zero_width: false,
             bits_amount: None,
             bits_color: None,
+            display_width: None,
+            display_height: None,
         }];
         let extra = attach_cheers("Kappa Cheer1", &twitch, &cat_with_cheer(), "xqc", 1, false);
         assert_eq!(extra.len(), 1);
