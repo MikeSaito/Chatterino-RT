@@ -324,34 +324,42 @@ type CdnImageBytes = {
   contentType: string | null;
 };
 
-function isFetchBlocked(err: unknown): boolean {
-  if (err instanceof TypeError) {
-    return true;
-  }
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    return msg.includes("failed to fetch") || msg.includes("networkerror");
-  }
-  return false;
-}
-
 async function fetchEmoteBytes(
   url: string,
 ): Promise<{ buf: ArrayBuffer; mime: string }> {
+  let fetchErr: unknown;
   try {
     const res = await fetch(url, { mode: "cors", credentials: "omit" });
-    if (!res.ok) {
+    if (!res.ok || res.status === 206) {
       throw new Error(`HTTP ${res.status}`);
     }
     const buf = await res.arrayBuffer();
-    return { buf, mime: sniffMime(res.headers.get("content-type"), url) };
-  } catch (err) {
-    if (!isFetchBlocked(err)) {
-      throw err;
+    if (buf.byteLength === 0) {
+      throw new Error("empty body");
     }
+    const mime = sniffMime(res.headers.get("content-type"), url, buf);
+    return { buf, mime };
+  } catch (err) {
+    fetchErr = err;
+  }
+  try {
     const data = await invoke<CdnImageBytes>("fetch_emote_cdn", { url });
+    if (!data.bytes?.length) {
+      throw new Error("empty cdn body");
+    }
     const buf = Uint8Array.from(data.bytes).buffer;
-    return { buf, mime: sniffMime(data.contentType, url) };
+    const mime = sniffMime(data.contentType, url, buf);
+    return { buf, mime };
+  } catch (invokeErr) {
+    throw invokeErr ?? fetchErr;
+  }
+}
+
+async function bytesToBitmap(buf: ArrayBuffer, mime: string): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(new Blob([buf], { type: mime }));
+  } catch {
+    return await createImageBitmap(new Blob([buf]));
   }
 }
 
@@ -367,7 +375,7 @@ async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrame
           return decoded;
         }
       }
-      const bitmap = await createImageBitmap(new Blob([buf], { type: mime }));
+      const bitmap = await bytesToBitmap(buf, mime);
       const tex = Texture.from(bitmap);
       return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
@@ -428,11 +436,32 @@ async function decodeAnimated(
   }
 }
 
-function sniffMime(header: string | null, url: string): string {
+function sniffMime(header: string | null, url: string, buf?: ArrayBuffer): string {
   if (header && header !== "application/octet-stream") {
     const base = header.split(";")[0]?.trim();
     if (base) {
       return base;
+    }
+  }
+  if (buf && buf.byteLength >= 12) {
+    const u8 = new Uint8Array(buf);
+    if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) {
+      return "image/png";
+    }
+    if (u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46) {
+      return "image/gif";
+    }
+    if (
+      u8[0] === 0x52 &&
+      u8[1] === 0x49 &&
+      u8[2] === 0x46 &&
+      u8[3] === 0x46 &&
+      u8[8] === 0x57 &&
+      u8[9] === 0x45 &&
+      u8[10] === 0x42 &&
+      u8[11] === 0x50
+    ) {
+      return "image/webp";
     }
   }
   const lower = url.toLowerCase();
@@ -441,6 +470,9 @@ function sniffMime(header: string | null, url: string): string {
   }
   if (lower.endsWith(".webp") || lower.includes(".webp?")) {
     return "image/webp";
+  }
+  if (lower.endsWith(".avif") || lower.includes(".avif?")) {
+    return "image/avif";
   }
   if (lower.endsWith(".png") || lower.includes(".png?")) {
     return "image/png";

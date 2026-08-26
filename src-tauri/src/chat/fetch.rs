@@ -657,7 +657,7 @@ pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), Str
                 let status = resp.status();
                 if status.is_redirection() {
                     last = format!("http {status} (redirects not followed)");
-                } else if status.is_success() {
+                } else if status == reqwest::StatusCode::OK {
                     let content_type = resp
                         .headers()
                         .get(reqwest::header::CONTENT_TYPE)

@@ -477,6 +477,14 @@ export class MessageRing {
     );
   }
 
+  /** Reposition badge/emote sprites after async CDN texture load. */
+  private repaintSlotMedia(slot: Slot): void {
+    if (!this.ready || !slot.msgId || !slot.root.visible) {
+      return;
+    }
+    this.paintClip(slot);
+  }
+
   private loadBadgeSprites(slot: Slot): void {
     for (const key of slot.badgeKeys) {
       if (key) {
@@ -502,6 +510,7 @@ export class MessageRing {
       void this.textures.load(key, badge.url, false).then((tex) => {
         if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key) {
           applySpriteTexture(spr, tex, this.badgeSize, this.badgeSize);
+          this.repaintSlotMedia(slot);
         }
       });
     }
@@ -1756,6 +1765,7 @@ export class MessageRing {
           ) {
             const paint = this.emotePaintSize(span);
             applySpriteTexture(spr, tex, paint.w, paint.h);
+            this.repaintSlotMedia(slot);
           }
         });
       }
@@ -3111,6 +3121,7 @@ export class MessageRing {
           ) {
             const paint = this.emotePaintSize(span);
             applySpriteTexture(spr, tex, paint.w, paint.h);
+            this.repaintSlotMedia(slot);
           }
         });
       }
