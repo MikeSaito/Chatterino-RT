@@ -2,6 +2,7 @@ import {
   BitmapFont,
   BitmapFontManager,
   BitmapText,
+  Cache,
   Container,
   FederatedPointerEvent,
   Graphics,
@@ -1032,8 +1033,7 @@ export class MessageRing {
 
   private reinstallChatFont(): void {
     const atlasSize = atlasFontSize(this.chatFontSize);
-    BitmapFont.uninstall("ChatFont");
-    BitmapFont.install({
+    replaceBitmapFont("ChatFont", {
       name: "ChatFont",
       style: {
         fontFamily: this.chatFontFamily,
@@ -1053,8 +1053,7 @@ export class MessageRing {
 
   private reinstallNickFont(): void {
     const atlasSize = atlasFontSize(this.chatFontSize);
-    BitmapFont.uninstall("ChatNickFont");
-    BitmapFont.install({
+    replaceBitmapFont("ChatNickFont", {
       name: "ChatNickFont",
       style: {
         fontFamily: this.chatFontFamily,
@@ -3137,6 +3136,17 @@ function dirtyBitmapText(bt: BitmapText): void {
   const prev = bt.text;
   bt.text = prev.length > 0 ? "" : " ";
   bt.text = prev;
+}
+
+/** Pixi Cache.get warns if the key is missing; uninstall always gets first. */
+function replaceBitmapFont(
+  name: string,
+  options: Parameters<typeof BitmapFont.install>[0],
+): void {
+  if (Cache.has(`${name}-bitmap`)) {
+    BitmapFont.uninstall(name);
+  }
+  BitmapFont.install(options);
 }
 
 function eventLogin(event: ChatEvent): string {

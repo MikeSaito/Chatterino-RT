@@ -94,6 +94,10 @@ window.addEventListener("beforeunload", () => {
   teardownChat?.();
   teardownChat = null;
 });
+window.addEventListener("pagehide", () => {
+  teardownChat?.();
+  teardownChat = null;
+});
 
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
