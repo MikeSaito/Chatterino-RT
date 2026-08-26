@@ -1,8 +1,11 @@
 import {
   atlasFontSize,
+  chatTextRowHeight,
   clampChatFontSize,
   clampChatFontWeight,
   cssFontFamily,
+  defaultChatLineHeight,
+  LINE_HEIGHT_MIN_RATIO,
   measureFontMetrics,
   qtWeightToCss,
   qtWeightToPixi,
@@ -37,9 +40,48 @@ assert(cssFontFamily("monospace") === "monospace", "generic unquoted");
 assert(atlasFontSize(10) === 40, `atlas 10*4=40, got ${atlasFontSize(10)}`);
 assert(atlasFontSize(14) === 56, `atlas 14*4=56, got ${atlasFontSize(14)}`);
 
+assert(chatTextRowHeight(15) === 22, "Chatterino 15→22");
+assert(defaultChatLineHeight(15) === 24, `default 15px row is 24, got ${defaultChatLineHeight(15)}`);
+assert(
+  defaultChatLineHeight(10) === Math.ceil(10 * LINE_HEIGHT_MIN_RATIO) + 2,
+  "size 10 fallback",
+);
+
 const m = measureFontMetrics("monospace", 400, 15);
 assert(m.charWidth > 0, "charWidth positive");
-assert(m.lineHeight >= 15, `lineHeight >= size, got ${m.lineHeight}`);
+assert(m.lineHeight >= defaultChatLineHeight(15), `lineHeight >= fallback, got ${m.lineHeight}`);
+assert(m.lineHeight > 15, "row taller than font size");
+
+const prevDocument = globalThis.document;
+const fakeMetrics = {
+  width: 9,
+  fontBoundingBoxAscent: 18,
+  fontBoundingBoxDescent: 5,
+  actualBoundingBoxAscent: 11,
+  actualBoundingBoxDescent: 3,
+};
+globalThis.document = {
+  createElement: () => ({
+    getContext: () => ({
+      font: "",
+      measureText: () => fakeMetrics,
+    }),
+  }),
+} as unknown as Document;
+try {
+  const canvasM = measureFontMetrics("Segoe UI", 400, 15);
+  assert(canvasM.charWidth === 9, `canvas width, got ${canvasM.charWidth}`);
+  assert(
+    canvasM.lineHeight === 25,
+    `fontBoundingBox 23 + 2 pad = 25, got ${canvasM.lineHeight}`,
+  );
+} finally {
+  if (prevDocument === undefined) {
+    Reflect.deleteProperty(globalThis, "document");
+  } else {
+    globalThis.document = prevDocument;
+  }
+}
 
 assert(10 * 2 === 20, "size × zoom");
 

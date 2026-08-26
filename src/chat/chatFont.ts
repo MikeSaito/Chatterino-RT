@@ -54,6 +54,10 @@ export type FontMetrics = {
   lineHeight: number;
 };
 
+/** Minimum row height / font size (Chatterino 22px at 15px). Tight actualBoundingBox of "M" clips Й/Ё/g. */
+export const LINE_HEIGHT_MIN_RATIO = 22 / 15;
+const ROW_LEADING_PX = 2;
+
 /** Quote CSS font-family for canvas measure (match Pixi non-generic quoting). */
 export function cssFontFamily(family: string): string {
   return family
@@ -92,7 +96,7 @@ export function measureFontMetrics(
   if (typeof document === "undefined") {
     return {
       charWidth: size * 0.56,
-      lineHeight: Math.max(1, Math.ceil(size * (22 / 15))),
+      lineHeight: defaultChatLineHeight(size),
     };
   }
   const canvas = document.createElement("canvas");
@@ -100,7 +104,7 @@ export function measureFontMetrics(
   if (!ctx) {
     return {
       charWidth: size * 0.56,
-      lineHeight: Math.max(1, Math.ceil(size * (22 / 15))),
+      lineHeight: defaultChatLineHeight(size),
     };
   }
   ctx.font = `${cssWeight} ${size}px ${cssFontFamily(family)}`;
@@ -108,17 +112,41 @@ export function measureFontMetrics(
   // Cyrillic chat: "Ш" is often wider than "M"; underestimating columns skips wrap.
   const cyr = ctx.measureText("Ш");
   const charWidth = Math.max(latin.width, cyr.width, size * 0.56);
-  const ascentSample = latin.width >= cyr.width ? latin : cyr;
+  const tall = ctx.measureText("ÉЙЁÅgj|Ш");
+  return { charWidth, lineHeight: lineHeightFromMetrics(size, tall) };
+}
+
+/** Row height without canvas (Chatterino 22px at 15px plus 2px raster pad). */
+export function defaultChatLineHeight(size: number): number {
+  return Math.max(1, Math.ceil(size * LINE_HEIGHT_MIN_RATIO) + ROW_LEADING_PX);
+}
+
+/** Emote box uses the Chatterino text row, not extra leading. */
+export function chatTextRowHeight(size: number): number {
+  return Math.max(1, Math.ceil(size * LINE_HEIGHT_MIN_RATIO));
+}
+
+function metricBox(m: TextMetrics, size: number): number {
+  const fontAscent = m.fontBoundingBoxAscent;
+  const fontDescent = m.fontBoundingBoxDescent;
+  if (typeof fontAscent === "number" && typeof fontDescent === "number") {
+    return fontAscent + fontDescent;
+  }
   const ascent =
-    typeof ascentSample.actualBoundingBoxAscent === "number"
-      ? ascentSample.actualBoundingBoxAscent
+    typeof m.actualBoundingBoxAscent === "number"
+      ? m.actualBoundingBoxAscent
       : size * 0.8;
   const descent =
-    typeof ascentSample.actualBoundingBoxDescent === "number"
-      ? ascentSample.actualBoundingBoxDescent
+    typeof m.actualBoundingBoxDescent === "number"
+      ? m.actualBoundingBoxDescent
       : size * 0.2;
-  const lineHeight = Math.max(1, Math.ceil(ascent + descent + size * 0.15));
-  return { charWidth, lineHeight };
+  return ascent + descent;
+}
+
+function lineHeightFromMetrics(size: number, m: TextMetrics): number {
+  const floor = Math.ceil(size * LINE_HEIGHT_MIN_RATIO);
+  const box = Math.ceil(metricBox(m, size));
+  return Math.max(1, Math.max(floor, box) + ROW_LEADING_PX);
 }
 
 /** Canvas advance for an arbitrary string (column widths; not M-grid). */

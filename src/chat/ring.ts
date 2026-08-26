@@ -40,8 +40,10 @@ import {
 } from "./scroll";
 import {
   atlasFontSize,
+  chatTextRowHeight,
   clampChatFontSize,
   clampChatFontWeight,
+  defaultChatLineHeight,
   measureFontMetrics,
   measureTextWidth,
   qtWeightToCss,
@@ -217,7 +219,7 @@ export class MessageRing {
   private fontScale = 1;
   private atlasDesignSize = 0;
   private fontSize = 10;
-  private lineHeight = Math.ceil(10 * (22 / 15));
+  private lineHeight = defaultChatLineHeight(10);
   private charWidth = 10 * 0.56;
   private badgeSize = BADGE_SIZE;
   private emoteScale = 1;
@@ -996,8 +998,10 @@ export class MessageRing {
   private applyFontStylesToSlots(forceDirty: boolean): void {
     for (const slot of this.slots) {
       slot.time.style.fontSize = this.fontSize;
+      slot.time.style.lineHeight = this.lineHeight;
       slot.nick.style.fontFamily = "ChatNickFont";
       slot.nick.style.fontSize = this.fontSize;
+      slot.nick.style.lineHeight = this.lineHeight;
       slot.body.style.fontSize = this.fontSize;
       slot.body.style.lineHeight = this.lineHeight;
       slot.bodyCont.style.fontSize = this.fontSize;
@@ -1009,11 +1013,14 @@ export class MessageRing {
       slot.replyHeader.style.fill = this.themeFills.timestamp;
       for (const mt of slot.mentionTexts) {
         mt.style.fontSize = this.fontSize;
+        mt.style.lineHeight = this.lineHeight;
       }
       for (const mt of slot.modBtns) {
         mt.style.fontSize = this.fontSize;
+        mt.style.lineHeight = this.lineHeight;
       }
       slot.bitsLabel.style.fontSize = this.fontSize;
+      slot.bitsLabel.style.lineHeight = this.lineHeight;
       if (forceDirty) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
@@ -1172,6 +1179,7 @@ export class MessageRing {
         style: {
           fontFamily: "ChatFont",
           fontSize: this.fontSize,
+          lineHeight: this.lineHeight,
           fill: this.themeFills.timestamp,
         },
       });
@@ -1180,6 +1188,7 @@ export class MessageRing {
         style: {
           fontFamily: "ChatNickFont",
           fontSize: this.fontSize,
+          lineHeight: this.lineHeight,
           fill: 0xffffff,
         },
       });
@@ -1229,6 +1238,7 @@ export class MessageRing {
           style: {
             fontFamily: "ChatFont",
             fontSize: this.fontSize,
+            lineHeight: this.lineHeight,
             fill: 0xffffff,
           },
         });
@@ -1241,6 +1251,7 @@ export class MessageRing {
         style: {
           fontFamily: "ChatFont",
           fontSize: this.fontSize,
+          lineHeight: this.lineHeight,
           fill: 0x9c34ff,
         },
       });
@@ -1261,6 +1272,7 @@ export class MessageRing {
           style: {
             fontFamily: "ChatFont",
             fontSize: this.fontSize,
+            lineHeight: this.lineHeight,
             fill: 0xffaa88,
           },
         });
@@ -1914,8 +1926,7 @@ export class MessageRing {
     }
     for (const mt of slot.modBtns) {
       if (mt.visible) {
-        mt.y =
-          contentY + Math.max(0, (this.lineHeight - this.fontSize) / 2 - 1);
+        mt.y = contentY;
       }
     }
     slot.time.x = gutterW;
@@ -2091,7 +2102,10 @@ export class MessageRing {
       spr.visible = true;
       spr.x =
         wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-      spr.y = contentY + 1 + pos.line * this.lineHeight;
+      spr.y =
+        contentY +
+        pos.line * this.lineHeight +
+        Math.max(1, (this.lineHeight - emoteSize) / 2);
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, emoteSize);
       }
@@ -2111,7 +2125,7 @@ export class MessageRing {
           slot.bitsLabel.text = ` ${span.bitsAmount}`;
           slot.bitsLabel.tint = tint;
           slot.bitsLabel.x = spr.x + emoteSize + 2;
-          slot.bitsLabel.y = spr.y;
+          slot.bitsLabel.y = contentY + pos.line * this.lineHeight;
           bitsLabelShown = true;
         }
       }
@@ -2620,7 +2634,7 @@ export class MessageRing {
       mt.text = action.label;
       mt.visible = true;
       mt.x = x + padX;
-      mt.y = Math.max(0, (this.lineHeight - this.fontSize) / 2 - 1);
+      mt.y = 0;
       const labelW = measureTextWidth(
         this.chatFontFamily,
         qtWeightToCss(this.chatFontWeight),
@@ -2970,7 +2984,10 @@ export class MessageRing {
   }
 
   private emotePixelSize(): number {
-    return Math.max(1, Math.round((this.lineHeight - 4) * this.emoteScale));
+    return Math.max(
+      1,
+      Math.round((chatTextRowHeight(this.fontSize) - 4) * this.emoteScale),
+    );
   }
 
   private emoteLoadUrl(span: EmoteSpan): string {
