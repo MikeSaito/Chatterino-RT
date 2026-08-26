@@ -1,3 +1,6 @@
+//! Chatterino RT — часть API намеренно зарезервирована под parity с Chatterino.
+#![allow(dead_code)]
+
 mod chat;
 mod security;
 

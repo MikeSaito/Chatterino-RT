@@ -246,9 +246,8 @@ pub struct CustomCommandInvoke {
     pub copy_text: Option<String>,
     #[serde(default)]
     pub input_text: Option<String>,
-    #[allow(non_snake_case)]
-    #[serde(default)]
-    pub replyToId: Option<String>,
+    #[serde(default, rename = "replyToId")]
+    pub reply_to_id: Option<String>,
 }
 
 #[tauri::command]
@@ -279,10 +278,10 @@ pub async fn chat_exec_custom_command(
         message_text: messageText,
         copy_text: copyText,
         input_text: inputText,
-        replyToId,
+        reply_to_id: replyToId,
     };
     let reply_to = match invoke
-        .replyToId
+        .reply_to_id
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())

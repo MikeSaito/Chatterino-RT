@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use super::filters::{blacklist_rules_from_settings, login_is_blacklisted, BlacklistRule};
+use super::filters::{login_is_blacklisted, BlacklistRule};
 use super::settings::{self, HighlightBlacklistRow};
 use super::state::Shared;
 

@@ -43,7 +43,7 @@ impl Expression {
                 case_insensitive: *case_insensitive,
             },
             Self::List(items) => {
-                let mut vals: Vec<FilterValue> = items.iter().map(|e| e.execute(ctx)).collect();
+                let vals: Vec<FilterValue> = items.iter().map(|e| e.execute(ctx)).collect();
                 let all_strings = vals.iter().all(|v| matches!(v, FilterValue::String(_)));
                 if all_strings {
                     FilterValue::StringList(
@@ -553,7 +553,7 @@ impl FilterParser {
             }
             TokenType::String => {
                 let raw = self.tokenizer.next();
-                let mut val = raw[1..raw.len() - 1].replace("\\\"", "\"");
+                let val = raw[1..raw.len() - 1].replace("\\\"", "\"");
                 Expression::Value {
                     value: FilterValue::String(val.clone()),
                     kind: TokenType::String,

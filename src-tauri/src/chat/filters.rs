@@ -1029,7 +1029,7 @@ fn patch_emote_spans(
     spans: &mut Vec<EmoteSpan>,
     full: &str,
     byte_start: usize,
-    byte_end: usize,
+    _byte_end: usize,
     matched: &str,
     replacement: &str,
 ) {
