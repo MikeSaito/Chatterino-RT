@@ -702,6 +702,33 @@ pub async fn auth_remove(
 }
 
 #[tauri::command]
+pub fn chat_emote_popup_list(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    tab: super::emote_popup::EmotePopupTab,
+    query: String,
+) -> Result<Vec<super::emote_popup::EmotePopupItem>, ApiError> {
+    let login = if channel.trim().is_empty() {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.active.clone().unwrap_or_default()
+    } else {
+        normalize_channel(&channel)?
+    };
+    super::emote_popup::list(state.inner(), &login, tab, &query)
+}
+
+#[tauri::command]
+pub fn chat_toggle_favourite_emote(
+    state: tauri::State<'_, Shared>,
+    code: String,
+    #[allow(non_snake_case)]
+    isEmoji: bool,
+    add: bool,
+) -> Result<(), ApiError> {
+    super::emote_popup::toggle_favourite(state.inner(), &code, isEmoji, add)
+}
+
+#[tauri::command]
 pub fn chat_complete(
     state: tauri::State<'_, Shared>,
     token: String,

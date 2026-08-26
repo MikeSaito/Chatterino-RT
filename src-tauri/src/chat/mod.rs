@@ -13,6 +13,7 @@ pub mod complete;
 pub mod constants;
 pub mod cheers;
 pub mod emoji;
+pub mod emote_popup;
 pub mod emotes;
 pub mod eventapi;
 pub mod filter_lang;

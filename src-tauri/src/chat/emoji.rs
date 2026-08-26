@@ -110,7 +110,7 @@ pub fn attach_emoji(text: &str, existing: &[EmoteSpan], set: &str) -> Vec<EmoteS
     extra
 }
 
-fn unified_code(emoji: &str) -> String {
+pub(crate) fn unified_code(emoji: &str) -> String {
     let mut out = String::new();
     for c in emoji.chars() {
         if !out.is_empty() {

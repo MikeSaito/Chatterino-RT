@@ -4,16 +4,14 @@ mod security;
 use chat::commands::{
     about_info, auth_import, auth_logout, auth_remove, auth_select, auth_start, auth_status,
     cache_clear, cache_info, cache_pick_directory, chat_blocked_users, chat_complete,
-    chat_exec_custom_command, chat_join, chat_leave, chat_part, chat_search, chat_send,
-    chat_set_user_blocked, chat_set_user_ignore_highlights, chat_snapshot, chat_subscribe,
-    chat_user_blocked, chat_user_followers, chat_user_ignore_highlights, chat_user_profile,
-    chat_user_pronouns, chat_user_notes, chat_user_subage, chat_set_user_notes, chat_viewer_role,
-    filters_get,
-    filters_set, highlight_cancel_attention,
-    highlight_request_attention, highlight_sound_pick, highlight_sound_read, image_upload,
-    logging_pick_directory, open_chat_link, open_in_custom_player, open_in_streamlink,
-    open_settings_directory, session_get, settings_get, settings_set, streamer_mode_detect,
-    supports_incognito_links,
+    chat_emote_popup_list, chat_exec_custom_command, chat_join, chat_leave, chat_part, chat_search,
+    chat_send, chat_set_user_blocked, chat_set_user_ignore_highlights, chat_snapshot, chat_subscribe,
+    chat_toggle_favourite_emote, chat_user_blocked, chat_user_followers, chat_user_ignore_highlights,
+    chat_user_profile, chat_user_pronouns, chat_user_notes, chat_user_subage, chat_set_user_notes,
+    chat_viewer_role, filters_get, filters_set, highlight_cancel_attention, highlight_request_attention,
+    highlight_sound_pick, highlight_sound_read, image_upload, logging_pick_directory, open_chat_link,
+    open_in_custom_player, open_in_streamlink, open_settings_directory, session_get, settings_get,
+    settings_set, streamer_mode_detect, supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -50,6 +48,8 @@ pub fn run() {
             chat_send,
             chat_exec_custom_command,
             chat_complete,
+            chat_emote_popup_list,
+            chat_toggle_favourite_emote,
             chat_search,
             chat_user_profile,
             chat_user_followers,

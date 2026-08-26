@@ -223,13 +223,20 @@
     </div>
     <div id="emotepopup-modal" hidden>
       <div id="emotepopup-backdrop"></div>
-      <div id="emotepopup-dialog" role="dialog" aria-modal="true" aria-label="Emotes">
+      <div id="emotepopup-dialog" role="dialog" aria-modal="true" aria-labelledby="emotepopup-title">
         <header class="popup-head">
-          <h2>Emotes</h2>
+          <h2 id="emotepopup-title">Emotes</h2>
           <button type="button" id="emotepopup-close" title="Close">×</button>
         </header>
+        <div class="emotepopup-tabs" role="tablist">
+          <button type="button" class="emotepopup-tab" data-tab="favourite" role="tab" aria-selected="false">Favourite</button>
+          <button type="button" class="emotepopup-tab is-active" data-tab="subs" role="tab" aria-selected="true">Subs</button>
+          <button type="button" class="emotepopup-tab" data-tab="channel" role="tab" aria-selected="false">Channel</button>
+          <button type="button" class="emotepopup-tab" data-tab="global" role="tab" aria-selected="false">Global</button>
+          <button type="button" class="emotepopup-tab" data-tab="emojis" role="tab" aria-selected="false">Emojis</button>
+        </div>
         <input id="emotepopup-search" type="search" placeholder="Search emotes" autocomplete="off" spellcheck="false" />
-        <div id="emotepopup-view"></div>
+        <div id="emotepopup-view" role="tabpanel"></div>
       </div>
     </div>
     <div id="search-modal" hidden>

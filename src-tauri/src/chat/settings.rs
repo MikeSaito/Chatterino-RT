@@ -32,6 +32,11 @@ const HOTKEY_ACTIONS: &[&str] = &[
     "zoomReset",
 ];
 
+fn dedup_preserve(list: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|s| seen.insert(s.clone()));
+}
+
 fn default_scale() -> f64 {
     DEFAULT_SCALE
 }
@@ -226,6 +231,10 @@ pub struct AppSettings {
     pub log_channels: Vec<ChannelRow>,
     #[serde(default)]
     pub notify_channels: Vec<ChannelRow>,
+    #[serde(default)]
+    pub favourite_emotes: Vec<String>,
+    #[serde(default)]
+    pub favourite_emojis: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -249,6 +258,8 @@ impl Default for AppSettings {
             mod_actions: Vec::new(),
             log_channels: Vec::new(),
             notify_channels: Vec::new(),
+            favourite_emotes: Vec::new(),
+            favourite_emojis: Vec::new(),
         }
     }
 }
@@ -390,6 +401,49 @@ pub fn mutate_highlight_blacklist(
     if let Ok(mut slot) = shared.highlight_blacklist.lock() {
         *slot = blacklist;
     }
+    Ok(())
+}
+
+/// Patch favourite emote/emoji lists and persist settings.json.
+pub fn mutate_favourites(
+    shared: &Shared,
+    mutator: impl FnOnce(&mut Vec<String>, &mut Vec<String>) -> Result<(), String>,
+) -> Result<(), ApiError> {
+    let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
+    if inner.path.as_os_str().is_empty() {
+        return Err(ApiError::internal("settings path unset"));
+    }
+    let mut next = inner.data.clone();
+    mutator(&mut next.favourite_emotes, &mut next.favourite_emojis)
+        .map_err(|message| ApiError::internal(&message))?;
+    if next.favourite_emotes.len() > MAX_TABLE_ROWS || next.favourite_emojis.len() > MAX_TABLE_ROWS {
+        return Err(ApiError::invalid("favourites limit reached"));
+    }
+    for s in &mut next.favourite_emotes {
+        *s = s.trim().to_string();
+        if s.len() > MAX_CELL
+            || s.chars()
+                .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+        {
+            return Err(ApiError::invalid("favourite emote invalid"));
+        }
+    }
+    next.favourite_emotes.retain(|s| !s.is_empty());
+    dedup_preserve(&mut next.favourite_emotes);
+    for s in &mut next.favourite_emojis {
+        *s = s.trim().to_string();
+        if s.len() > MAX_CELL
+            || s.chars()
+                .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+        {
+            return Err(ApiError::invalid("favourite emoji invalid"));
+        }
+    }
+    next.favourite_emojis.retain(|s| !s.is_empty());
+    dedup_preserve(&mut next.favourite_emojis);
+    save_file(&inner.path, &next).map_err(|e| ApiError::internal(&e))?;
+    inner.data.favourite_emotes = next.favourite_emotes;
+    inner.data.favourite_emojis = next.favourite_emojis;
     Ok(())
 }
 
@@ -648,6 +702,8 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         || raw.mod_actions.len() > MAX_TABLE_ROWS
         || raw.log_channels.len() > MAX_TABLE_ROWS
         || raw.notify_channels.len() > MAX_TABLE_ROWS
+        || raw.favourite_emotes.len() > MAX_TABLE_ROWS
+        || raw.favourite_emojis.len() > MAX_TABLE_ROWS
     {
         return Err(ApiError::invalid("слишком много строк таблицы"));
     }
@@ -719,6 +775,16 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     for row in &mut raw.notify_channels {
         trim_cell(&mut row.channel)?;
     }
+    for s in &mut raw.favourite_emotes {
+        trim_cell(s)?;
+    }
+    raw.favourite_emotes.retain(|s| !s.is_empty());
+    dedup_preserve(&mut raw.favourite_emotes);
+    for s in &mut raw.favourite_emojis {
+        trim_cell(s)?;
+    }
+    raw.favourite_emojis.retain(|s| !s.is_empty());
+    dedup_preserve(&mut raw.favourite_emojis);
 
     if let Some(Value::String(path)) = raw.knobs.get("highlighting.pathHighlightSound") {
         validate_sound_cell(path)?;
@@ -877,6 +943,41 @@ mod tests {
         let snap = snapshot(&shared).unwrap();
         assert_eq!(snap, saved);
         let _ = fs::remove_file(&shared.settings.lock().unwrap().path);
+    }
+
+    #[test]
+    fn sanitize_trims_favourites() {
+        let clean = sanitize(AppSettings {
+            favourite_emotes: vec!["  Kappa  ".into(), "".into()],
+            favourite_emojis: vec![" smile ".into(), "".into()],
+            ..AppSettings::default()
+        })
+        .unwrap();
+        assert_eq!(clean.favourite_emotes, vec!["Kappa".to_string()]);
+        assert_eq!(clean.favourite_emojis, vec!["smile".to_string()]);
+    }
+
+    #[test]
+    fn mutate_favourites_persists() {
+        let shared = Shared::new();
+        let path = std::env::temp_dir().join(format!(
+            "webtv-favs-test-{}.json",
+            std::process::id()
+        ));
+        {
+            let mut inner = shared.settings.lock().unwrap();
+            inner.path = path.clone();
+        }
+        mutate_favourites(&shared, |emotes, emojis| {
+            emotes.push("Kappa".into());
+            emojis.push("smile".into());
+            Ok(())
+        })
+        .unwrap();
+        let snap = snapshot(&shared).unwrap();
+        assert_eq!(snap.favourite_emotes, vec!["Kappa".to_string()]);
+        assert_eq!(snap.favourite_emojis, vec!["smile".to_string()]);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

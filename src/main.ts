@@ -617,6 +617,7 @@ async function boot(): Promise<void> {
   const emotePopup = bindEmotePopup({
     modal: emotepopupModal,
     settingsModal,
+    activeChannel: () => ipc.active(),
     insertEmote: (code) => {
       const start = messageInput.selectionStart ?? messageInput.value.length;
       const end = messageInput.selectionEnd ?? start;

@@ -151,6 +151,17 @@ impl Catalog {
             .or_else(|| self.global.get(code))
     }
 
+    pub fn iter_global(&self) -> impl Iterator<Item = (&String, &EmoteDef)> {
+        self.global.iter()
+    }
+
+    pub fn iter_channel(&self, channel: &str) -> impl Iterator<Item = (&String, &EmoteDef)> + '_ {
+        self.channel
+            .get(channel)
+            .into_iter()
+            .flat_map(|m| m.iter())
+    }
+
     pub fn has_channel(&self, channel: &str) -> bool {
         self.channel.contains_key(channel)
     }
