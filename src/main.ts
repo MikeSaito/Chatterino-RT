@@ -11,6 +11,7 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import {
   bindStreamPreviewTooltip,
   effectiveHeaderKnobs,
@@ -135,6 +136,7 @@ async function boot(): Promise<void> {
   const replythreadModal = document.querySelector<HTMLElement>("#replythread-modal");
   const emotepopupModal = document.querySelector<HTMLElement>("#emotepopup-modal");
   const emoteOpen = document.querySelector<HTMLButtonElement>("#emote-open");
+  const appRoot = document.querySelector<HTMLElement>("#app");
   if (
     !canvas ||
     !pane ||
@@ -172,7 +174,8 @@ async function boot(): Promise<void> {
     !usercardModal ||
     !replythreadModal ||
     !emotepopupModal ||
-    !emoteOpen
+    !emoteOpen ||
+    !appRoot
   ) {
     return;
   }
@@ -386,6 +389,31 @@ async function boot(): Promise<void> {
   } catch {
     supportsIncognito = false;
   }
+  let uiLayout: UiLayout = "Extended";
+  let mountedChannel = "";
+  let readActiveChannel = (): string => "";
+
+  function syncPlayerForLayout(joined: string): void {
+    if (uiLayout === "Classic") {
+      unmountPlayer(playerSlot);
+      mountedChannel = "";
+      return;
+    }
+    const ch = joined.trim();
+    if (!ch) {
+      if (mountedChannel) {
+        unmountPlayer(playerSlot);
+        mountedChannel = "";
+      }
+      return;
+    }
+    if (ch !== mountedChannel) {
+      unmountPlayer(playerSlot);
+      mountPlayer(playerSlot, ch);
+      mountedChannel = ch;
+    }
+  }
+
   const settingsCtl = bindSettingsDialog({
     ring,
     openBtn: settingsOpen,
@@ -487,6 +515,21 @@ async function boot(): Promise<void> {
       emoteTooltipCtl?.refresh();
       repaintChannelTitle();
       streamPreviewCtl?.refresh();
+      uiLayout = parseUiLayout(data.knobs["appearance.uiLayout"]);
+      channels.setShowRecents(uiLayout === "Extended");
+      if (uiLayout === "Classic") {
+        syncPlayerForLayout(readActiveChannel());
+        applyUiLayout(appRoot, uiLayout, {
+          settingsBtn: settingsOpen,
+          channelList: list,
+        });
+      } else {
+        applyUiLayout(appRoot, uiLayout, {
+          settingsBtn: settingsOpen,
+          channelList: list,
+        });
+        syncPlayerForLayout(readActiveChannel());
+      }
     },
   });
   const ipc = bindChatIpc(ring, {
@@ -494,6 +537,7 @@ async function boot(): Promise<void> {
       replyThreadLive?.(events);
     },
   });
+  readActiveChannel = () => ipc.active().trim();
   unbindImageUpload = bindImageUpload({
     input: messageInput,
     getKnobs: () => imageUploadKnobs,
@@ -713,7 +757,6 @@ async function boot(): Promise<void> {
         return false;
     }
   }
-  let mountedChannel = "";
   let holdStatus = false;
   let sending = false;
   let complete: {
@@ -1827,11 +1870,7 @@ async function boot(): Promise<void> {
     ring.setChannelLive(false);
     repaintChannelTitle();
     channelInput.value = joined;
-    if (joined !== mountedChannel) {
-      unmountPlayer(playerSlot);
-      mountPlayer(playerSlot, joined);
-      mountedChannel = joined;
-    }
+    syncPlayerForLayout(joined);
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
     userCard?.syncMod();
@@ -1868,10 +1907,7 @@ async function boot(): Promise<void> {
       } else {
         repaintChannelTitle();
         channelInput.value = "";
-        if (mountedChannel) {
-          unmountPlayer(playerSlot);
-          mountedChannel = "";
-        }
+        syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
       }
@@ -1908,10 +1944,7 @@ async function boot(): Promise<void> {
       if (!next) {
         repaintChannelTitle();
         channelInput.value = "";
-        if (mountedChannel) {
-          unmountPlayer(playerSlot);
-          mountedChannel = "";
-        }
+        syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
         return;

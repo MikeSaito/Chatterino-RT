@@ -654,6 +654,14 @@ const GENERAL_SECTIONS: SectionDef[] = [
     knobs: [
       sel("theme", "appearance.theme", "Theme", THEME_OPTIONS, "Dark"),
       sel(
+        "ui-layout",
+        "appearance.uiLayout",
+        "User interface",
+        [opt("Extended", "Extended"), opt("Classic", "Classic")],
+        "Extended",
+        "layout chrome chatterino tv",
+      ),
+      sel(
         "dark-system-theme",
         "appearance.darkSystemTheme",
         "Dark system theme",

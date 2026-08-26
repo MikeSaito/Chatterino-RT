@@ -5,6 +5,7 @@ export type ChannelList = {
   syncOpen: (open: string[], active: string) => void;
   paint: (active: string) => void;
   joined: () => string[];
+  setShowRecents: (show: boolean) => void;
 };
 
 export function bindChannelList(
@@ -15,14 +16,17 @@ export function bindChannelList(
   const recents: string[] = [];
   const open = new Set<string>();
   let activeLogin = "";
+  let showRecents = true;
 
   const paint = (active: string): void => {
     activeLogin = active;
     list.replaceChildren();
-    const order = [
-      ...[...open].sort((a, b) => a.localeCompare(b)),
-      ...recents.filter((login) => !open.has(login)),
-    ];
+    const order = showRecents
+      ? [
+          ...[...open].sort((a, b) => a.localeCompare(b)),
+          ...recents.filter((login) => !open.has(login)),
+        ]
+      : [...open];
     const seen = new Set<string>();
     for (const login of order) {
       if (seen.has(login)) {
@@ -91,5 +95,9 @@ export function bindChannelList(
     },
     paint,
     joined: () => [...open],
+    setShowRecents(show) {
+      showRecents = show;
+      paint(activeLogin);
+    },
   };
 }
