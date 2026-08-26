@@ -41,9 +41,9 @@ assert(atlasFontSize(10) === 40, `atlas 10*4=40, got ${atlasFontSize(10)}`);
 assert(atlasFontSize(14) === 56, `atlas 14*4=56, got ${atlasFontSize(14)}`);
 
 assert(chatTextRowHeight(15) === 22, "Chatterino 15→22");
-assert(defaultChatLineHeight(15) === 24, `default 15px row is 24, got ${defaultChatLineHeight(15)}`);
+assert(defaultChatLineHeight(15) === 22, `default 15px row is 22, got ${defaultChatLineHeight(15)}`);
 assert(
-  defaultChatLineHeight(10) === Math.ceil(10 * LINE_HEIGHT_MIN_RATIO) + 2,
+  defaultChatLineHeight(10) === Math.ceil(10 * LINE_HEIGHT_MIN_RATIO),
   "size 10 fallback",
 );
 
@@ -72,8 +72,8 @@ try {
   const canvasM = measureFontMetrics("Segoe UI", 400, 15);
   assert(canvasM.charWidth === 9, `canvas width, got ${canvasM.charWidth}`);
   assert(
-    canvasM.lineHeight === 25,
-    `fontBoundingBox 23 + 2 pad = 25, got ${canvasM.lineHeight}`,
+    canvasM.lineHeight === 23,
+    `fontBoundingBox 23, got ${canvasM.lineHeight}`,
   );
 } finally {
   if (prevDocument === undefined) {

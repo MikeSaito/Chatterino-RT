@@ -79,6 +79,8 @@ import {
 
 const TIME_GAP = 8;
 const BADGE_GAP = 2;
+/** Chatterino MessageLayoutContainer MARGIN.top/bottom (once per message). */
+const MESSAGE_GAP = 4;
 /** Soft-clip nick only when it would leave less than this many body columns. */
 const MIN_BODY_COLS_AFTER_NICK = 1;
 
@@ -1114,7 +1116,7 @@ export class MessageRing {
     }
     // Go to message даже если hideModerated скрыл слот в ленте
     this.findHitId = id;
-    this.scroll.setDesired(target.startRow, false);
+    this.scroll.setDesired(this.slotScrollRow(target), false);
     this.afterScrollChange();
     if (prevSlot && prevSlot !== target) {
       this.paintHighlight(prevSlot);
@@ -2348,23 +2350,31 @@ export class MessageRing {
   private layout(anchor?: ScrollAnchor): void {
     const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    let row = 0;
+    const visible: Slot[] = [];
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       const live = slot.msgId.length > 0;
       const show = live && !(this.hideModerated && slot.disabled);
       slot.root.visible = show;
-      if (!show) {
-        continue;
+      if (show) {
+        visible.push(slot);
       }
-      slot.root.y = row * this.lineHeight;
+    }
+    const gapPx = this.messageGapPx();
+    let y = 0;
+    for (let i = 0; i < visible.length; i += 1) {
+      const slot = visible[i];
+      slot.startRow = i;
+      slot.root.y = y;
       this.paintClip(slot);
-      slot.startRow = row;
-      row += slot.lineCount;
+      y += slot.lineCount * this.lineHeight;
+      if (i + 1 < visible.length) {
+        y += gapPx;
+      }
     }
     const viewRows = this.app.screen.height / this.lineHeight;
     this.scroll.applyLayout(
-      row,
+      this.lineHeight > 0 ? y / this.lineHeight : 0,
       viewRows,
       this.laidSlots(),
       resolved,
@@ -2406,6 +2416,7 @@ export class MessageRing {
   private laidSlots(): LaidSlot[] {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     this.laidBuf.length = 0;
+    const shown: Slot[] = [];
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId.length === 0) {
@@ -2414,10 +2425,16 @@ export class MessageRing {
       if (this.hideModerated && slot.disabled) {
         continue;
       }
+      shown.push(slot);
+    }
+    const gapRows =
+      this.lineHeight > 0 ? this.messageGapPx() / this.lineHeight : 0;
+    for (let i = 0; i < shown.length; i += 1) {
+      const slot = shown[i];
       this.laidBuf.push({
         msgId: slot.msgId,
-        startRow: slot.startRow,
-        lineCount: slot.lineCount,
+        startRow: this.slotScrollRow(slot),
+        lineCount: slot.lineCount + (i + 1 < shown.length ? gapRows : 0),
       });
     }
     return this.laidBuf;
@@ -2758,8 +2775,8 @@ export class MessageRing {
     const localX = clientX - rect.left;
     const localY = clientY - rect.top;
     const stageY = this.app.stage.y;
-    const row = Math.floor((localY - stageY) / this.lineHeight);
-    if (row < 0) {
+    const y = localY - stageY;
+    if (y < 0) {
       return null;
     }
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
@@ -2771,12 +2788,12 @@ export class MessageRing {
       if (slot.disabled && this.hideModerated) {
         continue;
       }
-      const y0 = slot.startRow;
-      const y1 = slot.startRow + slot.lineCount;
-      if (row < y0 || row >= y1) {
+      const top = slot.root.y;
+      const h = slot.lineCount * this.lineHeight;
+      if (y < top || y >= top + h) {
         continue;
       }
-      const slotLocalY = localY - stageY - slot.startRow * this.lineHeight;
+      const slotLocalY = y - top;
       const badgeVisible = this.visibleBadges(slot);
       for (let b = 0; b < slot.badges.length; b += 1) {
         const spr = slot.badges[b];
@@ -2951,8 +2968,8 @@ export class MessageRing {
     const rect = canvas.getBoundingClientRect();
     const localY = clientY - rect.top;
     const stageY = this.app.stage.y;
-    const row = Math.floor((localY - stageY) / this.lineHeight);
-    if (row < 0) {
+    const y = localY - stageY;
+    if (y < 0) {
       return null;
     }
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
@@ -2964,14 +2981,14 @@ export class MessageRing {
       if (slot.disabled && this.hideModerated) {
         continue;
       }
-      const y0 = slot.startRow;
-      const y1 = slot.startRow + slot.lineCount;
-      if (row >= y0 && row < y1) {
+      const top = slot.root.y;
+      const h = slot.lineCount * this.lineHeight + this.messageGapPx();
+      if (y >= top && y < top + h) {
         return {
           msgId: slot.msgId,
           login: slot.login,
           text: slot.copyText || slot.bodyRaw,
-          top: rect.top + stageY + slot.startRow * this.lineHeight,
+          top: rect.top + stageY + top,
           right: rect.right - 8,
         };
       }
@@ -2981,6 +2998,14 @@ export class MessageRing {
 
   isReplyButtonEnabled(): boolean {
     return this.showReplyButton;
+  }
+
+  private messageGapPx(): number {
+    return Math.max(2, Math.round(MESSAGE_GAP * this.fontScale));
+  }
+
+  private slotScrollRow(slot: Slot): number {
+    return this.lineHeight > 0 ? slot.root.y / this.lineHeight : 0;
   }
 
   private emotePixelSize(): number {

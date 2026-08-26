@@ -56,7 +56,6 @@ export type FontMetrics = {
 
 /** Minimum row height / font size (Chatterino 22px at 15px). Tight actualBoundingBox of "M" clips Й/Ё/g. */
 export const LINE_HEIGHT_MIN_RATIO = 22 / 15;
-const ROW_LEADING_PX = 2;
 
 /** Quote CSS font-family for canvas measure (match Pixi non-generic quoting). */
 export function cssFontFamily(family: string): string {
@@ -116,12 +115,12 @@ export function measureFontMetrics(
   return { charWidth, lineHeight: lineHeightFromMetrics(size, tall) };
 }
 
-/** Row height without canvas (Chatterino 22px at 15px plus 2px raster pad). */
+/** Wrap row without canvas (Chatterino 22px at 15px). Message gap is separate. */
 export function defaultChatLineHeight(size: number): number {
-  return Math.max(1, Math.ceil(size * LINE_HEIGHT_MIN_RATIO) + ROW_LEADING_PX);
+  return chatTextRowHeight(size);
 }
 
-/** Emote box uses the Chatterino text row, not extra leading. */
+/** Emote box and wrap row: Chatterino text metrics, no per-line pad. */
 export function chatTextRowHeight(size: number): number {
   return Math.max(1, Math.ceil(size * LINE_HEIGHT_MIN_RATIO));
 }
@@ -146,7 +145,7 @@ function metricBox(m: TextMetrics, size: number): number {
 function lineHeightFromMetrics(size: number, m: TextMetrics): number {
   const floor = Math.ceil(size * LINE_HEIGHT_MIN_RATIO);
   const box = Math.ceil(metricBox(m, size));
-  return Math.max(1, Math.max(floor, box) + ROW_LEADING_PX);
+  return Math.max(1, Math.max(floor, box));
 }
 
 /** Canvas advance for an arbitrary string (column widths; not M-grid). */
