@@ -41,11 +41,14 @@ function formatCreatedDate(iso: string): string {
  */
 export function bindUserCard(opts: {
   modal: HTMLElement;
+  notesModal: HTMLElement;
   settingsModal: HTMLElement;
   searchModal: HTMLElement;
   activeChannel: () => string;
   autoClose: () => boolean;
   getHideAvatars: () => boolean;
+  /** streamerMode.hideUserNotes && streamer mode active */
+  getHideUserNotes: () => boolean;
   /** misc.showPronouns */
   getShowPronouns: () => boolean;
   /** misc.openLinksIncognito when private open is supported. */
@@ -54,14 +57,24 @@ export function bindUserCard(opts: {
   getUsercardLimit: () => number;
   getTimeoutButtons: () => TimeoutButton[];
   getSelfLogin: () => string | null;
-}): { open: (info: UserCardOpen) => void; close: () => void; syncAvatars: () => void; syncPronouns: () => void; syncMod: () => void; syncSubage: () => void } {
+}): {
+  open: (info: UserCardOpen) => void;
+  close: () => void;
+  syncAvatars: () => void;
+  syncPronouns: () => void;
+  syncMod: () => void;
+  syncSubage: () => void;
+  syncNotes: () => void;
+} {
   const {
     modal,
+    notesModal,
     settingsModal,
     searchModal,
     activeChannel,
     autoClose,
     getHideAvatars,
+    getHideUserNotes,
     getShowPronouns,
     getOpenPrivate,
     getUsercardLimit,
@@ -100,8 +113,16 @@ export function bindUserCard(opts: {
   const blockCheckbox = modal.querySelector<HTMLInputElement>("#usercard-block");
   const ignoreHighlightsRow = modal.querySelector<HTMLElement>("#usercard-ignore-highlights-row");
   const ignoreHighlightsCheckbox = modal.querySelector<HTMLInputElement>("#usercard-ignore-highlights");
+  const notesPreviewEl = modal.querySelector<HTMLElement>("#usercard-notes-preview");
+  const addNotesBtn = modal.querySelector<HTMLButtonElement>("#usercard-add-notes");
   const statusEl = modal.querySelector<HTMLElement>("#usercard-status");
   const head = modal.querySelector<HTMLElement>(".popup-head");
+  const notesTitle = notesModal.querySelector<HTMLElement>("#notes-title");
+  const notesEditor = notesModal.querySelector<HTMLTextAreaElement>("#notes-editor");
+  const notesOk = notesModal.querySelector<HTMLButtonElement>("#notes-ok");
+  const notesCancel = notesModal.querySelector<HTMLButtonElement>("#notes-cancel");
+  const notesClose = notesModal.querySelector<HTMLButtonElement>("#notes-close");
+  const notesBackdrop = notesModal.querySelector<HTMLElement>("#notes-backdrop");
   if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
     return {
       open: () => undefined,
@@ -110,6 +131,7 @@ export function bindUserCard(opts: {
       syncPronouns: () => undefined,
       syncMod: () => undefined,
       syncSubage: () => undefined,
+      syncNotes: () => undefined,
     };
   }
 
@@ -125,6 +147,9 @@ export function bindUserCard(opts: {
   let ignoreHighlightsBusy = false;
   let suppressIgnoreHighlightsChange = false;
   let subageSeq = 0;
+  let notesSeq = 0;
+  let cachedNotes = "";
+  let notesBusy = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
 
   const clearAvatar = (): void => {
@@ -168,6 +193,9 @@ export function bindUserCard(opts: {
       createdEl.removeAttribute("title");
     }
     hideSubage();
+    hideNotesPreview();
+    cachedNotes = "";
+    setAddNotesEnabled(false);
   };
 
   const hideSubage = (): void => {
@@ -181,6 +209,114 @@ export function bindUserCard(opts: {
       subageEl.textContent = "";
       subageEl.removeAttribute("title");
     }
+  };
+
+  const hideNotesPreview = (): void => {
+    if (notesPreviewEl) {
+      notesPreviewEl.hidden = true;
+      notesPreviewEl.textContent = "";
+    }
+  };
+
+  const setAddNotesEnabled = (enabled: boolean): void => {
+    if (addNotesBtn) {
+      addNotesBtn.disabled = !enabled || notesBusy;
+    }
+  };
+
+  const applyNotesPreview = (notes: string): void => {
+    if (!notesPreviewEl) {
+      return;
+    }
+    const trimmed = notes.trim();
+    if (!trimmed) {
+      hideNotesPreview();
+      return;
+    }
+    if (getHideUserNotes()) {
+      notesPreviewEl.textContent = "Notes hidden in streamer mode.";
+      notesPreviewEl.hidden = false;
+      return;
+    }
+    notesPreviewEl.textContent = notes;
+    notesPreviewEl.hidden = false;
+  };
+
+  const closeNotesDialog = (): void => {
+    if (notesBusy) {
+      return;
+    }
+    notesModal.hidden = true;
+    if (notesEditor) {
+      notesEditor.value = "";
+    }
+  };
+
+  const forceCloseNotesDialog = (): void => {
+    notesModal.hidden = true;
+    if (notesEditor) {
+      notesEditor.value = "";
+    }
+  };
+
+  const setNotesDialogBusy = (busy: boolean): void => {
+    if (notesOk) {
+      notesOk.disabled = busy;
+    }
+    if (notesCancel) {
+      notesCancel.disabled = busy;
+    }
+    if (notesClose) {
+      notesClose.disabled = busy;
+    }
+    if (notesEditor) {
+      notesEditor.readOnly = busy;
+    }
+  };
+
+  const openNotesDialog = (): void => {
+    if (!/^\d+$/.test(currentUserId) || !notesEditor || !notesTitle) {
+      return;
+    }
+    if (!settingsModal.hidden || !searchModal.hidden) {
+      return;
+    }
+    notesTitle.textContent = `Editing notes for ${nameEl.textContent?.trim() || currentLogin || "user"}`;
+    notesEditor.value = cachedNotes;
+    notesModal.hidden = false;
+    notesEditor.focus();
+  };
+
+  const loadNotes = async (userId: string): Promise<void> => {
+    const seq = ++notesSeq;
+    if (!/^\d+$/.test(userId)) {
+      cachedNotes = "";
+      hideNotesPreview();
+      setAddNotesEnabled(false);
+      return;
+    }
+    setAddNotesEnabled(true);
+    try {
+      const result = await invoke<{ notes: string }>("chat_user_notes", { userId });
+      if (seq !== notesSeq || userId !== currentUserId) {
+        return;
+      }
+      cachedNotes = typeof result.notes === "string" ? result.notes : "";
+      applyNotesPreview(cachedNotes);
+    } catch {
+      if (seq !== notesSeq || userId !== currentUserId) {
+        return;
+      }
+      cachedNotes = "";
+      hideNotesPreview();
+    }
+  };
+
+  const syncNotes = (): void => {
+    if (modal.hidden) {
+      return;
+    }
+    applyNotesPreview(cachedNotes);
   };
 
   const setPronounsLabel = (text: string): void => {
@@ -266,6 +402,7 @@ export function bindUserCard(opts: {
     }
     void loadBlockState(login, profile.id);
     void loadIgnoreHighlightsState(login);
+    void loadNotes(profile.id);
   };
 
   const applyProfileAvatar = (profile: UserProfile, login: string): void => {
@@ -650,6 +787,11 @@ export function bindUserCard(opts: {
     hideIgnoreHighlightsRow();
     subageSeq += 1;
     hideSubage();
+    notesSeq += 1;
+    cachedNotes = "";
+    hideNotesPreview();
+    setAddNotesEnabled(false);
+    forceCloseNotesDialog();
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
@@ -760,6 +902,9 @@ export function bindUserCard(opts: {
       }
       showMetaUnavailable();
       clearAvatar();
+      cachedNotes = "";
+      hideNotesPreview();
+      setAddNotesEnabled(false);
       if (blockCheckbox) {
         suppressBlockChange = true;
         blockCheckbox.checked = false;
@@ -811,6 +956,11 @@ export function bindUserCard(opts: {
     currentLogin = info.login.toLowerCase();
     currentUserId = "";
     subageSeq += 1;
+    notesSeq += 1;
+    cachedNotes = "";
+    notesBusy = false;
+    setNotesDialogBusy(false);
+    forceCloseNotesDialog();
     resetBlockUi();
     resetIgnoreHighlightsUi();
     nameEl.textContent = info.nick || info.login;
@@ -1107,7 +1257,74 @@ export function bindUserCard(opts: {
     });
   }
 
+  if (addNotesBtn) {
+    addNotesBtn.addEventListener("click", () => {
+      openNotesDialog();
+    });
+  }
+
+  const saveNotesFromDialog = (): void => {
+    if (notesBusy || !notesEditor || !/^\d+$/.test(currentUserId)) {
+      return;
+    }
+    const userId = currentUserId;
+    const loginAtSave = currentLogin;
+    const nextNotes = notesEditor.value;
+    notesBusy = true;
+    setNotesDialogBusy(true);
+    setAddNotesEnabled(false);
+    void (async () => {
+      try {
+        await invoke("chat_set_user_notes", { userId, notes: nextNotes });
+        if (userId !== currentUserId || loginAtSave !== currentLogin) {
+          return;
+        }
+        forceCloseNotesDialog();
+        await loadNotes(userId);
+      } catch (e) {
+        if (userId !== currentUserId || modal.hidden) {
+          return;
+        }
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Could not save notes.";
+        setStatus(msg);
+      } finally {
+        notesBusy = false;
+        setNotesDialogBusy(false);
+        if (/^\d+$/.test(currentUserId)) {
+          setAddNotesEnabled(true);
+        }
+      }
+    })();
+  };
+
+  if (notesOk) {
+    notesOk.addEventListener("click", () => {
+      saveNotesFromDialog();
+    });
+  }
+  if (notesCancel) {
+    notesCancel.addEventListener("click", () => {
+      closeNotesDialog();
+    });
+  }
+  if (notesClose) {
+    notesClose.addEventListener("click", () => {
+      closeNotesDialog();
+    });
+  }
+  if (notesBackdrop) {
+    notesBackdrop.addEventListener("click", () => {
+      closeNotesDialog();
+    });
+  }
+
   document.addEventListener("pointerdown", (ev) => {
+    if (!notesModal.hidden) {
+      return;
+    }
     if (modal.hidden || pinned || !autoClose()) {
       return;
     }
@@ -1119,11 +1336,26 @@ export function bindUserCard(opts: {
   });
 
   window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !notesModal.hidden) {
+      ev.preventDefault();
+      if (!notesBusy) {
+        closeNotesDialog();
+      }
+      return;
+    }
     if (ev.key === "Escape" && !modal.hidden && !pinned) {
       ev.preventDefault();
       close();
     }
   });
 
-  return { open, close, syncAvatars, syncPronouns, syncMod: refreshModUi, syncSubage };
+  return {
+    open,
+    close,
+    syncAvatars,
+    syncPronouns,
+    syncMod: refreshModUi,
+    syncSubage,
+    syncNotes,
+  };
 }

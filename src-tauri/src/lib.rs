@@ -7,7 +7,8 @@ use chat::commands::{
     chat_exec_custom_command, chat_join, chat_leave, chat_part, chat_search, chat_send,
     chat_set_user_blocked, chat_set_user_ignore_highlights, chat_snapshot, chat_subscribe,
     chat_user_blocked, chat_user_followers, chat_user_ignore_highlights, chat_user_profile,
-    chat_user_pronouns, chat_user_subage, chat_viewer_role, filters_get,
+    chat_user_pronouns, chat_user_notes, chat_user_subage, chat_set_user_notes, chat_viewer_role,
+    filters_get,
     filters_set, highlight_cancel_attention,
     highlight_request_attention, highlight_sound_pick, highlight_sound_read, image_upload,
     logging_pick_directory, open_chat_link, open_in_custom_player, open_in_streamlink,
@@ -29,6 +30,7 @@ pub fn run() {
             chat::filters::init(app.handle(), &shared)?;
             chat::session::init(app.handle(), &shared)?;
             chat::settings::init(app.handle(), &shared)?;
+            chat::user_data::init(&shared)?;
             chat::toast_shortcut::apply_from_settings(&shared);
             chat::eventapi::start(shared.clone())?;
             chat::bttv_live::start(shared.clone())?;
@@ -53,6 +55,8 @@ pub fn run() {
             chat_user_followers,
             chat_user_pronouns,
             chat_user_subage,
+            chat_user_notes,
+            chat_set_user_notes,
             chat_viewer_role,
             chat_blocked_users,
             chat_user_blocked,

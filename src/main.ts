@@ -42,6 +42,7 @@ import {
   webSearchMenuLabel,
 } from "./shell/webSearch";
 import {
+  addStreamerModeOnChange,
   bindStreamerModeBadge,
   isStreamerModeActive,
   streamerModeState,
@@ -125,6 +126,7 @@ async function boot(): Promise<void> {
   const settingsModal = document.querySelector<HTMLElement>("#settings-modal");
   const settingsOpen = document.querySelector<HTMLButtonElement>("#settings-open");
   const searchModal = document.querySelector<HTMLElement>("#search-modal");
+  const notesModal = document.querySelector<HTMLElement>("#notes-modal");
   const usercardModal = document.querySelector<HTMLElement>("#usercard-modal");
   const replythreadModal = document.querySelector<HTMLElement>("#replythread-modal");
   const emotepopupModal = document.querySelector<HTMLElement>("#emotepopup-modal");
@@ -162,6 +164,7 @@ async function boot(): Promise<void> {
     !settingsModal ||
     !settingsOpen ||
     !searchModal ||
+    !notesModal ||
     !usercardModal ||
     !replythreadModal ||
     !emotepopupModal ||
@@ -340,6 +343,7 @@ async function boot(): Promise<void> {
   let autoCloseThreadPopup = false;
   let showPronouns = false;
   let hideUsercardAvatars = true;
+  let hideUserNotes = true;
   let userCard: ReturnType<typeof bindUserCard> | null = null;
   const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
   let replyHover: { msgId: string; login: string; text: string } | null = null;
@@ -393,8 +397,10 @@ async function boot(): Promise<void> {
       showPronouns = data.knobs["misc.showPronouns"] === true;
       hideUsercardAvatars =
         data.knobs["streamerMode.hideUsercardAvatars"] !== false;
+      hideUserNotes = data.knobs["streamerMode.hideUserNotes"] !== false;
       userCard?.syncAvatars();
       userCard?.syncPronouns();
+      userCard?.syncNotes();
       if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
         replyBtn.hidden = true;
         replyHover = null;
@@ -536,16 +542,23 @@ async function boot(): Promise<void> {
   });
   userCard = bindUserCard({
     modal: usercardModal,
+    notesModal,
     settingsModal,
     searchModal,
     activeChannel: () => ipc.active(),
     autoClose: () => autoCloseUserPopup,
     getHideAvatars: () => hideUsercardAvatars && isStreamerModeActive(),
+    getHideUserNotes: () => hideUserNotes && isStreamerModeActive(),
     getShowPronouns: () => showPronouns,
     getOpenPrivate: () => openLinksIncognito,
     getUsercardLimit: () => usercardScrollbackLimit,
     getTimeoutButtons: () => parseTimeoutButtons(timeoutKnobs),
     getSelfLogin: () => lastAuth.login?.trim().toLowerCase() || null,
+  });
+  addStreamerModeOnChange(() => {
+    userCard?.syncAvatars();
+    userCard?.syncNotes();
+    repaintChannelTitle();
   });
   if (replyBtn) {
     canvasHost.addEventListener("pointermove", (ev) => {

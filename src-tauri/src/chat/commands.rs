@@ -1037,6 +1037,41 @@ pub async fn chat_user_subage(
         })
 }
 
+#[tauri::command]
+pub fn chat_user_notes(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)]
+    userId: String,
+) -> Result<super::user_data::UserNotesResult, ApiError> {
+    let notes = super::user_data::get_notes(&state, userId.trim()).map_err(|message| {
+        ApiError {
+            code: "invalid".into(),
+            message,
+        }
+    })?;
+    Ok(super::user_data::UserNotesResult { notes })
+}
+
+#[tauri::command]
+pub fn chat_set_user_notes(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)]
+    userId: String,
+    notes: String,
+) -> Result<(), ApiError> {
+    super::user_data::set_notes(&state, userId.trim(), &notes).map_err(|message| {
+        let code = if message.contains("too long") || message.contains("invalid") {
+            "invalid"
+        } else {
+            "internal"
+        };
+        ApiError {
+            code: code.into(),
+            message,
+        }
+    })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewerRoleDto {

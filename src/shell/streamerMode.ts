@@ -24,6 +24,7 @@ let pollTimer: number | null = null;
 let detectGen = 0;
 let detectInflight = false;
 let onChange: ((state: StreamerModeState) => void) | undefined;
+const onChangeExtras = new Set<(state: StreamerModeState) => void>();
 let badgeEl: HTMLElement | null = null;
 
 export function bindStreamerModeBadge(el: HTMLElement | null): void {
@@ -35,6 +36,16 @@ export function setStreamerModeOnChange(
   cb: ((state: StreamerModeState) => void) | undefined,
 ): void {
   onChange = cb;
+}
+
+/** Additional listener; does not replace `setStreamerModeOnChange`. */
+export function addStreamerModeOnChange(
+  cb: (state: StreamerModeState) => void,
+): () => void {
+  onChangeExtras.add(cb);
+  return () => {
+    onChangeExtras.delete(cb);
+  };
 }
 
 export function configureStreamerMode(opts: {
@@ -90,7 +101,11 @@ function setActive(next: boolean, notify: boolean): void {
   active = next;
   paintBadge();
   if (changed && notify) {
-    onChange?.(streamerModeState());
+    const state = streamerModeState();
+    onChange?.(state);
+    for (const cb of onChangeExtras) {
+      cb(state);
+    }
   }
 }
 

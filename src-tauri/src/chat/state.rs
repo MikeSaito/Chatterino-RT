@@ -169,6 +169,7 @@ pub struct Shared {
     pub custom_commands: Arc<Mutex<Arc<CustomCommandSet>>>,
     pub logging: Arc<Mutex<Logging>>,
     pub live_notify: Arc<Mutex<LiveNotifyState>>,
+    pub user_data: Arc<Mutex<super::user_data::UserDataStore>>,
 }
 
 pub enum BatchSend {
@@ -226,6 +227,7 @@ impl Shared {
             custom_commands: Arc::new(Mutex::new(Arc::new(CustomCommandSet::default()))),
             logging: Arc::new(Mutex::new(Logging::default())),
             live_notify: Arc::new(Mutex::new(LiveNotifyState::default())),
+            user_data: Arc::new(Mutex::new(super::user_data::UserDataStore::default())),
         }
     }
 

@@ -164,7 +164,9 @@
           <input type="checkbox" id="usercard-ignore-highlights" />
           Ignore highlights
         </label>
+        <p id="usercard-notes-preview" class="usercard-notes-preview" hidden></p>
         <div class="popup-actions">
+          <button type="button" id="usercard-add-notes" disabled>Add notes</button>
           <button type="button" id="usercard-open-twitch">Open on Twitch</button>
         </div>
         <div id="usercard-mod-row" class="usercard-mod-row" hidden>
@@ -180,6 +182,30 @@
         </div>
         <p id="usercard-status" class="usercard-status" hidden></p>
         <div id="usercard-recent" aria-label="Recent messages"></div>
+      </div>
+    </div>
+    <div id="notes-modal" hidden>
+      <div id="notes-backdrop"></div>
+      <div
+        id="notes-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notes-title"
+      >
+        <header class="popup-head">
+          <h2 id="notes-title">Editing notes</h2>
+          <button type="button" id="notes-close" title="Close">×</button>
+        </header>
+        <textarea
+          id="notes-editor"
+          rows="12"
+          spellcheck="true"
+          autocomplete="off"
+        ></textarea>
+        <footer class="popup-foot notes-foot">
+          <button type="button" id="notes-ok">Ok</button>
+          <button type="button" id="notes-cancel">Cancel</button>
+        </footer>
       </div>
     </div>
     <div id="replythread-modal" hidden>

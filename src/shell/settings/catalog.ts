@@ -1141,13 +1141,11 @@ const GENERAL_SECTIONS: SectionDef[] = [
           true,
         ),
       ),
-      vx(
-        cb(
-          "sm-hide-notes",
-          "streamerMode.hideUserNotes",
-          "Hide user notes",
-          true,
-        ),
+      cb(
+        "sm-hide-notes",
+        "streamerMode.hideUserNotes",
+        "Hide user notes",
+        true,
       ),
       cb(
         "sm-mute-mentions",
