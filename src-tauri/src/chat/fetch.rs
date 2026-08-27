@@ -276,8 +276,15 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
                         Ok(v) => return Ok(v),
                         Err(e) => last = format!("json: {e}"),
                     }
-                } else {
+                } else if status.as_u16() == 404 || status.as_u16() == 410 {
+                    // Канал без BTTV/FFZ/7TV — ожидаемо, не спамим stderr.
+                    return Err(());
+                } else if status.as_u16() == 429 || status.is_server_error() {
                     last = format!("http {status}");
+                } else {
+                    // Прочие 4xx без ретраев.
+                    eprintln!("emote fetch failed (http {status}): {url}");
+                    return Err(());
                 }
             }
             Err(e) => last = e.to_string(),
