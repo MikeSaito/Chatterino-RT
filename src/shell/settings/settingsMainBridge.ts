@@ -27,6 +27,7 @@ export function bindSettingsBridge(opts: {
   onOpen?: () => void;
 }): {
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
+  patchKnobs: (patch: Record<string, boolean | string | number>) => Promise<void>;
 } {
   const { ring, openBtn, onDisplay } = opts;
   let applied: AppSettings = emptySettings();
@@ -70,20 +71,10 @@ export function bindSettingsBridge(opts: {
   });
 
   let chain: Promise<void> = Promise.resolve();
-  const bumpZoom = (dir: 1 | -1 | 0): Promise<void> => {
+  const persist = (next: AppSettings): Promise<void> => {
     chain = chain
       .catch(() => undefined)
       .then(async () => {
-        const next: AppSettings = {
-          ...applied,
-          fontScale: stepZoom(applied.fontScale, dir),
-          knobs: { ...defaultKnobs(), ...applied.knobs },
-          hotkeys: normalizeHotkeyRows(applied.hotkeys ?? []).map((r) => ({
-            action: r.action,
-            keybinding: r.keybinding,
-            name: r.name,
-          })),
-        };
         try {
           const saved = await invoke<AppSettings>("settings_set", { settings: next });
           const merged: AppSettings = {
@@ -105,5 +96,63 @@ export function bindSettingsBridge(opts: {
     return chain;
   };
 
-  return { bumpZoom };
+  const bumpZoom = (dir: 1 | -1 | 0): Promise<void> => {
+    const next: AppSettings = {
+      ...applied,
+      fontScale: stepZoom(applied.fontScale, dir),
+      knobs: { ...defaultKnobs(), ...applied.knobs },
+      hotkeys: normalizeHotkeyRows(applied.hotkeys ?? []).map((r) => ({
+        action: r.action,
+        keybinding: r.keybinding,
+        name: r.name,
+      })),
+    };
+    return persist(next);
+  };
+
+  /** Patch knobs onto last-saved baseline (not live preview) without wiping preview. */
+  const patchKnobs = (
+    patch: Record<string, boolean | string | number>,
+  ): Promise<void> => {
+    chain = chain
+      .catch(() => undefined)
+      .then(async () => {
+        const next: AppSettings = {
+          ...baseline,
+          knobs: { ...defaultKnobs(), ...baseline.knobs, ...patch },
+          hotkeys: normalizeHotkeyRows(baseline.hotkeys ?? []).map((r) => ({
+            action: r.action,
+            keybinding: r.keybinding,
+            name: r.name,
+          })),
+        };
+        try {
+          const saved = await invoke<AppSettings>("settings_set", { settings: next });
+          baseline = {
+            ...emptySettings(),
+            ...saved,
+            knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
+            hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
+              action: r.action,
+              keybinding: r.keybinding,
+              name: r.name,
+            })),
+          };
+          applied = {
+            ...applied,
+            knobs: { ...applied.knobs, ...patch },
+          };
+          onDisplay?.(applied);
+        } catch {
+          applied = {
+            ...applied,
+            knobs: { ...applied.knobs, ...patch },
+          };
+          onDisplay?.(applied);
+        }
+      });
+    return chain;
+  };
+
+  return { bumpZoom, patchKnobs };
 }

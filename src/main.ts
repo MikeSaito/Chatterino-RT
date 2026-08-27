@@ -24,6 +24,10 @@ import {
   type ThumbnailSizeStream,
 } from "./shell/channelHeader";
 import { iconEl } from "./shell/icons";
+import {
+  bindStageSplit,
+  parsePlayerChatSplit,
+} from "./shell/stageSplit";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindHeaderMenu } from "./shell/headerMenu";
 import { bindTabOverflow } from "./shell/tabOverflow";
@@ -147,6 +151,8 @@ async function boot(): Promise<void> {
     "#moderation-mode-btn",
   );
   const player = document.querySelector<HTMLElement>("#player-slot");
+  const stage = document.querySelector<HTMLElement>("#stage");
+  const stageSplit = document.querySelector<HTMLElement>("#stage-split");
   const status = document.querySelector<HTMLElement>("#status");
   const composer = document.querySelector<HTMLFormElement>("#composer");
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
@@ -202,6 +208,8 @@ async function boot(): Promise<void> {
     !headerMore ||
     !headerMenu ||
     !player ||
+    !stage ||
+    !stageSplit ||
     !status ||
     !composer ||
     !composerInput ||
@@ -252,6 +260,8 @@ async function boot(): Promise<void> {
   const headerMenuEl = headerMenu;
   const channelInput = input;
   const playerSlot = player;
+  const stageEl = stage;
+  const stageSplitEl = stageSplit;
   const statusEl = status;
   const messageInput = composerInput;
   const sendBtn = composerSend;
@@ -428,6 +438,8 @@ async function boot(): Promise<void> {
     joinPopoverCtl = null;
     authMenuCtl?.dispose();
     authMenuCtl = null;
+    stageSplitCtl?.dispose();
+    stageSplitCtl = null;
     streamPreviewCtl?.hide();
     chatIpc?.stop();
     chatIpc = null;
@@ -478,8 +490,14 @@ async function boot(): Promise<void> {
     supportsIncognito = false;
   }
   let uiLayout: UiLayout = "Extended";
+  let playerChatSplit = parsePlayerChatSplit(undefined);
   let mountedChannel = "";
   let readActiveChannel = (): string => "";
+  let stageSplitCtl: {
+    refresh: () => void;
+    dispose: () => void;
+    isDragging: () => boolean;
+  } | null = null;
 
   function syncPlayerForLayout(joined: string): void {
     if (uiLayout === "Classic") {
@@ -606,6 +624,9 @@ async function boot(): Promise<void> {
       repaintChannelTitle();
       streamPreviewCtl?.refresh();
       uiLayout = parseUiLayout(data.knobs["appearance.uiLayout"]);
+      if (!stageSplitCtl?.isDragging()) {
+        playerChatSplit = parsePlayerChatSplit(data.knobs["appearance.playerChatSplit"]);
+      }
       channels.setShowRecents(false);
       if (uiLayout === "Classic") {
         syncPlayerForLayout(readActiveChannel());
@@ -620,9 +641,22 @@ async function boot(): Promise<void> {
         });
         syncPlayerForLayout(readActiveChannel());
       }
+      stageSplitCtl?.refresh();
       joinPopoverCtl?.sync();
       tabOverflowCtl?.refresh();
       applyWindowMinForLayout(uiLayout);
+    },
+  });
+  stageSplitCtl = bindStageSplit({
+    stage: stageEl,
+    split: stageSplitEl,
+    isEnabled: () => uiLayout === "Extended",
+    getRatio: () => playerChatSplit,
+    setRatio: (ratio) => {
+      playerChatSplit = ratio;
+    },
+    onCommit: (ratio) => {
+      void settingsCtl.patchKnobs({ "appearance.playerChatSplit": ratio });
     },
   });
   const ipc = bindChatIpc(ring, {

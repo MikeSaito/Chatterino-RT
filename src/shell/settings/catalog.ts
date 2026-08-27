@@ -661,6 +661,17 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Extended",
         "layout chrome chatterino tv",
       ),
+      vx(
+        num(
+          "player-chat-split",
+          "appearance.playerChatSplit",
+          "Player chat split",
+          0.58,
+          0.35,
+          0.75,
+          0.01,
+        ),
+      ),
       sel(
         "dark-system-theme",
         "appearance.darkSystemTheme",

@@ -1590,6 +1590,15 @@ export function mountSettingsPanel(opts: {
     cancelBtn.disabled = true;
     statusEl.textContent = "";
     const draft = readDraft();
+    try {
+      const live = await invoke<AppSettings>("settings_get");
+      const split = live.knobs["appearance.playerChatSplit"];
+      if (typeof split === "number" && Number.isFinite(split)) {
+        draft.knobs["appearance.playerChatSplit"] = split;
+      }
+    } catch {
+      /* keep draft */
+    }
     const filtersDraft = filtersFromSettings(draft);
     let saved: AppSettings | undefined;
     try {
