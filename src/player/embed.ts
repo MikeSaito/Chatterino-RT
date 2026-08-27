@@ -60,9 +60,13 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
   const observer = new ResizeObserver(() => {
     kick();
   });
+  const onVisibility = () => {
+    kick();
+  };
 
   const cleanup = () => {
     observer.disconnect();
+    document.removeEventListener("visibilitychange", onVisibility);
     if (raf !== 0) {
       cancelAnimationFrame(raf);
       raf = 0;
@@ -81,6 +85,10 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
       cleanup();
       return;
     }
+    // Twitch embed отключает autoplay, если в момент инициализации документ скрыт.
+    if (document.visibilityState !== "visible") {
+      return;
+    }
     const box = host.getBoundingClientRect();
     if (box.width < 400 || box.height < 300) {
       return;
@@ -96,6 +104,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
 
   slotWaitCleanup = cleanup;
   observer.observe(host);
+  document.addEventListener("visibilitychange", onVisibility);
   raf = requestAnimationFrame(() => {
     raf = 0;
     kick();
