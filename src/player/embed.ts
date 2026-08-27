@@ -23,7 +23,7 @@ function twitchEmbedParents(): string[] {
   if (host) {
     hosts.add(host);
   }
-  // Dev Vite + Tauri WebView2 prod (compensation.md).
+  // Dev Vite (`localhost`) + Tauri WebView2 prod (`tauri.localhost` via useHttpsScheme).
   hosts.add("localhost");
   hosts.add("127.0.0.1");
   hosts.add("tauri.localhost");
