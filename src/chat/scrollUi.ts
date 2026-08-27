@@ -13,16 +13,76 @@ export function bindScrollChrome(opts: {
 } {
   const { ring, host, track, thumb, jump, onScroll } = opts;
   const marksLayer = track.querySelector<HTMLElement>("#chat-scroll-marks");
+  const jumpBadge = jump.querySelector<HTMLElement>("#chat-jump-badge");
   let hideHighlights = false;
   let marksGen = -1;
   let marksTrackH = -1;
+  let jumpHideTimer = 0;
+  let jumpWasVisible = false;
+
+  const paintJump = (state: ScrollSnapshot): void => {
+    const show = !state.atBottom;
+    const pending = ring.pendingBelowCount();
+    if (show) {
+      if (jumpHideTimer !== 0) {
+        window.clearTimeout(jumpHideTimer);
+        jumpHideTimer = 0;
+      }
+      jump.hidden = false;
+      jump.setAttribute("aria-hidden", "false");
+      const label =
+        pending > 0
+          ? `Вниз, ${pending > 99 ? "99+" : pending} новых`
+          : "Вниз";
+      jump.setAttribute("aria-label", label);
+      jump.title = label;
+      if (!jumpWasVisible) {
+        requestAnimationFrame(() => {
+          jump.classList.add("is-visible");
+        });
+      } else {
+        jump.classList.add("is-visible");
+      }
+      jumpWasVisible = true;
+    } else if (jumpWasVisible) {
+      jumpWasVisible = false;
+      jump.classList.remove("is-visible");
+      jump.setAttribute("aria-hidden", "true");
+      const reduce =
+        typeof matchMedia === "function" &&
+        matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) {
+        jump.hidden = true;
+      } else {
+        if (jumpHideTimer !== 0) {
+          window.clearTimeout(jumpHideTimer);
+        }
+        jumpHideTimer = window.setTimeout(() => {
+          jumpHideTimer = 0;
+          if (!jump.classList.contains("is-visible")) {
+            jump.hidden = true;
+          }
+        }, 130);
+      }
+    }
+    if (jumpBadge) {
+      jumpBadge.setAttribute("aria-hidden", "true");
+      if (show && pending > 0) {
+        jumpBadge.hidden = false;
+        jumpBadge.textContent = pending > 99 ? "99+" : String(pending);
+      } else {
+        jumpBadge.hidden = true;
+        jumpBadge.textContent = "";
+      }
+    }
+  };
 
   const paint = (state: ScrollSnapshot): void => {
     track.classList.toggle("idle", !state.overflow);
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", String(state.bottom));
     track.setAttribute("aria-valuenow", String(state.current));
-    jump.hidden = state.atBottom;
+    paintJump(state);
     layoutThumb(state);
     paintMarks(state);
     onScroll?.(state);
@@ -178,6 +238,7 @@ export function bindScrollChrome(opts: {
     ev.preventDefault();
     track.setPointerCapture(ev.pointerId);
     dragging = true;
+    track.classList.add("is-dragging");
     track.focus();
     ring.setDesired(yToDesired(ev.clientY, state));
   });
@@ -189,6 +250,7 @@ export function bindScrollChrome(opts: {
   });
   const endDrag = (): void => {
     dragging = false;
+    track.classList.remove("is-dragging");
   };
   track.addEventListener("pointerup", endDrag);
   track.addEventListener("pointercancel", endDrag);

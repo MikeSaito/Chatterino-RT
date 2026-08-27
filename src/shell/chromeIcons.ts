@@ -32,6 +32,13 @@ export function applyChromeIcons(root: ParentNode = document): void {
     if (!btn) {
       continue;
     }
+    const preserveBadge =
+      item.id === "chat-jump-bottom"
+        ? btn.querySelector<HTMLElement>("#chat-jump-badge")
+        : null;
     setButtonIcon(btn, item.name, { size: item.size ?? 16, label: item.label });
+    if (preserveBadge) {
+      btn.appendChild(preserveBadge);
+    }
   }
 }

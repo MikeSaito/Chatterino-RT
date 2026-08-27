@@ -71,8 +71,15 @@
                   <img id="emote-tooltip-img" alt="" />
                   <span id="emote-tooltip-text"></span>
                 </div>
-                <button type="button" id="chat-reply-btn" class="btn" hidden title="Reply">Reply</button>
-                <button id="chat-jump-bottom" type="button" class="btn-icon" hidden title="Вниз" aria-label="Вниз"></button>
+                <div id="chat-quick-actions" hidden>
+                  <button type="button" id="chat-qa-reply" class="btn-icon" title="Ответить" aria-label="Ответить"></button>
+                  <button type="button" id="chat-qa-copy" class="btn-icon" title="Копировать" aria-label="Копировать"></button>
+                  <button type="button" id="chat-qa-more" class="btn-icon" title="Ещё" aria-label="Ещё"></button>
+                </div>
+                <p id="chat-empty" hidden>Сообщений пока нет</p>
+                <button id="chat-jump-bottom" type="button" class="btn-icon" hidden title="Вниз" aria-label="Вниз">
+                  <span id="chat-jump-badge" hidden></span>
+                </button>
               </div>
               <div
                 id="chat-scroll"

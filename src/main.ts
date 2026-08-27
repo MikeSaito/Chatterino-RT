@@ -33,6 +33,7 @@ import { bindHeaderMenu } from "./shell/headerMenu";
 import { bindTabOverflow } from "./shell/tabOverflow";
 import { bindJoinPopover } from "./shell/joinPopover";
 import { bindAuthMenu } from "./shell/authMenu";
+import { bindChatQuickActions } from "./shell/chatQuickActions";
 import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
 import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
 import {
@@ -163,6 +164,11 @@ async function boot(): Promise<void> {
   const replyLabel = document.querySelector<HTMLElement>("#reply-label");
   const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
   const contextMenu = document.querySelector<HTMLMenuElement>("#chat-context");
+  const chatQuickBar = document.querySelector<HTMLElement>("#chat-quick-actions");
+  const chatQaReply = document.querySelector<HTMLButtonElement>("#chat-qa-reply");
+  const chatQaCopy = document.querySelector<HTMLButtonElement>("#chat-qa-copy");
+  const chatQaMore = document.querySelector<HTMLButtonElement>("#chat-qa-more");
+  const chatEmpty = document.querySelector<HTMLElement>("#chat-empty");
   const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
   const authChipAvatar = document.querySelector<HTMLImageElement>("#auth-chip-avatar");
   const authChipLetter = document.querySelector<HTMLElement>("#auth-chip-letter");
@@ -220,6 +226,11 @@ async function boot(): Promise<void> {
     !replyLabel ||
     !replyCancel ||
     !contextMenu ||
+    !chatQuickBar ||
+    !chatQaReply ||
+    !chatQaCopy ||
+    !chatQaMore ||
+    !chatEmpty ||
     !authChip ||
     !authChipAvatar ||
     !authChipLetter ||
@@ -440,6 +451,9 @@ async function boot(): Promise<void> {
     authMenuCtl = null;
     stageSplitCtl?.dispose();
     stageSplitCtl = null;
+    quickActionsCtl?.dispose();
+    quickActionsCtl = null;
+    ring.setHoverGuard(undefined);
     streamPreviewCtl?.hide();
     chatIpc?.stop();
     chatIpc = null;
@@ -459,9 +473,13 @@ async function boot(): Promise<void> {
   let hideUsercardAvatars = true;
   let hideUserNotes = true;
   let userCard: ReturnType<typeof bindUserCard> | null = null;
-  const replyBtn = document.querySelector<HTMLButtonElement>("#chat-reply-btn");
-  let replyHover: { msgId: string; login: string; text: string } | null = null;
   let lastPointerY = 0;
+  let quickActionsCtl: ReturnType<typeof bindChatQuickActions> | null = null;
+  const chatEmptyEl = chatEmpty;
+  const syncChatEmpty = (): void => {
+    const ch = chatIpc?.active()?.trim() ?? "";
+    chatEmptyEl.hidden = !(ch && ring.occupiedCount() === 0);
+  };
   const scrollChrome = bindScrollChrome({
     ring,
     host: canvasHost,
@@ -470,17 +488,8 @@ async function boot(): Promise<void> {
     jump: jumpBottom,
     onScroll: () => {
       emoteTooltipCtl?.refresh();
-      if (!replyBtn || replyBtn.hidden || !replyHover) {
-        return;
-      }
-      const anchor = ring.replyAnchorAt(0, lastPointerY);
-      if (!anchor || anchor.msgId !== replyHover.msgId) {
-        replyBtn.hidden = true;
-        replyHover = null;
-        return;
-      }
-      const hostRect = canvasHost.getBoundingClientRect();
-      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
+      quickActionsCtl?.syncOnScroll(lastPointerY);
+      syncChatEmpty();
     },
   });
   try {
@@ -554,10 +563,7 @@ async function boot(): Promise<void> {
       userCard?.syncAvatars();
       userCard?.syncPronouns();
       userCard?.syncNotes();
-      if (!data.knobs["appearance.showReplyButton"] && replyBtn) {
-        replyBtn.hidden = true;
-        replyHover = null;
-      }
+      quickActionsCtl?.hide();
       composerOpts = {
         showEmptyInput: data.knobs["appearance.showEmptyInput"] !== false,
         showMessageLength: data.knobs["appearance.showMessageLength"] === true,
@@ -927,50 +933,28 @@ async function boot(): Promise<void> {
     userCard?.syncNotes();
     repaintChannelTitle();
   });
-  if (replyBtn) {
-    canvasHost.addEventListener("pointermove", (ev) => {
-      lastPointerY = ev.clientY;
-      if (!ring.isReplyButtonEnabled()) {
-        replyBtn.hidden = true;
-        replyHover = null;
-        return;
-      }
-      const anchor = ring.replyAnchorAt(ev.clientX, ev.clientY);
-      if (!anchor) {
-        replyBtn.hidden = true;
-        replyHover = null;
-        return;
-      }
-      replyHover = {
-        msgId: anchor.msgId,
-        login: anchor.login,
-        text: anchor.text,
-      };
-      const hostRect = canvasHost.getBoundingClientRect();
-      replyBtn.hidden = false;
-      replyBtn.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
-      replyBtn.style.right = "28px";
-    });
-    canvasHost.addEventListener("pointerleave", () => {
-      if (replyBtn.matches(":hover")) {
-        return;
-      }
-      replyBtn.hidden = true;
-      replyHover = null;
-    });
-    replyBtn.addEventListener("pointerleave", () => {
-      replyBtn.hidden = true;
-      replyHover = null;
-    });
-    replyBtn.addEventListener("click", () => {
-      if (!replyHover) {
-        return;
-      }
-      setReply(replyHover.msgId, replyHover.login, replyHover.text);
+  canvasHost.addEventListener("pointermove", (ev) => {
+    lastPointerY = ev.clientY;
+  });
+  quickActionsCtl = bindChatQuickActions({
+    host: canvasHost,
+    ring,
+    bar: chatQuickBar,
+    replyBtn: chatQaReply,
+    copyBtn: chatQaCopy,
+    moreBtn: chatQaMore,
+    onReply: (msgId, login, text) => {
+      setReply(msgId, login, text);
       messageInput.focus();
-      replyBtn.hidden = true;
-    });
-  }
+    },
+    onCopy: (text) => {
+      void navigator.clipboard.writeText(text).catch(() => undefined);
+    },
+    onMore: (ctx) => {
+      openContextMenu(ctx);
+    },
+  });
+  ring.setHoverGuard(() => quickActionsCtl?.isHoveringBar() === true);
   const replyThread = bindReplyThread({
     modal: replythreadModal,
     activeChannel: () => ipc.active(),
@@ -2321,6 +2305,9 @@ async function boot(): Promise<void> {
     applySendWaitForActive();
     userCard?.syncMod();
     userCard?.syncSubage();
+    quickActionsCtl?.hide();
+    ring.clearHover();
+    syncChatEmpty();
   }
 
   function drainChannelQueue(): void {
@@ -2393,6 +2380,9 @@ async function boot(): Promise<void> {
         syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
+        quickActionsCtl?.hide();
+        ring.clearHover();
+        syncChatEmpty();
         return;
       }
       if (leftActive) {

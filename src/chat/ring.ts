@@ -282,10 +282,17 @@ export class MessageRing {
     nickFallback: 0x8c7f7f,
     alternate: 0x222222,
     alternateAlpha: 1,
+    hover: 0x222222,
+    hoverAlpha: 0.35,
     separator: 0x3c3c3c,
     disabled: 0x191919,
     disabledAlpha: 0x99 / 255,
   };
+  private hoveredMsgId = "";
+  private lastReadFadeMsgId = "";
+  private lastReadFadeStart = 0;
+  private lastReadFadeRaf = 0;
+  private pendingBelow = 0;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
@@ -295,6 +302,7 @@ export class MessageRing {
     | ((action: string, ctx: SlotContext) => void)
     | undefined;
   private onViewerRoleChange: (() => void) | undefined;
+  private hoverGuard: (() => boolean) | undefined;
 
   constructor(
     private readonly app: Application,
@@ -359,6 +367,10 @@ export class MessageRing {
 
   setOnViewerRoleChange(cb: () => void): void {
     this.onViewerRoleChange = cb;
+  }
+
+  setHoverGuard(cb: (() => boolean) | undefined): void {
+    this.hoverGuard = cb;
   }
 
   setModerationMode(on: boolean): void {
@@ -527,8 +539,79 @@ export class MessageRing {
       return;
     }
     this.lastReadMsgId = id;
+    this.beginLastReadFade(id);
     if (this.ready) {
       this.repaintHighlights();
+    }
+  }
+
+  private beginLastReadFade(id: string): void {
+    this.lastReadFadeMsgId = id;
+    this.lastReadFadeStart = performance.now();
+    if (this.lastReadFadeRaf !== 0) {
+      cancelAnimationFrame(this.lastReadFadeRaf);
+      this.lastReadFadeRaf = 0;
+    }
+    const reduce =
+      typeof matchMedia === "function" &&
+      matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      this.lastReadFadeStart = 0;
+      return;
+    }
+    const tick = (): void => {
+      this.lastReadFadeRaf = 0;
+      if (!this.lastReadFadeMsgId || this.lastReadFadeMsgId !== this.lastReadMsgId) {
+        return;
+      }
+      const elapsed = performance.now() - this.lastReadFadeStart;
+      this.repaintHighlights();
+      if (elapsed < 150) {
+        this.lastReadFadeRaf = requestAnimationFrame(tick);
+      } else {
+        this.lastReadFadeStart = 0;
+      }
+    };
+    this.lastReadFadeRaf = requestAnimationFrame(tick);
+  }
+
+  pendingBelowCount(): number {
+    return this.pendingBelow;
+  }
+
+  occupiedCount(): number {
+    return this.occupied;
+  }
+
+  clearHover(): void {
+    if (!this.hoveredMsgId) {
+      return;
+    }
+    const prev = this.hoveredMsgId;
+    this.hoveredMsgId = "";
+    const slot = this.findSlotByMsgId(prev);
+    if (slot) {
+      this.paintHighlight(slot);
+    }
+  }
+
+  private setHoveredMsgId(id: string): void {
+    if (id === this.hoveredMsgId) {
+      return;
+    }
+    const prev = this.hoveredMsgId;
+    this.hoveredMsgId = id;
+    if (prev) {
+      const old = this.findSlotByMsgId(prev);
+      if (old) {
+        this.paintHighlight(old);
+      }
+    }
+    if (id) {
+      const next = this.findSlotByMsgId(id);
+      if (next) {
+        this.paintHighlight(next);
+      }
     }
   }
 
@@ -1096,6 +1179,7 @@ export class MessageRing {
 
   goToBottom(): void {
     this.pauseFollowIntent = false;
+    this.pendingBelow = 0;
     this.scroll.goToBottom();
     this.afterScrollChange();
   }
@@ -1373,6 +1457,25 @@ export class MessageRing {
       root.on("pointermove", (ev: FederatedPointerEvent) => {
         this.onSlotMove(slot, ev);
       });
+      root.on("pointerover", () => {
+        if (
+          slot.msgId &&
+          !slot.system &&
+          slot.login &&
+          !(slot.disabled && this.hideModerated)
+        ) {
+          this.setHoveredMsgId(slot.msgId);
+        }
+      });
+      root.on("pointerout", () => {
+        if (this.hoveredMsgId !== slot.msgId) {
+          return;
+        }
+        if (this.hoverGuard?.()) {
+          return;
+        }
+        this.clearHover();
+      });
       stage.addChild(root);
       this.slots.push(slot);
     }
@@ -1406,6 +1509,10 @@ export class MessageRing {
 
   destroy(): void {
     this.emoteTicker.destroy();
+    if (this.lastReadFadeRaf !== 0) {
+      cancelAnimationFrame(this.lastReadFadeRaf);
+      this.lastReadFadeRaf = 0;
+    }
     this.clearSlots();
   }
 
@@ -1437,6 +1544,14 @@ export class MessageRing {
     this.occupied = 0;
     this.head = 0;
     this.lastReadMsgId = "";
+    this.lastReadFadeMsgId = "";
+    this.lastReadFadeStart = 0;
+    this.hoveredMsgId = "";
+    this.pendingBelow = 0;
+    if (this.lastReadFadeRaf !== 0) {
+      cancelAnimationFrame(this.lastReadFadeRaf);
+      this.lastReadFadeRaf = 0;
+    }
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
@@ -1513,6 +1628,9 @@ export class MessageRing {
     this.head = (this.head + 1) % this.poolSize;
     if (this.occupied < this.poolSize) {
       this.occupied += 1;
+    }
+    if (!this.loadingSnapshot && !this.scroll.atBottom) {
+      this.pendingBelow += 1;
     }
     this.bumpHighlightMarks();
   }
@@ -2164,6 +2282,11 @@ export class MessageRing {
         slot.highlight
           .rect(0, 0, w, h)
           .fill({ color: parsed.color, alpha: parsed.alpha });
+      } else if (this.hoveredMsgId && slot.msgId === this.hoveredMsgId) {
+        slot.highlight.rect(0, 0, w, h).fill({
+          color: this.themeFills.hover,
+          alpha: this.themeFills.hoverAlpha,
+        });
       } else if (this.alternateMessages && slot.startRow % 2 === 1) {
         slot.highlight
           .rect(0, 0, w, h)
@@ -2191,8 +2314,16 @@ export class MessageRing {
   private paintLastReadLine(gfx: Graphics, w: number, h: number): void {
     const y = h - 0.5;
     const color = this.lastReadColor;
+    let alpha = 1;
+    if (
+      this.lastReadFadeMsgId === this.lastReadMsgId &&
+      this.lastReadFadeStart > 0
+    ) {
+      const t = Math.min(1, (performance.now() - this.lastReadFadeStart) / 150);
+      alpha = t;
+    }
     if (this.lastReadPattern === "Solid") {
-      gfx.moveTo(0, y).lineTo(w, y).stroke({ width: 1, color, alpha: 1 });
+      gfx.moveTo(0, y).lineTo(w, y).stroke({ width: 1, color, alpha });
       return;
     }
     const dash = 4;
@@ -2203,7 +2334,7 @@ export class MessageRing {
       gfx.moveTo(x, y).lineTo(x2, y);
       x += dash + gap;
     }
-    gfx.stroke({ width: 1, color, alpha: 1 });
+    gfx.stroke({ width: 1, color, alpha });
   }
 
   private paintDisabled(slot: Slot): void {
@@ -2398,6 +2529,9 @@ export class MessageRing {
   }
 
   private afterScrollChange(): void {
+    if (this.scroll.atBottom) {
+      this.pendingBelow = 0;
+    }
     this.applyStageY();
     this.notifyScroll();
     this.ensureScrollTick();
@@ -2966,15 +3100,16 @@ export class MessageRing {
     return { text: hit.url, resolveUrl: hit.url };
   }
 
-  /** Hover reply chip: screen rect of last visible privmsg under pointer, or null. */
-  replyAnchorAt(clientX: number, clientY: number): {
+  /** Hover quick-actions / reply: screen rect of privmsg under pointer. */
+  messageAnchorAt(clientX: number, clientY: number): {
     msgId: string;
     login: string;
     text: string;
     top: number;
     right: number;
+    canReply: boolean;
   } | null {
-    if (!this.showReplyButton || !this.ready) {
+    if (!this.ready) {
       return null;
     }
     void clientX;
@@ -3004,10 +3139,70 @@ export class MessageRing {
           text: slot.copyText || slot.bodyRaw,
           top: rect.top + stageY + top,
           right: rect.right - 8,
+          canReply: this.showReplyButton && !slot.disabled,
         };
       }
     }
     return null;
+  }
+
+  /** Build SlotContext for a message id (quick-actions "more"). */
+  contextForMsgId(msgId: string, clientX: number, clientY: number): SlotContext | null {
+    const slot = this.findSlotByMsgId(msgId);
+    if (!slot || !slot.msgId) {
+      return null;
+    }
+    return {
+      msgId: slot.msgId,
+      login: slot.login,
+      authorLogin: slot.login,
+      nick: this.contextNick(slot),
+      text: slot.copyText || slot.bodyRaw,
+      fullText: formatFullCopyText({
+        time: slot.time.text,
+        nick: slot.nickRaw,
+        body: slot.bodySource || slot.copyText,
+        copyText: slot.copyText,
+        system: slot.system,
+        isAction: slot.isAction,
+        isWhisper: slot.isWhisper,
+        whisperPeer: slot.isWhisper ? this.selfLogin : undefined,
+      }),
+      clientX,
+      clientY,
+      disabled: slot.disabled,
+      replyToId: slot.replyToId,
+      linkUrl: "",
+      imageUrl: "",
+      imageKind: "",
+      imageProvider: "",
+      inReplyThread: this.slotInReplyThread(slot),
+      shiftOnly: false,
+    };
+  }
+
+  /** @deprecated prefer messageAnchorAt */
+  replyAnchorAt(clientX: number, clientY: number): {
+    msgId: string;
+    login: string;
+    text: string;
+    top: number;
+    right: number;
+  } | null {
+    if (!this.showReplyButton) {
+      return null;
+    }
+    const a = this.messageAnchorAt(clientX, clientY);
+    if (!a?.canReply) {
+      return null;
+    }
+    return {
+      msgId: a.msgId,
+      login: a.login,
+      text: a.text,
+      top: a.top,
+      right: a.right,
+    };
   }
 
   isReplyButtonEnabled(): boolean {

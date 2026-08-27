@@ -33,6 +33,9 @@ export type ThemePixiFills = {
   nickFallback: number;
   alternate: number;
   alternateAlpha: number;
+  /** Row hover fill (surface-2), alpha separate. */
+  hover: number;
+  hoverAlpha: number;
   separator: number;
   disabled: number;
   disabledAlpha: number;
@@ -72,6 +75,8 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
       nickFallback: 0x9a9a9a,
       alternate: 0x1c1c1c,
       alternateAlpha: 1,
+      hover: 0x222222,
+      hoverAlpha: 0.35,
       separator: 0x2e2e2e,
       disabled: 0x161616,
       disabledAlpha: 0x99 / 255,
@@ -106,6 +111,8 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
       nickFallback: 0x8a8a8a,
       alternate: 0x0a0a0a,
       alternateAlpha: 1,
+      hover: 0x121212,
+      hoverAlpha: 0.35,
       separator: 0x1a1a1a,
       disabled: 0x000000,
       disabledAlpha: 0x99 / 255,
@@ -140,6 +147,8 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
       nickFallback: 0x5a5a5a,
       alternate: 0xdfdfdf,
       alternateAlpha: 1,
+      hover: 0xd8d8d8,
+      hoverAlpha: 0.45,
       separator: 0xb0b0b0,
       disabled: 0xe8e8e8,
       disabledAlpha: 0x99 / 255,
@@ -174,6 +183,8 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
       nickFallback: 0x5a5a5a,
       alternate: 0xf5f5f5,
       alternateAlpha: 1,
+      hover: 0xf0f0f0,
+      hoverAlpha: 0.5,
       separator: 0xb0b0b0,
       disabled: 0xffffff,
       disabledAlpha: 0x99 / 255,

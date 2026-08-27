@@ -1686,18 +1686,126 @@ button:disabled {
   background: var(--c-scroll-thumb);
   pointer-events: none;
   z-index: 1;
+  transition: width 120ms ease, left 120ms ease;
+}
+
+#chat-scroll:hover #chat-scroll-thumb,
+#chat-scroll:focus-visible #chat-scroll-thumb,
+#chat-scroll.is-dragging #chat-scroll-thumb {
+  width: 10px;
+  left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #chat-scroll-thumb {
+    transition: none;
+  }
 }
 
 #chat-jump-bottom {
   position: absolute;
   right: var(--space-2);
   bottom: var(--space-2);
-  z-index: 1;
+  z-index: 2;
   margin: 0;
   width: 32px;
   height: 32px;
   border-radius: 999px;
+  background: var(--c-surface-2);
+  border-color: var(--c-border);
   box-shadow: var(--shadow-1);
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+#chat-jump-bottom.is-visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+#chat-jump-bottom[hidden] {
+  display: none;
+}
+
+#chat-jump-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+#chat-jump-badge[hidden] {
+  display: none;
+}
+
+#chat-quick-actions {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  transition: opacity 100ms ease;
+  pointer-events: auto;
+}
+
+#chat-quick-actions.is-visible {
+  opacity: 1;
+}
+
+#chat-quick-actions[hidden] {
+  display: none;
+}
+
+#chat-quick-actions .btn-icon {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+}
+
+#chat-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-4);
+  pointer-events: none;
+  color: var(--c-muted);
+  font-size: var(--font-md);
+  text-align: center;
+}
+
+#chat-empty[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #chat-jump-bottom,
+  #chat-quick-actions {
+    transition: none;
+  }
 }
 
 #emote-tooltip {
