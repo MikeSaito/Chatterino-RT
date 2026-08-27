@@ -37,6 +37,10 @@ export function bindChatQuickActions(opts: {
   setButtonIcon(moreBtn, "more", { size: 14, label: "Ещё" });
 
   const hide = (): void => {
+    if (hoverRaf !== 0) {
+      cancelAnimationFrame(hoverRaf);
+      hoverRaf = 0;
+    }
     if (pinned) {
       return;
     }
@@ -67,18 +71,30 @@ export function bindChatQuickActions(opts: {
     bar.hidden = false;
     bar.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
     bar.style.right = "28px";
-    requestAnimationFrame(() => {
-      if (hover?.msgId === anchor.msgId) {
-        bar.classList.add("is-visible");
-      }
+    bar.classList.add("is-visible");
+  };
+
+  let hoverRaf = 0;
+  let pendingX = 0;
+  let pendingY = 0;
+
+  const onHostMove = (ev: PointerEvent): void => {
+    pendingX = ev.clientX;
+    pendingY = ev.clientY;
+    if (hoverRaf !== 0) {
+      return;
+    }
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      paint(pendingX, pendingY);
     });
   };
 
-  const onHostMove = (ev: PointerEvent): void => {
-    paint(ev.clientX, ev.clientY);
-  };
-
   const onHostLeave = (ev: PointerEvent): void => {
+    if (hoverRaf !== 0) {
+      cancelAnimationFrame(hoverRaf);
+      hoverRaf = 0;
+    }
     const related = ev.relatedTarget;
     if (related instanceof Node && bar.contains(related)) {
       return;
@@ -160,6 +176,10 @@ export function bindChatQuickActions(opts: {
       paint(lastX, pointerY);
     },
     dispose: () => {
+      if (hoverRaf !== 0) {
+        cancelAnimationFrame(hoverRaf);
+        hoverRaf = 0;
+      }
       host.removeEventListener("pointermove", onHostMove);
       host.removeEventListener("pointerleave", onHostLeave);
       bar.removeEventListener("pointerenter", onBarEnter);

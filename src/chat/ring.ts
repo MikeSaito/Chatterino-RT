@@ -241,6 +241,8 @@ export class MessageRing {
   private hideTimestampsWhenLive = false;
   private channelLive = false;
   private loadingSnapshot = false;
+  private mediaRepaintSlots = new Set<Slot>();
+  private mediaRepaintRaf = 0;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
   private showReplyButton = false;
@@ -491,10 +493,184 @@ export class MessageRing {
 
   /** Reposition badge/emote sprites after async CDN texture load. */
   private repaintSlotMedia(slot: Slot): void {
-    if (!this.ready || !slot.msgId || !slot.root.visible) {
+    if (!this.ready || !slot.msgId) {
       return;
     }
-    this.paintClip(slot);
+    this.mediaRepaintSlots.add(slot);
+    if (this.mediaRepaintRaf !== 0) {
+      return;
+    }
+    this.mediaRepaintRaf = requestAnimationFrame(() => {
+      this.mediaRepaintRaf = 0;
+      const batch = [...this.mediaRepaintSlots];
+      this.mediaRepaintSlots.clear();
+      let lineCountChanged = false;
+      for (const s of batch) {
+        if (!s.msgId || !s.root.visible) {
+          continue;
+        }
+        const prev = s.lineCount;
+        this.repositionSlotMedia(s);
+        if (s.lineCount !== prev) {
+          lineCountChanged = true;
+        }
+      }
+      if (lineCountChanged) {
+        this.repositionRootsFromCache();
+      }
+    });
+  }
+
+  /**
+   * After texture load: refresh emote/badge placement without re-wrapping body.
+   * Falls back to paintClip only when wrap metrics are missing.
+   */
+  private repositionSlotMedia(slot: Slot): void {
+    if (
+      slot.wrapLines.length === 0 ||
+      (slot.wrapLines.length === 1 &&
+        slot.wrapLines[0].start === 0 &&
+        slot.wrapLines[0].end === 0 &&
+        slot.bodyRaw.length > 0)
+    ) {
+      this.paintClip(slot);
+      return;
+    }
+    const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
+    const timeSample = this.timestampsVisible()
+      ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
+      : "";
+    const timeW = this.timestampsVisible()
+      ? this.measureBitmapTextWidth("ChatFont", timeSample) + gap
+      : 0;
+    const gutterW = this.paintModGutter(slot);
+    const replyRows = slot.replyRows;
+    const contentY = replyRows * this.lineHeight;
+    for (const mt of slot.modBtns) {
+      if (mt.visible) {
+        mt.y = contentY;
+      }
+    }
+    const badgeVisible = this.visibleBadges(slot);
+    for (let i = 0; i < slot.badges.length; i += 1) {
+      const spr = slot.badges[i];
+      const badge = badgeVisible[i];
+      if (!badge) {
+        spr.visible = false;
+        continue;
+      }
+      spr.visible = true;
+      spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
+      spr.y = contentY + (this.lineHeight - this.badgeSize) / 2;
+    }
+    const firstOriginX = slot.bodyIndent;
+    const contOriginX = slot.bodyContIndent;
+    const lines = slot.wrapLines;
+    const layoutOpts = this.wrapOpts(slot, undefined, Math.max(1, firstOriginX));
+    let prevX = 0;
+    let prevY = 0;
+    let hasPrev = false;
+    let bitsLabelShown = false;
+    for (let i = 0; i < slot.emotes.length; i += 1) {
+      const spr = slot.emotes[i];
+      const span = slot.spansRaw[i];
+      if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
+        spr.visible = false;
+        continue;
+      }
+      const paint = this.emotePaintSize(span);
+      const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
+      if (zw && hasPrev) {
+        spr.visible = true;
+        spr.x = prevX;
+        spr.y = prevY;
+        if (spr.texture !== Texture.EMPTY) {
+          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
+        }
+        continue;
+      }
+      const pos = indexToLineCol(
+        slot.bodyRaw,
+        lines,
+        span.start,
+        slot.spansRaw,
+        layoutOpts,
+      );
+      if (!pos) {
+        spr.visible = false;
+        continue;
+      }
+      spr.visible = true;
+      spr.x =
+        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
+      spr.y =
+        contentY +
+        pos.line * this.lineHeight +
+        Math.max(1, (this.lineHeight - paint.h) / 2);
+      if (spr.texture !== Texture.EMPTY) {
+        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
+      }
+      prevX = spr.x;
+      prevY = spr.y;
+      hasPrev = true;
+      if (
+        !bitsLabelShown &&
+        this.stackBits &&
+        span.bitsAmount != null &&
+        span.bitsAmount > 0 &&
+        span.bitsColor
+      ) {
+        const tint = parseCheerColor(span.bitsColor);
+        if (tint != null) {
+          slot.bitsLabel.visible = true;
+          slot.bitsLabel.text = ` ${span.bitsAmount}`;
+          slot.bitsLabel.tint = tint;
+          slot.bitsLabel.x = spr.x + paint.w + 2;
+          slot.bitsLabel.y = contentY + pos.line * this.lineHeight;
+          bitsLabelShown = true;
+        }
+      }
+    }
+    if (!bitsLabelShown) {
+      slot.bitsLabel.visible = false;
+      slot.bitsLabel.text = "";
+    }
+  }
+
+  /** Update root.y / startRow from cached lineCount without paintClip. */
+  private repositionRootsFromCache(anchor?: ScrollAnchor): void {
+    const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    const visible: Slot[] = [];
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      const live = slot.msgId.length > 0;
+      const show = live && !(this.hideModerated && slot.disabled);
+      slot.root.visible = show;
+      if (show) {
+        visible.push(slot);
+      }
+    }
+    const gapPx = this.messageGapPx();
+    let y = 0;
+    for (let i = 0; i < visible.length; i += 1) {
+      const slot = visible[i];
+      slot.startRow = i;
+      slot.root.y = y;
+      y += slot.lineCount * this.lineHeight;
+      if (i + 1 < visible.length) {
+        y += gapPx;
+      }
+    }
+    const viewRows = this.app.screen.height / this.lineHeight;
+    this.scroll.applyLayout(
+      this.lineHeight > 0 ? y / this.lineHeight : 0,
+      viewRows,
+      this.laidSlots(),
+      resolved,
+      this.isPaused(),
+    );
+    this.afterScrollChange();
   }
 
   private loadBadgeSprites(slot: Slot): void {
@@ -980,7 +1156,9 @@ export class MessageRing {
     // Zoom changes fontSize without atlas rebuild; BitmapText skips GPU update
     // unless forced — nicks vanish and column gaps drift from stale glyphs.
     this.applyFontStylesToSlots(true);
-    for (const slot of this.slots) {
+    const occStart = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(occStart + i) % this.poolSize];
       if (slot.msgId && slot.timestampMs) {
         slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
       }
@@ -1093,7 +1271,9 @@ export class MessageRing {
   }
 
   private applyFontStylesToSlots(forceDirty: boolean): void {
-    for (const slot of this.slots) {
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
       slot.time.style.fontSize = this.fontSize;
       slot.time.style.lineHeight = this.lineHeight;
       slot.nick.style.fontFamily = "ChatNickFont";
@@ -1118,7 +1298,7 @@ export class MessageRing {
       }
       slot.bitsLabel.style.fontSize = this.fontSize;
       slot.bitsLabel.style.lineHeight = this.lineHeight;
-      if (forceDirty) {
+      if (forceDirty && slot.msgId) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
@@ -1513,6 +1693,11 @@ export class MessageRing {
       cancelAnimationFrame(this.lastReadFadeRaf);
       this.lastReadFadeRaf = 0;
     }
+    if (this.mediaRepaintRaf !== 0) {
+      cancelAnimationFrame(this.mediaRepaintRaf);
+      this.mediaRepaintRaf = 0;
+    }
+    this.mediaRepaintSlots.clear();
     this.clearSlots();
   }
 
@@ -1534,10 +1719,25 @@ export class MessageRing {
 
   pushMany(events: ChatEvent[]): void {
     const anchor = this.scroll.captureAnchor(this.laidSlots());
+    const paintSlots = new Set<Slot>();
+    let needFull = false;
     for (const event of events) {
-      this.pushOne(event);
+      const result = this.pushOne(event);
+      if (result.needFullLayout) {
+        needFull = true;
+      }
+      if (result.slot) {
+        paintSlots.add(result.slot);
+      }
     }
-    this.layout(anchor);
+    if (needFull) {
+      this.layout(anchor);
+      return;
+    }
+    if (paintSlots.size === 0) {
+      return;
+    }
+    this.layout(anchor, paintSlots);
   }
 
   private clearSlots(): void {
@@ -1552,6 +1752,11 @@ export class MessageRing {
       cancelAnimationFrame(this.lastReadFadeRaf);
       this.lastReadFadeRaf = 0;
     }
+    if (this.mediaRepaintRaf !== 0) {
+      cancelAnimationFrame(this.mediaRepaintRaf);
+      this.mediaRepaintRaf = 0;
+    }
+    this.mediaRepaintSlots.clear();
     for (const slot of this.slots) {
       this.clearSlot(slot);
     }
@@ -1563,16 +1768,15 @@ export class MessageRing {
     this.scroll.reset();
   }
 
-  private pushOne(event: ChatEvent): void {
+  private pushOne(event: ChatEvent): { slot?: Slot; needFullLayout: boolean } {
     if (event.kind === "clearmsg") {
       const target = this.findSlotByMsgId(event.targetId);
       if (!target) {
-        return;
+        return { needFullLayout: false };
       }
       this.disableById(event.targetId);
       if (this.hideDeletionActions || this.hideModerationActions) {
-        this.layout();
-        return;
+        return { needFullLayout: true };
       }
       const login = target.nickLogin || target.login || "unknown";
       const notice: ChatEvent = {
@@ -1592,8 +1796,7 @@ export class MessageRing {
         this.occupied += 1;
       }
       this.bumpHighlightMarks();
-      this.layout();
-      return;
+      return { slot, needFullLayout: true };
     }
     if (event.kind === "clearchat") {
       const existing = this.findSlotByMsgId(event.id);
@@ -1605,23 +1808,20 @@ export class MessageRing {
         }
       }
       if (this.hideModerationActions) {
-        this.layout();
-        return;
+        return { needFullLayout: true };
       }
       if (existing) {
         this.write(existing, event);
         this.bumpHighlightMarks();
-        this.layout();
-        return;
+        return { slot: existing, needFullLayout: true };
       }
-    }
-    if (event.kind === "userstate") {
+      // Fall through: timeout/ban notice is a new ring row (stock Channel).
+    } else if (event.kind === "userstate") {
       this.onViewerRoleChange?.();
-      return;
-    }
-    if (event.kind === "roomstate") {
+      return { needFullLayout: false };
+    } else if (event.kind === "roomstate") {
       // Legacy raw roomstate in old snapshots — skip; live path side-effects only.
-      return;
+      return { needFullLayout: false };
     }
     const slot = this.slots[this.head];
     this.write(slot, event);
@@ -1633,6 +1833,10 @@ export class MessageRing {
       this.pendingBelow += 1;
     }
     this.bumpHighlightMarks();
+    return {
+      slot,
+      needFullLayout: event.kind === "clearchat",
+    };
   }
 
   /** Soft-delete: MessageFlag::Disabled, слот остаётся (Chatterino Channel). */
@@ -2030,6 +2234,17 @@ export class MessageRing {
   }
 
   private paintClip(slot: Slot): void {
+    slot.time.style.fontSize = this.fontSize;
+    slot.time.style.lineHeight = this.lineHeight;
+    slot.nick.style.fontFamily = "ChatNickFont";
+    slot.nick.style.fontSize = this.fontSize;
+    slot.nick.style.lineHeight = this.lineHeight;
+    slot.body.style.fontSize = this.fontSize;
+    slot.body.style.lineHeight = this.lineHeight;
+    slot.bodyCont.style.fontSize = this.fontSize;
+    slot.bodyCont.style.lineHeight = this.lineHeight;
+    slot.bitsLabel.style.fontSize = this.fontSize;
+    slot.bitsLabel.style.lineHeight = this.lineHeight;
     const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
     const timeSample = this.timestampsVisible()
       ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
@@ -2492,7 +2707,7 @@ export class MessageRing {
     return out;
   }
 
-  private layout(anchor?: ScrollAnchor): void {
+  private layout(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
     const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     const visible: Slot[] = [];
@@ -2511,7 +2726,9 @@ export class MessageRing {
       const slot = visible[i];
       slot.startRow = i;
       slot.root.y = y;
-      this.paintClip(slot);
+      if (!paintOnly || paintOnly.has(slot)) {
+        this.paintClip(slot);
+      }
       y += slot.lineCount * this.lineHeight;
       if (i + 1 < visible.length) {
         y += gapPx;
