@@ -55,7 +55,29 @@ impl BadgeCatalog {
         self.channel.clear();
     }
 
+    pub fn global_is_empty(&self) -> bool {
+        self.global.is_empty()
+    }
+
     pub fn lookup(&self, channel: &str, set: &str, version: &str) -> Option<&str> {
+        self.lookup_exact(channel, set, version)
+            .or_else(|| {
+                if version != "1" {
+                    self.lookup_exact(channel, set, "1")
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                if version != "0" {
+                    self.lookup_exact(channel, set, "0")
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn lookup_exact(&self, channel: &str, set: &str, version: &str) -> Option<&str> {
         let key = badge_key(set, version);
         self.channel
             .get(channel)
@@ -83,24 +105,41 @@ pub async fn load_global_badges(
     client_id: &str,
 ) {
     let Some((client_id, token)) = helix_creds(token, client_id) else {
+        if let Ok(mut cat) = catalog.lock() {
+            super::badge_fallback::seed_global(&mut cat);
+        }
         return;
     };
     let client = http_client();
     let url = format!("{HELIX}/chat/badges/global");
     let v = match get_helix(&client, &url, &client_id, &token).await {
         HelixFetch::Ok(v) => v,
-        HelixFetch::Auth => return,
+        HelixFetch::Auth => {
+            if let Ok(mut cat) = catalog.lock() {
+                super::badge_fallback::seed_global(&mut cat);
+            }
+            return;
+        }
         HelixFetch::Fail => {
             tokio::time::sleep(RETRY_WAIT).await;
             match get_helix(&client, &url, &client_id, &token).await {
                 HelixFetch::Ok(v) => v,
-                HelixFetch::Auth | HelixFetch::Fail => return,
+                HelixFetch::Auth | HelixFetch::Fail => {
+                    if let Ok(mut cat) = catalog.lock() {
+                        super::badge_fallback::seed_global(&mut cat);
+                    }
+                    return;
+                }
             }
         }
     };
     let map = parse_badge_sets(&v);
     if let Ok(mut cat) = catalog.lock() {
-        cat.replace_global(map);
+        if map.is_empty() {
+            super::badge_fallback::seed_global(&mut cat);
+        } else {
+            cat.replace_global(map);
+        }
     }
 }
 
@@ -1316,6 +1355,23 @@ mod tests {
         assert_eq!(
             badges[0].url.as_deref(),
             Some("https://static-cdn.jtvnw.net/badges/v1/mod/1")
+        );
+    }
+
+    #[test]
+    fn lookup_falls_back_to_version_one() {
+        let mut cat = BadgeCatalog::default();
+        cat.replace_global({
+            let mut m = BadgeMap::new();
+            m.insert(
+                "subscriber/1".into(),
+                "https://static-cdn.jtvnw.net/badges/v1/sub/1".into(),
+            );
+            m
+        });
+        assert_eq!(
+            cat.lookup("ch", "subscriber", "12"),
+            Some("https://static-cdn.jtvnw.net/badges/v1/sub/1")
         );
     }
 

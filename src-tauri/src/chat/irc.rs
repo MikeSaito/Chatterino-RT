@@ -38,6 +38,9 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 }
 
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>) {
+    if let Ok(mut cat) = shared.badges.lock() {
+        super::badge_fallback::seed_global(&mut cat);
+    }
     let flags = fetch::EmoteProviderFlags::from_shared(&shared);
     let (globals_result, _, _) = tokio::join!(
         fetch::load_globals(&shared.catalog, flags),

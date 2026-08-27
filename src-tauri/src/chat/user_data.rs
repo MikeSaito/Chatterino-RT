@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde_json::Value;
 
 use super::state::Shared;
 
