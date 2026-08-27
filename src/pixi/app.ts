@@ -1,3 +1,5 @@
+// Polyfill shader/UBO sync without new Function — required under prod CSP (no unsafe-eval).
+import "pixi.js/unsafe-eval";
 import { Application, Assets } from "pixi.js";
 
 let app: Application | null = null;

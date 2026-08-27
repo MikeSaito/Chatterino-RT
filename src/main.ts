@@ -1,3 +1,4 @@
+import "pixi.js/unsafe-eval";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createChatApp, destroyChatApp } from "./pixi/app";
