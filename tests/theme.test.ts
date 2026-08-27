@@ -54,8 +54,8 @@ const dark = themeTokens("Dark");
 const light = themeTokens("Light");
 assert(dark.pixi.body !== light.pixi.body, "Dark body ≠ Light body");
 assert(dark.pixi.canvasBg !== light.pixi.canvasBg, "Dark canvas ≠ Light");
-assert(light.pixi.body === 0x000000, "Light body black");
-assert(dark.pixi.body === 0xffffff, "Dark body white");
+assert(light.pixi.body === 0x1a1a1a, "Light body dark");
+assert(dark.pixi.body === 0xefeff1, "Dark body light");
 
 const argb = parseArgb("#99191919");
 assert(Math.abs(argb.alpha - 0x99 / 255) < 1e-6, "ARGB alpha");
