@@ -29,7 +29,7 @@ import {
   parsePlayerChatSplit,
 } from "./shell/stageSplit";
 import { bindSearchPopup } from "./shell/chatFind";
-import { bindHeaderMenu } from "./shell/headerMenu";
+import { bindHeaderMenu, type HeaderMenuAction } from "./shell/headerMenu";
 import { bindTabOverflow } from "./shell/tabOverflow";
 import { bindJoinPopover } from "./shell/joinPopover";
 import { bindAuthMenu } from "./shell/authMenu";
@@ -109,7 +109,13 @@ if (import.meta.hot) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  void boot();
+  void boot().catch((err) => {
+    const status = document.querySelector<HTMLElement>("#status");
+    if (status) {
+      status.textContent =
+        err instanceof Error ? err.message : String(err ?? "ошибка загрузки");
+    }
+  });
 });
 
 window.addEventListener("beforeunload", () => {
@@ -335,7 +341,204 @@ async function boot(): Promise<void> {
     messageInput.focus();
   });
 
-  const app = await createChatApp(canvas, canvasHost);
+  statusEl.textContent = "Загрузка чата…";
+  messageInput.disabled = true;
+  sendBtn.disabled = true;
+  emoteOpen.disabled = true;
+
+  type ChromeReady = {
+    join: ((channel: string, focus?: boolean) => void) | null;
+    startLogin: (() => void) | null;
+    logout: (() => void) | null;
+    importLogin: (() => void) | null;
+    headerAction: ((action: HeaderMenuAction) => void) | null;
+    getChannel: () => string;
+    hasCustomPlayer: () => boolean;
+  };
+  const chromeReady: ChromeReady = {
+    join: null,
+    startLogin: null,
+    logout: null,
+    importLogin: null,
+    headerAction: null,
+    getChannel: () => "",
+    hasCustomPlayer: () => false,
+  };
+  const pendingJoins: { name: string; focus: boolean }[] = [];
+
+  let headerMenuCtl: ReturnType<typeof bindHeaderMenu> | null = null;
+  let joinPopoverCtl: ReturnType<typeof bindJoinPopover> | null = null;
+  let authMenuCtl: ReturnType<typeof bindAuthMenu> | null = null;
+  let tabOverflowCtl: ReturnType<typeof bindTabOverflow> | null = null;
+
+  const queueOrJoin = (channel: string, focus = true): void => {
+    const name = channel.trim();
+    if (!name) {
+      return;
+    }
+    if (chromeReady.join) {
+      chromeReady.join(name, focus);
+      return;
+    }
+    pendingJoins.push({ name, focus });
+    statusEl.textContent = "Загрузка чата…";
+  };
+
+  let prepareSettingsOpen: (() => void) | null = null;
+  const earlyChromeAbort = new AbortController();
+  const earlySignal = earlyChromeAbort.signal;
+
+  settingsBtn.addEventListener(
+    "click",
+    () => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      headerMenuCtl?.hide();
+      authMenuCtl?.hide();
+      joinPopoverCtl?.hide();
+      prepareSettingsOpen?.();
+      void requestOpenSettingsWindow().catch((err) => {
+        statusEl.textContent = formatError(err);
+      });
+    },
+    { signal: earlySignal },
+  );
+
+  joinFormEl.addEventListener(
+    "submit",
+    (ev) => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      ev.preventDefault();
+      queueOrJoin(channelInput.value);
+    },
+    { signal: earlySignal },
+  );
+
+  joinPopoverCtl = bindJoinPopover({
+    form: joinFormEl,
+    toggle: joinToggleBtn,
+    popover: joinPopoverEl,
+    popoverForm: joinPopoverFormEl,
+    popoverInput: joinPopoverInputEl,
+    isCompact: () => window.matchMedia("(max-width: 479px)").matches,
+    onJoin: (channel) => {
+      queueOrJoin(channel);
+    },
+  });
+
+  headerMenuCtl = bindHeaderMenu({
+    button: headerMoreBtn,
+    menu: headerMenuEl,
+    getChannel: () => chromeReady.getChannel(),
+    hasCustomPlayer: () => chromeReady.hasCustomPlayer(),
+    onAction: (action) => {
+      if (chromeReady.headerAction) {
+        chromeReady.headerAction(action);
+        return;
+      }
+      statusEl.textContent = "Загрузка чата…";
+    },
+  });
+
+  signinBtn.addEventListener(
+    "click",
+    () => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      if (chromeReady.startLogin) {
+        chromeReady.startLogin();
+        return;
+      }
+      void (async () => {
+        signinBtn.disabled = true;
+        try {
+          await invoke("auth_start");
+          statusEl.textContent = "Ожидание входа…";
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        } finally {
+          signinBtn.disabled = false;
+        }
+      })();
+    },
+    { signal: earlySignal },
+  );
+
+  logoutBtn.addEventListener(
+    "click",
+    () => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      if (chromeReady.logout) {
+        chromeReady.logout();
+        return;
+      }
+      void (async () => {
+        logoutBtn.disabled = true;
+        try {
+          await invoke("auth_logout");
+          statusEl.textContent = "Вход отменён";
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        } finally {
+          logoutBtn.disabled = false;
+        }
+      })();
+    },
+    { signal: earlySignal },
+  );
+
+  importBtn.addEventListener(
+    "click",
+    () => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      if (chromeReady.importLogin) {
+        chromeReady.importLogin();
+        return;
+      }
+      void (async () => {
+        importBtn.disabled = true;
+        try {
+          await invoke("auth_import", { blob: pasteEl.value });
+          statusEl.textContent = "Код принят";
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        } finally {
+          importBtn.disabled = false;
+        }
+      })();
+    },
+    { signal: earlySignal },
+  );
+
+  teardownChat = () => {
+    earlyChromeAbort.abort();
+    pendingJoins.length = 0;
+    headerMenuCtl?.dispose();
+    headerMenuCtl = null;
+    tabOverflowCtl?.dispose();
+    tabOverflowCtl = null;
+    joinPopoverCtl?.dispose();
+    joinPopoverCtl = null;
+    authMenuCtl?.dispose();
+    authMenuCtl = null;
+  };
+
+  let app;
+  try {
+    app = await createChatApp(canvas, canvasHost);
+  } catch (err) {
+    teardownChat?.();
+    teardownChat = null;
+    throw err;
+  }
   const textures = new TextureLru();
   let bootKnobs: AppSettings["knobs"] = {};
   let menuCommands: AppSettings["commands"] = [];
@@ -359,7 +562,16 @@ async function boot(): Promise<void> {
   let authOp: "idle" | "start" | "import" | "logout" = "idle";
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
-  await ring.init();
+  try {
+    await ring.init();
+  } catch (err) {
+    ring.destroy();
+    textures.clear();
+    destroyChatApp();
+    teardownChat?.();
+    teardownChat = null;
+    throw err;
+  }
   ring.setModActions(modActionBtns);
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
@@ -434,21 +646,11 @@ async function boot(): Promise<void> {
     })();
   });
   let unbindImageUpload: (() => void) | null = null;
-  let headerMenuCtl: ReturnType<typeof bindHeaderMenu> | null = null;
-  let tabOverflowCtl: ReturnType<typeof bindTabOverflow> | null = null;
-  let joinPopoverCtl: ReturnType<typeof bindJoinPopover> | null = null;
-  let authMenuCtl: ReturnType<typeof bindAuthMenu> | null = null;
+  const chromeTeardown = teardownChat;
   teardownChat = () => {
     unbindImageUpload?.();
     unbindImageUpload = null;
-    headerMenuCtl?.dispose();
-    headerMenuCtl = null;
-    tabOverflowCtl?.dispose();
-    tabOverflowCtl = null;
-    joinPopoverCtl?.dispose();
-    joinPopoverCtl = null;
-    authMenuCtl?.dispose();
-    authMenuCtl = null;
+    chromeTeardown?.();
     stageSplitCtl?.dispose();
     stageSplitCtl = null;
     quickActionsCtl?.dispose();
@@ -534,7 +736,7 @@ async function boot(): Promise<void> {
 
   const settingsCtl = bindSettingsBridge({
     ring,
-    openBtn: settingsOpen,
+    openBtn: null,
     onOpen: () => {
       hideContextMenu();
     },
@@ -653,6 +855,9 @@ async function boot(): Promise<void> {
       applyWindowMinForLayout(uiLayout);
     },
   });
+  prepareSettingsOpen = () => {
+    settingsCtl.prepareOpen();
+  };
   stageSplitCtl = bindStageSplit({
     stage: stageEl,
     split: stageSplitEl,
@@ -854,12 +1059,9 @@ async function boot(): Promise<void> {
       hideContextMenu();
     },
   });
-  headerMenuCtl = bindHeaderMenu({
-    button: headerMoreBtn,
-    menu: headerMenuEl,
-    getChannel: () => ipc.active(),
-    hasCustomPlayer: () => Boolean(customUriScheme),
-    onAction: (action) => {
+  chromeReady.getChannel = () => ipc.active();
+  chromeReady.hasCustomPlayer = () => Boolean(customUriScheme);
+  chromeReady.headerAction = (action) => {
       const channel = ipc.active().trim();
       switch (action) {
         case "search":
@@ -912,8 +1114,7 @@ async function boot(): Promise<void> {
           void leaveChannel(channel);
           break;
       }
-    },
-  });
+  };
   userCard = bindUserCard({
     modal: usercardModal,
     notesModal,
@@ -1076,17 +1277,6 @@ async function boot(): Promise<void> {
   );
 
   tabOverflowCtl = bindTabOverflow({ list, host: channelListHost });
-  joinPopoverCtl = bindJoinPopover({
-    form: joinFormEl,
-    toggle: joinToggleBtn,
-    popover: joinPopoverEl,
-    popoverForm: joinPopoverFormEl,
-    popoverInput: joinPopoverInputEl,
-    isCompact: () => window.matchMedia("(max-width: 479px)").matches,
-    onJoin: (channel) => {
-      void joinChannel(channel);
-    },
-  });
   authMenuCtl = bindAuthMenu({
     chip: authChipBtn,
     menu: authMenuEl,
@@ -1534,11 +1724,6 @@ async function boot(): Promise<void> {
     applyAuth(ev.payload);
   });
 
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    void joinChannel(channelInput.value.trim());
-  });
-
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void sendMessage();
@@ -1627,17 +1812,22 @@ async function boot(): Promise<void> {
     }, 0);
   });
 
-  signinBtn.addEventListener("click", () => {
+  chromeReady.join = (channel, focus = true) => {
+    void joinChannel(channel, focus);
+  };
+  chromeReady.startLogin = () => {
     void startLogin();
-  });
-
-  logoutBtn.addEventListener("click", () => {
+  };
+  chromeReady.logout = () => {
     void logout();
-  });
-
-  importBtn.addEventListener("click", () => {
+  };
+  chromeReady.importLogin = () => {
     void importLogin();
-  });
+  };
+  emoteOpen.disabled = false;
+  if (statusEl.textContent === "Загрузка чата…") {
+    statusEl.textContent = "";
+  }
 
   try {
     applyAuth(await invoke<AuthInfo>("auth_status"));
@@ -1673,6 +1863,10 @@ async function boot(): Promise<void> {
     }
   } catch {
     /* first run */
+  }
+
+  for (const pending of pendingJoins.splice(0)) {
+    void joinChannel(pending.name, pending.focus);
   }
 
   function fillImageScaleSubmenu(

@@ -1428,6 +1428,12 @@ button:disabled {
   background: var(--c-surface-2);
 }
 
+/* display:inline-flex иначе пробивает атрибут hidden (Send и др.). */
+.btn[hidden],
+.btn-icon[hidden] {
+  display: none !important;
+}
+
 .btn:hover:not(:disabled) {
   background: var(--c-surface-3);
 }
@@ -1483,6 +1489,8 @@ button:disabled {
   border-radius: var(--radius-sm);
   color: var(--c-window-text);
 }
+
+/* .btn[hidden] / .btn-icon[hidden] — см. блок выше у .btn */
 
 .btn-icon:hover:not(:disabled) {
   background: var(--c-surface-2);
@@ -1765,11 +1773,12 @@ button:disabled {
   box-shadow: var(--shadow-1);
   opacity: 0;
   transition: opacity 100ms ease;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 #chat-quick-actions.is-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 #chat-quick-actions[hidden] {

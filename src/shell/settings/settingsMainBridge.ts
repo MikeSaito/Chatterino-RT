@@ -22,12 +22,14 @@ export type { AppSettings } from "./settingsApply";
 
 export function bindSettingsBridge(opts: {
   ring: MessageRing;
-  openBtn: HTMLButtonElement;
+  /** null = open уже привязан до Pixi (chrome wiring). */
+  openBtn: HTMLButtonElement | null;
   onDisplay?: (data: AppSettings) => void;
   onOpen?: () => void;
 }): {
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
   patchKnobs: (patch: Record<string, boolean | string | number>) => Promise<void>;
+  prepareOpen: () => void;
 } {
   const { ring, openBtn, onDisplay } = opts;
   let applied: AppSettings = emptySettings();
@@ -64,11 +66,16 @@ export function bindSettingsBridge(opts: {
     }
   });
 
-  openBtn.addEventListener("click", () => {
+  openBtn?.addEventListener("click", () => {
     opts.onOpen?.();
     baseline = applied;
     void requestOpenSettingsWindow();
   });
+
+  const prepareOpen = (): void => {
+    opts.onOpen?.();
+    baseline = applied;
+  };
 
   let chain: Promise<void> = Promise.resolve();
   const persist = (next: AppSettings): Promise<void> => {
@@ -96,6 +103,9 @@ export function bindSettingsBridge(opts: {
     return chain;
   };
 
+  let zoomPersistTimer: ReturnType<typeof setTimeout> | null = null;
+  let zoomPersistResolve: (() => void) | null = null;
+
   const bumpZoom = (dir: 1 | -1 | 0): Promise<void> => {
     const next: AppSettings = {
       ...applied,
@@ -107,7 +117,34 @@ export function bindSettingsBridge(opts: {
         name: r.name,
       })),
     };
-    return persist(next);
+    applied = next;
+    applySettingsDisplay(ring, next, onDisplay);
+    if (zoomPersistTimer !== null) {
+      clearTimeout(zoomPersistTimer);
+      zoomPersistTimer = null;
+    }
+    return new Promise((resolve) => {
+      zoomPersistResolve?.();
+      zoomPersistResolve = resolve;
+      zoomPersistTimer = setTimeout(() => {
+        zoomPersistTimer = null;
+        const done = zoomPersistResolve;
+        zoomPersistResolve = null;
+        const toSave: AppSettings = {
+          ...baseline,
+          fontScale: applied.fontScale,
+          knobs: { ...defaultKnobs(), ...baseline.knobs },
+          hotkeys: normalizeHotkeyRows(baseline.hotkeys ?? []).map((r) => ({
+            action: r.action,
+            keybinding: r.keybinding,
+            name: r.name,
+          })),
+        };
+        void persist(toSave).finally(() => {
+          done?.();
+        });
+      }, 400);
+    });
   };
 
   /** Patch knobs onto last-saved baseline (not live preview) without wiping preview. */
@@ -154,5 +191,5 @@ export function bindSettingsBridge(opts: {
     return chain;
   };
 
-  return { bumpZoom, patchKnobs };
+  return { bumpZoom, patchKnobs, prepareOpen };
 }
