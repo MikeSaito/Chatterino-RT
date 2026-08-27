@@ -1,4 +1,9 @@
 import { applyUiLayout, parseUiLayout } from "../src/shell/uiLayout.ts";
+import {
+  CLASSIC_MIN_SIZE,
+  EXTENDED_MIN_SIZE,
+  minSizeForLayout,
+} from "../src/shell/windowMinSize.ts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -12,6 +17,24 @@ assert(parseUiLayout("classic") === "Extended", "case → Extended");
 assert(parseUiLayout("") === "Extended", "empty → Extended");
 assert(parseUiLayout(null) === "Extended", "null → Extended");
 assert(parseUiLayout(1) === "Extended", "number → Extended");
+
+assert(
+  minSizeForLayout("Classic").width === CLASSIC_MIN_SIZE.width,
+  "classic min w",
+);
+assert(
+  minSizeForLayout("Classic").height === CLASSIC_MIN_SIZE.height,
+  "classic min h",
+);
+assert(
+  minSizeForLayout("Extended").width === EXTENDED_MIN_SIZE.width,
+  "extended min w",
+);
+assert(
+  minSizeForLayout("Extended").height === EXTENDED_MIN_SIZE.height,
+  "extended min h",
+);
+assert(CLASSIC_MIN_SIZE.width < EXTENDED_MIN_SIZE.width, "classic narrower");
 
 const app = { dataset: {} as DOMStringMap };
 const settingsBtn = { textContent: "Настройки", title: "" };

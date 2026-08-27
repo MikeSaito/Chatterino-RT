@@ -9,6 +9,8 @@
     "core:webview:deny-create-webview-window",
     "core:window:deny-create",
     "core:window:allow-set-always-on-top",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-focus",

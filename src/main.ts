@@ -12,6 +12,7 @@ import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
+import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
   bindStreamPreviewTooltip,
   effectiveHeaderKnobs,
@@ -542,6 +543,7 @@ async function boot(): Promise<void> {
         });
         syncPlayerForLayout(readActiveChannel());
       }
+      applyWindowMinForLayout(uiLayout);
     },
   });
   const ipc = bindChatIpc(ring, {
