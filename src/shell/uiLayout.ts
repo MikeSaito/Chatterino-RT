@@ -25,6 +25,6 @@ export function applyUiLayout(
     }
   }
   if (opts?.channelList) {
-    opts.channelList.setAttribute("role", mode === "Classic" ? "tablist" : "list");
+    opts.channelList.setAttribute("role", "tablist");
   }
 }

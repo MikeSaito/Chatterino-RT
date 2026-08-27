@@ -1,7 +1,8 @@
-/** Account chip dropdown (switch account / logout). */
+/** Account chip dropdown (switch account / settings / logout). */
 
 export type AuthMenuAction =
   | { kind: "select"; login: string }
+  | { kind: "settings" }
   | { kind: "logout" };
 
 export function bindAuthMenu(opts: {
@@ -31,11 +32,16 @@ export function bindAuthMenu(opts: {
       btn.disabled = row.current;
       menu.appendChild(btn);
     }
+    if (menu.childElementCount > 0) {
+      const sep = document.createElement("hr");
+      menu.appendChild(sep);
+    }
+    const settings = document.createElement("button");
+    settings.type = "button";
+    settings.dataset.action = "settings";
+    settings.textContent = "Настройки";
+    menu.appendChild(settings);
     if (canLogout()) {
-      if (menu.childElementCount > 0) {
-        const sep = document.createElement("hr");
-        menu.appendChild(sep);
-      }
       const logout = document.createElement("button");
       logout.type = "button";
       logout.dataset.action = "logout";
@@ -50,9 +56,6 @@ export function bindAuthMenu(opts: {
       return;
     }
     paint();
-    if (menu.childElementCount === 0) {
-      return;
-    }
     menu.hidden = false;
     chip.setAttribute("aria-expanded", "true");
     const rect = chip.getBoundingClientRect();
@@ -91,6 +94,10 @@ export function bindAuthMenu(opts: {
     hide();
     if (action === "logout") {
       onAction({ kind: "logout" });
+      return;
+    }
+    if (action === "settings") {
+      onAction({ kind: "settings" });
       return;
     }
     if (action === "select") {

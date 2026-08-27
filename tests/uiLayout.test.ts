@@ -75,6 +75,6 @@ applyUiLayout(app as HTMLElement, "Extended", {
 });
 assert(app.dataset.uiLayout === "extended", "dataset extended");
 assert(settingsBtn.dataset.uiLayout === "extended", "settings dataset extended");
-assert(channelList.role === "list", "extended list");
+assert(channelList.role === "tablist", "extended tablist");
 
 console.log("uiLayout.test.ts ok");

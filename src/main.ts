@@ -262,6 +262,7 @@ async function boot(): Promise<void> {
   const deviceEl = authDevice;
   const pasteEl = authPaste;
   const importBtn = authImport;
+  const settingsBtn = settingsOpen;
   const completeBox = completeList;
   let composerOpts: ComposerChromeOpts = defaultComposerChrome();
   const sendWaitByChannel = new Map<string, string>();
@@ -589,7 +590,7 @@ async function boot(): Promise<void> {
       repaintChannelTitle();
       streamPreviewCtl?.refresh();
       uiLayout = parseUiLayout(data.knobs["appearance.uiLayout"]);
-      channels.setShowRecents(uiLayout === "Extended");
+      channels.setShowRecents(false);
       if (uiLayout === "Classic") {
         syncPlayerForLayout(readActiveChannel());
         applyUiLayout(appRoot, uiLayout, {
@@ -935,9 +936,7 @@ async function boot(): Promise<void> {
     popover: joinPopoverEl,
     popoverForm: joinPopoverFormEl,
     popoverInput: joinPopoverInputEl,
-    isCompact: () =>
-      appRoot.dataset.uiLayout === "classic" &&
-      window.matchMedia("(max-width: 479px)").matches,
+    isCompact: () => window.matchMedia("(max-width: 479px)").matches,
     onJoin: (channel) => {
       void joinChannel(channel);
     },
@@ -960,6 +959,10 @@ async function boot(): Promise<void> {
     onAction: (action) => {
       if (action.kind === "logout") {
         void logout();
+        return;
+      }
+      if (action.kind === "settings") {
+        void requestOpenSettingsWindow();
         return;
       }
       void (async () => {
@@ -1725,9 +1728,11 @@ async function boot(): Promise<void> {
     if (!showChip) {
       authMenuCtl?.hide();
     }
-    // Idle unsigned → только «Войти»; любой pending скрывает «Войти».
+    // Idle unsigned → только «Войти» + настройки; любой pending скрывает «Войти».
     signinBtn.hidden = signed || pending;
     signinBtn.disabled = pending || authOp === "start";
+    // Настройки: рядом с «Войти» без сессии; в меню chip когда вошли.
+    settingsBtn.hidden = showChip;
     // Pending: «Отмена»; signed idle — logout только через chip-меню.
     logoutBtn.hidden = !pending;
     logoutBtn.textContent = "Отмена";
