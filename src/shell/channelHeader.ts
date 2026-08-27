@@ -227,28 +227,28 @@ export function formatChannelTitle(
   stream: ChannelLive | null | undefined,
   knobs: HeaderKnobs,
 ): string {
-  let text = `#${channel}`;
+  void channel;
   if (!stream?.live) {
-    return text;
+    return "";
   }
-  text += " (live)";
+  const parts: string[] = [];
   if (knobs.uptime && stream.startedAt) {
     const uptime = formatUptime(stream.startedAt);
     if (uptime) {
-      text += ` - ${uptime}`;
+      parts.push(uptime);
     }
   }
   if (knobs.viewerCount && stream.viewerCount != null) {
-    text += ` - ${stream.viewerCount.toLocaleString()}`;
+    parts.push(stream.viewerCount.toLocaleString());
   }
   if (knobs.game && stream.gameName) {
-    text += ` - ${stream.gameName}`;
+    parts.push(stream.gameName);
   }
   if (knobs.streamTitle && stream.streamTitle) {
     const title = stream.streamTitle.replace(/\s+/g, " ").trim();
     if (title) {
-      text += ` - ${title.length > 80 ? `${title.slice(0, 79)}…` : title}`;
+      parts.push(title.length > 80 ? `${title.slice(0, 79)}…` : title);
     }
   }
-  return text;
+  return parts.join(" · ");
 }

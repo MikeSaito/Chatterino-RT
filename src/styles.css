@@ -279,6 +279,80 @@ body,
   cursor: default;
 }
 
+#header-live:not([hidden]) + #channel-title {
+  min-width: 48px;
+}
+
+#header-live {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 6px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-danger);
+}
+
+#header-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+#header-live[hidden] {
+  display: none;
+}
+
+#header-more {
+  flex-shrink: 0;
+}
+
+#header-menu {
+  position: fixed;
+  z-index: var(--z-menu);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: var(--shadow-2);
+}
+
+#header-menu[hidden] {
+  display: none;
+}
+
+#header-menu button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  color: var(--c-window-text);
+}
+
+#header-menu button:hover:not(:disabled) {
+  background: var(--c-surface-2);
+}
+
+#header-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 #stream-tooltip {
   position: fixed;
   z-index: var(--z-tooltip);
@@ -2376,6 +2450,7 @@ button:disabled {
   font-weight: 400;
 }
 
+#app[data-ui-layout="classic"] #header-more,
 #app[data-ui-layout="classic"] #settings-open {
   width: 24px;
   height: 24px;

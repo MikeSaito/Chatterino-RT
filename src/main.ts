@@ -24,6 +24,7 @@ import {
   type ThumbnailSizeStream,
 } from "./shell/channelHeader";
 import { bindSearchPopup } from "./shell/chatFind";
+import { bindHeaderMenu } from "./shell/headerMenu";
 import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
 import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
 import {
@@ -126,6 +127,9 @@ async function boot(): Promise<void> {
   const joinBtn = form?.querySelector<HTMLButtonElement>("button[type=submit]");
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
+  const headerLive = document.querySelector<HTMLElement>("#header-live");
+  const headerMore = document.querySelector<HTMLButtonElement>("#header-more");
+  const headerMenu = document.querySelector<HTMLMenuElement>("#header-menu");
   const moderationModeBtn = document.querySelector<HTMLButtonElement>(
     "#moderation-mode-btn",
   );
@@ -167,6 +171,9 @@ async function boot(): Promise<void> {
     !joinBtn ||
     !list ||
     !title ||
+    !headerLive ||
+    !headerMore ||
+    !headerMenu ||
     !player ||
     !status ||
     !composer ||
@@ -198,6 +205,9 @@ async function boot(): Promise<void> {
 
   const joinControl = joinBtn;
   const titleEl = title;
+  const headerLiveEl = headerLive;
+  const headerMoreBtn = headerMore;
+  const headerMenuEl = headerMenu;
   const channelInput = input;
   const playerSlot = player;
   const statusEl = status;
@@ -277,6 +287,8 @@ async function boot(): Promise<void> {
   let modActionBtns: ModActionBtn[] = bootModActions;
   let modSendBusy = false;
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
+  let authOp: "idle" | "start" | "import" | "logout" = "idle";
+  let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
   await ring.init();
   ring.setModActions(modActionBtns);
@@ -353,9 +365,12 @@ async function boot(): Promise<void> {
     })();
   });
   let unbindImageUpload: (() => void) | null = null;
+  let headerMenuCtl: ReturnType<typeof bindHeaderMenu> | null = null;
   teardownChat = () => {
     unbindImageUpload?.();
     unbindImageUpload = null;
+    headerMenuCtl?.dispose();
+    headerMenuCtl = null;
     streamPreviewCtl?.hide();
     chatIpc?.stop();
     chatIpc = null;
@@ -582,19 +597,22 @@ async function boot(): Promise<void> {
     const ch = ipc.active();
     if (!ch) {
       titleEl.textContent = "";
+      headerLiveEl.hidden = true;
       ring.setChannelLive(false);
       replyThreadCtl?.repaint();
       return;
     }
     const stream = streamByChannel.get(ch.toLowerCase());
-    ring.setChannelLive(stream?.live ?? false);
+    const live = stream?.live ?? false;
+    ring.setChannelLive(live);
     replyThreadCtl?.repaint();
     const sm = streamerModeState();
     const knobs = effectiveHeaderKnobs(headerKnobs, {
       streamerActive: sm.active,
       hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
     });
-    titleEl.textContent = formatChannelTitle(ch, stream, knobs);
+    titleEl.textContent = formatChannelTitle(ch, stream, knobs) || (live ? "\u00a0" : "");
+    headerLiveEl.hidden = !live;
     streamPreviewCtl?.refresh();
   };
 
@@ -620,6 +638,66 @@ async function boot(): Promise<void> {
     activeChannel: () => ipc.active(),
     onOpen: () => {
       hideContextMenu();
+    },
+  });
+  headerMenuCtl = bindHeaderMenu({
+    button: headerMoreBtn,
+    menu: headerMenuEl,
+    getChannel: () => ipc.active(),
+    hasCustomPlayer: () => Boolean(customUriScheme),
+    onAction: (action) => {
+      const channel = ipc.active().trim();
+      switch (action) {
+        case "search":
+          chatFindCtl.open();
+          break;
+        case "open-browser":
+          if (!channel) {
+            statusEl.textContent = "нет активного канала";
+            return;
+          }
+          void invoke("open_chat_link", {
+            url: `https://www.twitch.tv/${channel}`,
+            private: openLinksIncognito,
+          }).catch((err) => {
+            statusEl.textContent = formatError(err);
+          });
+          break;
+        case "open-streamlink":
+          if (!channel) {
+            statusEl.textContent = "нет активного канала";
+            return;
+          }
+          void invoke("open_in_streamlink", { channel }).catch((err) => {
+            statusEl.textContent = formatError(err);
+          });
+          break;
+        case "open-custom-player":
+          if (!channel || !customUriScheme) {
+            statusEl.textContent = !customUriScheme
+              ? "custom player не настроен"
+              : "нет активного канала";
+            return;
+          }
+          void invoke("open_in_custom_player", { channel }).catch((err) => {
+            statusEl.textContent = formatError(err);
+          });
+          break;
+        case "reconnect":
+          if (!channel) {
+            statusEl.textContent = "нет активного канала";
+            return;
+          }
+          void joinChannel(channel, true);
+          break;
+        case "leave":
+          if (!channel) {
+            statusEl.textContent = "нет активного канала";
+            return;
+          }
+          void leaveChannel(channel);
+          break;
+      }
     },
   });
   userCard = bindUserCard({
@@ -1192,6 +1270,7 @@ async function boot(): Promise<void> {
   });
 
   await listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
+    authPaintGen += 1;
     applyAuth(ev.payload);
   });
 
@@ -1360,6 +1439,7 @@ async function boot(): Promise<void> {
   }
 
   function openContextMenu(ctx: SlotContext): void {
+    headerMenuCtl?.hide();
     contextTarget = ctx;
     if (contextCustomHost && contextCustomSep) {
       contextCustomHost.replaceChildren();
@@ -1488,6 +1568,7 @@ async function boot(): Promise<void> {
   function hideContextMenu(): void {
     contextMenuEl.hidden = true;
     contextTarget = null;
+    headerMenuCtl?.hide();
   }
 
   function setReply(id: string, login: string, text: string): void {
@@ -1511,18 +1592,26 @@ async function boot(): Promise<void> {
     userCard?.syncMod();
     replyThreadCtl?.syncComposer();
     const signed = Boolean(info.login);
-    const pending = Boolean(info.userCode) || Boolean(info.pendingPaste);
-    loginEl.textContent = info.login ? info.login : "";
+    const pendingPaste = Boolean(info.pendingPaste);
+    const pendingDevice = Boolean(info.userCode);
+    const pending = pendingPaste || pendingDevice;
+    loginEl.textContent = signed && !pending ? info.login! : "";
+    // Idle unsigned → только «Войти»; любой pending скрывает «Войти».
     signinBtn.hidden = signed || pending;
-    signinBtn.disabled = pending;
-    logoutBtn.hidden = !((signed && !info.fromEnv) || pending);
+    signinBtn.disabled = pending || authOp === "start";
+    // Paste/device: «Отмена»; вошёл: «Выйти» (не из env).
+    logoutBtn.hidden = !((signed && !info.fromEnv && !pending) || pending);
     logoutBtn.textContent = pending ? "Отмена" : "Выйти";
-    pasteEl.hidden = !info.pendingPaste;
-    importBtn.hidden = !info.pendingPaste;
-    if (info.userCode) {
+    logoutBtn.disabled = authOp === "logout";
+    // «Вставить код» только в pendingPaste, никогда в idle.
+    pasteEl.hidden = !pendingPaste;
+    importBtn.hidden = !pendingPaste;
+    importBtn.disabled = authOp === "import";
+    if (pendingDevice) {
       deviceEl.hidden = false;
-      deviceEl.textContent = `код: ${info.userCode}`;
-    } else if (info.pendingPaste) {
+      const code = `код: ${info.userCode}`;
+      deviceEl.textContent = info.message ? `${code}\n${info.message}` : code;
+    } else if (pendingPaste) {
       deviceEl.hidden = false;
       deviceEl.textContent =
         info.message ||
@@ -1537,6 +1626,15 @@ async function boot(): Promise<void> {
     syncComposer();
   }
 
+  async function paintAuthFromServer(message?: string): Promise<void> {
+    const gen = ++authPaintGen;
+    const info = await invoke<AuthInfo>("auth_status");
+    if (gen !== authPaintGen) {
+      return;
+    }
+    applyAuth(message ? { ...info, message } : info);
+  }
+
   function syncComposer(): void {
     const on = lastAuth.canSend && !sending;
     sendBtn.disabled = !on;
@@ -1548,32 +1646,30 @@ async function boot(): Promise<void> {
   }
 
   async function startLogin(): Promise<void> {
+    const op = "start" as const;
+    authOp = op;
     signinBtn.disabled = true;
     try {
-      const started = await invoke<{
-        mode: string;
-        userCode?: string;
-      }>("auth_start");
-      if (started.mode === "paste") {
-        pasteEl.hidden = false;
-        importBtn.hidden = false;
-        deviceEl.hidden = false;
-        deviceEl.textContent =
-          "Войдите на chatterino.com/client_login, скопируйте строку и вставьте сюда";
-      } else if (started.userCode) {
-        deviceEl.hidden = false;
-        deviceEl.textContent = `код: ${started.userCode}`;
-      }
+      await invoke("auth_start");
+      await paintAuthFromServer();
     } catch (err) {
-      deviceEl.hidden = false;
-      deviceEl.textContent = formatError(err);
+      try {
+        await paintAuthFromServer(formatError(err));
+      } catch {
+        applyAuth({ ...lastAuth, message: formatError(err) });
+      }
     } finally {
-      signinBtn.disabled = false;
+      if (authOp === op) {
+        authOp = "idle";
+        applyAuth(lastAuth);
+      }
     }
   }
 
   async function importLogin(): Promise<void> {
     const blob = pasteEl.value;
+    const op = "import" as const;
+    authOp = op;
     importBtn.disabled = true;
     try {
       await invoke("auth_import", { blob });
@@ -1583,22 +1679,40 @@ async function boot(): Promise<void> {
       } catch {
         /* clipboard may be denied */
       }
+      await paintAuthFromServer();
     } catch (err) {
-      deviceEl.hidden = false;
-      deviceEl.textContent = formatError(err);
+      try {
+        await paintAuthFromServer(formatError(err));
+      } catch {
+        applyAuth({ ...lastAuth, message: formatError(err) });
+      }
     } finally {
-      importBtn.disabled = false;
+      if (authOp === op) {
+        authOp = "idle";
+        applyAuth(lastAuth);
+      }
     }
   }
 
   async function logout(): Promise<void> {
+    const op = "logout" as const;
+    authOp = op;
     logoutBtn.disabled = true;
     try {
       await invoke("auth_logout");
+      await paintAuthFromServer();
     } catch (err) {
       statusEl.textContent = formatError(err);
+      try {
+        await paintAuthFromServer();
+      } catch {
+        /* keep lastAuth */
+      }
     } finally {
-      logoutBtn.disabled = false;
+      if (authOp === op) {
+        authOp = "idle";
+        applyAuth(lastAuth);
+      }
     }
   }
 

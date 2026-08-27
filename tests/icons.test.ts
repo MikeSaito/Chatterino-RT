@@ -7,6 +7,7 @@ function assert(cond: boolean, msg: string): void {
 }
 
 assert(hasIcon("settings"), "settings icon");
+assert(hasIcon("more"), "more icon");
 assert(hasIcon("emote"), "emote icon");
 assert(hasIcon("send"), "send icon");
 assert(hasIcon("close"), "close icon");

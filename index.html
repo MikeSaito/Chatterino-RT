@@ -29,10 +29,12 @@
       </aside>
       <div id="main">
         <header id="header">
+          <span id="header-live" hidden title="Live">live</span>
           <p id="channel-title"></p>
           <button type="button" id="moderation-mode-btn" class="btn-ghost" title="Moderation mode" aria-pressed="false">Mod</button>
           <span id="streamer-badge" hidden title="Streamer Mode">Streamer Mode</span>
           <p id="status"></p>
+          <button type="button" id="header-more" class="btn-icon" title="Ещё" aria-label="Ещё" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu"></button>
           <button type="button" id="settings-open" class="btn-icon" title="Настройки" aria-label="Настройки"></button>
           <div id="stream-tooltip" hidden>
             <img id="stream-tooltip-img" alt="" />
@@ -101,6 +103,7 @@
         </div>
       </div>
     </div>
+    <menu id="header-menu" hidden></menu>
     <menu id="chat-context" hidden>
       <div id="chat-context-custom" class="chat-context-custom" hidden></div>
       <hr id="chat-context-custom-sep" hidden />

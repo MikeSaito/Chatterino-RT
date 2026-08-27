@@ -8,6 +8,7 @@ type ChromeIcon = {
 };
 
 const CHROME: ChromeIcon[] = [
+  { id: "header-more", name: "more", label: "Ещё" },
   { id: "settings-open", name: "settings", label: "Настройки" },
   { id: "emote-open", name: "emote", label: "Emotes" },
   { id: "composer-send", name: "send", label: "Send" },

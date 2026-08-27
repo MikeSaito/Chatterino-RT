@@ -58,15 +58,30 @@ const live: ChannelLive = {
 };
 
 const full = formatChannelTitle("xqc", live, allOn);
+assert(!full.includes("#xqc"), `no channel prefix ${full}`);
+assert(!/\(live\)/i.test(full), `no (live) ${full}`);
 const fullDigits = full.replace(/\D/g, "");
 assert(fullDigits.includes("1234"), `viewers digits in ${full}`);
 assert(/\d+h \d+m/.test(full), `uptime in ${full}`);
+assert(full.includes(" · "), `meta separator ${full}`);
+
+const offline = formatChannelTitle("xqc", { ...live, live: false }, allOn);
+assert(offline === "", `offline empty got ${offline}`);
 
 const stripped = formatChannelTitle("xqc", live, hidden);
 const strippedDigits = stripped.replace(/\D/g, "");
 assert(!strippedDigits.includes("1234"), `no viewers ${stripped}`);
 assert(!/\d+h \d+m/.test(stripped), `no uptime ${stripped}`);
 assert(stripped.includes("Just Chatting"), "game remains");
+assert(!stripped.includes("#"), "no hash in stripped");
+
+const knobsOff: HeaderKnobs = {
+  uptime: false,
+  viewerCount: false,
+  game: false,
+  streamTitle: false,
+};
+assert(formatChannelTitle("xqc", live, knobsOff) === "", "live no knobs → empty");
 
 assert(parseThumbnailSizeStream("2") === 2, "stream thumb default medium");
 assert(parseThumbnailSizeStream(0) === 0, "stream thumb off");
