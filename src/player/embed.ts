@@ -16,6 +16,32 @@ const LOAD_TIMEOUT_MS = 12_000;
 
 export type PlayerLiveHint = boolean | null;
 
+/** Domains Twitch embed will accept as `parent` for this WebView. */
+function twitchEmbedParents(): string[] {
+  const hosts = new Set<string>();
+  const host = (window.location.hostname || "").trim().toLowerCase();
+  if (host) {
+    hosts.add(host);
+  }
+  // Dev Vite + Tauri WebView2 prod (compensation.md).
+  hosts.add("localhost");
+  hosts.add("127.0.0.1");
+  hosts.add("tauri.localhost");
+  return [...hosts];
+}
+
+function buildTwitchPlayerSrc(channel: string): string {
+  const params = new URLSearchParams({
+    channel,
+    muted: "true",
+    autoplay: "true",
+  });
+  for (const parent of twitchEmbedParents()) {
+    params.append("parent", parent);
+  }
+  return `https://player.twitch.tv/?${params.toString()}`;
+}
+
 function clearLoadTimer(): void {
   if (loadTimer != null) {
     clearTimeout(loadTimer);
@@ -209,13 +235,6 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
   frame.style.visibility = "visible";
   frame.style.opacity = "1";
   frame.style.display = "block";
-  const parent = window.location.hostname || "localhost";
-  const params = new URLSearchParams({
-    channel,
-    parent,
-    muted: "true",
-    autoplay: "true",
-  });
 
   const isLive = () => epoch === playerEpoch;
 
@@ -258,7 +277,7 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
     }
     host.appendChild(frame);
     // Set src only after the frame is in-tree and unobscured (Twitch visibility checks).
-    frame.src = `https://player.twitch.tv/?${params.toString()}`;
+    frame.src = buildTwitchPlayerSrc(channel);
     armLoadTimeout(isLive);
   };
 
