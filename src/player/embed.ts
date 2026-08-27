@@ -66,9 +66,18 @@ function paintOverlay(): void {
   ph.removeAttribute("aria-hidden");
   action.hidden = true;
 
+  // Twitch autoplay checks style visibility / occlusion: never cover a live iframe.
+  if (frameEl?.isConnected) {
+    ph.hidden = true;
+    ph.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  ph.hidden = false;
+
   if (overlayMode === "ready") {
     label.textContent = "";
-    ph.classList.add("is-ready");
+    ph.hidden = true;
     ph.setAttribute("aria-hidden", "true");
     return;
   }
@@ -240,9 +249,16 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
     pendingInsert = null;
     frame.width = String(Math.floor(box.width));
     frame.height = String(Math.floor(box.height));
-    frame.src = `https://player.twitch.tv/?${params.toString()}`;
     frameEl = frame;
+    // Hide overlay before iframe joins so autoplay sees an unobscured player.
+    const ph = host.querySelector<HTMLElement>("#player-placeholder");
+    if (ph) {
+      ph.hidden = true;
+      ph.setAttribute("aria-hidden", "true");
+    }
     host.appendChild(frame);
+    // Set src only after the frame is in-tree and unobscured (Twitch visibility checks).
+    frame.src = `https://player.twitch.tv/?${params.toString()}`;
     armLoadTimeout(isLive);
   };
 
