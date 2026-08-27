@@ -11,6 +11,7 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import { applyChromeIcons } from "./shell/chromeIcons";
 import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
@@ -112,6 +113,7 @@ window.addEventListener("pagehide", () => {
 
 async function boot(): Promise<void> {
   const myEpoch = ++bootEpoch;
+  applyChromeIcons();
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
   const pane = document.querySelector<HTMLElement>("#chat-pane");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");

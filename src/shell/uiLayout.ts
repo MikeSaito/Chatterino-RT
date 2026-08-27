@@ -16,8 +16,13 @@ export function applyUiLayout(
 ): void {
   app.dataset.uiLayout = mode === "Classic" ? "classic" : "extended";
   if (opts?.settingsBtn) {
-    opts.settingsBtn.textContent = mode === "Classic" ? "…" : "Настройки";
-    opts.settingsBtn.title = "Settings";
+    opts.settingsBtn.dataset.uiLayout = mode === "Classic" ? "classic" : "extended";
+    if (!opts.settingsBtn.getAttribute("aria-label")) {
+      opts.settingsBtn.setAttribute("aria-label", "Settings");
+    }
+    if (!opts.settingsBtn.title) {
+      opts.settingsBtn.title = "Settings";
+    }
   }
   if (opts?.channelList) {
     opts.channelList.setAttribute("role", mode === "Classic" ? "tablist" : "list");

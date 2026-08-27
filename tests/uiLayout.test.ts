@@ -37,7 +37,19 @@ assert(
 assert(CLASSIC_MIN_SIZE.width < EXTENDED_MIN_SIZE.width, "classic narrower");
 
 const app = { dataset: {} as DOMStringMap };
-const settingsBtn = { textContent: "Настройки", title: "" };
+const settingsBtn = {
+  dataset: {} as DOMStringMap,
+  title: "Настройки",
+  ariaLabel: "Настройки",
+  getAttribute(name: string) {
+    return name === "aria-label" ? this.ariaLabel : null;
+  },
+  setAttribute(name: string, value: string) {
+    if (name === "aria-label") {
+      this.ariaLabel = value;
+    }
+  },
+};
 const channelList = {
   role: "list",
   setAttribute(name: string, value: string) {
@@ -48,19 +60,21 @@ const channelList = {
 };
 
 applyUiLayout(app as HTMLElement, "Classic", {
-  settingsBtn: settingsBtn as HTMLButtonElement,
+  settingsBtn: settingsBtn as unknown as HTMLButtonElement,
   channelList: channelList as HTMLUListElement,
 });
 assert(app.dataset.uiLayout === "classic", "dataset classic");
-assert(settingsBtn.textContent === "…", "classic settings label");
+assert(settingsBtn.dataset.uiLayout === "classic", "settings dataset classic");
+assert(settingsBtn.title === "Настройки", "settings title preserved");
+assert(settingsBtn.ariaLabel === "Настройки", "settings aria preserved");
 assert(channelList.role === "tablist", "classic tablist");
 
 applyUiLayout(app as HTMLElement, "Extended", {
-  settingsBtn: settingsBtn as HTMLButtonElement,
+  settingsBtn: settingsBtn as unknown as HTMLButtonElement,
   channelList: channelList as HTMLUListElement,
 });
 assert(app.dataset.uiLayout === "extended", "dataset extended");
-assert(settingsBtn.textContent === "Настройки", "extended settings label");
+assert(settingsBtn.dataset.uiLayout === "extended", "settings dataset extended");
 assert(channelList.role === "list", "extended list");
 
 console.log("uiLayout.test.ts ok");

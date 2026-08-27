@@ -231,6 +231,7 @@ export function bindReplyThread(opts: {
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
       pinBtn.title = "Pin";
+      pinBtn.setAttribute("aria-label", "Pin");
     }
     input.value = "";
     view.replaceChildren();
@@ -251,6 +252,7 @@ export function bindReplyThread(opts: {
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
       pinBtn.title = "Pin";
+      pinBtn.setAttribute("aria-label", "Pin");
     }
     titleEl.textContent = channel
       ? `Reply Thread - @${info.login} in #${channel}`
@@ -413,6 +415,7 @@ export function bindReplyThread(opts: {
       pinned = !pinned;
       pinBtn.classList.toggle("is-pinned", pinned);
       pinBtn.title = pinned ? "Unpin" : "Pin";
+      pinBtn.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
     });
   }
 

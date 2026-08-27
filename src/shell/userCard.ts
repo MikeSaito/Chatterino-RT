@@ -764,6 +764,7 @@ export function bindUserCard(opts: {
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
       pinBtn.title = "Pin";
+      pinBtn.setAttribute("aria-label", "Pin");
     }
     clearAvatar();
     clearPronouns();
@@ -1052,6 +1053,7 @@ export function bindUserCard(opts: {
       pinned = !pinned;
       pinBtn.classList.toggle("is-pinned", pinned);
       pinBtn.title = pinned ? "Unpin" : "Pin";
+      pinBtn.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
     });
   }
 

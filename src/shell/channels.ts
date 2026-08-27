@@ -1,3 +1,5 @@
+import { setButtonIcon } from "./icons";
+
 export type ChannelList = {
   hydrate: (recents: string[], open: string[], active: string) => void;
   remember: (login: string, makeActive?: boolean) => void;
@@ -46,9 +48,8 @@ export function bindChannelList(
       if (open.has(login)) {
         const leave = document.createElement("button");
         leave.type = "button";
-        leave.className = "channel-leave";
-        leave.title = "Покинуть";
-        leave.textContent = "×";
+        leave.className = "channel-leave btn-icon";
+        setButtonIcon(leave, "close", { size: 12, label: "Покинуть" });
         leave.addEventListener("click", (ev) => {
           ev.stopPropagation();
           onLeave(login);

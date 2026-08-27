@@ -14,26 +14,26 @@
         <form id="join-form">
           <label for="channel-input">канал</label>
           <input id="channel-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
-          <button type="submit">Join</button>
+          <button type="submit" class="btn btn-primary">Join</button>
         </form>
         <ul id="channel-list" role="list"></ul>
         <div id="auth-box">
           <p id="auth-login"></p>
-          <button type="button" id="auth-signin">Войти</button>
-          <button type="button" id="auth-logout" hidden>Выйти</button>
+          <button type="button" id="auth-signin" class="btn btn-primary">Войти</button>
+          <button type="button" id="auth-logout" class="btn" hidden>Выйти</button>
           <p id="auth-device" hidden></p>
           <label class="sr-only" for="auth-paste">код входа Chatterino</label>
           <textarea id="auth-paste" hidden rows="3" spellcheck="false" autocomplete="off"></textarea>
-          <button type="button" id="auth-import" hidden>Вставить код</button>
+          <button type="button" id="auth-import" class="btn" hidden>Вставить код</button>
         </div>
       </aside>
       <div id="main">
         <header id="header">
           <p id="channel-title"></p>
-          <button type="button" id="moderation-mode-btn" title="Moderation mode" aria-pressed="false">Mod</button>
+          <button type="button" id="moderation-mode-btn" class="btn-ghost" title="Moderation mode" aria-pressed="false">Mod</button>
           <span id="streamer-badge" hidden title="Streamer Mode">Streamer Mode</span>
           <p id="status"></p>
-          <button type="button" id="settings-open">Настройки</button>
+          <button type="button" id="settings-open" class="btn-icon" title="Настройки" aria-label="Настройки"></button>
           <div id="stream-tooltip" hidden>
             <img id="stream-tooltip-img" alt="" />
             <span id="stream-tooltip-text"></span>
@@ -49,8 +49,8 @@
                   <img id="emote-tooltip-img" alt="" />
                   <span id="emote-tooltip-text"></span>
                 </div>
-                <button type="button" id="chat-reply-btn" hidden title="Reply">Reply</button>
-                <button id="chat-jump-bottom" type="button" hidden>вниз</button>
+                <button type="button" id="chat-reply-btn" class="btn" hidden title="Reply">Reply</button>
+                <button id="chat-jump-bottom" type="button" class="btn-icon" hidden title="Вниз" aria-label="Вниз"></button>
               </div>
               <div
                 id="chat-scroll"
@@ -69,11 +69,11 @@
             <ul id="complete-list" hidden></ul>
             <div id="reply-bar" hidden>
               <p id="reply-label"></p>
-              <button type="button" id="reply-cancel" title="Отмена">×</button>
+              <button type="button" id="reply-cancel" class="btn-icon" title="Отмена" aria-label="Отмена"></button>
             </div>
             <form id="composer">
               <label class="sr-only" for="composer-input">сообщение</label>
-              <button type="button" id="emote-open" title="Emotes">☺</button>
+              <button type="button" id="emote-open" class="btn-icon" title="Emotes" aria-label="Emotes"></button>
               <div id="composer-field">
                 <textarea
                   id="composer-input"
@@ -89,13 +89,13 @@
               </div>
               <button
                 id="composer-send"
+                class="btn-icon btn-primary"
                 type="submit"
                 hidden
                 disabled
                 title="Нужен вход Twitch, чтобы отправлять сообщения"
-              >
-                Send
-              </button>
+                aria-label="Send"
+              ></button>
             </form>
           </div>
         </div>
@@ -144,8 +144,8 @@
             <p id="usercard-pronouns" class="popup-sub usercard-pronouns" hidden></p>
           </div>
           <div class="popup-head-actions">
-            <button type="button" id="usercard-pin" title="Pin">Pin</button>
-            <button type="button" id="usercard-close" title="Close">×</button>
+            <button type="button" id="usercard-pin" class="btn-icon" title="Pin" aria-label="Pin"></button>
+            <button type="button" id="usercard-close" class="btn-icon" title="Close" aria-label="Close"></button>
           </div>
         </header>
         <div id="usercard-meta" class="usercard-meta">
@@ -172,8 +172,8 @@
         </label>
         <p id="usercard-notes-preview" class="usercard-notes-preview" hidden></p>
         <div class="popup-actions">
-          <button type="button" id="usercard-add-notes" disabled>Add notes</button>
-          <button type="button" id="usercard-open-twitch">Open on Twitch</button>
+          <button type="button" id="usercard-add-notes" class="btn btn-primary" disabled>Add notes</button>
+          <button type="button" id="usercard-open-twitch" class="btn btn-primary">Open on Twitch</button>
         </div>
         <div id="usercard-mod-row" class="usercard-mod-row" hidden>
           <div id="usercard-roles" class="usercard-roles" hidden>
@@ -200,7 +200,7 @@
       >
         <header class="popup-head">
           <h2 id="notes-title">Editing notes</h2>
-          <button type="button" id="notes-close" title="Close">×</button>
+          <button type="button" id="notes-close" class="btn-icon" title="Close" aria-label="Close"></button>
         </header>
         <textarea
           id="notes-editor"
@@ -209,8 +209,8 @@
           autocomplete="off"
         ></textarea>
         <footer class="popup-foot notes-foot">
-          <button type="button" id="notes-ok">Ok</button>
-          <button type="button" id="notes-cancel">Cancel</button>
+          <button type="button" id="notes-ok" class="btn btn-primary">Ok</button>
+          <button type="button" id="notes-cancel" class="btn">Cancel</button>
         </footer>
       </div>
     </div>
@@ -220,14 +220,14 @@
         <header class="popup-head">
           <h2 id="replythread-title">Thread</h2>
           <div class="popup-head-actions">
-            <button type="button" id="replythread-pin" title="Pin" hidden>Pin</button>
-            <button type="button" id="replythread-close" title="Close">×</button>
+            <button type="button" id="replythread-pin" class="btn-icon" title="Pin" aria-label="Pin" hidden></button>
+            <button type="button" id="replythread-close" class="btn-icon" title="Close" aria-label="Close"></button>
           </div>
         </header>
         <div id="replythread-view"></div>
         <footer class="popup-foot replythread-foot">
           <textarea id="replythread-input" rows="2" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>
-          <button type="button" id="replythread-send">Send</button>
+          <button type="button" id="replythread-send" class="btn btn-primary">Send</button>
         </footer>
       </div>
     </div>
@@ -236,7 +236,7 @@
       <div id="emotepopup-dialog" role="dialog" aria-modal="true" aria-labelledby="emotepopup-title">
         <header class="popup-head">
           <h2 id="emotepopup-title">Emotes</h2>
-          <button type="button" id="emotepopup-close" title="Close">×</button>
+          <button type="button" id="emotepopup-close" class="btn-icon" title="Close" aria-label="Close"></button>
         </header>
         <div class="emotepopup-tabs" role="tablist">
           <button type="button" class="emotepopup-tab" data-tab="favourite" role="tab" aria-selected="false">Favourite</button>
@@ -259,7 +259,7 @@
       >
         <header id="search-dialog-head">
           <h2 id="search-title">Поиск в истории</h2>
-          <button type="button" id="search-close" title="Закрыть">×</button>
+          <button type="button" id="search-close" class="btn-icon" title="Закрыть" aria-label="Закрыть"></button>
         </header>
         <div id="search-input-row">
           <label class="sr-only" for="search-input">Type to search</label>
@@ -273,12 +273,11 @@
           <button
             type="button"
             id="search-clear"
+            class="btn-icon"
             title="Clear"
             hidden
             aria-label="Clear search"
-          >
-            ×
-          </button>
+          ></button>
         </div>
         <div id="search-view" role="list" aria-label="Результаты поиска"></div>
       </div>
