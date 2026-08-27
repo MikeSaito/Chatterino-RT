@@ -39,6 +39,7 @@ pub mod logging;
 pub mod membership_batch;
 pub mod parse;
 pub mod pending;
+pub mod profile_images;
 pub mod pronouns;
 pub mod provider_activity;
 pub mod recent_messages;

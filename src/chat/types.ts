@@ -143,6 +143,7 @@ export type ChannelLive = {
 export type AuthAccountRow = {
   login: string;
   userId?: string;
+  profileImageUrl?: string;
 };
 
 export type AuthInfo = {
@@ -153,6 +154,7 @@ export type AuthInfo = {
   userCode?: string;
   pendingPaste?: boolean;
   message?: string;
+  profileImageUrl?: string;
 };
 
 export type Filters = {

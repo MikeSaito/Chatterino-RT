@@ -25,6 +25,9 @@ import {
 } from "./shell/channelHeader";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindHeaderMenu } from "./shell/headerMenu";
+import { bindTabOverflow } from "./shell/tabOverflow";
+import { bindJoinPopover } from "./shell/joinPopover";
+import { bindAuthMenu } from "./shell/authMenu";
 import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
 import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
 import {
@@ -125,6 +128,11 @@ async function boot(): Promise<void> {
   const form = document.querySelector<HTMLFormElement>("#join-form");
   const input = document.querySelector<HTMLInputElement>("#channel-input");
   const joinBtn = form?.querySelector<HTMLButtonElement>("button[type=submit]");
+  const joinToggle = document.querySelector<HTMLButtonElement>("#join-toggle");
+  const joinPopover = document.querySelector<HTMLElement>("#join-popover");
+  const joinPopoverForm = document.querySelector<HTMLFormElement>("#join-popover-form");
+  const joinPopoverInput = document.querySelector<HTMLInputElement>("#join-popover-input");
+  const listHost = document.querySelector<HTMLElement>("#channel-list-host");
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
   const headerLive = document.querySelector<HTMLElement>("#header-live");
@@ -144,6 +152,11 @@ async function boot(): Promise<void> {
   const replyLabel = document.querySelector<HTMLElement>("#reply-label");
   const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
   const contextMenu = document.querySelector<HTMLMenuElement>("#chat-context");
+  const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
+  const authChipAvatar = document.querySelector<HTMLImageElement>("#auth-chip-avatar");
+  const authChipLetter = document.querySelector<HTMLElement>("#auth-chip-letter");
+  const authChipLogin = document.querySelector<HTMLElement>("#auth-chip-login");
+  const authMenu = document.querySelector<HTMLMenuElement>("#auth-menu");
   const authLogin = document.querySelector<HTMLElement>("#auth-login");
   const authSignin = document.querySelector<HTMLButtonElement>("#auth-signin");
   const authLogout = document.querySelector<HTMLButtonElement>("#auth-logout");
@@ -169,6 +182,11 @@ async function boot(): Promise<void> {
     !form ||
     !input ||
     !joinBtn ||
+    !joinToggle ||
+    !joinPopover ||
+    !joinPopoverForm ||
+    !joinPopoverInput ||
+    !listHost ||
     !list ||
     !title ||
     !headerLive ||
@@ -185,6 +203,11 @@ async function boot(): Promise<void> {
     !replyLabel ||
     !replyCancel ||
     !contextMenu ||
+    !authChip ||
+    !authChipAvatar ||
+    !authChipLetter ||
+    !authChipLogin ||
+    !authMenu ||
     !authLogin ||
     !authSignin ||
     !authLogout ||
@@ -204,6 +227,12 @@ async function boot(): Promise<void> {
   }
 
   const joinControl = joinBtn;
+  const joinFormEl = form;
+  const joinToggleBtn = joinToggle;
+  const joinPopoverEl = joinPopover;
+  const joinPopoverFormEl = joinPopoverForm;
+  const joinPopoverInputEl = joinPopoverInput;
+  const channelListHost = listHost;
   const titleEl = title;
   const headerLiveEl = headerLive;
   const headerMoreBtn = headerMore;
@@ -217,6 +246,11 @@ async function boot(): Promise<void> {
   const replyLabelEl = replyLabel;
   const replyCancelBtn = replyCancel;
   const contextMenuEl = contextMenu;
+  const authChipBtn = authChip;
+  const authChipAvatarEl = authChipAvatar;
+  const authChipLetterEl = authChipLetter;
+  const authChipLoginEl = authChipLogin;
+  const authMenuEl = authMenu;
   const contextCustomHost = document.querySelector<HTMLElement>("#chat-context-custom");
   const contextCustomSep = document.querySelector<HTMLElement>("#chat-context-custom-sep");
   const contextImageSep = document.querySelector<HTMLElement>("#chat-context-image-sep");
@@ -366,11 +400,20 @@ async function boot(): Promise<void> {
   });
   let unbindImageUpload: (() => void) | null = null;
   let headerMenuCtl: ReturnType<typeof bindHeaderMenu> | null = null;
+  let tabOverflowCtl: ReturnType<typeof bindTabOverflow> | null = null;
+  let joinPopoverCtl: ReturnType<typeof bindJoinPopover> | null = null;
+  let authMenuCtl: ReturnType<typeof bindAuthMenu> | null = null;
   teardownChat = () => {
     unbindImageUpload?.();
     unbindImageUpload = null;
     headerMenuCtl?.dispose();
     headerMenuCtl = null;
+    tabOverflowCtl?.dispose();
+    tabOverflowCtl = null;
+    joinPopoverCtl?.dispose();
+    joinPopoverCtl = null;
+    authMenuCtl?.dispose();
+    authMenuCtl = null;
     streamPreviewCtl?.hide();
     chatIpc?.stop();
     chatIpc = null;
@@ -560,6 +603,8 @@ async function boot(): Promise<void> {
         });
         syncPlayerForLayout(readActiveChannel());
       }
+      joinPopoverCtl?.sync();
+      tabOverflowCtl?.refresh();
       applyWindowMinForLayout(uiLayout);
     },
   });
@@ -882,6 +927,51 @@ async function boot(): Promise<void> {
       void leaveChannel(login);
     },
   );
+
+  tabOverflowCtl = bindTabOverflow({ list, host: channelListHost });
+  joinPopoverCtl = bindJoinPopover({
+    form: joinFormEl,
+    toggle: joinToggleBtn,
+    popover: joinPopoverEl,
+    popoverForm: joinPopoverFormEl,
+    popoverInput: joinPopoverInputEl,
+    isCompact: () =>
+      appRoot.dataset.uiLayout === "classic" &&
+      window.matchMedia("(max-width: 479px)").matches,
+    onJoin: (channel) => {
+      void joinChannel(channel);
+    },
+  });
+  authMenuCtl = bindAuthMenu({
+    chip: authChipBtn,
+    menu: authMenuEl,
+    getAccounts: () => {
+      const current = (lastAuth.login ?? "").toLowerCase();
+      const rows = lastAuth.accounts ?? [];
+      if (rows.length === 0 && lastAuth.login) {
+        return [{ login: lastAuth.login, current: true }];
+      }
+      return rows.map((r) => ({
+        login: r.login,
+        current: r.login.toLowerCase() === current,
+      }));
+    },
+    canLogout: () => Boolean(lastAuth.login) && !lastAuth.fromEnv,
+    onAction: (action) => {
+      if (action.kind === "logout") {
+        void logout();
+        return;
+      }
+      void (async () => {
+        try {
+          await invoke("auth_select", { login: action.login });
+          await paintAuthFromServer();
+        } catch (err) {
+          statusEl.textContent = formatError(err);
+        }
+      })();
+    },
+  });
 
   canvas.addEventListener("contextmenu", (ev) => {
     ev.preventDefault();
@@ -1569,6 +1659,8 @@ async function boot(): Promise<void> {
     contextMenuEl.hidden = true;
     contextTarget = null;
     headerMenuCtl?.hide();
+    authMenuCtl?.hide();
+    joinPopoverCtl?.hide();
   }
 
   function setReply(id: string, login: string, text: string): void {
@@ -1595,13 +1687,50 @@ async function boot(): Promise<void> {
     const pendingPaste = Boolean(info.pendingPaste);
     const pendingDevice = Boolean(info.userCode);
     const pending = pendingPaste || pendingDevice;
-    loginEl.textContent = signed && !pending ? info.login! : "";
+    const showChip = signed && !pending;
+    loginEl.hidden = true;
+    loginEl.textContent = "";
+    authChipBtn.hidden = !showChip;
+    authChipLoginEl.textContent = showChip ? info.login! : "";
+    const avatarUrl = info.profileImageUrl?.trim() ?? "";
+    authChipBtn.classList.toggle("has-avatar", Boolean(showChip && avatarUrl));
+    if (showChip && avatarUrl) {
+      authChipAvatarEl.hidden = false;
+      authChipLetterEl.hidden = true;
+      authChipLetterEl.textContent = "";
+      if (authChipAvatarEl.src !== avatarUrl) {
+        authChipAvatarEl.src = avatarUrl;
+      }
+    } else if (showChip) {
+      authChipAvatarEl.hidden = true;
+      authChipAvatarEl.removeAttribute("src");
+      authChipLetterEl.hidden = false;
+      authChipLetterEl.textContent = (info.login ?? "?").slice(0, 1).toUpperCase();
+    } else {
+      authChipAvatarEl.hidden = true;
+      authChipAvatarEl.removeAttribute("src");
+      authChipLetterEl.hidden = true;
+      authChipLetterEl.textContent = "";
+    }
+    authChipAvatarEl.onerror = () => {
+      if (!lastAuth.login || authChipBtn.hidden) {
+        return;
+      }
+      authChipAvatarEl.hidden = true;
+      authChipAvatarEl.removeAttribute("src");
+      authChipBtn.classList.remove("has-avatar");
+      authChipLetterEl.hidden = false;
+      authChipLetterEl.textContent = lastAuth.login.slice(0, 1).toUpperCase();
+    };
+    if (!showChip) {
+      authMenuCtl?.hide();
+    }
     // Idle unsigned → только «Войти»; любой pending скрывает «Войти».
     signinBtn.hidden = signed || pending;
     signinBtn.disabled = pending || authOp === "start";
-    // Paste/device: «Отмена»; вошёл: «Выйти» (не из env).
-    logoutBtn.hidden = !((signed && !info.fromEnv && !pending) || pending);
-    logoutBtn.textContent = pending ? "Отмена" : "Выйти";
+    // Pending: «Отмена»; signed idle — logout только через chip-меню.
+    logoutBtn.hidden = !pending;
+    logoutBtn.textContent = "Отмена";
     logoutBtn.disabled = authOp === "logout";
     // «Вставить код» только в pendingPaste, никогда в idle.
     pasteEl.hidden = !pendingPaste;

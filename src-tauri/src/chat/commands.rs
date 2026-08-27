@@ -673,8 +673,11 @@ pub async fn auth_import(
 }
 
 #[tauri::command]
-pub fn auth_status(state: tauri::State<'_, Shared>) -> Result<AuthInfo, ApiError> {
-    Ok(auth::snapshot(&state))
+pub fn auth_status(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+) -> Result<AuthInfo, ApiError> {
+    Ok(auth::snapshot(&app, &state))
 }
 
 #[tauri::command]

@@ -47,6 +47,8 @@ pub struct AccountRow {
     pub login: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +64,8 @@ pub struct AuthInfo {
     pub pending_paste: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,17 +184,6 @@ fn apply_store(inner: &mut AuthInner, store: AuthStore) {
     inner.cached_user_id = current_creds(inner).and_then(|c| c.user_id.clone());
 }
 
-fn account_rows(inner: &AuthInner) -> Vec<AccountRow> {
-    inner
-        .accounts
-        .iter()
-        .map(|c| AccountRow {
-            login: c.login.clone(),
-            user_id: c.user_id.clone(),
-        })
-        .collect()
-}
-
 fn upsert_account(accounts: &mut Vec<StoredCreds>, creds: StoredCreds) {
     if let Some(slot) = accounts.iter_mut().find(|c| c.login == creds.login) {
         *slot = creds;
@@ -213,27 +206,32 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let app_chk = app.clone();
     let shared_chk = shared.clone();
     tauri::async_runtime::spawn(async move {
-        verify_disk(app_chk, shared_chk).await;
+        verify_disk(app_chk.clone(), shared_chk.clone()).await;
+        super::profile_images::spawn_refresh_current(app_chk, shared_chk);
     });
     Ok(())
 }
 
 pub fn emit(app: &AppHandle, shared: &Shared) {
-    let _ = app.emit("chat:auth", snapshot(shared));
+    let _ = app.emit("chat:auth", snapshot(app, shared));
 }
 
-pub fn snapshot(shared: &Shared) -> AuthInfo {
-    let (pending, pending_paste, accounts, current_login, last_message) = match shared.auth.lock()
-    {
-        Ok(inner) => (
-            inner.pending_user_code.clone(),
-            inner.pending_paste,
-            account_rows(&inner),
-            inner.current_login.clone(),
-            inner.last_message.clone(),
-        ),
-        Err(_) => (None, false, Vec::new(), None, None),
-    };
+pub fn snapshot(app: &AppHandle, shared: &Shared) -> AuthInfo {
+    let (pending, pending_paste, account_logins, current_login, last_message) =
+        match shared.auth.lock() {
+            Ok(inner) => (
+                inner.pending_user_code.clone(),
+                inner.pending_paste,
+                inner
+                    .accounts
+                    .iter()
+                    .map(|c| (c.login.clone(), c.user_id.clone()))
+                    .collect::<Vec<_>>(),
+                inner.current_login.clone(),
+                inner.last_message.clone(),
+            ),
+            Err(_) => (None, false, Vec::new(), None, None),
+        };
     let env_pair = env_login_token();
     let from_env = env_pair.is_some();
     let login = env_pair
@@ -247,18 +245,30 @@ pub fn snapshot(shared: &Shared) -> AuthInfo {
         && active
             .as_ref()
             .is_some_and(|h| h.active.is_some() && h.joined_active());
+    let accounts: Vec<AccountRow> = if from_env {
+        Vec::new()
+    } else {
+        account_logins
+            .into_iter()
+            .map(|(login, user_id)| AccountRow {
+                profile_image_url: super::profile_images::get(app, &login),
+                login,
+                user_id,
+            })
+            .collect()
+    };
+    let profile_image_url = login
+        .as_ref()
+        .and_then(|l| super::profile_images::get(app, l));
     AuthInfo {
         can_send,
         login,
-        accounts: if from_env {
-            Vec::new()
-        } else {
-            accounts
-        },
+        accounts,
         from_env,
         user_code: pending,
         pending_paste,
         message: last_message,
+        profile_image_url,
     }
 }
 
@@ -610,7 +620,7 @@ pub async fn select_account(
         inner.pending_user_code = None;
         inner.pending_paste = false;
         inner.last_message = None;
-        inner.current_login = Some(login);
+        inner.current_login = Some(login.clone());
         inner.cached_user_id = current_creds(&inner).and_then(|c| c.user_id.clone());
         let store = AuthStore {
             accounts: inner.accounts.clone(),
@@ -624,6 +634,7 @@ pub async fn select_account(
     }
     after_identity_change(&shared).await;
     emit(&app, &shared);
+    super::profile_images::spawn_refresh(app.clone(), shared.clone(), login);
     Ok(())
 }
 
@@ -820,7 +831,7 @@ async fn persist_and_relogin(
         );
         let store = AuthStore {
             accounts,
-            current_login: Some(login),
+            current_login: Some(login.clone()),
         };
         if let Err(e) = save_store(&path, &store) {
             inner.last_message = Some(e);
@@ -841,6 +852,7 @@ async fn persist_and_relogin(
     }
     after_identity_change(shared).await;
     emit(app, shared);
+    super::profile_images::spawn_refresh(app.clone(), shared.clone(), login);
     true
 }
 
@@ -1305,6 +1317,7 @@ mod tests {
         let json = serde_json::to_string(&AccountRow {
             login: "alice".into(),
             user_id: Some("1".into()),
+            profile_image_url: None,
         })
         .unwrap();
         assert!(!json.contains("token"));

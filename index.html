@@ -16,8 +16,16 @@
           <input id="channel-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
           <button type="submit" class="btn btn-primary">Join</button>
         </form>
-        <ul id="channel-list" role="list"></ul>
+        <button type="button" id="join-toggle" class="btn-icon" hidden title="Join channel" aria-label="Join channel" aria-haspopup="dialog" aria-expanded="false" aria-controls="join-popover"></button>
+        <div id="channel-list-host" class="channel-list-host">
+          <ul id="channel-list" role="list"></ul>
+        </div>
         <div id="auth-box">
+          <button type="button" id="auth-chip" class="auth-chip" hidden aria-haspopup="menu" aria-expanded="false" aria-controls="auth-menu">
+            <img id="auth-chip-avatar" class="auth-chip-avatar" alt="" width="20" height="20" hidden />
+            <span id="auth-chip-letter" class="auth-chip-avatar is-placeholder" hidden aria-hidden="true"></span>
+            <span id="auth-chip-login" class="auth-chip-login"></span>
+          </button>
           <p id="auth-login"></p>
           <button type="button" id="auth-signin" class="btn btn-primary">Войти</button>
           <button type="button" id="auth-logout" class="btn" hidden>Выйти</button>
@@ -104,6 +112,14 @@
       </div>
     </div>
     <menu id="header-menu" hidden></menu>
+    <menu id="auth-menu" hidden></menu>
+    <div id="join-popover" hidden role="dialog" aria-label="Join channel">
+      <form id="join-popover-form">
+        <label class="sr-only" for="join-popover-input">канал</label>
+        <input id="join-popover-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
+        <button type="submit" class="btn btn-primary">Join</button>
+      </form>
+    </div>
     <menu id="chat-context" hidden>
       <div id="chat-context-custom" class="chat-context-custom" hidden></div>
       <hr id="chat-context-custom-sep" hidden />
