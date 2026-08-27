@@ -27,6 +27,12 @@ struct Cache {
 
 static CACHE: OnceLock<Mutex<Option<Cache>>> = OnceLock::new();
 
+#[derive(Clone, Serialize)]
+pub struct ProfileImageEvent {
+    pub login: String,
+    pub url: String,
+}
+
 fn cache_slot() -> &'static Mutex<Option<Cache>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
@@ -97,7 +103,20 @@ pub fn put(app: &AppHandle, login: &str, url: &str) -> bool {
     true
 }
 
-/// Refresh CDN url for login via Helix; emits chat:auth when url is new/changed.
+fn emit_updated(app: &AppHandle, shared: &Shared, login: &str, url: &str) {
+    let _ = app.emit(
+        "chat:profile_image",
+        ProfileImageEvent {
+            login: login.to_string(),
+            url: url.to_string(),
+        },
+    );
+    if auth::resolved_login_token(shared).map(|(l, _)| l) == Some(login.to_string()) {
+        let _ = app.emit("chat:auth", auth::snapshot(app, shared));
+    }
+}
+
+/// Refresh CDN url for an auth-account login (uses that account's token).
 pub fn spawn_refresh(app: AppHandle, shared: Shared, login: String) {
     tauri::async_runtime::spawn(async move {
         let login = login.trim().to_ascii_lowercase();
@@ -127,7 +146,32 @@ pub fn spawn_refresh(app: AppHandle, shared: Shared, login: String) {
             return;
         };
         if put(&app, &login, url) {
-            let _ = app.emit("chat:auth", auth::snapshot(&app, &shared));
+            emit_updated(&app, &shared, &login, url);
+        }
+    });
+}
+
+/// Refresh CDN url for any login via the current session OAuth token.
+pub fn spawn_refresh_login(app: AppHandle, shared: Shared, login: String) {
+    tauri::async_runtime::spawn(async move {
+        let login = login.trim().to_ascii_lowercase();
+        if login.is_empty() {
+            return;
+        }
+        let Some(token) = auth::oauth_token(&shared) else {
+            return;
+        };
+        let client_id = auth::resolved_client_id(&shared);
+        let Some(profile) =
+            helix::fetch_user_profile(&login, Some(&token), &client_id).await
+        else {
+            return;
+        };
+        let Some(url) = profile.profile_image_url.as_deref() else {
+            return;
+        };
+        if put(&app, &login, url) {
+            emit_updated(&app, &shared, &login, url);
         }
     });
 }

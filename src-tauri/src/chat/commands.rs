@@ -1026,6 +1026,30 @@ pub async fn chat_user_profile(
         })
 }
 
+#[derive(Serialize)]
+pub struct ProfileImageResult {
+    pub login: String,
+    pub url: Option<String>,
+}
+
+/// Cached Helix profile_image_url for a login; kicks background refresh when signed in and cache miss.
+#[tauri::command]
+pub fn chat_profile_image(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    login: String,
+) -> Result<ProfileImageResult, ApiError> {
+    let normalized = normalize_channel(&login)?;
+    let url = super::profile_images::get(&app, &normalized);
+    if url.is_none() && auth::oauth_token(&state).is_some() {
+        super::profile_images::spawn_refresh_login(app, state.inner().clone(), normalized.clone());
+    }
+    Ok(ProfileImageResult {
+        login: normalized,
+        url,
+    })
+}
+
 #[tauri::command]
 pub async fn chat_user_followers(
     state: tauri::State<'_, Shared>,

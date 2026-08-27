@@ -14,7 +14,10 @@ export type IconName =
   | "plus"
   | "minus"
   | "warning"
-  | "arrow-down";
+  | "arrow-down"
+  | "play"
+  | "viewers"
+  | "live-dot";
 
 const PATHS: Record<IconName, string> = {
   settings:
@@ -35,6 +38,11 @@ const PATHS: Record<IconName, string> = {
   warning:
     '<path d="M12 3l9 16H3L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="16.5" r="0.75" fill="currentColor" stroke="none"/>',
   "arrow-down": '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  play: '<path d="M8 5.5v13l11-6.5L8 5.5z" fill="currentColor" stroke="none"/>',
+  viewers:
+    '<path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M21 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  "live-dot":
+    '<circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/>',
 };
 
 export function iconSvg(name: IconName, size = 16): string {

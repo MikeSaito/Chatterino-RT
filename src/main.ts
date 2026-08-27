@@ -8,7 +8,7 @@ import {
 } from "./chat/emoteImageLinks";
 import { bindChatIpc, type ChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
-import { mountPlayer, unmountPlayer } from "./player/embed";
+import { mountPlayer, unmountPlayer, setPlayerLiveHint, bindPlayerOpenTwitch } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
 import { applyChromeIcons } from "./shell/chromeIcons";
@@ -16,13 +16,14 @@ import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
   bindStreamPreviewTooltip,
+  channelMetaParts,
   effectiveHeaderKnobs,
-  formatChannelTitle,
   parseHeaderKnobs,
   parseThumbnailSizeStream,
   type HeaderKnobs,
   type ThumbnailSizeStream,
 } from "./shell/channelHeader";
+import { iconEl } from "./shell/icons";
 import { bindSearchPopup } from "./shell/chatFind";
 import { bindHeaderMenu } from "./shell/headerMenu";
 import { bindTabOverflow } from "./shell/tabOverflow";
@@ -136,6 +137,10 @@ async function boot(): Promise<void> {
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
   const headerLive = document.querySelector<HTMLElement>("#header-live");
+  const headerChannelName = document.querySelector<HTMLElement>("#header-channel-name");
+  const headerAvatar = document.querySelector<HTMLElement>("#header-channel-avatar");
+  const headerAvatarImg = document.querySelector<HTMLImageElement>("#header-channel-avatar-img");
+  const headerAvatarLetter = document.querySelector<HTMLElement>("#header-channel-avatar-letter");
   const headerMore = document.querySelector<HTMLButtonElement>("#header-more");
   const headerMenu = document.querySelector<HTMLMenuElement>("#header-menu");
   const moderationModeBtn = document.querySelector<HTMLButtonElement>(
@@ -190,6 +195,10 @@ async function boot(): Promise<void> {
     !list ||
     !title ||
     !headerLive ||
+    !headerChannelName ||
+    !headerAvatar ||
+    !headerAvatarImg ||
+    !headerAvatarLetter ||
     !headerMore ||
     !headerMenu ||
     !player ||
@@ -235,6 +244,10 @@ async function boot(): Promise<void> {
   const channelListHost = listHost;
   const titleEl = title;
   const headerLiveEl = headerLive;
+  const headerChannelNameEl = headerChannelName;
+  const headerAvatarEl = headerAvatar;
+  const headerAvatarImgEl = headerAvatarImg;
+  const headerAvatarLetterEl = headerAvatarLetter;
   const headerMoreBtn = headerMore;
   const headerMenuEl = headerMenu;
   const channelInput = input;
@@ -472,6 +485,7 @@ async function boot(): Promise<void> {
     if (uiLayout === "Classic") {
       unmountPlayer(playerSlot);
       mountedChannel = "";
+      setPlayerLiveHint(null);
       return;
     }
     const ch = joined.trim();
@@ -480,13 +494,15 @@ async function boot(): Promise<void> {
         unmountPlayer(playerSlot);
         mountedChannel = "";
       }
+      setPlayerLiveHint(null);
       return;
     }
     if (ch !== mountedChannel) {
-      unmountPlayer(playerSlot);
       mountPlayer(playerSlot, ch);
       mountedChannel = ch;
     }
+    const stream = streamByChannel.get(ch.toLowerCase());
+    setPlayerLiveHint(stream ? stream.live : null);
   }
 
   const settingsCtl = bindSettingsBridge({
@@ -636,14 +652,118 @@ async function boot(): Promise<void> {
     });
   }
 
+  let headerAvatarLogin = "";
+  const avatarUrlByLogin = new Map<string, string>();
+
+  function paintHeaderAvatar(login: string): void {
+    const key = login.trim().toLowerCase();
+    if (!key) {
+      headerAvatarEl.hidden = true;
+      headerAvatarImgEl.hidden = true;
+      headerAvatarImgEl.removeAttribute("src");
+      headerAvatarImgEl.removeAttribute("data-expect");
+      headerAvatarLetterEl.hidden = true;
+      headerAvatarLetterEl.textContent = "";
+      headerAvatarLogin = "";
+      return;
+    }
+    headerAvatarEl.hidden = false;
+    headerAvatarLogin = key;
+    const url = avatarUrlByLogin.get(key);
+    if (url) {
+      headerAvatarImgEl.hidden = false;
+      headerAvatarLetterEl.hidden = true;
+      headerAvatarLetterEl.textContent = "";
+      headerAvatarImgEl.dataset.expect = url;
+      if (headerAvatarImgEl.getAttribute("src") !== url) {
+        headerAvatarImgEl.src = url;
+      }
+      return;
+    }
+    headerAvatarImgEl.hidden = true;
+    headerAvatarImgEl.removeAttribute("src");
+    headerAvatarImgEl.removeAttribute("data-expect");
+    headerAvatarLetterEl.hidden = false;
+    headerAvatarLetterEl.textContent = key.slice(0, 1).toUpperCase();
+  }
+
+  function requestChannelAvatar(login: string): void {
+    const key = login.trim().toLowerCase();
+    if (!key) {
+      return;
+    }
+    if (avatarUrlByLogin.has(key)) {
+      paintHeaderAvatar(key);
+      return;
+    }
+    void invoke<{ login: string; url: string | null }>("chat_profile_image", {
+      login: key,
+    })
+      .then((res) => {
+        if (res.url) {
+          avatarUrlByLogin.set(res.login, res.url);
+        }
+        if (headerAvatarLogin === res.login) {
+          paintHeaderAvatar(res.login);
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  headerAvatarImgEl.addEventListener("error", () => {
+    const key = headerAvatarLogin;
+    const expect = headerAvatarImgEl.dataset.expect;
+    if (!key || !expect) {
+      return;
+    }
+    if (headerAvatarImgEl.getAttribute("src") !== expect) {
+      return;
+    }
+    avatarUrlByLogin.delete(key);
+    headerAvatarImgEl.hidden = true;
+    headerAvatarImgEl.removeAttribute("src");
+    headerAvatarImgEl.removeAttribute("data-expect");
+    headerAvatarLetterEl.hidden = false;
+    headerAvatarLetterEl.textContent = key.slice(0, 1).toUpperCase();
+  });
+
+  function paintHeaderMeta(
+    el: HTMLElement,
+    parts: ReturnType<typeof channelMetaParts>,
+    live: boolean,
+  ): void {
+    el.replaceChildren();
+    const restBits = [parts.uptime, parts.game, parts.streamTitle].filter(
+      (p): p is string => Boolean(p),
+    );
+    if (parts.viewers) {
+      const viewers = document.createElement("span");
+      viewers.className = "header-meta-viewers";
+      viewers.append(iconEl("viewers", 14), document.createTextNode(parts.viewers));
+      el.appendChild(viewers);
+    }
+    if (restBits.length > 0) {
+      const rest = document.createElement("span");
+      rest.className = "header-meta-rest";
+      const prefix = parts.viewers ? " · " : "";
+      rest.textContent = prefix + restBits.join(" · ");
+      el.appendChild(rest);
+    } else if (!parts.viewers && live) {
+      el.textContent = "\u00a0";
+    }
+  }
+
   let repaintChannelTitle = (): void => {
     if (!titleEl) {
       return;
     }
     const ch = ipc.active();
     if (!ch) {
-      titleEl.textContent = "";
+      titleEl.replaceChildren();
       headerLiveEl.hidden = true;
+      headerChannelNameEl.textContent = "";
+      paintHeaderAvatar("");
+      setPlayerLiveHint(null);
       ring.setChannelLive(false);
       replyThreadCtl?.repaint();
       return;
@@ -657,8 +777,16 @@ async function boot(): Promise<void> {
       streamerActive: sm.active,
       hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
     });
-    titleEl.textContent = formatChannelTitle(ch, stream, knobs) || (live ? "\u00a0" : "");
+    headerChannelNameEl.textContent = ch;
+    paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
     headerLiveEl.hidden = !live;
+    if (headerAvatarLogin !== ch.toLowerCase()) {
+      paintHeaderAvatar(ch);
+      requestChannelAvatar(ch);
+    } else {
+      paintHeaderAvatar(ch);
+    }
+    setPlayerLiveHint(stream ? stream.live : null);
     streamPreviewCtl?.refresh();
   };
 
@@ -1327,6 +1455,26 @@ async function boot(): Promise<void> {
     repaintChannelTitle();
   });
 
+  await listen<{ login: string; url: string }>("chat:profile_image", (ev) => {
+    const login = ev.payload.login?.trim().toLowerCase() ?? "";
+    const url = ev.payload.url?.trim() ?? "";
+    if (!login || !url) {
+      return;
+    }
+    avatarUrlByLogin.set(login, url);
+    if (headerAvatarLogin === login) {
+      paintHeaderAvatar(login);
+    }
+  });
+
+  bindPlayerOpenTwitch((channel) => {
+    void invoke("open_chat_link", {
+      url: `https://www.twitch.tv/${channel}`,
+    }).catch((err) => {
+      statusEl.textContent = formatError(err);
+    });
+  });
+
   await listen<{
     active?: string | null;
     open?: string[];
@@ -1338,6 +1486,7 @@ async function boot(): Promise<void> {
       channels.remove(ev.payload.dropped);
       sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
       streamByChannel.delete(ev.payload.dropped.toLowerCase());
+      avatarUrlByLogin.delete(ev.payload.dropped.toLowerCase());
     }
     channels.syncOpen(open, focus);
     channelQueue.push({ kind: "sync", name: focus });

@@ -222,33 +222,51 @@ function formatUptime(startedAt: string): string {
   return `${hours}h ${minutes}m`;
 }
 
+export type ChannelMetaParts = {
+  uptime?: string;
+  viewers?: string;
+  game?: string;
+  streamTitle?: string;
+};
+
+export function channelMetaParts(
+  channel: string,
+  stream: ChannelLive | null | undefined,
+  knobs: HeaderKnobs,
+): ChannelMetaParts {
+  void channel;
+  if (!stream?.live) {
+    return {};
+  }
+  const parts: ChannelMetaParts = {};
+  if (knobs.uptime && stream.startedAt) {
+    const uptime = formatUptime(stream.startedAt);
+    if (uptime) {
+      parts.uptime = uptime;
+    }
+  }
+  if (knobs.viewerCount && stream.viewerCount != null) {
+    parts.viewers = stream.viewerCount.toLocaleString();
+  }
+  if (knobs.game && stream.gameName) {
+    parts.game = stream.gameName;
+  }
+  if (knobs.streamTitle && stream.streamTitle) {
+    const title = stream.streamTitle.replace(/\s+/g, " ").trim();
+    if (title) {
+      parts.streamTitle = title.length > 80 ? `${title.slice(0, 79)}…` : title;
+    }
+  }
+  return parts;
+}
+
 export function formatChannelTitle(
   channel: string,
   stream: ChannelLive | null | undefined,
   knobs: HeaderKnobs,
 ): string {
-  void channel;
-  if (!stream?.live) {
-    return "";
-  }
-  const parts: string[] = [];
-  if (knobs.uptime && stream.startedAt) {
-    const uptime = formatUptime(stream.startedAt);
-    if (uptime) {
-      parts.push(uptime);
-    }
-  }
-  if (knobs.viewerCount && stream.viewerCount != null) {
-    parts.push(stream.viewerCount.toLocaleString());
-  }
-  if (knobs.game && stream.gameName) {
-    parts.push(stream.gameName);
-  }
-  if (knobs.streamTitle && stream.streamTitle) {
-    const title = stream.streamTitle.replace(/\s+/g, " ").trim();
-    if (title) {
-      parts.push(title.length > 80 ? `${title.slice(0, 79)}…` : title);
-    }
-  }
-  return parts.join(" · ");
+  const parts = channelMetaParts(channel, stream, knobs);
+  return [parts.uptime, parts.viewers, parts.game, parts.streamTitle]
+    .filter((p): p is string => Boolean(p))
+    .join(" · ");
 }
