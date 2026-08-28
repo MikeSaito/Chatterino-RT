@@ -13,11 +13,11 @@ type EmotePopupItem = {
 const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis"];
 
 const EMPTY_BY_TAB: Record<EmotePopupTab, string> = {
-  favourite: "No favourite emotes yet. Ctrl+click an emote to add.",
-  subs: "No subscriber emotes loaded.",
-  channel: "No channel emotes loaded.",
-  global: "No global emotes loaded.",
-  emojis: "No emojis match.",
+  favourite: "Нет избранных эмодзи. Ctrl+клик по эмодзи добавляет в избранное.",
+  subs: "Нет subscriber emotes.",
+  channel: "Нет эмодзи канала.",
+  global: "Нет global emotes.",
+  emojis: "Нет эмодзи.",
 };
 
 /**
@@ -78,7 +78,7 @@ export function bindEmotePopup(opts: {
 
   const emptyMessage = (query: string): string => {
     if (query.trim()) {
-      return "No emotes match.";
+      return "Нет эмодзи по запросу.";
     }
     return EMPTY_BY_TAB[tab];
   };

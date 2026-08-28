@@ -60,8 +60,35 @@ export function mountEditableTable(
   let rowFilter: ((row: Record<string, string | boolean>, index: number) => boolean) | null =
     null;
 
+  const syncToolbar = (): void => {
+    const filtered = Boolean(rowFilter);
+    addBtn.disabled = filtered;
+    removeBtn.disabled = filtered;
+    upBtn.disabled = filtered || selected <= 0;
+    downBtn.disabled = filtered || selected < 0 || selected >= model.rows.length - 1;
+  };
+
   const paint = (): void => {
     tbody.replaceChildren();
+    const visibleRows = model.rows.filter((row, index) =>
+      rowFilter ? rowFilter(row, index) : true,
+    );
+    if (visibleRows.length === 0) {
+      const tr = document.createElement("tr");
+      tr.className = "editable-table-empty";
+      const td = document.createElement("td");
+      td.colSpan = model.columns.length;
+      const filtered = Boolean(rowFilter);
+      if (filtered) {
+        td.textContent = "Нет совпадений.";
+      } else {
+        td.textContent = "Пусто. Добавьте строку кнопкой Add.";
+      }
+      tr.append(td);
+      tbody.append(tr);
+      syncToolbar();
+      return;
+    }
     model.rows.forEach((row, index) => {
       if (rowFilter && !rowFilter(row, index)) {
         return;
@@ -142,11 +169,7 @@ export function mountEditableTable(
       }
       tbody.append(tr);
     });
-    const filtered = Boolean(rowFilter);
-    addBtn.disabled = filtered;
-    removeBtn.disabled = filtered;
-    upBtn.disabled = filtered || selected <= 0;
-    downBtn.disabled = filtered || selected < 0 || selected >= model.rows.length - 1;
+    syncToolbar();
   };
 
   addBtn.addEventListener("click", () => {

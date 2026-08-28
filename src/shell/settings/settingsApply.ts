@@ -208,7 +208,7 @@ export function applySettingsDisplay(
     delLen,
     fadeHistory,
     hideTsLive,
-    data.knobs["appearance.showReplyButton"] === true,
+    data.knobs["appearance.showReplyButton"] !== false,
     data.knobs["links.linksDoubleClickOnly"] === true,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,

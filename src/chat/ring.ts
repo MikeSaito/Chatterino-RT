@@ -3408,7 +3408,11 @@ export class MessageRing {
           text: slot.copyText || slot.bodyRaw,
           top: rect.top + stageY + top,
           right: rect.right - 8,
-          canReply: this.showReplyButton && !slot.disabled,
+          canReply:
+            this.showReplyButton &&
+            !slot.disabled &&
+            Boolean(slot.login) &&
+            Boolean(slot.msgId),
         };
       }
     }

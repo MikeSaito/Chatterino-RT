@@ -746,7 +746,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "show-reply-button",
         "appearance.showReplyButton",
         "Show message reply button",
-        false,
+        true,
       ),
       vx(
         cb(

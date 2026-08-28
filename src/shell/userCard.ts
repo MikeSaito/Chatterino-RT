@@ -115,9 +115,11 @@ export function bindUserCard(opts: {
   const notesPreviewEl = modal.querySelector<HTMLElement>("#usercard-notes-preview");
   const addNotesBtn = modal.querySelector<HTMLButtonElement>("#usercard-add-notes");
   const statusEl = modal.querySelector<HTMLElement>("#usercard-status");
+  const skeletonEl = modal.querySelector<HTMLElement>("#usercard-skeleton");
   const head = modal.querySelector<HTMLElement>(".popup-head");
   const notesTitle = notesModal.querySelector<HTMLElement>("#notes-title");
   const notesEditor = notesModal.querySelector<HTMLTextAreaElement>("#notes-editor");
+  const notesCounter = notesModal.querySelector<HTMLElement>("#notes-counter");
   const notesOk = notesModal.querySelector<HTMLButtonElement>("#notes-ok");
   const notesCancel = notesModal.querySelector<HTMLButtonElement>("#notes-cancel");
   const notesClose = notesModal.querySelector<HTMLButtonElement>("#notes-close");
@@ -150,6 +152,27 @@ export function bindUserCard(opts: {
   let cachedNotes = "";
   let notesBusy = false;
   let drag: { ox: number; oy: number; sx: number; sy: number } | null = null;
+
+  const paintNotesCounter = (): void => {
+    if (!notesCounter || !notesEditor) {
+      return;
+    }
+    notesCounter.textContent = String([...notesEditor.value].length);
+  };
+
+  const showSkeleton = (): void => {
+    if (skeletonEl) {
+      skeletonEl.hidden = false;
+    }
+    dialog.classList.add("is-loading");
+  };
+
+  const hideSkeleton = (): void => {
+    if (skeletonEl) {
+      skeletonEl.hidden = true;
+    }
+    dialog.classList.remove("is-loading");
+  };
 
   const clearAvatar = (): void => {
     if (!avatarEl) {
@@ -282,6 +305,7 @@ export function bindUserCard(opts: {
     }
     notesTitle.textContent = `Editing notes for ${nameEl.textContent?.trim() || currentLogin || "user"}`;
     notesEditor.value = cachedNotes;
+    paintNotesCounter();
     notesModal.hidden = false;
     notesEditor.focus();
   };
@@ -362,6 +386,7 @@ export function bindUserCard(opts: {
   };
 
   const applyProfileMeta = (profile: UserProfile, login: string): void => {
+    hideSkeleton();
     currentUserId = /^\d+$/.test(profile.id) ? profile.id : "";
     const displayName = profile.displayName.trim();
     if (displayName && displayName.toLowerCase() !== login) {
@@ -900,6 +925,7 @@ export function bindUserCard(opts: {
       if (login !== currentLogin) {
         return;
       }
+      hideSkeleton();
       showMetaUnavailable();
       clearAvatar();
       cachedNotes = "";
@@ -971,10 +997,7 @@ export function bindUserCard(opts: {
     showMetaUnavailable();
     recent.replaceChildren();
     setStatus("");
-    const loading = document.createElement("p");
-    loading.className = "usercard-empty";
-    loading.textContent = "Loading recent messages…";
-    recent.append(loading);
+    showSkeleton();
     refreshModUi();
     placeNear(info.clientX, info.clientY);
     void loadIgnoreHighlightsState(currentLogin);
@@ -1262,6 +1285,10 @@ export function bindUserCard(opts: {
     addNotesBtn.addEventListener("click", () => {
       openNotesDialog();
     });
+  }
+
+  if (notesEditor) {
+    notesEditor.addEventListener("input", paintNotesCounter);
   }
 
   const saveNotesFromDialog = (): void => {

@@ -11,7 +11,11 @@ assert(hasIcon("more"), "more icon");
 assert(hasIcon("emote"), "emote icon");
 assert(hasIcon("send"), "send icon");
 assert(hasIcon("close"), "close icon");
-assert(hasIcon("arrow-down"), "arrow-down icon");
+assert(hasIcon("clock"), "clock icon");
+assert(hasIcon("star"), "star icon");
+assert(hasIcon("link"), "link icon");
+assert(hasIcon("external"), "external icon");
+assert(hasIcon("user"), "user icon");
 assert(!hasIcon("not-a-real-icon"), "unknown rejected");
 
 const svg = iconSvg("settings", 16);

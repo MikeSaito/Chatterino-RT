@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { iconEl } from "./icons";
 import type { MessageRing } from "../chat/ring";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 
@@ -101,9 +102,14 @@ export function bindSearchPopup(opts: {
     view.replaceChildren();
     if (hits.length === 0) {
       if (hasQuery) {
-        const empty = document.createElement("p");
+        const empty = document.createElement("div");
         empty.className = "search-hit-empty";
-        empty.textContent = "Нет совпадений";
+        const iconWrap = document.createElement("span");
+        iconWrap.className = "search-hit-empty-icon";
+        iconWrap.append(iconEl("search", 40));
+        const text = document.createElement("p");
+        text.textContent = "Ничего не найдено";
+        empty.append(iconWrap, text);
         view.append(empty);
       }
       return;

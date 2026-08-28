@@ -18,7 +18,19 @@ export type IconName =
   | "play"
   | "viewers"
   | "live-dot"
-  | "copy";
+  | "copy"
+  | "link"
+  | "external"
+  | "trash"
+  | "edit"
+  | "refresh"
+  | "pin-off"
+  | "chevron-up"
+  | "chevron-left"
+  | "chevron-right"
+  | "clock"
+  | "star"
+  | "user";
 
 const PATHS: Record<IconName, string> = {
   settings:
@@ -45,6 +57,24 @@ const PATHS: Record<IconName, string> = {
   "live-dot":
     '<circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M6 16V6a2 2 0 0 1 2-2h10"/>',
+  link: '<path d="M10 13a4.5 4.5 0 0 0 6.4 0l2.1-2.1a4.5 4.5 0 0 0-6.4-6.4L11 5"/><path d="M14 11a4.5 4.5 0 0 0-6.4 0L5.5 13.1a4.5 4.5 0 0 0 6.4 6.4L13 19"/>',
+  external:
+    '<path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  trash:
+    '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+  edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>',
+  refresh:
+    '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',
+  "pin-off":
+    '<path d="M12 17v5M9 3h6l-1 7h3l-5 5-5-5h3L9 3z"/><path d="M3 3l18 18"/>',
+  "chevron-up": '<path d="M6 15l6-6 6 6"/>',
+  "chevron-left": '<path d="M15 6l-6 6 6 6"/>',
+  "chevron-right": '<path d="M9 6l6 6-6 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  star:
+    '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.3L12 15.8 6.2 17.8l.9-5.3L3.2 8.7l5.4-.8L12 3z"/>',
+  user:
+    '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
 };
 
 export function iconSvg(name: IconName, size = 16): string {

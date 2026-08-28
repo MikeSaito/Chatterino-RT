@@ -57,6 +57,8 @@ export function bindReplyThread(opts: {
   const closeBtn = modal.querySelector<HTMLButtonElement>("#replythread-close");
   const pinBtn = modal.querySelector<HTMLButtonElement>("#replythread-pin");
   const titleEl = modal.querySelector<HTMLElement>("#replythread-title");
+  const subEl = modal.querySelector<HTMLElement>("#replythread-sub");
+  const avatarEl = modal.querySelector<HTMLElement>("#replythread-avatar");
   const view = modal.querySelector<HTMLElement>("#replythread-view");
   const input = modal.querySelector<HTMLTextAreaElement>("#replythread-input");
   const sendBtn = modal.querySelector<HTMLButtonElement>("#replythread-send");
@@ -238,6 +240,17 @@ export function bindReplyThread(opts: {
     syncComposer();
   };
 
+  const paintHeader = (info: ReplyThreadOpen, channel: string): void => {
+    const nick = info.login.trim();
+    if (avatarEl) {
+      avatarEl.textContent = nick ? nick[0]?.toUpperCase() ?? "?" : "?";
+    }
+    if (subEl) {
+      subEl.textContent = channel ? `#${channel}` : "";
+    }
+    titleEl.textContent = nick ? `@${nick}` : "Thread";
+  };
+
   const mountOpen = (info: ReplyThreadOpen): void => {
     if (isSettingsWindowOpen()) {
       return;
@@ -254,9 +267,7 @@ export function bindReplyThread(opts: {
       pinBtn.title = "Pin";
       pinBtn.setAttribute("aria-label", "Pin");
     }
-    titleEl.textContent = channel
-      ? `Reply Thread - @${info.login} in #${channel}`
-      : `Reply Thread - @${info.login}`;
+    paintHeader(info, channel);
     input.value = "";
     modal.hidden = false;
     syncComposer();
@@ -275,9 +286,7 @@ export function bindReplyThread(opts: {
     current = info;
     replyTarget = { id: info.rootId, login: info.login, text: info.text };
     const channel = openChannel || activeChannel().trim();
-    titleEl.textContent = channel
-      ? `Reply Thread - @${info.login} in #${channel}`
-      : `Reply Thread - @${info.login}`;
+    paintHeader(info, channel);
     void loadThread(info);
   };
 

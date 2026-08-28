@@ -47,9 +47,12 @@
           <p id="channel-title" class="header-meta"></p>
           <button type="button" id="moderation-mode-btn" class="btn-ghost" title="Moderation mode" aria-pressed="false">Mod</button>
           <span id="streamer-badge" hidden title="Streamer Mode">Streamer Mode</span>
-          <p id="status"></p>
+          <p id="status" class="status-line">
+            <span id="status-spinner" class="status-spinner" hidden aria-hidden="true"></span>
+            <span id="status-text"></span>
+          </p>
           <button type="button" id="header-more" class="btn-icon" title="Ещё" aria-label="Ещё" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu"></button>
-          <div id="stream-tooltip" hidden>
+          <div id="stream-tooltip" class="ui-tooltip" hidden>
             <img id="stream-tooltip-img" alt="" />
             <span id="stream-tooltip-text"></span>
           </div>
@@ -67,7 +70,7 @@
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>
-                <div id="emote-tooltip" hidden>
+                <div id="emote-tooltip" class="ui-tooltip" hidden>
                   <img id="emote-tooltip-img" alt="" />
                   <span id="emote-tooltip-text"></span>
                 </div>
@@ -76,7 +79,13 @@
                   <button type="button" id="chat-qa-copy" class="btn-icon" title="Копировать" aria-label="Копировать"></button>
                   <button type="button" id="chat-qa-more" class="btn-icon" title="Ещё" aria-label="Ещё"></button>
                 </div>
-                <p id="chat-empty" hidden>Сообщений пока нет</p>
+                <div id="chat-empty" hidden>
+                  <div class="chat-empty-inner">
+                    <span class="chat-empty-icon" aria-hidden="true"></span>
+                    <p class="chat-empty-title">Выберите канал</p>
+                    <p class="chat-empty-hint">Подключитесь к каналу, чтобы видеть сообщения</p>
+                  </div>
+                </div>
                 <button id="chat-jump-bottom" type="button" class="btn-icon" hidden title="Вниз" aria-label="Вниз">
                   <span id="chat-jump-badge" hidden></span>
                 </button>
@@ -102,29 +111,37 @@
             </div>
             <form id="composer">
               <label class="sr-only" for="composer-input">сообщение</label>
-              <button type="button" id="emote-open" class="btn-icon" title="Emotes" aria-label="Emotes"></button>
-              <div id="composer-field">
-                <textarea
-                  id="composer-input"
-                  name="message"
-                  rows="2"
-                  maxlength="500"
-                  spellcheck="false"
-                ></textarea>
-                <div id="composer-meta">
-                  <span id="composer-wait" hidden aria-live="polite"></span>
-                  <span id="composer-length" hidden aria-live="polite">0</span>
+              <div id="composer-inner">
+                <p id="composer-drop-hint" class="composer-drop-hint" hidden aria-hidden="true">
+                  Перетащите изображение сюда
+                </p>
+                <button type="button" id="emote-open" class="btn-icon" title="Emotes" aria-label="Emotes"></button>
+                <div id="composer-field">
+                  <textarea
+                    id="composer-input"
+                    name="message"
+                    rows="2"
+                    maxlength="500"
+                    spellcheck="false"
+                  ></textarea>
+                  <div id="composer-meta">
+                    <span id="composer-wait" class="composer-wait-chip" hidden aria-live="polite">
+                      <span class="composer-wait-icon" aria-hidden="true"></span>
+                      <span class="composer-wait-text"></span>
+                    </span>
+                    <span id="composer-length" hidden aria-live="polite">0</span>
+                  </div>
                 </div>
+                <button
+                  id="composer-send"
+                  class="btn-icon btn-primary"
+                  type="submit"
+                  hidden
+                  disabled
+                  title="Нужен вход Twitch, чтобы отправлять сообщения"
+                  aria-label="Send"
+                ></button>
               </div>
-              <button
-                id="composer-send"
-                class="btn-icon btn-primary"
-                type="submit"
-                hidden
-                disabled
-                title="Нужен вход Twitch, чтобы отправлять сообщения"
-                aria-label="Send"
-              ></button>
             </form>
           </div>
         </div>
@@ -174,6 +191,13 @@
         aria-modal="false"
         aria-labelledby="usercard-name"
       >
+        <div id="usercard-skeleton" class="usercard-skeleton" hidden aria-hidden="true">
+          <div class="usercard-skeleton-avatar"></div>
+          <div class="usercard-skeleton-lines">
+            <span></span>
+            <span></span>
+          </div>
+        </div>
         <header class="popup-head">
           <img id="usercard-avatar" alt="" hidden width="64" height="64" />
           <div>
@@ -222,7 +246,7 @@
           </div>
           <button type="button" id="usercard-unban" title="Unban" hidden>Unban</button>
           <div id="usercard-timeouts" class="usercard-timeouts" aria-label="Timeout durations"></div>
-          <button type="button" id="usercard-ban" title="Ban" hidden>Ban</button>
+          <button type="button" id="usercard-ban" class="is-danger" title="Ban" hidden>Ban</button>
         </div>
         <p id="usercard-status" class="usercard-status" hidden></p>
         <div id="usercard-recent" aria-label="Recent messages"></div>
@@ -247,16 +271,23 @@
           autocomplete="off"
         ></textarea>
         <footer class="popup-foot notes-foot">
-          <button type="button" id="notes-ok" class="btn btn-primary">Ok</button>
-          <button type="button" id="notes-cancel" class="btn">Cancel</button>
+          <span id="notes-counter" class="notes-counter">0</span>
+          <div class="notes-foot-actions">
+            <button type="button" id="notes-ok" class="btn btn-primary">Ok</button>
+            <button type="button" id="notes-cancel" class="btn">Cancel</button>
+          </div>
         </footer>
       </div>
     </div>
     <div id="replythread-modal" hidden>
       <div id="replythread-backdrop"></div>
       <div id="replythread-dialog" role="dialog" aria-modal="true" aria-labelledby="replythread-title">
-        <header class="popup-head">
-          <h2 id="replythread-title">Thread</h2>
+        <header class="popup-head replythread-head">
+          <span id="replythread-avatar" class="replythread-avatar" aria-hidden="true"></span>
+          <div class="replythread-head-text">
+            <h2 id="replythread-title">Thread</h2>
+            <p id="replythread-sub" class="popup-sub"></p>
+          </div>
           <div class="popup-head-actions">
             <button type="button" id="replythread-pin" class="btn-icon" title="Pin" aria-label="Pin" hidden></button>
             <button type="button" id="replythread-close" class="btn-icon" title="Close" aria-label="Close"></button>

@@ -190,6 +190,8 @@ export function insertAtCursor(
 
 type BindOpts = {
   input: HTMLTextAreaElement;
+  dragHost?: HTMLElement;
+  dropHint?: HTMLElement;
   getKnobs: () => ImageUploadKnobs;
   getChannel: () => string;
   onError: (message: string) => void;
@@ -257,6 +259,18 @@ export function bindImageUpload(opts: BindOpts): () => void {
     busy = v;
   };
   const isBusy = (): boolean => busy;
+  const dragHost = opts.dragHost ?? opts.input;
+
+  const setDragOver = (active: boolean): void => {
+    dragHost.classList.toggle("is-drag-over", active);
+    if (opts.dropHint) {
+      opts.dropHint.hidden = !active;
+    }
+  };
+
+  const clearDragOver = (): void => {
+    setDragOver(false);
+  };
 
   const onPaste = (ev: ClipboardEvent): void => {
     const knobs = opts.getKnobs();
@@ -280,6 +294,26 @@ export function bindImageUpload(opts: BindOpts): () => void {
     );
   };
 
+  const onDragEnter = (ev: DragEvent): void => {
+    const knobs = opts.getKnobs();
+    if (!knobs.enabled) {
+      return;
+    }
+    if (!dataTransferLooksLikeImage(ev.dataTransfer)) {
+      return;
+    }
+    ev.preventDefault();
+    setDragOver(true);
+  };
+
+  const onDragLeave = (ev: DragEvent): void => {
+    const related = ev.relatedTarget;
+    if (related instanceof Node && dragHost.contains(related)) {
+      return;
+    }
+    clearDragOver();
+  };
+
   const onDragOver = (ev: DragEvent): void => {
     const knobs = opts.getKnobs();
     if (!knobs.enabled) {
@@ -292,9 +326,11 @@ export function bindImageUpload(opts: BindOpts): () => void {
     if (ev.dataTransfer) {
       ev.dataTransfer.dropEffect = "copy";
     }
+    setDragOver(true);
   };
 
   const onDrop = (ev: DragEvent): void => {
+    clearDragOver();
     const knobs = opts.getKnobs();
     if (!knobs.enabled) {
       return;
@@ -311,12 +347,19 @@ export function bindImageUpload(opts: BindOpts): () => void {
   };
 
   opts.input.addEventListener("paste", onPaste);
-  opts.input.addEventListener("dragover", onDragOver);
-  opts.input.addEventListener("drop", onDrop);
+  dragHost.addEventListener("dragenter", onDragEnter);
+  dragHost.addEventListener("dragleave", onDragLeave);
+  dragHost.addEventListener("dragover", onDragOver);
+  dragHost.addEventListener("drop", onDrop);
+  window.addEventListener("dragend", clearDragOver);
   return () => {
     opts.input.removeEventListener("paste", onPaste);
-    opts.input.removeEventListener("dragover", onDragOver);
-    opts.input.removeEventListener("drop", onDrop);
+    dragHost.removeEventListener("dragenter", onDragEnter);
+    dragHost.removeEventListener("dragleave", onDragLeave);
+    dragHost.removeEventListener("dragover", onDragOver);
+    dragHost.removeEventListener("drop", onDrop);
+    window.removeEventListener("dragend", clearDragOver);
+    clearDragOver();
   };
 }
 

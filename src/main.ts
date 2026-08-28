@@ -12,7 +12,9 @@ import { TextureLru } from "./chat/textures";
 import { mountPlayer, unmountPlayer, setPlayerLiveHint, bindPlayerOpenTwitch } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
+import { normalizeChannelInput } from "./shell/channelName";
 import { applyChromeIcons } from "./shell/chromeIcons";
+import { applyContextMenuChrome, setContextMenuLabel } from "./shell/contextMenuChrome";
 import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
@@ -24,7 +26,7 @@ import {
   type HeaderKnobs,
   type ThumbnailSizeStream,
 } from "./shell/channelHeader";
-import { iconEl } from "./shell/icons";
+import { iconEl, type IconName } from "./shell/icons";
 import {
   bindStageSplit,
   parsePlayerChatSplit,
@@ -111,10 +113,18 @@ if (import.meta.hot) {
 
 window.addEventListener("DOMContentLoaded", () => {
   void boot().catch((err) => {
-    const status = document.querySelector<HTMLElement>("#status");
-    if (status) {
-      status.textContent =
-        err instanceof Error ? err.message : String(err ?? "ошибка загрузки");
+    const message = err instanceof Error ? err.message : String(err ?? "ошибка загрузки");
+    const statusText = document.querySelector<HTMLElement>("#status-text");
+    const statusLine = document.querySelector<HTMLElement>("#status");
+    if (statusText) {
+      statusText.textContent = message;
+    } else if (statusLine) {
+      statusLine.textContent = message;
+    }
+    statusLine?.classList.remove("is-connecting");
+    const spinner = document.querySelector<HTMLElement>("#status-spinner");
+    if (spinner) {
+      spinner.hidden = true;
     }
   });
 });
@@ -131,6 +141,10 @@ window.addEventListener("pagehide", () => {
 async function boot(): Promise<void> {
   const myEpoch = ++bootEpoch;
   applyChromeIcons();
+  const composerWaitIcon = document.querySelector<HTMLElement>(".composer-wait-icon");
+  if (composerWaitIcon) {
+    composerWaitIcon.append(iconEl("clock", 12));
+  }
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
   const pane = document.querySelector<HTMLElement>("#chat-pane");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
@@ -281,6 +295,26 @@ async function boot(): Promise<void> {
   const stageEl = stage;
   const stageSplitEl = stageSplit;
   const statusEl = status;
+  const statusTextEl =
+    status.querySelector<HTMLElement>("#status-text") ??
+    (() => {
+      const span = document.createElement("span");
+      span.id = "status-text";
+      status.append(span);
+      return span;
+    })();
+  const statusSpinnerEl = status.querySelector<HTMLElement>("#status-spinner");
+  const setStatus = (message: string, opts?: { spin?: boolean }): void => {
+    statusTextEl.textContent = message;
+    const spin = opts?.spin ?? false;
+    statusEl.classList.toggle("is-connecting", spin);
+    if (statusSpinnerEl) {
+      statusSpinnerEl.hidden = !spin;
+    }
+  };
+  const composerInner = document.querySelector<HTMLElement>("#composer-inner");
+  const composerWaitText = document.querySelector<HTMLElement>(".composer-wait-text");
+  const composerDropHint = document.querySelector<HTMLElement>("#composer-drop-hint");
   const messageInput = composerInput;
   const sendBtn = composerSend;
   const replyBarEl = replyBar;
@@ -309,9 +343,11 @@ async function boot(): Promise<void> {
   const sendWaitByChannel = new Map<string, string>();
   const composerChrome = bindComposerChrome({
     form: composer,
+    inner: composerInner,
     input: messageInput,
     lengthEl: composerLength,
     waitEl: composerWait,
+    waitTextEl: composerWaitText,
     replyBar: replyBarEl,
     sendBtn: composerSend,
     getOpts: () => composerOpts,
@@ -342,7 +378,7 @@ async function boot(): Promise<void> {
     messageInput.focus();
   });
 
-  statusEl.textContent = "Загрузка чата…";
+  setStatus("Загрузка чата…");
   messageInput.disabled = true;
   sendBtn.disabled = true;
   emoteOpen.disabled = true;
@@ -373,7 +409,7 @@ async function boot(): Promise<void> {
   let tabOverflowCtl: ReturnType<typeof bindTabOverflow> | null = null;
 
   const queueOrJoin = (channel: string, focus = true): void => {
-    const name = channel.trim();
+    const name = normalizeChannelInput(channel);
     if (!name) {
       return;
     }
@@ -382,7 +418,7 @@ async function boot(): Promise<void> {
       return;
     }
     pendingJoins.push({ name, focus });
-    statusEl.textContent = "Загрузка чата…";
+    setStatus("Загрузка чата…");
   };
 
   let prepareSettingsOpen: (() => void) | null = null;
@@ -400,7 +436,7 @@ async function boot(): Promise<void> {
       joinPopoverCtl?.hide();
       prepareSettingsOpen?.();
       void requestOpenSettingsWindow().catch((err) => {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       });
     },
     { signal: earlySignal },
@@ -410,6 +446,21 @@ async function boot(): Promise<void> {
     "submit",
     (ev) => {
       if (myEpoch !== bootEpoch) {
+        return;
+      }
+      ev.preventDefault();
+      queueOrJoin(channelInput.value);
+    },
+    { signal: earlySignal },
+  );
+
+  channelInput.addEventListener(
+    "keydown",
+    (ev) => {
+      if (myEpoch !== bootEpoch) {
+        return;
+      }
+      if (ev.key !== "Enter") {
         return;
       }
       ev.preventDefault();
@@ -440,7 +491,7 @@ async function boot(): Promise<void> {
         chromeReady.headerAction(action);
         return;
       }
-      statusEl.textContent = "Загрузка чата…";
+      setStatus("Загрузка чата…");
     },
   });
 
@@ -458,9 +509,9 @@ async function boot(): Promise<void> {
         signinBtn.disabled = true;
         try {
           await invoke("auth_start");
-          statusEl.textContent = "Ожидание входа…";
+          setStatus("Ожидание входа…");
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         } finally {
           signinBtn.disabled = false;
         }
@@ -483,9 +534,9 @@ async function boot(): Promise<void> {
         logoutBtn.disabled = true;
         try {
           await invoke("auth_logout");
-          statusEl.textContent = "Вход отменён";
+          setStatus("Вход отменён");
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         } finally {
           logoutBtn.disabled = false;
         }
@@ -508,9 +559,9 @@ async function boot(): Promise<void> {
         importBtn.disabled = true;
         try {
           await invoke("auth_import", { blob: pasteEl.value });
-          statusEl.textContent = "Код принят";
+          setStatus("Код принят");
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         } finally {
           importBtn.disabled = false;
         }
@@ -652,7 +703,7 @@ async function boot(): Promise<void> {
           private: openLinksIncognito,
         });
       } catch (err) {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       }
     })();
   });
@@ -689,9 +740,39 @@ async function boot(): Promise<void> {
   let lastPointerY = 0;
   let quickActionsCtl: ReturnType<typeof bindChatQuickActions> | null = null;
   const chatEmptyEl = chatEmpty;
+  const chatEmptyTitleEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-title");
+  const chatEmptyHintEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-hint");
+  const chatEmptyIconEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-icon");
   const syncChatEmpty = (): void => {
     const ch = chatIpc?.active()?.trim() ?? "";
-    chatEmptyEl.hidden = !(ch && ring.occupiedCount() === 0);
+    const occupied = ring.occupiedCount();
+    if (!ch) {
+      chatEmptyEl.hidden = false;
+      if (chatEmptyTitleEl) {
+        chatEmptyTitleEl.textContent = "Выберите канал";
+      }
+      if (chatEmptyHintEl) {
+        chatEmptyHintEl.textContent = "Подключитесь к каналу, чтобы видеть сообщения";
+      }
+      if (chatEmptyIconEl) {
+        chatEmptyIconEl.replaceChildren(iconEl("plus", 64));
+      }
+      return;
+    }
+    if (occupied === 0) {
+      chatEmptyEl.hidden = false;
+      if (chatEmptyTitleEl) {
+        chatEmptyTitleEl.textContent = "Сообщений пока нет";
+      }
+      if (chatEmptyHintEl) {
+        chatEmptyHintEl.textContent = "Напишите первым или дождитесь активности в чате";
+      }
+      if (chatEmptyIconEl) {
+        chatEmptyIconEl.replaceChildren(iconEl("emote", 64));
+      }
+      return;
+    }
+    chatEmptyEl.hidden = true;
   };
   const scrollChrome = bindScrollChrome({
     ring,
@@ -846,7 +927,7 @@ async function boot(): Promise<void> {
       if (!stageSplitCtl?.isDragging()) {
         playerChatSplit = parsePlayerChatSplit(data.knobs["appearance.playerChatSplit"]);
       }
-      channels.setShowRecents(false);
+      channels.setShowRecents(true);
       if (uiLayout === "Classic") {
         syncPlayerForLayout(readActiveChannel());
         applyUiLayout(appRoot, uiLayout, {
@@ -889,10 +970,12 @@ async function boot(): Promise<void> {
   readActiveChannel = () => ipc.active().trim();
   unbindImageUpload = bindImageUpload({
     input: messageInput,
+    dragHost: composer,
+    dropHint: composerDropHint ?? undefined,
     getKnobs: () => imageUploadKnobs,
     getChannel: () => ipc.active(),
     onError: (message) => {
-      statusEl.textContent = message;
+      setStatus(message);
     },
   });
 
@@ -1080,46 +1163,44 @@ async function boot(): Promise<void> {
           break;
         case "open-browser":
           if (!channel) {
-            statusEl.textContent = "нет активного канала";
+            setStatus("нет активного канала");
             return;
           }
           void invoke("open_chat_link", {
             url: `https://www.twitch.tv/${channel}`,
             private: openLinksIncognito,
           }).catch((err) => {
-            statusEl.textContent = formatError(err);
+            setStatus(formatError(err));
           });
           break;
         case "open-streamlink":
           if (!channel) {
-            statusEl.textContent = "нет активного канала";
+            setStatus("нет активного канала");
             return;
           }
           void invoke("open_in_streamlink", { channel }).catch((err) => {
-            statusEl.textContent = formatError(err);
+            setStatus(formatError(err));
           });
           break;
         case "open-custom-player":
           if (!channel || !customUriScheme) {
-            statusEl.textContent = !customUriScheme
-              ? "custom player не настроен"
-              : "нет активного канала";
+            setStatus(!customUriScheme ? "custom player не настроен" : "нет активного канала");
             return;
           }
           void invoke("open_in_custom_player", { channel }).catch((err) => {
-            statusEl.textContent = formatError(err);
+            setStatus(formatError(err));
           });
           break;
         case "reconnect":
           if (!channel) {
-            statusEl.textContent = "нет активного канала";
+            setStatus("нет активного канала");
             return;
           }
           void joinChannel(channel, true);
           break;
         case "leave":
           if (!channel) {
-            statusEl.textContent = "нет активного канала";
+            setStatus("нет активного канала");
             return;
           }
           void leaveChannel(channel);
@@ -1179,7 +1260,7 @@ async function boot(): Promise<void> {
     getChannelLive: () =>
       streamByChannel.get(ipc.active().trim().toLowerCase())?.live ?? false,
     onStatus: (message) => {
-      statusEl.textContent = message;
+      setStatus(message);
     },
   });
   replyThreadCtl = replyThread;
@@ -1317,7 +1398,7 @@ async function boot(): Promise<void> {
           await invoke("auth_select", { login: action.login });
           await paintAuthFromServer();
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         }
       })();
     },
@@ -1341,7 +1422,7 @@ async function boot(): Promise<void> {
       channel: ipc.active() || "",
     });
     if (!text) {
-      statusEl.textContent = "Could not build moderation command.";
+      setStatus("Could not build moderation command.");
       return;
     }
     modSendBusy = true;
@@ -1349,7 +1430,7 @@ async function boot(): Promise<void> {
       try {
         await invoke("chat_send", { text, replyToId: null });
       } catch (err) {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       } finally {
         modSendBusy = false;
       }
@@ -1441,7 +1522,7 @@ async function boot(): Promise<void> {
         inputText: messageInput.value,
         replyToId: null,
       }).catch((err) => {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       });
       return;
     }
@@ -1463,7 +1544,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          statusEl.textContent = "нет активного канала";
+          setStatus("нет активного канала");
           return;
         }
         try {
@@ -1474,12 +1555,12 @@ async function boot(): Promise<void> {
           const events = Array.isArray(snap.events) ? snap.events : [];
           const event = findEventByMsgId(events, msgId);
           if (!event) {
-            statusEl.textContent = "сообщение не найдено в scrollback";
+            setStatus("сообщение не найдено в scrollback");
             return;
           }
           await navigator.clipboard.writeText(JSON.stringify(event, null, 2));
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         }
       })();
       return;
@@ -1544,7 +1625,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          statusEl.textContent = "нет активного канала";
+          setStatus("нет активного канала");
           return;
         }
         try {
@@ -1557,13 +1638,13 @@ async function boot(): Promise<void> {
           );
           const root = resolveReplyRoot(events, msgId);
           if (!root) {
-            statusEl.textContent = "не удалось найти корень ветки";
+            setStatus("не удалось найти корень ветки");
             return;
           }
           setReply(root.id, root.login, root.text);
           messageInput.focus();
         } catch (err) {
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         }
       })();
       return;
@@ -1574,7 +1655,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          statusEl.textContent = "нет активного канала";
+          setStatus("нет активного канала");
           return;
         }
         try {
@@ -1594,7 +1675,7 @@ async function boot(): Promise<void> {
           const root = resolveReplyRoot(events, msgId);
           if (!root) {
             replyThread.close();
-            statusEl.textContent = "не удалось найти корень ветки";
+            setStatus("не удалось найти корень ветки");
             return;
           }
           replyThread.completeOpen({
@@ -1605,7 +1686,7 @@ async function boot(): Promise<void> {
           });
         } catch (err) {
           replyThread.close();
-          statusEl.textContent = formatError(err);
+          setStatus(formatError(err));
         }
       })();
       return;
@@ -1629,22 +1710,22 @@ async function boot(): Promise<void> {
     if (action === "open-streamlink") {
       const channel = ipc.active().trim();
       if (!channel) {
-        statusEl.textContent = "нет активного канала";
+        setStatus("нет активного канала");
         return;
       }
       void invoke("open_in_streamlink", { channel }).catch((err) => {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       });
       return;
     }
     if (action === "open-custom-player") {
       const channel = ipc.active().trim();
       if (!channel) {
-        statusEl.textContent = "нет активного канала";
+        setStatus("нет активного канала");
         return;
       }
       void invoke("open_in_custom_player", { channel }).catch((err) => {
-        statusEl.textContent = formatError(err);
+        setStatus(formatError(err));
       });
     }
   });
@@ -1659,7 +1740,9 @@ async function boot(): Promise<void> {
     if (holdStatus) {
       return;
     }
-    statusEl.textContent = formatStatus(ev.payload);
+    const spin =
+      ev.payload.state === "connecting" || ev.payload.state === "reconnecting";
+    setStatus(formatStatus(ev.payload), { spin });
   });
 
   await listen<ChannelLive>(CHAT_CHANNEL_LIVE_EVENT, (ev) => {
@@ -1690,7 +1773,7 @@ async function boot(): Promise<void> {
     void invoke("open_chat_link", {
       url: `https://www.twitch.tv/${channel}`,
     }).catch((err) => {
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
     });
   });
 
@@ -1836,14 +1919,14 @@ async function boot(): Promise<void> {
     void importLogin();
   };
   emoteOpen.disabled = false;
-  if (statusEl.textContent === "Загрузка чата…") {
-    statusEl.textContent = "";
+  if (statusTextEl.textContent === "Загрузка чата…") {
+    setStatus("");
   }
 
   try {
     applyAuth(await invoke<AuthInfo>("auth_status"));
   } catch (err) {
-    statusEl.textContent = formatError(err);
+    setStatus(formatError(err));
   }
 
   try {
@@ -2003,11 +2086,12 @@ async function boot(): Promise<void> {
       const searchUrl =
         searchEnabled ? buildWebSearchUrl(searchEngineUrl, ctx.text) : null;
       webSearchBtn.hidden = !searchUrl;
-      webSearchBtn.textContent = webSearchMenuLabel(
-        searchEngineName,
-        searchIncognito && supportsIncognito,
+      setContextMenuLabel(
+        webSearchBtn,
+        webSearchMenuLabel(searchEngineName, searchIncognito && supportsIncognito),
       );
     }
+    applyContextMenuChrome(contextMenuEl);
     contextMenuEl.hidden = false;
     const pad = 8;
     const flyoutW = imageLinks.length > 0 ? 128 : 0;
@@ -2208,7 +2292,7 @@ async function boot(): Promise<void> {
       await invoke("auth_logout");
       await paintAuthFromServer();
     } catch (err) {
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
       try {
         await paintAuthFromServer();
       } catch {
@@ -2389,7 +2473,7 @@ async function boot(): Promise<void> {
     try {
       items = await invoke<string[]>("chat_complete", { token, firstWord });
     } catch (err) {
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
       if (seq === completeSeq) {
         clearComplete();
       }
@@ -2453,9 +2537,16 @@ async function boot(): Promise<void> {
       return;
     }
     completeBox.hidden = false;
+    const iconName: IconName = complete.popup === "at" ? "user" : "emote";
     complete.items.forEach((item, i) => {
       const li = document.createElement("li");
-      li.textContent = item.trimEnd();
+      const iconWrap = document.createElement("span");
+      iconWrap.className = "complete-icon";
+      iconWrap.append(iconEl(iconName, 14));
+      const text = document.createElement("span");
+      text.className = "complete-text";
+      text.textContent = item.trimEnd();
+      li.append(iconWrap, text);
       li.dataset.index = String(i);
       if (i === complete?.index) {
         li.className = "active";
@@ -2491,7 +2582,7 @@ async function boot(): Promise<void> {
       clearReply();
       composerChrome.pulse();
     } catch (err) {
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
     } finally {
       sending = false;
       syncComposer();
@@ -2551,7 +2642,7 @@ async function boot(): Promise<void> {
       }
     } catch (err) {
       holdStatus = true;
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
     } finally {
       channelBusy = false;
       joinControl.disabled = false;
@@ -2598,7 +2689,7 @@ async function boot(): Promise<void> {
       }
     } catch (err) {
       holdStatus = true;
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
     } finally {
       channelBusy = false;
       joinControl.disabled = false;
@@ -2607,10 +2698,10 @@ async function boot(): Promise<void> {
   }
 
   async function joinChannel(raw: string, focus = true): Promise<void> {
-    const name = raw.trim();
+    const name = normalizeChannelInput(raw);
     if (!name) {
       holdStatus = true;
-      statusEl.textContent = "имя канала: 1-25 символов [a-z0-9_]";
+      setStatus("имя канала: 1-25 символов [a-z0-9_]");
       return;
     }
     if (channelBusy) {
@@ -2632,7 +2723,7 @@ async function boot(): Promise<void> {
       }
     } catch (err) {
       holdStatus = true;
-      statusEl.textContent = formatError(err);
+      setStatus(formatError(err));
     } finally {
       channelBusy = false;
       joinControl.disabled = false;

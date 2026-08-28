@@ -29,3 +29,5 @@ dist-ssr
 # CDP probe artifacts (screenshots from scripts/cdp)
 cdp-shot*.png
 cdp-verify1.png
+cdp-probe*.mjs
+cdp-verify*.mjs
