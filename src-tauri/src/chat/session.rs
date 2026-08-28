@@ -114,7 +114,10 @@ pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<S
 pub fn forget_open(shared: &Shared, normalized: &str) -> Result<Session, ApiError> {
     let (path, data) = {
         let mut inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+        // Leave removes the tab entirely: drop from open and recents so hydrate
+        // with showRecents does not bring the channel back after restart.
         inner.data.open.retain(|c| c != normalized);
+        inner.data.recents.retain(|c| c != normalized);
         if inner.data.last_channel.as_deref() == Some(normalized) {
             inner.data.last_channel = inner.data.open.first().cloned();
         }
@@ -235,6 +238,7 @@ mod tests {
         forget_open(&shared, "u0").unwrap();
         let snap2 = snapshot(&shared).unwrap();
         assert!(!snap2.open.contains(&"u0".to_string()));
+        assert!(!snap2.recents.contains(&"u0".to_string()));
         remember(&shared, "overflow".into(), true).unwrap();
         assert!(snapshot(&shared).unwrap().open.contains(&"overflow".to_string()));
         remember(&shared, "u1".into(), false).unwrap();
