@@ -18,7 +18,7 @@ export function bindChannelList(
   const recents: string[] = [];
   const open = new Set<string>();
   let activeLogin = "";
-  let showRecents = true;
+  let showRecents = false;
 
   const paint = (active: string): void => {
     activeLogin = active;

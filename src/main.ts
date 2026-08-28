@@ -928,7 +928,7 @@ async function boot(): Promise<void> {
       if (!stageSplitCtl?.isDragging()) {
         playerChatSplit = parsePlayerChatSplit(data.knobs["appearance.playerChatSplit"]);
       }
-      channels.setShowRecents(true);
+      channels.setShowRecents(false);
       if (uiLayout === "Classic") {
         syncPlayerForLayout(readActiveChannel());
         applyUiLayout(appRoot, uiLayout, {
