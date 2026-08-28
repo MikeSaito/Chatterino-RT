@@ -245,6 +245,11 @@ pub enum ChatEvent {
         /// Twitch `mod=1` tag (badges sometimes omit moderator).
         #[serde(default)]
         is_mod_tag: bool,
+        /// Self profile cache source for local echo (Twitch не эхает свой PRIVMSG).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
     },
     #[serde(rename = "notice", rename_all = "camelCase")]
     Notice {

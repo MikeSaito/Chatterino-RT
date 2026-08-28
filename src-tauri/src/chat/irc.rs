@@ -14,7 +14,7 @@ use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
 use super::helix::resolve_badge_urls;
 use super::parse::{
-    parse_line, shift_emote_spans_back, strip_leading_reply_mention, ParsedLine,
+    parse_line, shift_emote_spans_back, strip_leading_reply_mention, synthetic_id, ParsedLine,
 };
 use super::spans::{decorate_text_spans_ex, FindMentions};
 use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -287,7 +287,7 @@ async fn connect_session(
                         reply_to,
                     }) => {
                         enqueue_pending_out(pending_out, channel, text, reply_to);
-                        if flush_outgoing(
+                        match flush_outgoing(
                             &mut write,
                             wanted,
                             &in_rooms,
@@ -295,9 +295,13 @@ async fn connect_session(
                             shared,
                         )
                         .await
-                        .is_err()
                         {
-                            return SessionEnd::Reconnect { wait: true };
+                            Err(()) => return SessionEnd::Reconnect { wait: true },
+                            Ok(sent) => {
+                                for (ch, txt, reply) in sent {
+                                    echo_own_privmsg(app, shared, &ch, txt, reply);
+                                }
+                            }
                         }
                     }
                     Some(IrcCmd::Relogin) => {
@@ -332,7 +336,7 @@ async fn connect_session(
                                 LineAction::Joined(ch) => {
                                     in_rooms.insert(ch.clone());
                                     maybe_spawn_gap_fill(app, shared, &ch);
-                                    if flush_outgoing(
+                                    match flush_outgoing(
                                         &mut write,
                                         wanted,
                                         &in_rooms,
@@ -340,9 +344,15 @@ async fn connect_session(
                                         shared,
                                     )
                                     .await
-                                    .is_err()
                                     {
-                                        return SessionEnd::Reconnect { wait: true };
+                                        Err(()) => {
+                                            return SessionEnd::Reconnect { wait: true };
+                                        }
+                                        Ok(sent) => {
+                                            for (ch, txt, reply) in sent {
+                                                echo_own_privmsg(app, shared, &ch, txt, reply);
+                                            }
+                                        }
                                     }
                                 }
                                 LineAction::LeftRoom(ch) => {
@@ -468,16 +478,21 @@ where
     send_ws(write, Message::Text(format!("{line}\r\n").into())).await
 }
 
+/// Шлёт накопленные PRIVMSG; возвращает успешно ушедшие (channel, text, reply_to)
+/// для локального echo: Twitch не возвращает отправителю его PRIVMSG на том же
+/// соединении (подтверждение только USERSTATE), поэтому своё сообщение надо
+/// отобразить локально после успешной записи в сокет.
 async fn flush_outgoing<S>(
     write: &mut S,
     wanted: &HashSet<String>,
     in_rooms: &HashSet<String>,
     pending: &mut VecDeque<(String, String, Option<String>)>,
     shared: &Shared,
-) -> Result<(), ()>
+) -> Result<Vec<(String, String, Option<String>)>, ()>
 where
     S: Sink<Message> + Unpin,
 {
+    let mut sent: Vec<(String, String, Option<String>)> = Vec::new();
     let mut rest = VecDeque::new();
     while let Some((channel, text, reply_to)) = pending.pop_front() {
         if !wanted.contains(&channel) {
@@ -500,11 +515,12 @@ where
         }
         shared.release_outbound(1);
         if let Ok(mut last) = shared.last_sent.lock() {
-            last.insert(channel, text);
+            last.insert(channel.clone(), text.clone());
         }
+        sent.push((channel, text, reply_to));
     }
     *pending = rest;
-    Ok(())
+    Ok(sent)
 }
 
 async fn send_ws<S>(write: &mut S, msg: Message) -> Result<(), ()>
@@ -670,6 +686,24 @@ fn dispatch_line(
                     hub.set_joined(&channel, true);
                 }
                 auth::emit(app, shared);
+            }
+            if let ChatEvent::Userstate {
+                display_name,
+                color,
+                badges,
+                ..
+            } = &event
+            {
+                if let Ok(mut profiles) = shared.self_profiles.lock() {
+                    let entry = profiles.entry(channel.clone()).or_default();
+                    if let Some(name) = display_name {
+                        entry.display_name = name.clone();
+                    }
+                    if let Some(c) = color {
+                        entry.color = c.clone();
+                    }
+                    entry.badges = badges.clone();
+                }
             }
             let mut failed: Option<String> = None;
             if let ChatEvent::Notice { id, text, .. } = &event {
@@ -910,6 +944,114 @@ fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBat
             );
         }
     }
+}
+
+/// Локальный echo своего PRIVMSG после успешной записи в сокет.
+/// Twitch не шлёт отправителю его сообщение на том же соединении (только
+/// USERSTATE-подтверждение), поэтому своё сообщение рендерим сами через тот же
+/// пайплайн, что и входящие: gate/decorate/ingest/deliver. Бейджи, цвет и
+/// display-name берём из кэша USERSTATE (приходит на JOIN и после каждого
+/// PRIVMSG), reply-контекст — из скроллбэка по parent id.
+pub(crate) fn echo_own_privmsg(
+    app: &AppHandle,
+    shared: &Shared,
+    channel: &str,
+    text: String,
+    reply_to: Option<String>,
+) {
+    let Some((login, _)) = auth::resolved_login_token(shared) else {
+        return;
+    };
+    let now = unix_ms();
+    let (display_name, color, badges) = shared
+        .self_profiles
+        .lock()
+        .ok()
+        .and_then(|profiles| profiles.get(channel).cloned())
+        .map(|p| {
+            (
+                if p.display_name.is_empty() {
+                    login.clone()
+                } else {
+                    p.display_name
+                },
+                p.color,
+                p.badges,
+            )
+        })
+        .unwrap_or_else(|| (login.clone(), String::new(), Vec::new()));
+    let user_id = auth::resolved_twitch_user_id(shared).unwrap_or_default();
+    let (reply_to_login, reply_to_display_name, reply_to_text) = reply_to
+        .as_deref()
+        .and_then(|rid| {
+            match shared.hub.lock().ok()?.peek_event(channel, rid)? {
+                ChatEvent::Privmsg {
+                    login,
+                    display_name,
+                    text,
+                    ..
+                } => Some((Some(login), Some(display_name), Some(text))),
+                _ => None,
+            }
+        })
+        .unwrap_or((None, None, None));
+    let mut event = ChatEvent::Privmsg {
+        id: synthetic_id("l", now, &text),
+        timestamp_ms: now,
+        user_id,
+        login: login.clone(),
+        display_name,
+        color,
+        badges,
+        text,
+        emote_spans: Vec::new(),
+        link_spans: Vec::new(),
+        mention_spans: Vec::new(),
+        bits: None,
+        reply_to_id: reply_to,
+        reply_to_login,
+        reply_to_display_name,
+        reply_to_text,
+        action: false,
+        first_msg: false,
+        custom_reward_id: None,
+        system_msg_id: None,
+        highlight_color: None,
+        highlight_sound: false,
+        highlight_sound_path: None,
+        highlight_flash: false,
+        whisper: false,
+        disabled: false,
+        source_room_id: None,
+        source_badges: Vec::new(),
+    };
+    if super::filters::gate_event(shared, channel, &mut event) {
+        return;
+    }
+    decorate_event(&mut event, shared, channel);
+    let sim = super::similarity::cfg_from_shared(shared);
+    let stack_style = super::timeout_stack::style_from_shared(shared);
+    let stream_id = super::logging::resolve_stream_id(shared, channel);
+    let mut logged: Vec<ChatEvent> = Vec::new();
+    let batch = shared.hub.lock().ok().and_then(|mut hub| {
+        hub.ingest_logged(
+            channel,
+            event,
+            Some(login.as_str()),
+            &sim,
+            stack_style,
+            |ev| {
+                logged.push(ev.clone());
+            },
+        )
+    });
+    for ev in &logged {
+        super::logging::try_log(shared, channel, ev, &stream_id);
+    }
+    if let Some(batch) = batch {
+        deliver_batch(app, shared, &batch);
+    }
+    emit_send_waits(app, shared);
 }
 
 fn enqueue_pending_out(

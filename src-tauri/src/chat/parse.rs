@@ -303,6 +303,8 @@ fn parse_userstate(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
             timestamp_ms: now_ms,
             badges: parse_badges(tags.get("badges").as_deref()),
             is_mod_tag: tags.get("mod").as_deref() == Some("1"),
+            display_name: tags.get("display-name").filter(|s| !s.is_empty()),
+            color: tags.get("color").filter(|s| !s.is_empty()),
         },
         channel,
     }
@@ -589,7 +591,7 @@ fn unescape_tag(value: &str) -> String {
     out
 }
 
-fn synthetic_id(prefix: &str, now_ms: u64, salt: &str) -> String {
+pub(crate) fn synthetic_id(prefix: &str, now_ms: u64, salt: &str) -> String {
     let seq = SYNTHETIC_SEQ.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{now_ms}-{seq}-{}", salt.len())
 }
@@ -622,6 +624,50 @@ mod tests {
                 assert_eq!(emote_spans[0].start, 0);
                 assert_eq!(emote_spans[0].end, 5);
                 assert_eq!(emote_spans[0].provider, "twitch");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn userstate_keeps_display_name_and_color() {
+        let line = "@badge-info=;badges=broadcaster/1;color=#9ACD32;display-name=Mike_Saito;emote-sets=0;mod=0;subscriber=0;user-type= :tmi.twitch.tv USERSTATE #mike_saito";
+        match parse_line(line, 42) {
+            ParsedLine::Event {
+                channel,
+                event:
+                    ChatEvent::Userstate {
+                        display_name,
+                        color,
+                        badges,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(channel, "mike_saito");
+                assert_eq!(display_name.as_deref(), Some("Mike_Saito"));
+                assert_eq!(color.as_deref(), Some("#9ACD32"));
+                assert_eq!(badges.len(), 1);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn userstate_empty_color_stays_none() {
+        let line = "@badge-info=;badges=;color=;display-name=;mod=0 :tmi.twitch.tv USERSTATE #xqc";
+        match parse_line(line, 1) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Userstate {
+                        display_name,
+                        color,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(display_name.is_none());
+                assert!(color.is_none());
             }
             other => panic!("unexpected {other:?}"),
         }

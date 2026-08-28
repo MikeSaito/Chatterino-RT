@@ -115,9 +115,20 @@ pub struct BttvChannelWanted {
     pub room_id: String,
 }
 
+/// Кэш USERSTATE self-профиля по каналу для локального echo своего PRIVMSG:
+/// Twitch не возвращает отправителю его сообщение на том же соединении.
+#[derive(Debug, Clone, Default)]
+pub struct SelfProfile {
+    pub display_name: String,
+    pub color: String,
+    pub badges: Vec<super::types::Badge>,
+}
+
 #[derive(Clone)]
 pub struct Shared {
     pub hub: Arc<Mutex<Hub>>,
+    /// Последний USERSTATE (display-name/color/badges) по каналу.
+    pub self_profiles: Arc<Mutex<HashMap<String, SelfProfile>>>,
     pub catalog: Arc<Mutex<Catalog>>,
     pub badges: Arc<Mutex<BadgeCatalog>>,
     pub ffz_badges: Arc<Mutex<FfzBadgeCatalog>>,
@@ -182,6 +193,7 @@ impl Shared {
     pub fn new() -> Self {
         Self {
             hub: Arc::new(Mutex::new(Hub::default())),
+            self_profiles: Arc::new(Mutex::new(HashMap::new())),
             catalog: Arc::new(Mutex::new(Catalog::default())),
             badges: Arc::new(Mutex::new(BadgeCatalog::default())),
             ffz_badges: Arc::new(Mutex::new(FfzBadgeCatalog::default())),

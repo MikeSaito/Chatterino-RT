@@ -4,6 +4,50 @@ use super::scrollback_config::DEFAULT_SCROLLBACK_LIMIT;
 use super::timeout_stack::{self, PushOutcome, TimeoutStackStyle};
 use super::types::{ChatEvent, SearchHit};
 
+const LOCAL_ECHO_ID_PREFIX: &str = "l-";
+const ECHO_DEDUP_WINDOW_MS: u64 = 15_000;
+
+/// Gap fill may return the same self PRIVMSG with a real Twitch id after local echo.
+fn upgrade_local_echo_id(items: &mut VecDeque<ChatEvent>, incoming: &ChatEvent) -> bool {
+    let ChatEvent::Privmsg {
+        login: in_login,
+        text: in_text,
+        timestamp_ms: in_ts,
+        id: in_id,
+        ..
+    } = incoming
+    else {
+        return false;
+    };
+    if in_id.starts_with(LOCAL_ECHO_ID_PREFIX) {
+        return false;
+    }
+    for existing in items.iter_mut() {
+        let ChatEvent::Privmsg {
+            id,
+            login,
+            text,
+            timestamp_ms,
+            ..
+        } = existing
+        else {
+            continue;
+        };
+        if !id.starts_with(LOCAL_ECHO_ID_PREFIX) {
+            continue;
+        }
+        if !login.eq_ignore_ascii_case(in_login) || text != in_text {
+            continue;
+        }
+        if timestamp_ms.abs_diff(*in_ts) > ECHO_DEDUP_WINDOW_MS {
+            continue;
+        }
+        *id = in_id.clone();
+        return true;
+    }
+    false
+}
+
 #[derive(Debug, Default)]
 pub struct Scrollback {
     items: VecDeque<ChatEvent>,
@@ -86,6 +130,10 @@ impl Scrollback {
         for event in incoming {
             let id = event.id().to_string();
             if id.is_empty() || seen.contains(&id) {
+                continue;
+            }
+            if upgrade_local_echo_id(&mut self.items, &event) {
+                seen.insert(id);
                 continue;
             }
             seen.insert(id);
@@ -346,6 +394,16 @@ mod tests {
         let gap = vec![notice_ts("a", 100), notice_ts("b", 150)];
         assert_eq!(q.fill_in_missing(&gap), 1);
         assert_eq!(q.snapshot().len(), 2);
+    }
+
+    #[test]
+    fn fill_in_missing_upgrades_local_echo_id() {
+        let mut q = Scrollback::new();
+        q.push(privmsg("l-1-0-5", "me", "hello"), no_stack());
+        let gap = vec![privmsg("real-twitch-id", "me", "hello")];
+        assert_eq!(q.fill_in_missing(&gap), 0);
+        assert_eq!(q.snapshot().len(), 1);
+        assert_eq!(q.snapshot()[0].id(), "real-twitch-id");
     }
 
     #[test]

@@ -168,6 +168,20 @@ impl Hub {
         Some(buf.snapshot_batch(channel))
     }
 
+    /// Read-only поиск события по id в скроллбэке (без flush pending).
+    /// Для локального echo reply-контекста: snapshot() здесь нельзя — он
+    /// сбрасывает недоставленные live-события.
+    pub fn peek_event(&self, channel: &str, id: &str) -> Option<ChatEvent> {
+        if id.is_empty() {
+            return None;
+        }
+        let buf = self.buffers.get(channel)?;
+        buf.snapshot_batch(channel)
+            .events
+            .into_iter()
+            .find(|e| e.id() == id)
+    }
+
     pub fn set_room_id(&mut self, channel: &str, room_id: String) {
         if room_id.is_empty() || !room_id.chars().all(|c| c.is_ascii_digit()) {
             return;

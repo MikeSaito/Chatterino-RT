@@ -568,7 +568,16 @@ async fn send_via_helix(
     )
     .await;
     match outcome {
-        super::helix::HelixSendOutcome::Sent => Ok(()),
+        super::helix::HelixSendOutcome::Sent => {
+            super::irc::echo_own_privmsg(
+                app,
+                state,
+                channel,
+                payload,
+                reply_to.map(str::to_string),
+            );
+            Ok(())
+        }
         super::helix::HelixSendOutcome::Dropped(msg) | super::helix::HelixSendOutcome::Failed(msg) => {
             state.post_channel_notice(app, channel, msg);
             Ok(())
