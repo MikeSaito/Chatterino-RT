@@ -2323,8 +2323,7 @@ button:disabled {
   border-color: var(--c-accent);
 }
 
-#replythread-modal,
-#emotepopup-modal {
+#replythread-modal {
   position: fixed;
   inset: 0;
   z-index: var(--z-popup);
@@ -2334,16 +2333,31 @@ button:disabled {
   padding: 16px;
 }
 
+#emotepopup-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popup);
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
+
 #replythread-modal[hidden],
 #emotepopup-modal[hidden] {
   display: none;
 }
 
-#replythread-backdrop,
-#emotepopup-backdrop {
+#replythread-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
+}
+
+#emotepopup-backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: auto;
 }
 
 #replythread-dialog,
@@ -2366,8 +2380,13 @@ button:disabled {
 }
 
 #emotepopup-dialog {
-  width: min(300px, 100%);
-  height: min(500px, 90vh);
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: min(320px, calc(100vw - 16px));
+  height: min(420px, min(60vh, calc(100vh - 24px)));
+  max-height: calc(100vh - 24px);
+  pointer-events: auto;
 }
 
 .popup-head h2 {

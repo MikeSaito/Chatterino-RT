@@ -1268,6 +1268,7 @@ async function boot(): Promise<void> {
   replyThreadLive = replyThread.ingestLive;
   const emotePopup = bindEmotePopup({
     modal: emotepopupModal,
+    anchor: emoteOpen,
     activeChannel: () => ipc.active(),
     insertEmote: (code) => {
       const start = messageInput.selectionStart ?? messageInput.value.length;
@@ -1283,7 +1284,7 @@ async function boot(): Promise<void> {
     },
   });
   emoteOpen.addEventListener("click", () => {
-    emotePopup.open();
+    emotePopup.toggle();
   });
   window.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented) {

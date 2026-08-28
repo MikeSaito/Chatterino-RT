@@ -20,15 +20,20 @@ const EMPTY_BY_TAB: Record<EmotePopupTab, string> = {
   emojis: "Нет эмодзи.",
 };
 
+const VIEWPORT_PAD = 8;
+const ANCHOR_GAP = 6;
+
 /**
  * SPA EmotePopup: вкладки Favourite/Subs/Channel/Global/Emojis, поиск, insert, Ctrl+favourite.
+ * Якорь над кнопкой эмоутов в composer, не центрированный модал.
  */
 export function bindEmotePopup(opts: {
   modal: HTMLElement;
+  anchor: HTMLElement;
   insertEmote: (code: string) => void;
   activeChannel: () => string | null;
-}): { open: () => void; close: () => void } {
-  const { modal, insertEmote, activeChannel } = opts;
+}): { open: () => void; close: () => void; toggle: () => void } {
+  const { modal, anchor, insertEmote, activeChannel } = opts;
   const dialog = modal.querySelector<HTMLElement>("#emotepopup-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#emotepopup-backdrop");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#emotepopup-close");
@@ -39,7 +44,11 @@ export function bindEmotePopup(opts: {
     modal.querySelectorAll<HTMLButtonElement>(".emotepopup-tab[data-tab]"),
   );
   if (!dialog || !backdrop || !closeBtn || !title || !search || !view || tabButtons.length === 0) {
-    return { open: () => undefined, close: () => undefined };
+    return {
+      open: () => undefined,
+      close: () => undefined,
+      toggle: () => undefined,
+    };
   }
 
   let timer = 0;
@@ -57,10 +66,32 @@ export function bindEmotePopup(opts: {
     }
   };
 
+  const positionNearAnchor = (): void => {
+    const rect = anchor.getBoundingClientRect();
+    const dw = dialog.offsetWidth || 320;
+    const dh = dialog.offsetHeight || 420;
+    let left = rect.left;
+    let top = rect.top - dh - ANCHOR_GAP;
+    if (top < VIEWPORT_PAD) {
+      top = rect.bottom + ANCHOR_GAP;
+    }
+    left = Math.max(
+      VIEWPORT_PAD,
+      Math.min(left, window.innerWidth - dw - VIEWPORT_PAD),
+    );
+    top = Math.max(
+      VIEWPORT_PAD,
+      Math.min(top, window.innerHeight - dh - VIEWPORT_PAD),
+    );
+    dialog.style.left = `${Math.round(left)}px`;
+    dialog.style.top = `${Math.round(top)}px`;
+  };
+
   const close = (): void => {
     window.clearTimeout(timer);
     seq += 1;
     modal.hidden = true;
+    anchor.setAttribute("aria-expanded", "false");
     search.value = "";
     view.replaceChildren();
   };
@@ -72,8 +103,22 @@ export function bindEmotePopup(opts: {
     const channel = activeChannel()?.trim() || "";
     title.textContent = channel ? `Emotes in #${channel}` : "Emotes";
     modal.hidden = false;
+    anchor.setAttribute("aria-expanded", "true");
+    positionNearAnchor();
     search.focus();
-    void reload();
+    void reload().then(() => {
+      if (!modal.hidden) {
+        positionNearAnchor();
+      }
+    });
+  };
+
+  const toggle = (): void => {
+    if (modal.hidden) {
+      open();
+    } else {
+      close();
+    }
   };
 
   const emptyMessage = (query: string): string => {
@@ -153,6 +198,9 @@ export function bindEmotePopup(opts: {
           add,
         });
         await reload();
+        if (!modal.hidden) {
+          positionNearAnchor();
+        }
       } catch (err) {
         const msg =
           err && typeof err === "object" && "message" in err
@@ -200,14 +248,22 @@ export function bindEmotePopup(opts: {
         return;
       }
       setTab(id);
-      void reload();
+      void reload().then(() => {
+        if (!modal.hidden) {
+          positionNearAnchor();
+        }
+      });
     });
   }
 
   search.addEventListener("input", () => {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => {
-      void reload();
+      void reload().then(() => {
+        if (!modal.hidden) {
+          positionNearAnchor();
+        }
+      });
     }, 100);
   });
 
@@ -223,8 +279,16 @@ export function bindEmotePopup(opts: {
       close();
     }
   });
+  window.addEventListener("resize", () => {
+    if (!modal.hidden) {
+      positionNearAnchor();
+    }
+  });
 
   setTab("subs");
+  anchor.setAttribute("aria-haspopup", "dialog");
+  anchor.setAttribute("aria-expanded", "false");
+  anchor.setAttribute("aria-controls", "emotepopup-dialog");
 
-  return { open, close };
+  return { open, close, toggle };
 }
