@@ -563,6 +563,12 @@ async function boot(): Promise<void> {
   let authOp: "idle" | "start" | "import" | "logout" = "idle";
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
+  if (
+    import.meta.env.DEV ||
+    localStorage.getItem("crt-debug") === "1"
+  ) {
+    (window as Window & { __crt?: { ring: MessageRing } }).__crt = { ring };
+  }
   try {
     await ring.init();
   } catch (err) {
