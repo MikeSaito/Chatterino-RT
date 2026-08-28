@@ -245,7 +245,7 @@ export class MessageRing {
   private mediaRepaintRaf = 0;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
-  private showReplyButton = false;
+  private showReplyButton = true;
   private moderationMode = false;
   private modActions: ModActionBtn[] = [];
   private selfLogin = "";
@@ -1097,7 +1097,7 @@ export class MessageRing {
     deletedMessageLengthLimit = 50,
     fadeMessageHistory = true,
     hideTimestampsWhenLive = false,
-    showReplyButton = false,
+    showReplyButton = true,
     linksDoubleClickOnly = false,
     emotes?: {
       scale?: number;

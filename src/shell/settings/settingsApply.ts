@@ -28,11 +28,13 @@ import {
   defaultKnobs,
 } from "./catalog";
 import { defaultHotkeyTableRows, normalizeHotkeyRows } from "../hotkeys";
-import { migrateSendButtonDefault } from "./sendButtonMigrate";
+import { migrateStaleFalseDefaults } from "./sendButtonMigrate";
 
 export {
   migrateSendButtonDefault,
+  migrateStaleFalseDefaults,
   SEND_BUTTON_DEFAULT_ON_MARKER,
+  REPLY_BUTTON_DEFAULT_ON_MARKER,
 } from "./sendButtonMigrate";
 
 export type AppSettings = {
@@ -147,8 +149,8 @@ export function migrateFiltersIntoSettings(
 export function mergeLoadedSettingsWithMeta(
   loaded: AppSettings,
   filters: Filters,
-): { settings: AppSettings; sendButtonMigrated: boolean } {
-  const { knobs, migrated } = migrateSendButtonDefault({
+): { settings: AppSettings; knobsMigrated: boolean } {
+  const { knobs, migrated } = migrateStaleFalseDefaults({
     ...defaultKnobs(),
     ...(loaded.knobs ?? {}),
   });
@@ -167,7 +169,7 @@ export function mergeLoadedSettingsWithMeta(
       },
       filters,
     ),
-    sendButtonMigrated: migrated,
+    knobsMigrated: migrated,
   };
 }
 

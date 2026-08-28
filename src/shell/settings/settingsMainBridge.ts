@@ -17,7 +17,7 @@ import { requestOpenSettingsWindow, setSettingsWindowOpen } from "./settingsWind
 import { defaultKnobs } from "./catalog";
 import { normalizeHotkeyRows, stepZoom } from "../hotkeys";
 import type { Filters } from "../../chat/types";
-import { migrateSendButtonDefault } from "./sendButtonMigrate";
+import { migrateStaleFalseDefaults } from "./sendButtonMigrate";
 
 export type { AppSettings } from "./settingsApply";
 
@@ -25,7 +25,7 @@ function rematchSettings(saved: AppSettings): AppSettings {
   return {
     ...emptySettings(),
     ...saved,
-    knobs: migrateSendButtonDefault({
+    knobs: migrateStaleFalseDefaults({
       ...defaultKnobs(),
       ...(saved.knobs ?? {}),
     }).knobs,
@@ -80,11 +80,11 @@ export function bindSettingsBridge(opts: {
     try {
       const loaded = await invoke<AppSettings>("settings_get");
       const filters = await invoke<Filters>("filters_get");
-      const { settings: merged, sendButtonMigrated } =
+      const { settings: merged, knobsMigrated } =
         mergeLoadedSettingsWithMeta(loaded, filters);
       baseline = merged;
       apply(merged);
-      if (sendButtonMigrated) {
+      if (knobsMigrated) {
         await persist(merged);
       }
     } catch {
@@ -171,7 +171,7 @@ export function bindSettingsBridge(opts: {
       .then(async () => {
         const next: AppSettings = {
           ...baseline,
-          knobs: migrateSendButtonDefault({
+          knobs: migrateStaleFalseDefaults({
             ...defaultKnobs(),
             ...baseline.knobs,
             ...patch,

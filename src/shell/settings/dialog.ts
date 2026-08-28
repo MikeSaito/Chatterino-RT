@@ -39,7 +39,7 @@ import {
   tablePathGet,
   type AppSettings as AppliedSettings,
 } from "./settingsApply";
-import { migrateSendButtonDefault } from "./sendButtonMigrate";
+import { migrateStaleFalseDefaults } from "./sendButtonMigrate";
 import {
   emitSettingsClosed,
   emitSettingsPreview,
@@ -1578,7 +1578,7 @@ export function mountSettingsPanel(opts: {
     cancelBtn.disabled = true;
     statusEl.textContent = "";
     const draft = readDraft();
-    draft.knobs = migrateSendButtonDefault(draft.knobs).knobs;
+    draft.knobs = migrateStaleFalseDefaults(draft.knobs).knobs;
     try {
       const live = await invoke<AppSettings>("settings_get");
       const split = live.knobs["appearance.playerChatSplit"];
