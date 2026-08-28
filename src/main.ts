@@ -639,11 +639,15 @@ async function boot(): Promise<void> {
   }
   ring.setOnOpenChatLink((url) => {
     void (async () => {
-      const openUrl = await resolveOpenUrlForChatLink(url, unshortLinks);
-      await invoke("open_chat_link", {
-        url: openUrl,
-        private: openLinksIncognito,
-      }).catch(() => undefined);
+      try {
+        const openUrl = await resolveOpenUrlForChatLink(url, unshortLinks);
+        await invoke("open_chat_link", {
+          url: openUrl,
+          private: openLinksIncognito,
+        });
+      } catch (err) {
+        statusEl.textContent = formatError(err);
+      }
     })();
   });
   let unbindImageUpload: (() => void) | null = null;

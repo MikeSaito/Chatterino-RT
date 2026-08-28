@@ -1778,7 +1778,8 @@ button:disabled {
 
 #chat-quick-actions.is-visible {
   opacity: 1;
-  pointer-events: auto;
+  /* Фон панели не перехватывает клики по ссылкам под ней; только кнопки. */
+  pointer-events: none;
 }
 
 #chat-quick-actions[hidden] {
@@ -1789,6 +1790,10 @@ button:disabled {
   width: 24px;
   height: 24px;
   min-width: 24px;
+}
+
+#chat-quick-actions.is-visible .btn-icon {
+  pointer-events: auto;
 }
 
 #chat-empty {

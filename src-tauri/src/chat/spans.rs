@@ -95,10 +95,49 @@ fn parse_links(text: &str, emotes: &[EmoteSpan]) -> Vec<LinkSpan> {
             i = end;
             continue;
         }
+        // Stock-like bare www.host (scheme added for open); only at word start.
+        let at_boundary = i == 0 || chars[i - 1].is_whitespace();
+        if at_boundary {
+            if let Some((consumed, url)) = bare_www_link(&chars[i..]) {
+                let start_u16 = utf16;
+                let span_end = start_u16 + utf16_len(&chars[i..i + consumed]);
+                if !overlaps(emotes, start_u16, span_end)
+                    && !overlaps_links(&out, start_u16, span_end)
+                {
+                    out.push(LinkSpan {
+                        start: start_u16,
+                        end: span_end,
+                        url,
+                    });
+                }
+                utf16 += utf16_len(&chars[i..i + consumed]);
+                i += consumed;
+                continue;
+            }
+        }
         utf16 += chars[i].len_utf16() as u32;
         i += 1;
     }
     out
+}
+
+/// `www.example.com/path` → open as `https://…` (display span keeps bare form).
+fn bare_www_link(chars: &[char]) -> Option<(usize, String)> {
+    const WWW: &[char] = &['w', 'w', 'w', '.'];
+    if !starts_ignore_case(chars, WWW) {
+        return None;
+    }
+    let mut end = 0;
+    while end < chars.len() && !chars[end].is_whitespace() && chars[end] != '<' {
+        end += 1;
+    }
+    end = strip_url_tail(&chars[..end], WWW.len());
+    if end <= WWW.len() {
+        return None;
+    }
+    let candidate: String = chars[..end].iter().collect();
+    let url = allowed_chat_url(&format!("https://{candidate}")).ok()?;
+    Some((end, url))
 }
 
 fn parse_mentions(
@@ -290,6 +329,25 @@ mod tests {
         let (links, _) = decorate_text_spans(text, &[]);
         assert_eq!(links.len(), 1);
         assert_eq!(&text[links[0].start as usize..links[0].end as usize], "https://example.com");
+    }
+
+    #[test]
+    fn bare_www_link_gets_https() {
+        let text = "see www.example.com/path!";
+        let (links, _) = decorate_text_spans(text, &[]);
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            &text[links[0].start as usize..links[0].end as usize],
+            "www.example.com/path"
+        );
+        assert_eq!(links[0].url, "https://www.example.com/path");
+    }
+
+    #[test]
+    fn bare_www_not_inside_word() {
+        let text = "notwww.example.com";
+        let (links, _) = decorate_text_spans(text, &[]);
+        assert!(links.is_empty());
     }
 
     #[test]

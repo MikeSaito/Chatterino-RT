@@ -2405,6 +2405,7 @@ export class MessageRing {
     }
     this.paintHighlight(slot);
     this.paintMentions(slot, firstOriginX, contOriginX, contentY, layoutOpts);
+    this.paintLinks(slot, firstOriginX, contOriginX, contentY, layoutOpts);
     this.paintMentionTexts(
       slot,
       firstOriginX,
@@ -2620,6 +2621,58 @@ export class MessageRing {
             this.lineHeight,
           )
           .fill({ color: 0x5c65f9, alpha: 0.35 });
+      }
+    }
+  }
+
+  /** Underline link spans (hit-test uses the same ranges). */
+  private paintLinks(
+    slot: Slot,
+    firstOriginX: number,
+    contOriginX: number,
+    contentY: number,
+    wrapOpts: WrapOptions,
+  ): void {
+    if (slot.linkSpans.length === 0) {
+      return;
+    }
+    const linkColor = 0x3ea6ff;
+    for (const span of slot.linkSpans) {
+      for (const line of slot.wrapLines) {
+        const a = Math.max(span.start, line.start);
+        const b = Math.min(span.end, line.end);
+        if (a >= b) {
+          continue;
+        }
+        const start = indexToLineCol(
+          slot.bodyRaw,
+          slot.wrapLines,
+          a,
+          slot.spansRaw,
+          wrapOpts,
+        );
+        const end = indexToLineCol(
+          slot.bodyRaw,
+          slot.wrapLines,
+          Math.max(a, b - 1),
+          slot.spansRaw,
+          wrapOpts,
+        );
+        if (!start || !end || start.line !== end.line) {
+          continue;
+        }
+        const linkW = Math.max(
+          1,
+          this.measureBitmapTextWidth("ChatFont", slot.bodyRaw.slice(a, b)),
+        );
+        const x0 =
+          wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col;
+        const y =
+          contentY + start.line * this.lineHeight + this.lineHeight - 2;
+        slot.mentions
+          .moveTo(x0, y)
+          .lineTo(x0 + linkW, y)
+          .stroke({ width: 1, color: linkColor, alpha: 0.95 });
       }
     }
   }
@@ -2892,12 +2945,6 @@ export class MessageRing {
       this.layout();
       return;
     }
-    // Pixi has no dblclick; DOM double-click sets detail >= 2 on the second tap.
-    const needDbl = this.linksDoubleClickOnly;
-    const isDbl = (ev.detail ?? 1) >= 2;
-    if (needDbl && !isDbl) {
-      return;
-    }
     if (this.nickAt(slot, ev) && slot.login && this.onNickClick) {
       this.onNickClick(this.makeSlotContext(slot, ev));
       return;
@@ -2914,6 +2961,11 @@ export class MessageRing {
     }
     const url = this.linkAt(slot, ev);
     if (!url) {
+      return;
+    }
+    // Stock links.linksDoubleClickOnly: only links need dblclick; nick stays single.
+    // Pixi may leave detail at 0; treat only detail >= 2 as double.
+    if (this.linksDoubleClickOnly && !(ev.detail >= 2)) {
       return;
     }
     if (this.onOpenChatLink) {
