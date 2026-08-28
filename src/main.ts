@@ -352,6 +352,7 @@ async function boot(): Promise<void> {
     sendBtn: composerSend,
     getOpts: () => composerOpts,
   });
+  composerChrome.sync();
   let nickRclick = {
     behavior: "Mention" as UsernameRclickAction,
     modBehavior: "Reply" as UsernameRclickAction,

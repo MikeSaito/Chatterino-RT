@@ -28,6 +28,12 @@ import {
   defaultKnobs,
 } from "./catalog";
 import { defaultHotkeyTableRows, normalizeHotkeyRows } from "../hotkeys";
+import { migrateSendButtonDefault } from "./sendButtonMigrate";
+
+export {
+  migrateSendButtonDefault,
+  SEND_BUTTON_DEFAULT_ON_MARKER,
+} from "./sendButtonMigrate";
 
 export type AppSettings = {
   fontScale: number;
@@ -138,24 +144,38 @@ export function migrateFiltersIntoSettings(
   return next;
 }
 
+export function mergeLoadedSettingsWithMeta(
+  loaded: AppSettings,
+  filters: Filters,
+): { settings: AppSettings; sendButtonMigrated: boolean } {
+  const { knobs, migrated } = migrateSendButtonDefault({
+    ...defaultKnobs(),
+    ...(loaded.knobs ?? {}),
+  });
+  return {
+    settings: migrateFiltersIntoSettings(
+      {
+        ...emptySettings(),
+        ...loaded,
+        knobs,
+        hotkeys: normalizeHotkeyRows(loaded.hotkeys ?? []).map((r) => ({
+          action: r.action,
+          keybinding: r.keybinding,
+          name: r.name,
+        })),
+        enableSelfHighlight: filters.enableSelfHighlight,
+      },
+      filters,
+    ),
+    sendButtonMigrated: migrated,
+  };
+}
+
 export function mergeLoadedSettings(
   loaded: AppSettings,
   filters: Filters,
 ): AppSettings {
-  return migrateFiltersIntoSettings(
-    {
-      ...emptySettings(),
-      ...loaded,
-      knobs: { ...defaultKnobs(), ...(loaded.knobs ?? {}) },
-      hotkeys: normalizeHotkeyRows(loaded.hotkeys ?? []).map((r) => ({
-        action: r.action,
-        keybinding: r.keybinding,
-        name: r.name,
-      })),
-      enableSelfHighlight: filters.enableSelfHighlight,
-    },
-    filters,
-  );
+  return mergeLoadedSettingsWithMeta(loaded, filters).settings;
 }
 
 export function applySettingsDisplay(

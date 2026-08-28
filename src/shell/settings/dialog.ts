@@ -35,10 +35,11 @@ import {
   applySettingsDisplay,
   emptySettings,
   filtersFromSettings,
-  migrateFiltersIntoSettings,
+  mergeLoadedSettings,
   tablePathGet,
   type AppSettings as AppliedSettings,
 } from "./settingsApply";
+import { migrateSendButtonDefault } from "./sendButtonMigrate";
 import {
   emitSettingsClosed,
   emitSettingsPreview,
@@ -1553,20 +1554,7 @@ export function mountSettingsPanel(opts: {
       const loaded = await invoke<AppSettings>("settings_get");
       const filters = await invoke<Filters>("filters_get");
       baselineFilters = filters;
-      baseline = migrateFiltersIntoSettings(
-        {
-          ...emptySettings(),
-          ...loaded,
-          knobs: { ...defaultKnobs(), ...(loaded.knobs ?? {}) },
-          hotkeys: normalizeHotkeyRows(loaded.hotkeys ?? []).map((r) => ({
-            action: r.action,
-            keybinding: r.keybinding,
-            name: r.name,
-          })),
-          enableSelfHighlight: filters.enableSelfHighlight,
-        },
-        filters,
-      );
+      baseline = mergeLoadedSettings(loaded, filters);
       loadReady = true;
       okBtn.disabled = false;
     } catch (err) {
@@ -1590,6 +1578,7 @@ export function mountSettingsPanel(opts: {
     cancelBtn.disabled = true;
     statusEl.textContent = "";
     const draft = readDraft();
+    draft.knobs = migrateSendButtonDefault(draft.knobs).knobs;
     try {
       const live = await invoke<AppSettings>("settings_get");
       const split = live.knobs["appearance.playerChatSplit"];

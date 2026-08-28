@@ -4,7 +4,7 @@ import type { MessageRing } from "../../chat/ring";
 import {
   applySettingsDisplay,
   emptySettings,
-  mergeLoadedSettings,
+  mergeLoadedSettingsWithMeta,
   type AppSettings,
 } from "./settingsApply";
 import {
@@ -17,8 +17,25 @@ import { requestOpenSettingsWindow, setSettingsWindowOpen } from "./settingsWind
 import { defaultKnobs } from "./catalog";
 import { normalizeHotkeyRows, stepZoom } from "../hotkeys";
 import type { Filters } from "../../chat/types";
+import { migrateSendButtonDefault } from "./sendButtonMigrate";
 
 export type { AppSettings } from "./settingsApply";
+
+function rematchSettings(saved: AppSettings): AppSettings {
+  return {
+    ...emptySettings(),
+    ...saved,
+    knobs: migrateSendButtonDefault({
+      ...defaultKnobs(),
+      ...(saved.knobs ?? {}),
+    }).knobs,
+    hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
+      action: r.action,
+      keybinding: r.keybinding,
+      name: r.name,
+    })),
+  };
+}
 
 export function bindSettingsBridge(opts: {
   ring: MessageRing;
@@ -40,24 +57,48 @@ export function bindSettingsBridge(opts: {
     applySettingsDisplay(ring, data, onDisplay);
   };
 
+  let chain: Promise<void> = Promise.resolve();
+  const persist = (next: AppSettings): Promise<void> => {
+    chain = chain
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const saved = await invoke<AppSettings>("settings_set", {
+            settings: next,
+          });
+          const merged = rematchSettings(saved);
+          baseline = merged;
+          apply(merged);
+        } catch {
+          apply(next);
+        }
+      });
+    return chain;
+  };
+
   void (async () => {
     try {
       const loaded = await invoke<AppSettings>("settings_get");
       const filters = await invoke<Filters>("filters_get");
-      const merged = mergeLoadedSettings(loaded, filters);
+      const { settings: merged, sendButtonMigrated } =
+        mergeLoadedSettingsWithMeta(loaded, filters);
       baseline = merged;
       apply(merged);
+      if (sendButtonMigrated) {
+        await persist(merged);
+      }
     } catch {
       apply(emptySettings());
     }
   })();
 
   void listen<AppSettings>(SETTINGS_PREVIEW_EVENT, (ev) => {
-    apply(ev.payload);
+    apply(rematchSettings(ev.payload));
   });
   void listen<AppSettings>(SETTINGS_SAVED_EVENT, (ev) => {
-    baseline = ev.payload;
-    apply(ev.payload);
+    const next = rematchSettings(ev.payload);
+    baseline = next;
+    apply(next);
   });
   void listen<SettingsClosedPayload>(SETTINGS_CLOSED_EVENT, (ev) => {
     setSettingsWindowOpen(false);
@@ -75,32 +116,6 @@ export function bindSettingsBridge(opts: {
   const prepareOpen = (): void => {
     opts.onOpen?.();
     baseline = applied;
-  };
-
-  let chain: Promise<void> = Promise.resolve();
-  const persist = (next: AppSettings): Promise<void> => {
-    chain = chain
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          const saved = await invoke<AppSettings>("settings_set", { settings: next });
-          const merged: AppSettings = {
-            ...emptySettings(),
-            ...saved,
-            knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
-            hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
-              action: r.action,
-              keybinding: r.keybinding,
-              name: r.name,
-            })),
-          };
-          baseline = merged;
-          apply(merged);
-        } catch {
-          apply(next);
-        }
-      });
-    return chain;
   };
 
   let zoomPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -156,7 +171,11 @@ export function bindSettingsBridge(opts: {
       .then(async () => {
         const next: AppSettings = {
           ...baseline,
-          knobs: { ...defaultKnobs(), ...baseline.knobs, ...patch },
+          knobs: migrateSendButtonDefault({
+            ...defaultKnobs(),
+            ...baseline.knobs,
+            ...patch,
+          }).knobs,
           hotkeys: normalizeHotkeyRows(baseline.hotkeys ?? []).map((r) => ({
             action: r.action,
             keybinding: r.keybinding,
@@ -164,17 +183,10 @@ export function bindSettingsBridge(opts: {
           })),
         };
         try {
-          const saved = await invoke<AppSettings>("settings_set", { settings: next });
-          baseline = {
-            ...emptySettings(),
-            ...saved,
-            knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
-            hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
-              action: r.action,
-              keybinding: r.keybinding,
-              name: r.name,
-            })),
-          };
+          const saved = await invoke<AppSettings>("settings_set", {
+            settings: next,
+          });
+          baseline = rematchSettings(saved);
           applied = {
             ...applied,
             knobs: { ...applied.knobs, ...patch },
