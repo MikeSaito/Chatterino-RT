@@ -433,21 +433,6 @@ body,
   display: none;
 }
 
-#header-channel-name {
-  flex-shrink: 0;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-md);
-  font-weight: 600;
-  color: var(--c-header-text);
-}
-
-#header-channel-name:empty {
-  display: none;
-}
-
 #channel-title,
 .header-meta {
   margin: 0;
@@ -3528,11 +3513,6 @@ button:disabled {
 
 #app[data-ui-layout="classic"] #header-channel-avatar {
   display: none !important;
-}
-
-#app[data-ui-layout="classic"] #header-channel-name {
-  max-width: 120px;
-  font-size: var(--font-sm);
 }
 
 #app[data-ui-layout="classic"] #channel-title {

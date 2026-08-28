@@ -163,7 +163,6 @@ async function boot(): Promise<void> {
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
   const headerLive = document.querySelector<HTMLElement>("#header-live");
-  const headerChannelName = document.querySelector<HTMLElement>("#header-channel-name");
   const headerAvatar = document.querySelector<HTMLElement>("#header-channel-avatar");
   const headerAvatarImg = document.querySelector<HTMLImageElement>("#header-channel-avatar-img");
   const headerAvatarLetter = document.querySelector<HTMLElement>("#header-channel-avatar-letter");
@@ -228,7 +227,6 @@ async function boot(): Promise<void> {
     !list ||
     !title ||
     !headerLive ||
-    !headerChannelName ||
     !headerAvatar ||
     !headerAvatarImg ||
     !headerAvatarLetter ||
@@ -284,7 +282,6 @@ async function boot(): Promise<void> {
   const channelListHost = listHost;
   const titleEl = title;
   const headerLiveEl = headerLive;
-  const headerChannelNameEl = headerChannelName;
   const headerAvatarEl = headerAvatar;
   const headerAvatarImgEl = headerAvatarImg;
   const headerAvatarLetterEl = headerAvatarLetter;
@@ -1101,7 +1098,6 @@ async function boot(): Promise<void> {
     if (!ch) {
       titleEl.replaceChildren();
       headerLiveEl.hidden = true;
-      headerChannelNameEl.textContent = "";
       paintHeaderAvatar("");
       setPlayerLiveHint(null);
       ring.setChannelLive(false);
@@ -1117,7 +1113,6 @@ async function boot(): Promise<void> {
       streamerActive: sm.active,
       hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
     });
-    headerChannelNameEl.textContent = ch;
     paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
     headerLiveEl.hidden = !live;
     if (headerAvatarLogin !== ch.toLowerCase()) {
