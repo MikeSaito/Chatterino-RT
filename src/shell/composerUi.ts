@@ -26,7 +26,7 @@ export function defaultComposerChrome(): ComposerChromeOpts {
     showEmptyInput: true,
     showMessageLength: false,
     showSendWaitTimer: false,
-    showSendButton: false,
+    showSendButton: true,
     overflow: "Highlight",
     pulseOnSelf: false,
   };

@@ -1787,7 +1787,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "show-send-button",
         "ui.showSendButton",
         "Show send message button",
-        false,
+        true,
       ),
       vx(
         cb(

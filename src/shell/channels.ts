@@ -85,6 +85,10 @@ export function bindChannelList(
     },
     remove(login) {
       open.delete(login);
+      const at = recents.indexOf(login);
+      if (at >= 0) {
+        recents.splice(at, 1);
+      }
       paint(activeLogin === login ? "" : activeLogin);
     },
     syncOpen(nextOpen, active) {

@@ -17,7 +17,7 @@ assert(parseMessageOverflow("nope") === "Highlight", "default");
 assert(MAX_CHAT_CHARS === 500, "500");
 const d = defaultComposerChrome();
 assert(d.showEmptyInput === true, "empty default");
-assert(d.showSendButton === false, "send button default off");
+assert(d.showSendButton === true, "send button default on");
 assert(d.overflow === "Highlight", "overflow default");
 
 console.log("composerUi tests ok");

@@ -863,7 +863,7 @@ async function boot(): Promise<void> {
         showMessageLength: data.knobs["appearance.showMessageLength"] === true,
         showSendWaitTimer:
           data.knobs["appearance.showSendWaitTimer"] === true,
-        showSendButton: data.knobs["ui.showSendButton"] === true,
+        showSendButton: data.knobs["ui.showSendButton"] !== false,
         overflow: parseMessageOverflow(data.knobs["appearance.messageOverflow"]),
         pulseOnSelf:
           data.knobs["appearance.pulseTextInputOnSelfMessage"] === true,

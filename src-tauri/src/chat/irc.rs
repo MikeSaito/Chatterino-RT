@@ -334,7 +334,20 @@ async fn connect_session(
                                     pong_deadline = None;
                                 }
                                 LineAction::Joined(ch) => {
-                                    in_rooms.insert(ch.clone());
+                                    let first = in_rooms.insert(ch.clone());
+                                    if first
+                                        && shared
+                                            .hub
+                                            .lock()
+                                            .ok()
+                                            .is_some_and(|hub| hub.has_channel(&ch))
+                                    {
+                                        shared.post_channel_notice(
+                                            app,
+                                            &ch,
+                                            "joined channel".into(),
+                                        );
+                                    }
                                     maybe_spawn_gap_fill(app, shared, &ch);
                                     match flush_outgoing(
                                         &mut write,
@@ -590,14 +603,8 @@ fn dispatch_line(
                 }
                 let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
                 if !part && login == nick {
-                    if shared
-                        .hub
-                        .lock()
-                        .ok()
-                        .is_some_and(|hub| hub.has_channel(&channel))
-                    {
-                        shared.post_channel_notice(app, &channel, "joined channel".into());
-                    }
+                    // First self-JOIN → Joined (notice once in handler). Re-JOIN spam skipped via in_rooms.
+                    return LineAction::Joined(channel);
                 } else if part {
                     if super::membership_batch::should_show(
                         shared,

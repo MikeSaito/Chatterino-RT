@@ -348,8 +348,8 @@ body,
   background: transparent;
   border: 0;
   border-radius: 50%;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.55;
+  pointer-events: auto;
   transition:
     opacity var(--transition-fast),
     background-color var(--transition-fast);
@@ -365,7 +365,6 @@ body,
 .channel-row:focus-within .channel-leave,
 .channel-row:has(.channel-item.is-active) .channel-leave {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .channel-leave:hover:not(:disabled) {
@@ -2080,7 +2079,7 @@ button:disabled {
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
-  padding: var(--space-2);
+  padding: 6px var(--space-2);
   background: var(--c-surface-1);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-lg);
@@ -2163,14 +2162,14 @@ button:disabled {
 
 #emote-open {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
 }
 
 .btn-primary.btn-icon,
 #composer-send.btn-icon {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-md);
   color: var(--c-accent-text);
   background: var(--c-accent);
@@ -2186,12 +2185,14 @@ button:disabled {
 #composer-input {
   flex: 1;
   resize: none;
-  min-height: 40px;
-  max-height: 72px;
+  min-height: 28px;
+  max-height: 56px;
   width: 100%;
   border: none;
   background: transparent;
   box-shadow: none;
+  line-height: 1.35;
+  padding: 4px 0;
 }
 
 #composer-input:focus-visible {
@@ -3415,8 +3416,8 @@ button:disabled {
   background: transparent;
   border: 0;
   border-radius: 50%;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.55;
+  pointer-events: auto;
   transition:
     opacity var(--transition-fast),
     background-color var(--transition-fast);
@@ -3426,7 +3427,6 @@ button:disabled {
 #app[data-ui-layout="classic"] .channel-row:focus-within .channel-leave,
 #app[data-ui-layout="classic"] .channel-row:has(.channel-item.is-active) .channel-leave {
   opacity: 1;
-  pointer-events: auto;
 }
 
 #app[data-ui-layout="classic"] .channel-leave:hover:not(:disabled) {
