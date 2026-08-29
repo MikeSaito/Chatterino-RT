@@ -1256,11 +1256,7 @@ fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .user_agent("Chatterino-RT/0.1")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build(Duration::from_secs(12))
 }
 
 #[cfg(test)]

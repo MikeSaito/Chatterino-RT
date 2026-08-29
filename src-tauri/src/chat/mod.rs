@@ -29,6 +29,7 @@ pub mod filters;
 pub mod helix;
 pub mod highlight_blacklist;
 pub mod highlight_sound;
+pub mod http_client;
 pub mod hub;
 pub mod image_uploader;
 pub mod incognito;

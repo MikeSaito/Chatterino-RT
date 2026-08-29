@@ -253,12 +253,7 @@ pub fn try_begin_upload() -> Result<UploadGuard, String> {
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("ChatterinoRT/0.1")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build_no_redirect(Duration::from_secs(60))
 }
 
 pub async fn post_image(

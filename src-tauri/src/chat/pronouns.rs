@@ -45,12 +45,7 @@ pub struct UserPronounsResult {
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .user_agent("Chatterino-RT/0.1")
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build_no_redirect(Duration::from_secs(12))
 }
 
 /// Format from dictionary entries (stock `parsePronoun` rules).

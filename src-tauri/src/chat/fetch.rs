@@ -318,20 +318,11 @@ pub async fn load_7tv_set(
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .user_agent("Chatterino-RT/0.1")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build(Duration::from_secs(12))
 }
 
 fn cdn_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Chatterino-RT/0.1")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build_no_redirect(Duration::from_secs(12))
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {

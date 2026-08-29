@@ -358,10 +358,7 @@ fn gap_limit(after_ms: u64, before_ms: u64, max: usize) -> usize {
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(TIMEOUT_SECS))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    super::http_client::build(Duration::from_secs(TIMEOUT_SECS))
 }
 
 fn unescape_zero_width_joiner(input: &str) -> String {
