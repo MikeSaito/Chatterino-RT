@@ -145,7 +145,10 @@ fn validate_target_user_id(raw: &str) -> Result<String, String> {
 
 fn validate_target_login(raw: &str) -> Result<String, String> {
     let login = raw.trim().to_ascii_lowercase();
-    if login.is_empty() || login.len() > 25 || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    if login.is_empty()
+        || login.len() > 25
+        || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
         return Err("invalid login".into());
     }
     Ok(login)

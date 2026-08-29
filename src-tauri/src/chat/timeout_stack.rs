@@ -87,9 +87,12 @@ pub fn push_clearchat(
             }
         }
 
-        if let Some(updated) =
-            try_stack_pair(existing, incoming_target.as_deref(), *incoming_duration, *incoming_ts)
-        {
+        if let Some(updated) = try_stack_pair(
+            existing,
+            incoming_target.as_deref(),
+            *incoming_duration,
+            *incoming_ts,
+        ) {
             items[i] = updated.clone();
             return PushOutcome::Replaced(updated);
         }
@@ -105,8 +108,7 @@ fn breaks_stack_before(existing: &ChatEvent, incoming_target: Option<&str>) -> b
             login,
             disabled: false,
             ..
-        } => incoming_target
-            .is_some_and(|t| login.eq_ignore_ascii_case(t)),
+        } => incoming_target.is_some_and(|t| login.eq_ignore_ascii_case(t)),
         ChatEvent::Clearchat { .. } => false,
         _ => incoming_target.is_none(),
     }
@@ -205,8 +207,8 @@ mod tests {
             highlight_flash: false,
             whisper: false,
             disabled: false,
-        source_room_id: None,
-        source_badges: vec![],
+            source_room_id: None,
+            source_badges: vec![],
         }
     }
 

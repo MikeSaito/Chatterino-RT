@@ -158,7 +158,11 @@ impl Tokenizer {
 
     pub fn next_token_is_op(&self) -> bool {
         let t = self.next_token_type();
-        is_binary_op(t) || is_unary_op(t) || is_math_op(t) || t == TokenType::And || t == TokenType::Or
+        is_binary_op(t)
+            || is_unary_op(t)
+            || is_math_op(t)
+            || t == TokenType::And
+            || t == TokenType::Or
     }
 }
 
@@ -228,7 +232,11 @@ pub fn is_unary_op(t: TokenType) -> bool {
 pub fn is_math_op(t: TokenType) -> bool {
     matches!(
         t,
-        TokenType::Plus | TokenType::Minus | TokenType::Multiply | TokenType::Divide | TokenType::Mod
+        TokenType::Plus
+            | TokenType::Minus
+            | TokenType::Multiply
+            | TokenType::Divide
+            | TokenType::Mod
     )
 }
 
@@ -238,15 +246,32 @@ pub fn identifier_type(name: &str) -> Option<FilterType> {
         "author.color" => Some(FilterType::Color),
         "author.name" | "author.user_id" | "channel.name" | "message.content" | "reward.id"
         | "reward.title" => Some(FilterType::String),
-        "author.no_color" | "author.subbed" | "channel.watching" | "channel.live"
-        | "flags.action" | "flags.highlighted" | "flags.points_redeemed" | "flags.sub_message"
-        | "flags.system_message" | "flags.reward_message" | "flags.first_message"
-        | "flags.elevated_message" | "flags.hype_chat" | "flags.cheer_message" | "flags.whisper"
-        | "flags.reply" | "flags.automod" | "flags.restricted" | "flags.monitored"
-        | "flags.shared" | "flags.similar" | "flags.watch_streak" | "flags.announcement" => {
-            Some(FilterType::Bool)
+        "author.no_color"
+        | "author.subbed"
+        | "channel.watching"
+        | "channel.live"
+        | "flags.action"
+        | "flags.highlighted"
+        | "flags.points_redeemed"
+        | "flags.sub_message"
+        | "flags.system_message"
+        | "flags.reward_message"
+        | "flags.first_message"
+        | "flags.elevated_message"
+        | "flags.hype_chat"
+        | "flags.cheer_message"
+        | "flags.whisper"
+        | "flags.reply"
+        | "flags.automod"
+        | "flags.restricted"
+        | "flags.monitored"
+        | "flags.shared"
+        | "flags.similar"
+        | "flags.watch_streak"
+        | "flags.announcement" => Some(FilterType::Bool),
+        "author.sub_length" | "bits.amount" | "message.length" | "reward.cost" => {
+            Some(FilterType::Int)
         }
-        "author.sub_length" | "bits.amount" | "message.length" | "reward.cost" => Some(FilterType::Int),
         _ => None,
     }
 }

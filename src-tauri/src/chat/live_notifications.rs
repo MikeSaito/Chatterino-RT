@@ -52,7 +52,11 @@ impl NotifyCfg {
         let knobs = &data.knobs;
         let mut selected = HashSet::new();
         for row in &data.notify_channels {
-            let ch = row.channel.trim().trim_start_matches('#').to_ascii_lowercase();
+            let ch = row
+                .channel
+                .trim()
+                .trim_start_matches('#')
+                .to_ascii_lowercase();
             if !ch.is_empty() {
                 selected.insert(ch);
             }
@@ -91,10 +95,7 @@ impl NotifyCfg {
 }
 
 fn knob_bool(knobs: &std::collections::BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(default)
+    knobs.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 fn knob_str(knobs: &std::collections::BTreeMap<String, Value>, key: &str) -> String {

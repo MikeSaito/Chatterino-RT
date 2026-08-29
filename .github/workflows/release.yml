@@ -5,11 +5,16 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     permissions:
       contents: write
     runs-on: windows-latest
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: .
@@ -23,6 +28,8 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -30,6 +37,20 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Check formatting
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: JavaScript tests
+        run: npm test
 
       - uses: tauri-apps/tauri-action@v0
         env:

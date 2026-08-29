@@ -55,7 +55,13 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "PING" => ParsedLine::Ping(trailing.unwrap_or_default()),
         "PONG" => ParsedLine::Pong,
         "001" => ParsedLine::Ready,
-        "PRIVMSG" => parse_privmsg(&tags, prefix.as_deref(), &params, trailing.as_deref(), now_ms),
+        "PRIVMSG" => parse_privmsg(
+            &tags,
+            prefix.as_deref(),
+            &params,
+            trailing.as_deref(),
+            now_ms,
+        ),
         "WHISPER" => parse_whisper(&tags, prefix.as_deref(), trailing.as_deref(), now_ms),
         "CLEARCHAT" => parse_clearchat(&tags, &params, trailing.as_deref(), now_ms),
         "CLEARMSG" => parse_clearmsg(&tags, &params, now_ms),
@@ -158,9 +164,7 @@ fn build_privmsg(
         reply_to_text: tags.get("reply-parent-msg-body"),
         action,
         first_msg: tags.get("first-msg").as_deref() == Some("1"),
-        custom_reward_id: tags
-            .get("custom-reward-id")
-            .filter(|s| !s.is_empty()),
+        custom_reward_id: tags.get("custom-reward-id").filter(|s| !s.is_empty()),
         system_msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
         text,
         highlight_color: None,
@@ -184,7 +188,9 @@ fn parse_clearchat(
     ParsedLine::Event {
         room_id: tags.get("room-id"),
         event: ChatEvent::Clearchat {
-            id: tags.get("id").unwrap_or_else(|| synthetic_id("c", now_ms, &channel)),
+            id: tags
+                .get("id")
+                .unwrap_or_else(|| synthetic_id("c", now_ms, &channel)),
             timestamp_ms: tags.timestamp(now_ms),
             target_login: trailing.map(|s| s.to_lowercase()).filter(|s| !s.is_empty()),
             duration_sec: tags.get("ban-duration").and_then(|s| s.parse().ok()),
@@ -200,7 +206,9 @@ fn parse_clearmsg(tags: &Tags, params: &[String], now_ms: u64) -> ParsedLine {
     ParsedLine::Event {
         room_id: tags.get("room-id"),
         event: ChatEvent::Clearmsg {
-            id: tags.get("id").unwrap_or_else(|| synthetic_id("m", now_ms, &target_id)),
+            id: tags
+                .get("id")
+                .unwrap_or_else(|| synthetic_id("m", now_ms, &target_id)),
             timestamp_ms: tags.timestamp(now_ms),
             target_id,
         },
@@ -221,7 +229,11 @@ fn parse_usernotice(
         let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
         let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
         Box::new(ChatEvent::Privmsg {
-            id: format!("{}-body", tags.get("id").unwrap_or_else(|| synthetic_id("u", now_ms, text))),
+            id: format!(
+                "{}-body",
+                tags.get("id")
+                    .unwrap_or_else(|| synthetic_id("u", now_ms, text))
+            ),
             timestamp_ms: tags.timestamp(now_ms),
             user_id: tags.get("user-id").unwrap_or_default(),
             login: login.clone().unwrap_or_default(),
@@ -252,7 +264,7 @@ fn parse_usernotice(
             highlight_sound_path: None,
             highlight_flash: false,
             whisper: false,
-        disabled: false,
+            disabled: false,
             source_room_id: tags.get("source-room-id").filter(|s| !s.is_empty()),
             source_badges: parse_badges(tags.get("source-badges").as_deref()),
         })
@@ -260,7 +272,9 @@ fn parse_usernotice(
     ParsedLine::Event {
         room_id: tags.get("room-id"),
         event: ChatEvent::Usernotice {
-            id: tags.get("id").unwrap_or_else(|| synthetic_id("u", now_ms, &system_text)),
+            id: tags
+                .get("id")
+                .unwrap_or_else(|| synthetic_id("u", now_ms, &system_text)),
             timestamp_ms: tags.timestamp(now_ms),
             system_text,
             login,
@@ -345,18 +359,15 @@ fn parse_membership(part: bool, prefix: Option<&str>, params: &[String]) -> Pars
     }
 }
 
-fn parse_notice(
-    tags: &Tags,
-    params: &[String],
-    trailing: Option<&str>,
-    now_ms: u64,
-) -> ParsedLine {
+fn parse_notice(tags: &Tags, params: &[String], trailing: Option<&str>, now_ms: u64) -> ParsedLine {
     let channel = channel_from_params(params);
     let text = trailing.unwrap_or("").to_string();
     ParsedLine::Event {
         room_id: None,
         event: ChatEvent::Notice {
-            id: tags.get("msg-id").unwrap_or_else(|| synthetic_id("n", now_ms, &text)),
+            id: tags
+                .get("msg-id")
+                .unwrap_or_else(|| synthetic_id("n", now_ms, &text)),
             timestamp_ms: now_ms,
             text,
         },
@@ -391,7 +402,10 @@ fn split_tags(line: &str) -> (Tags, &str) {
         if let Some((tags, rest)) = rest.split_once(' ') {
             let parsed = tags
                 .split(';')
-                .filter_map(|pair| pair.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+                .filter_map(|pair| {
+                    pair.split_once('=')
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                })
                 .collect();
             return (Tags(parsed), rest);
         }
@@ -493,8 +507,12 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
             let Some((a, b)) = range.split_once('-') else {
                 continue;
             };
-            let Ok(start_cp) = a.parse::<usize>() else { continue };
-            let Ok(end_cp) = b.parse::<usize>() else { continue };
+            let Ok(start_cp) = a.parse::<usize>() else {
+                continue;
+            };
+            let Ok(end_cp) = b.parse::<usize>() else {
+                continue;
+            };
             if !safe_twitch_emote_id(id) {
                 continue;
             }
@@ -606,13 +624,14 @@ mod tests {
         match parse_line(line, 99) {
             ParsedLine::Event {
                 channel,
-                event: ChatEvent::Privmsg {
-                    text,
-                    emote_spans,
-                    display_name,
-                    user_id,
-                    ..
-                },
+                event:
+                    ChatEvent::Privmsg {
+                        text,
+                        emote_spans,
+                        display_name,
+                        user_id,
+                        ..
+                    },
                 room_id,
             } => {
                 assert_eq!(channel, "xqc");
@@ -706,15 +725,25 @@ mod tests {
 
     #[test]
     fn ping_and_clearchat() {
-        assert_eq!(parse_line("PING :tmi.twitch.tv", 1), ParsedLine::Ping("tmi.twitch.tv".into()));
-        assert_eq!(parse_line(":tmi.twitch.tv PONG tmi.twitch.tv :webtv", 1), ParsedLine::Pong);
-        match parse_line("@ban-duration=600;room-id=1 :tmi.twitch.tv CLEARCHAT #xqc :baduser", 2) {
+        assert_eq!(
+            parse_line("PING :tmi.twitch.tv", 1),
+            ParsedLine::Ping("tmi.twitch.tv".into())
+        );
+        assert_eq!(
+            parse_line(":tmi.twitch.tv PONG tmi.twitch.tv :webtv", 1),
+            ParsedLine::Pong
+        );
+        match parse_line(
+            "@ban-duration=600;room-id=1 :tmi.twitch.tv CLEARCHAT #xqc :baduser",
+            2,
+        ) {
             ParsedLine::Event {
-                event: ChatEvent::Clearchat {
-                    target_login,
-                    duration_sec,
-                    ..
-                },
+                event:
+                    ChatEvent::Clearchat {
+                        target_login,
+                        duration_sec,
+                        ..
+                    },
                 ..
             } => {
                 assert_eq!(target_login.as_deref(), Some("baduser"));
@@ -729,12 +758,13 @@ mod tests {
         let line = "@id=a1;display-name=Test;user-id=9;room-id=1 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :\u{0001}ACTION waves\u{0001}";
         match parse_line(line, 10) {
             ParsedLine::Event {
-                event: ChatEvent::Privmsg {
-                    action,
-                    text,
-                    emote_spans,
-                    ..
-                },
+                event:
+                    ChatEvent::Privmsg {
+                        action,
+                        text,
+                        emote_spans,
+                        ..
+                    },
                 channel,
                 ..
             } => {
@@ -752,12 +782,13 @@ mod tests {
         let line = "@id=a2;emotes=25:0-4;display-name=Test;user-id=9 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :\u{0001}ACTION Kappa\u{0001}";
         match parse_line(line, 10) {
             ParsedLine::Event {
-                event: ChatEvent::Privmsg {
-                    action,
-                    text,
-                    emote_spans,
-                    ..
-                },
+                event:
+                    ChatEvent::Privmsg {
+                        action,
+                        text,
+                        emote_spans,
+                        ..
+                    },
                 ..
             } => {
                 assert!(action);
@@ -772,15 +803,17 @@ mod tests {
 
     #[test]
     fn privmsg_without_emotes_tag() {
-        let line = "@id=abc;display-name=Test;user-id=1 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :hello";
+        let line =
+            "@id=abc;display-name=Test;user-id=1 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :hello";
         match parse_line(line, 11) {
             ParsedLine::Event {
-                event: ChatEvent::Privmsg {
-                    text,
-                    emote_spans,
-                    action,
-                    ..
-                },
+                event:
+                    ChatEvent::Privmsg {
+                        text,
+                        emote_spans,
+                        action,
+                        ..
+                    },
                 ..
             } => {
                 assert_eq!(text, "hello");
@@ -793,15 +826,17 @@ mod tests {
 
     #[test]
     fn usernotice_unescapes_system_msg() {
-        let line = "@system-msg=foo\\sbar;id=u1;login=ann;msg-id=sub :tmi.twitch.tv USERNOTICE #xqc";
+        let line =
+            "@system-msg=foo\\sbar;id=u1;login=ann;msg-id=sub :tmi.twitch.tv USERNOTICE #xqc";
         match parse_line(line, 12) {
             ParsedLine::Event {
-                event: ChatEvent::Usernotice {
-                    system_text,
-                    login,
-                    privmsg,
-                    ..
-                },
+                event:
+                    ChatEvent::Usernotice {
+                        system_text,
+                        login,
+                        privmsg,
+                        ..
+                    },
                 ..
             } => {
                 assert_eq!(system_text, "foo bar");
@@ -821,9 +856,7 @@ mod tests {
                 ..
             } => {
                 let Some(ChatEvent::Privmsg {
-                    text,
-                    link_spans,
-                    ..
+                    text, link_spans, ..
                 }) = privmsg.as_deref()
                 else {
                     panic!("no body");
@@ -856,16 +889,17 @@ mod tests {
         let line = "@id=r1;display-name=Test;user-id=1;reply-parent-msg-id=p0;reply-parent-user-login=ann;reply-parent-display-name=Ann;reply-parent-msg-body=hi\\sthere :test!test@test.tmi.twitch.tv PRIVMSG #xqc :see https://example.com @bob";
         match parse_line(line, 20) {
             ParsedLine::Event {
-                event: ChatEvent::Privmsg {
-                    reply_to_id,
-                    reply_to_login,
-                    reply_to_display_name,
-                    reply_to_text,
-                    link_spans,
-                    mention_spans,
-                    text,
-                    ..
-                },
+                event:
+                    ChatEvent::Privmsg {
+                        reply_to_id,
+                        reply_to_login,
+                        reply_to_display_name,
+                        reply_to_text,
+                        link_spans,
+                        mention_spans,
+                        text,
+                        ..
+                    },
                 ..
             } => {
                 assert_eq!(reply_to_id.as_deref(), Some("p0"));
@@ -884,8 +918,14 @@ mod tests {
 
     #[test]
     fn roomstate_and_reconnect() {
-        assert_eq!(parse_line(":tmi.twitch.tv RECONNECT", 14), ParsedLine::Reconnect);
-        match parse_line(":justinfan1!justinfan1@justinfan1.tmi.twitch.tv PART #xqc", 16) {
+        assert_eq!(
+            parse_line(":tmi.twitch.tv RECONNECT", 14),
+            ParsedLine::Reconnect
+        );
+        match parse_line(
+            ":justinfan1!justinfan1@justinfan1.tmi.twitch.tv PART #xqc",
+            16,
+        ) {
             ParsedLine::Membership {
                 part,
                 channel,

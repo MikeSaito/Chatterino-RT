@@ -102,8 +102,8 @@ pub fn read_chatterino1_commands() -> Result<Vec<CommandRow>, String> {
     if !path_allowed(&path) {
         return Err("Invalid Chatterino 1 commands path".into());
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read settings: {e}"))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {e}"))?;
     Ok(parse_chatterino1_commands_text(&text))
 }
 

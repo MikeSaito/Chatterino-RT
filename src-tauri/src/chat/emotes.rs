@@ -83,16 +83,17 @@ impl Catalog {
         channel: &str,
         incoming: std::collections::HashMap<String, EmoteDef>,
     ) {
-        let map = self
-            .channel
-            .entry(channel.to_string())
-            .or_default();
+        let map = self.channel.entry(channel.to_string()).or_default();
         for (code, def) in incoming {
             map.entry(code).or_insert(def);
         }
     }
 
-    pub fn replace_channel(&mut self, channel: String, map: std::collections::HashMap<String, EmoteDef>) {
+    pub fn replace_channel(
+        &mut self,
+        channel: String,
+        map: std::collections::HashMap<String, EmoteDef>,
+    ) {
         self.channel.insert(channel, map);
     }
 
@@ -159,10 +160,7 @@ impl Catalog {
     }
 
     pub fn iter_channel(&self, channel: &str) -> impl Iterator<Item = (&String, &EmoteDef)> + '_ {
-        self.channel
-            .get(channel)
-            .into_iter()
-            .flat_map(|m| m.iter())
+        self.channel.get(channel).into_iter().flat_map(|m| m.iter())
     }
 
     pub fn has_channel(&self, channel: &str) -> bool {
@@ -265,10 +263,7 @@ impl Catalog {
         if def.provider != "bttv" {
             return;
         }
-        let map = self
-            .channel
-            .entry(channel.to_string())
-            .or_default();
+        let map = self.channel.entry(channel.to_string()).or_default();
         if map.get(&code).is_some_and(|d| d.provider != "bttv") {
             return;
         }
@@ -302,7 +297,11 @@ impl Catalog {
         map.insert(new, def);
     }
 
-    pub fn replace_7tv(&mut self, channel: &str, incoming: std::collections::HashMap<String, EmoteDef>) {
+    pub fn replace_7tv(
+        &mut self,
+        channel: &str,
+        incoming: std::collections::HashMap<String, EmoteDef>,
+    ) {
         let Some(map) = self.channel.get_mut(channel) else {
             return;
         };
@@ -310,7 +309,10 @@ impl Catalog {
         map.extend(incoming);
     }
 
-    fn map_mut(&mut self, scope: &SetScope) -> Option<&mut std::collections::HashMap<String, EmoteDef>> {
+    fn map_mut(
+        &mut self,
+        scope: &SetScope,
+    ) -> Option<&mut std::collections::HashMap<String, EmoteDef>> {
         match scope {
             SetScope::Global => Some(&mut self.global),
             SetScope::Channel(channel) => self.channel.get_mut(channel),
@@ -451,10 +453,7 @@ mod tests {
 
     #[test]
     fn overlay_stacks_on_previous_emote() {
-        let mut spans = vec![
-            span(0, 5, "twitch", false),
-            span(6, 14, "7tv", true),
-        ];
+        let mut spans = vec![span(0, 5, "twitch", false), span(6, 14, "7tv", true)];
         resolve_overlays("Kappa cvHazmat", &mut spans);
         assert!(!spans[0].zero_width);
         assert!(spans[1].zero_width);
@@ -462,10 +461,7 @@ mod tests {
 
     #[test]
     fn overlay_skipped_when_text_between() {
-        let mut spans = vec![
-            span(0, 5, "twitch", false),
-            span(12, 20, "7tv", true),
-        ];
+        let mut spans = vec![span(0, 5, "twitch", false), span(12, 20, "7tv", true)];
         resolve_overlays("Kappa hello cvHazmat", &mut spans);
         assert!(!spans[1].zero_width);
     }
@@ -489,7 +485,11 @@ mod tests {
             def("z", "7tv", true),
         );
         assert!(cat.lookup("xqc", "cvHazmat").is_some());
-        cat.rename_7tv(&SetScope::Channel("xqc".into()), "cvHazmat", "cvPaint".into());
+        cat.rename_7tv(
+            &SetScope::Channel("xqc".into()),
+            "cvHazmat",
+            "cvPaint".into(),
+        );
         assert!(cat.lookup("xqc", "cvHazmat").is_none());
         assert!(cat.lookup("xqc", "cvPaint").is_some());
         cat.remove_7tv(&SetScope::Channel("xqc".into()), "cvPaint");
@@ -611,7 +611,10 @@ mod tests {
             "Pog".into(),
             def("z", "7tv", false),
         );
-        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("bttv"));
+        assert_eq!(
+            cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()),
+            Some("bttv")
+        );
     }
 
     #[test]
@@ -635,9 +638,13 @@ mod tests {
         twitch.insert("Pog".into(), def("x", "twitch", false));
         twitch.insert("CoolStoryBob".into(), def("y", "twitch", false));
         cat.merge_channel_vacant("xqc", twitch);
-        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("bttv"));
         assert_eq!(
-            cat.lookup("xqc", "CoolStoryBob").map(|d| d.provider.as_str()),
+            cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()),
+            Some("bttv")
+        );
+        assert_eq!(
+            cat.lookup("xqc", "CoolStoryBob")
+                .map(|d| d.provider.as_str()),
             Some("twitch")
         );
     }
@@ -688,7 +695,10 @@ mod tests {
                 display_height: None,
             },
         );
-        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("ffz"));
+        assert_eq!(
+            cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()),
+            Some("ffz")
+        );
         cat.remove_bttv_by_id("xqc", "eid");
         assert!(cat.lookup("xqc", "NewCode").is_none());
         // Rename onto FFZ code must not delete the BTTV id entry.
@@ -720,7 +730,10 @@ mod tests {
             cat.lookup("xqc", "KeepMe").map(|d| d.id.as_str()),
             Some("keep")
         );
-        assert_eq!(cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()), Some("ffz"));
+        assert_eq!(
+            cat.lookup("xqc", "Pog").map(|d| d.provider.as_str()),
+            Some("ffz")
+        );
     }
 
     #[test]

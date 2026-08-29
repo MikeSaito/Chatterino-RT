@@ -191,7 +191,10 @@ pub enum ChatEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_sec: Option<u32>,
         /// Stacked CLEARCHAT count (stock Message::count).
-        #[serde(default = "default_stack_count", skip_serializing_if = "stack_count_is_one")]
+        #[serde(
+            default = "default_stack_count",
+            skip_serializing_if = "stack_count_is_one"
+        )]
         stack_count: u32,
     },
     #[serde(rename = "clearmsg", rename_all = "camelCase")]
@@ -337,7 +340,9 @@ impl ChatEvent {
                 ..
             } => {
                 contains_ci(system_text, needle_lower)
-                    || login.as_deref().is_some_and(|v| contains_ci(v, needle_lower))
+                    || login
+                        .as_deref()
+                        .is_some_and(|v| contains_ci(v, needle_lower))
                     || privmsg
                         .as_ref()
                         .is_some_and(|inner| inner.matches_substring(needle_lower))
@@ -570,7 +575,10 @@ mod tests {
         assert_eq!(v["timestampMs"], 10);
         assert_eq!(v["userId"], "9");
         assert_eq!(v["displayName"], "Ann");
-        assert!(v.get("emoteSpans").is_some(), "wire key emoteSpans, got {v}");
+        assert!(
+            v.get("emoteSpans").is_some(),
+            "wire key emoteSpans, got {v}"
+        );
         assert!(v.get("emote_spans").is_none());
         assert_eq!(v["emoteSpans"][0]["emoteId"], "25");
         assert_eq!(v["emoteSpans"][0]["zeroWidth"], false);

@@ -40,7 +40,9 @@ const CHANNEL_SUB_TYPES: &[&str] = &[
     "entitlement.delete",
 ];
 
-pub fn seventv_event_channel_needed_from_knobs(knobs: &BTreeMap<String, serde_json::Value>) -> bool {
+pub fn seventv_event_channel_needed_from_knobs(
+    knobs: &BTreeMap<String, serde_json::Value>,
+) -> bool {
     let flags = EmoteProviderFlags::from_knobs(knobs);
     if !flags.seventv_event_api {
         return false;
@@ -99,11 +101,7 @@ async fn resync_event_channel(shared: &Shared) {
         shared.notify_event(EventCmd::ClearChannel);
         return;
     }
-    let login = shared
-        .hub
-        .lock()
-        .ok()
-        .and_then(|h| h.active.clone());
+    let login = shared.hub.lock().ok().and_then(|h| h.active.clone());
     let Some(login) = login else {
         return;
     };
@@ -160,10 +158,7 @@ async fn resync_event_channel(shared: &Shared) {
 pub fn start(shared: Shared) -> Result<(), String> {
     let enabled = EmoteProviderFlags::from_shared(&shared).seventv_event_api;
     {
-        let mut wanted = shared
-            .event_wanted
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut wanted = shared.event_wanted.lock().map_err(|e| e.to_string())?;
         wanted.enabled = enabled;
     }
     let (tx, rx) = mpsc::unbounded_channel::<EventCmd>();
@@ -513,7 +508,10 @@ async fn fill_switched_set(
 
 pub(crate) fn hello_interval_ms(data: &Value) -> Option<u64> {
     data.get("heartbeat_interval")
-        .and_then(|v| v.as_u64().or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok())))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+        })
         .filter(|ms| *ms >= 1_000 && *ms <= 120_000)
 }
 
@@ -634,7 +632,11 @@ fn change_items(arr: Option<&Value>) -> Option<&[Value]> {
     Some(items)
 }
 
-pub(crate) fn user_set_switch(data: &Value, user_id: &str, current_set: &str) -> Option<(String, String)> {
+pub(crate) fn user_set_switch(
+    data: &Value,
+    user_id: &str,
+    current_set: &str,
+) -> Option<(String, String)> {
     let body = data.get("body").unwrap_or(data);
     let dispatch_user = body.get("id").and_then(Value::as_str)?;
     if dispatch_user != user_id {
@@ -660,7 +662,8 @@ pub(crate) fn user_set_switch(data: &Value, user_id: &str, current_set: &str) ->
                 .and_then(|v| v.get("id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            if !fetch::safe_object_id(old_id) || !fetch::safe_object_id(new_id) || old_id == new_id {
+            if !fetch::safe_object_id(old_id) || !fetch::safe_object_id(new_id) || old_id == new_id
+            {
                 continue;
             }
             if old_id != current_set {
@@ -781,8 +784,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::emotes::EmoteDef;
+    use super::*;
 
     fn active_emote(name: &str, flags: u64) -> Value {
         serde_json::json!({
@@ -825,7 +828,11 @@ mod tests {
                 "pushed": [{ "key": "emotes", "value": active_emote("cvHazmat", 1) }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         let def = cat.lookup("xqc", "cvHazmat").expect("inserted");
         assert!(def.zero_width);
         assert_eq!(def.provider, "7tv");
@@ -853,7 +860,11 @@ mod tests {
                 "pulled": [{ "key": "emotes", "old_value": { "id": "abc", "name": "cvHazmat" } }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         assert!(cat.lookup("xqc", "cvHazmat").is_none());
     }
 
@@ -883,7 +894,11 @@ mod tests {
                 }]
             }
         });
-        assert!(apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         assert!(cat.lookup("xqc", "oldName").is_none());
         assert!(cat.lookup("xqc", "newName").is_some());
     }
@@ -898,7 +913,11 @@ mod tests {
                 "pushed": [{ "key": "emotes", "value": active_emote("cvHazmat", 1) }]
             }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(!apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         assert!(cat.lookup("xqc", "cvHazmat").is_none());
     }
 
@@ -929,12 +948,13 @@ mod tests {
     #[test]
     fn user_update_ignored_when_hub_inactive() {
         let shared = Shared::new();
-        shared.event_wanted.lock().unwrap().channel = Some(super::super::state::EventChannelWanted {
-            login: "xqc".into(),
-            room_id: "999".into(),
-            set_id: "set1".into(),
-            user_id: "user1".into(),
-        });
+        shared.event_wanted.lock().unwrap().channel =
+            Some(super::super::state::EventChannelWanted {
+                login: "xqc".into(),
+                room_id: "999".into(),
+                set_id: "set1".into(),
+                user_id: "user1".into(),
+            });
         let data = serde_json::json!({
             "type": "user.update",
             "body": {
@@ -982,7 +1002,11 @@ mod tests {
                 }]
             }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(!apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         assert!(cat.lookup("xqc", "oldName").is_some());
         assert!(cat.lookup("xqc", "newName").is_none());
     }
@@ -1002,7 +1026,11 @@ mod tests {
             "type": "emote_set.update",
             "body": { "id": "set1", "pushed": pushed }
         });
-        assert!(!apply_emote_set_update(&mut cat, &data, EmoteProviderFlags::default()));
+        assert!(!apply_emote_set_update(
+            &mut cat,
+            &data,
+            EmoteProviderFlags::default()
+        ));
         assert!(cat.lookup("xqc", "e0").is_none());
     }
 
@@ -1067,7 +1095,10 @@ mod tests {
         use std::collections::BTreeMap;
         let mut knobs = BTreeMap::new();
         knobs.insert("emotes.enableSevenTVEventAPI".into(), Value::Bool(true));
-        knobs.insert("emotes.enableSevenTVChannelEmotes".into(), Value::Bool(false));
+        knobs.insert(
+            "emotes.enableSevenTVChannelEmotes".into(),
+            Value::Bool(false),
+        );
         knobs.insert("appearance.showBadgesSevenTV".into(), Value::Bool(true));
         assert!(seventv_event_channel_needed_from_knobs(&knobs));
         knobs.insert("appearance.showBadgesSevenTV".into(), Value::Bool(false));

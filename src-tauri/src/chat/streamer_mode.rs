@@ -162,10 +162,10 @@ mod tests {
                 .data
                 .knobs
                 .insert("streamerMode.enabled".into(), json!("Enabled"));
-            inner.data.knobs.insert(
-                "streamerMode.suppressInlineWhispers".into(),
-                json!(true),
-            );
+            inner
+                .data
+                .knobs
+                .insert("streamerMode.suppressInlineWhispers".into(), json!(true));
         }
         assert!(is_enabled(&shared));
         assert!(should_suppress_inline_whispers(&shared));
@@ -181,10 +181,10 @@ mod tests {
                 .data
                 .knobs
                 .insert("streamerMode.enabled".into(), json!("Disabled"));
-            inner.data.knobs.insert(
-                "streamerMode.suppressInlineWhispers".into(),
-                json!(true),
-            );
+            inner
+                .data
+                .knobs
+                .insert("streamerMode.suppressInlineWhispers".into(), json!(true));
         }
         assert!(!is_enabled(&shared));
         assert!(!should_suppress_inline_whispers(&shared));

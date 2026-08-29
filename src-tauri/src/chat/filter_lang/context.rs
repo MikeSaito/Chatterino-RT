@@ -18,7 +18,9 @@ pub fn resolve_identifier(name: &str, ctx: &RunContext<'_>) -> FilterValue {
         "author.name" => FilterValue::String(author_name(ctx.event)),
         "author.user_id" => FilterValue::String(author_user_id(ctx.event)),
         "author.no_color" => FilterValue::Bool(author_color(ctx.event).is_empty()),
-        "author.subbed" => FilterValue::Bool(has_badge(ctx.event, "subscriber") || has_badge(ctx.event, "founder")),
+        "author.subbed" => {
+            FilterValue::Bool(has_badge(ctx.event, "subscriber") || has_badge(ctx.event, "founder"))
+        }
         "author.sub_length" => FilterValue::Int(0),
         "bits.amount" => FilterValue::Int(bits_amount(ctx.event)),
         "channel.name" => FilterValue::String(ctx.channel.to_string()),
@@ -152,7 +154,10 @@ fn bits_amount(event: &ChatEvent) -> i32 {
 }
 
 fn flag_action(event: &ChatEvent) -> bool {
-    matches!(privmsg_event(event), Some(ChatEvent::Privmsg { action: true, .. }))
+    matches!(
+        privmsg_event(event),
+        Some(ChatEvent::Privmsg { action: true, .. })
+    )
 }
 
 fn flag_highlighted(event: &ChatEvent) -> bool {
@@ -170,10 +175,12 @@ fn flag_points_redeemed(event: &ChatEvent) -> bool {
             custom_reward_id,
             system_msg_id,
             ..
-        } => custom_reward_id.is_some()
-            || system_msg_id
-                .as_deref()
-                .is_some_and(|id| id.contains("redemption") || id.contains("reward")),
+        } => {
+            custom_reward_id.is_some()
+                || system_msg_id
+                    .as_deref()
+                    .is_some_and(|id| id.contains("redemption") || id.contains("reward"))
+        }
         _ => false,
     }
 }
@@ -211,7 +218,13 @@ fn flag_reward_message(event: &ChatEvent) -> bool {
 }
 
 fn flag_first_message(event: &ChatEvent) -> bool {
-    matches!(event, ChatEvent::Privmsg { first_msg: true, .. })
+    matches!(
+        event,
+        ChatEvent::Privmsg {
+            first_msg: true,
+            ..
+        }
+    )
 }
 
 fn flag_cheer_message(event: &ChatEvent) -> bool {
@@ -258,8 +271,7 @@ fn flag_similar(event: &ChatEvent) -> bool {
 fn reward_id(event: &ChatEvent) -> String {
     match privmsg_event(event) {
         Some(ChatEvent::Privmsg {
-            custom_reward_id,
-            ..
+            custom_reward_id, ..
         }) => custom_reward_id.clone().unwrap_or_default(),
         _ => String::new(),
     }

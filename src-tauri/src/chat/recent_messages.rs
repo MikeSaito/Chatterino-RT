@@ -44,9 +44,11 @@ pub fn spawn_recent_messages(app: AppHandle, shared: Shared, channel: String) {
         let result = load_and_apply(&app, &shared, &channel, limit, None, None).await;
         finish_load(&shared, &channel);
         if let Err(err) = result {
-            if push_history_notice(&shared, &channel, format!(
-                "Message history service unavailable (Error: {err})"
-            )) {
+            if push_history_notice(
+                &shared,
+                &channel,
+                format!("Message history service unavailable (Error: {err})"),
+            ) {
                 emit_history_loaded_if_active(&app, &shared, &channel);
             }
         }
@@ -76,13 +78,14 @@ pub fn spawn_gap_fill(app: AppHandle, shared: Shared, channel: String, after_ms:
     }
     let limit = gap_limit(after_ms, before_ms, history_limit(&shared));
     tauri::async_runtime::spawn(async move {
-        let result =
-            load_gap_and_apply(&app, &shared, &channel, limit, after_ms, before_ms).await;
+        let result = load_gap_and_apply(&app, &shared, &channel, limit, after_ms, before_ms).await;
         finish_load(&shared, &channel);
         if let Err(err) = result {
-            if push_history_notice(&shared, &channel, format!(
-                "Message history service unavailable (Error: {err})"
-            )) {
+            if push_history_notice(
+                &shared,
+                &channel,
+                format!("Message history service unavailable (Error: {err})"),
+            ) {
                 emit_history_loaded_if_active(&app, &shared, &channel);
             }
         }
@@ -130,8 +133,7 @@ async fn load_and_apply(
     after_ms: Option<u64>,
     before_ms: Option<u64>,
 ) -> Result<(), String> {
-    let (messages, error_code) =
-        fetch_recent_messages(channel, limit, after_ms, before_ms).await?;
+    let (messages, error_code) = fetch_recent_messages(channel, limit, after_ms, before_ms).await?;
     if !channel_still_open(shared, channel) {
         return Ok(());
     }
@@ -146,10 +148,7 @@ async fn load_and_apply(
 
     let parsed_count = events.len();
     let prepended = {
-        let mut hub = shared
-            .hub
-            .lock()
-            .map_err(|_| "lock".to_string())?;
+        let mut hub = shared.hub.lock().map_err(|_| "lock".to_string())?;
         if !hub.has_channel(channel) {
             return Ok(());
         }
@@ -199,10 +198,7 @@ async fn load_gap_and_apply(
     }
 
     let merged = {
-        let mut hub = shared
-            .hub
-            .lock()
-            .map_err(|_| "lock".to_string())?;
+        let mut hub = shared.hub.lock().map_err(|_| "lock".to_string())?;
         if !hub.has_channel(channel) {
             return Ok(());
         }
@@ -310,11 +306,7 @@ async fn fetch_recent_messages(
 ) -> Result<(Vec<String>, Option<String>), String> {
     let url = build_url(channel, limit, after_ms, before_ms)?;
     let client = http_client();
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
@@ -412,7 +404,13 @@ fn history_limit(shared: &Shared) -> usize {
         .settings
         .lock()
         .ok()
-        .map(|inner| knob_usize(&inner.data.knobs, "misc.twitchMessageHistoryLimit", DEFAULT_LIMIT))
+        .map(|inner| {
+            knob_usize(
+                &inner.data.knobs,
+                "misc.twitchMessageHistoryLimit",
+                DEFAULT_LIMIT,
+            )
+        })
         .unwrap_or(DEFAULT_LIMIT);
     raw.clamp(MIN_LIMIT, MAX_LIMIT)
 }

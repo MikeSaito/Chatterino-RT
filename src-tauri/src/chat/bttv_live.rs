@@ -26,10 +26,7 @@ pub fn bttv_cdn_url(emote_id: &str) -> String {
 pub fn start(shared: Shared) -> Result<(), String> {
     let enabled = bttv_live_enabled(&shared);
     {
-        let mut wanted = shared
-            .bttv_wanted
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut wanted = shared.bttv_wanted.lock().map_err(|e| e.to_string())?;
         wanted.enabled = enabled;
     }
     let (tx, rx) = mpsc::unbounded_channel::<BttvCmd>();
@@ -119,10 +116,7 @@ enum SessionEnd {
     Reconnect { wait: bool },
 }
 
-async fn connect_session(
-    shared: &Shared,
-    rx: &mut mpsc::UnboundedReceiver<BttvCmd>,
-) -> SessionEnd {
+async fn connect_session(shared: &Shared, rx: &mut mpsc::UnboundedReceiver<BttvCmd>) -> SessionEnd {
     let cfg = WebSocketConfig::default()
         .max_message_size(Some(MAX_WS_MESSAGE))
         .max_frame_size(Some(MAX_WS_FRAME))
@@ -233,11 +227,7 @@ async fn connect_session(
     }
 }
 
-async fn sync_join<S>(
-    shared: &Shared,
-    write: &mut S,
-    joined: &mut Option<String>,
-) -> Result<(), ()>
+async fn sync_join<S>(shared: &Shared, write: &mut S, joined: &mut Option<String>) -> Result<(), ()>
 where
     S: Sink<Message> + Unpin,
     S::Error: std::fmt::Debug,
@@ -416,7 +406,12 @@ mod tests {
                 "data": { "channel": "twitch:123", "emoteId": "abc" }
             }),
         );
-        assert!(shared.catalog.lock().unwrap().lookup("xqc", "CatJam").is_none());
+        assert!(shared
+            .catalog
+            .lock()
+            .unwrap()
+            .lookup("xqc", "CatJam")
+            .is_none());
     }
 
     #[test]
@@ -432,7 +427,12 @@ mod tests {
                 }
             }),
         );
-        assert!(shared.catalog.lock().unwrap().lookup("xqc", "Nope").is_none());
+        assert!(shared
+            .catalog
+            .lock()
+            .unwrap()
+            .lookup("xqc", "Nope")
+            .is_none());
         shared.notify_bttv(BttvCmd::SetEnabled(false));
         apply_event(
             &shared,
@@ -444,7 +444,12 @@ mod tests {
                 }
             }),
         );
-        assert!(shared.catalog.lock().unwrap().lookup("xqc", "CatJam").is_none());
+        assert!(shared
+            .catalog
+            .lock()
+            .unwrap()
+            .lookup("xqc", "CatJam")
+            .is_none());
     }
 
     #[test]
@@ -485,10 +490,7 @@ mod tests {
     fn lookup_user_works_without_channel_emotes() {
         let shared = Shared::new();
         let mut knobs = BTreeMap::new();
-        knobs.insert(
-            "emotes.enableBTTVChannelEmotes".into(),
-            Value::Bool(false),
-        );
+        knobs.insert("emotes.enableBTTVChannelEmotes".into(), Value::Bool(false));
         knobs.insert("appearance.showBadgesBttv".into(), Value::Bool(true));
         knobs.insert("emotes.enableBTTVLiveUpdates".into(), Value::Bool(true));
         shared.settings.lock().unwrap().data.knobs = knobs;
@@ -505,16 +507,18 @@ mod tests {
                 }
             }),
         );
-        assert!(shared.bttv_badges.lock().unwrap().badge_for_user("1").is_some());
+        assert!(shared
+            .bttv_badges
+            .lock()
+            .unwrap()
+            .badge_for_user("1")
+            .is_some());
     }
 
     #[test]
     fn bttv_live_disabled_when_channel_emotes_and_badges_off() {
         let mut knobs = BTreeMap::new();
-        knobs.insert(
-            "emotes.enableBTTVChannelEmotes".into(),
-            Value::Bool(false),
-        );
+        knobs.insert("emotes.enableBTTVChannelEmotes".into(), Value::Bool(false));
         knobs.insert("appearance.showBadgesBttv".into(), Value::Bool(false));
         knobs.insert("emotes.enableBTTVLiveUpdates".into(), Value::Bool(true));
         assert!(!bttv_live_enabled_from_knobs(&knobs));

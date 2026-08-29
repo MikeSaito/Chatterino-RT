@@ -135,11 +135,7 @@ pub async fn chat_leave(
     let next = if left_was_active {
         super::session::preferred_focus(&state)
     } else {
-        state
-            .hub
-            .lock()
-            .ok()
-            .and_then(|h| h.active.clone())
+        state.hub.lock().ok().and_then(|h| h.active.clone())
     };
     if left_was_active {
         if let Some(ch) = next.as_ref() {
@@ -217,10 +213,13 @@ pub async fn chat_send(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
     text: String,
-    #[allow(non_snake_case)]
-    replyToId: Option<String>,
+    #[allow(non_snake_case)] replyToId: Option<String>,
 ) -> Result<(), ApiError> {
-    let reply_to = match replyToId.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let reply_to = match replyToId
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
     };
@@ -255,20 +254,13 @@ pub async fn chat_exec_custom_command(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
     trigger: String,
-    #[allow(non_snake_case)]
-    messageLogin: Option<String>,
-    #[allow(non_snake_case)]
-    messageDisplay: Option<String>,
-    #[allow(non_snake_case)]
-    messageId: Option<String>,
-    #[allow(non_snake_case)]
-    messageText: Option<String>,
-    #[allow(non_snake_case)]
-    copyText: Option<String>,
-    #[allow(non_snake_case)]
-    inputText: Option<String>,
-    #[allow(non_snake_case)]
-    replyToId: Option<String>,
+    #[allow(non_snake_case)] messageLogin: Option<String>,
+    #[allow(non_snake_case)] messageDisplay: Option<String>,
+    #[allow(non_snake_case)] messageId: Option<String>,
+    #[allow(non_snake_case)] messageText: Option<String>,
+    #[allow(non_snake_case)] copyText: Option<String>,
+    #[allow(non_snake_case)] inputText: Option<String>,
+    #[allow(non_snake_case)] replyToId: Option<String>,
 ) -> Result<(), ApiError> {
     let invoke = CustomCommandInvoke {
         trigger,
@@ -379,10 +371,7 @@ fn build_expand_context(
             message_display: m.message_display.map(str::to_string),
             message_id: m.message_id.map(str::to_string),
             message_text: Some(m.message_text.to_string()),
-            input_text: m
-                .input_text
-                .or(composer_text)
-                .map(str::to_string),
+            input_text: m.input_text.or(composer_text).map(str::to_string),
             copy_text: m.copy_text.map(str::to_string),
         }
     } else {
@@ -485,11 +474,7 @@ async fn send_via_helix(
 ) -> Result<(), ApiError> {
     if is_unknown_command_for_helix(text.trim()) {
         let cmd = text.trim().split_whitespace().next().unwrap_or("");
-        state.post_channel_notice(
-            app,
-            channel,
-            format!("{cmd} is not a known command."),
-        );
+        state.post_channel_notice(app, channel, format!("{cmd} is not a known command."));
         return Ok(());
     }
     let mut payload = format_outgoing_helix(text)?;
@@ -550,21 +535,15 @@ async fn send_via_helix(
         );
         return Ok(());
     };
-    let token = auth::oauth_token(state).ok_or_else(|| {
-        ApiError::invalid("нужен вход Twitch, чтобы отправлять сообщения")
-    })?;
+    let token = auth::oauth_token(state)
+        .ok_or_else(|| ApiError::invalid("нужен вход Twitch, чтобы отправлять сообщения"))?;
     let client_id = auth::resolved_client_id(state);
     if let Ok(mut last) = state.last_sent.lock() {
         last.insert(channel.to_string(), payload.clone());
     }
     super::provider_activity::post_send_activity(state.clone(), channel.to_string());
     let outcome = super::helix::send_chat_message(
-        &room_id,
-        &sender_id,
-        &payload,
-        reply_to,
-        &token,
-        &client_id,
+        &room_id, &sender_id, &payload, reply_to, &token, &client_id,
     )
     .await;
     match outcome {
@@ -578,7 +557,8 @@ async fn send_via_helix(
             );
             Ok(())
         }
-        super::helix::HelixSendOutcome::Dropped(msg) | super::helix::HelixSendOutcome::Failed(msg) => {
+        super::helix::HelixSendOutcome::Dropped(msg)
+        | super::helix::HelixSendOutcome::Failed(msg) => {
             state.post_channel_notice(app, channel, msg);
             Ok(())
         }
@@ -682,10 +662,7 @@ pub async fn auth_import(
 }
 
 #[tauri::command]
-pub fn auth_status(
-    app: AppHandle,
-    state: tauri::State<'_, Shared>,
-) -> Result<AuthInfo, ApiError> {
+pub fn auth_status(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<AuthInfo, ApiError> {
     Ok(auth::snapshot(&app, &state))
 }
 
@@ -732,8 +709,7 @@ pub fn chat_emote_popup_list(
 pub fn chat_toggle_favourite_emote(
     state: tauri::State<'_, Shared>,
     code: String,
-    #[allow(non_snake_case)]
-    isEmoji: bool,
+    #[allow(non_snake_case)] isEmoji: bool,
     add: bool,
 ) -> Result<(), ApiError> {
     super::emote_popup::toggle_favourite(state.inner(), &code, isEmoji, add)
@@ -853,8 +829,7 @@ pub fn chat_complete(
             .lock()
             .map_err(|_| ApiError::internal("lock"))?;
         let pool = catalog.codes_matching(&channel, "", emote_mode, false, false);
-        let mut ranked =
-            complete::apply_smart_emotes(&token, pool, !prefix_only, false, false);
+        let mut ranked = complete::apply_smart_emotes(&token, pool, !prefix_only, false, false);
         ranked.truncate(complete::COMPLETE_LIMIT);
         ranked
     } else {
@@ -912,11 +887,10 @@ pub fn chat_search(
         return Ok(SearchResult { hits: Vec::new() });
     }
     let room_id = hub.room_id(&normalized).map(str::to_string);
-    let hits = hub.buffer(&normalized).scrollback.search_hits(
-        &query,
-        &normalized,
-        room_id.as_deref(),
-    );
+    let hits =
+        hub.buffer(&normalized)
+            .scrollback
+            .search_hits(&query, &normalized, room_id.as_deref());
     Ok(SearchResult { hits })
 }
 
@@ -926,17 +900,12 @@ pub fn filters_get(state: tauri::State<'_, Shared>) -> Result<Filters, ApiError>
 }
 
 #[tauri::command]
-pub fn filters_set(
-    state: tauri::State<'_, Shared>,
-    filters: Filters,
-) -> Result<Filters, ApiError> {
+pub fn filters_set(state: tauri::State<'_, Shared>, filters: Filters) -> Result<Filters, ApiError> {
     filters::replace(&state, filters).map_err(ApiError::invalid)
 }
 
 #[tauri::command]
-pub fn settings_get(
-    state: tauri::State<'_, Shared>,
-) -> Result<DisplaySettings, ApiError> {
+pub fn settings_get(state: tauri::State<'_, Shared>) -> Result<DisplaySettings, ApiError> {
     super::settings::snapshot(&state)
 }
 
@@ -967,16 +936,12 @@ pub fn highlight_sound_read(
 }
 
 #[tauri::command]
-pub fn highlight_sound_pick(
-    state: tauri::State<'_, Shared>,
-) -> Result<String, ApiError> {
+pub fn highlight_sound_pick(state: tauri::State<'_, Shared>) -> Result<String, ApiError> {
     super::highlight_sound::pick_path(&state)
 }
 
 #[tauri::command]
-pub fn logging_pick_directory(
-    state: tauri::State<'_, Shared>,
-) -> Result<String, ApiError> {
+pub fn logging_pick_directory(state: tauri::State<'_, Shared>) -> Result<String, ApiError> {
     super::logging::pick_directory(&state)
 }
 
@@ -1083,7 +1048,9 @@ pub async fn chat_user_followers(
 }
 
 #[tauri::command]
-pub async fn chat_user_pronouns(login: String) -> Result<super::pronouns::UserPronounsResult, ApiError> {
+pub async fn chat_user_pronouns(
+    login: String,
+) -> Result<super::pronouns::UserPronounsResult, ApiError> {
     let normalized = normalize_channel(&login)?;
     let pronouns = super::pronouns::lookup(&normalized)
         .await
@@ -1112,14 +1079,11 @@ pub async fn chat_user_subage(
 #[tauri::command]
 pub fn chat_user_notes(
     state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)]
-    userId: String,
+    #[allow(non_snake_case)] userId: String,
 ) -> Result<super::user_data::UserNotesResult, ApiError> {
-    let notes = super::user_data::get_notes(&state, userId.trim()).map_err(|message| {
-        ApiError {
-            code: "invalid".into(),
-            message,
-        }
+    let notes = super::user_data::get_notes(&state, userId.trim()).map_err(|message| ApiError {
+        code: "invalid".into(),
+        message,
     })?;
     Ok(super::user_data::UserNotesResult { notes })
 }
@@ -1127,8 +1091,7 @@ pub fn chat_user_notes(
 #[tauri::command]
 pub fn chat_set_user_notes(
     state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)]
-    userId: String,
+    #[allow(non_snake_case)] userId: String,
     notes: String,
 ) -> Result<(), ApiError> {
     super::user_data::set_notes(&state, userId.trim(), &notes).map_err(|message| {
@@ -1158,7 +1121,10 @@ pub fn chat_viewer_role(
 ) -> Result<ViewerRoleDto, ApiError> {
     let normalized = normalize_channel(&channel)?;
     let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-    let role = hub.viewer_role(&normalized, auth::resolved_twitch_user_id(&state).as_deref());
+    let role = hub.viewer_role(
+        &normalized,
+        auth::resolved_twitch_user_id(&state).as_deref(),
+    );
     Ok(ViewerRoleDto {
         is_mod: role.is_mod,
         is_broadcaster: role.is_broadcaster,
@@ -1168,26 +1134,34 @@ pub fn chat_viewer_role(
 /// Runtime Helix block list logins (Settings Ignores → Users). Empty when anon / unloaded.
 #[tauri::command]
 pub fn chat_blocked_users(state: tauri::State<'_, Shared>) -> Result<Vec<String>, ApiError> {
-    let guard = state.twitch_blocks.lock().map_err(|_| ApiError::internal("lock"))?;
+    let guard = state
+        .twitch_blocks
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
     Ok(guard.list_logins())
 }
 
 #[tauri::command]
 pub fn chat_user_blocked(
     state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)]
-    userId: String,
+    #[allow(non_snake_case)] userId: String,
     login: String,
 ) -> Result<bool, ApiError> {
-    let guard = state.twitch_blocks.lock().map_err(|_| ApiError::internal("lock"))?;
-    Ok(super::twitch_blocks::is_user_blocked(&guard, userId.trim(), login.trim()))
+    let guard = state
+        .twitch_blocks
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    Ok(super::twitch_blocks::is_user_blocked(
+        &guard,
+        userId.trim(),
+        login.trim(),
+    ))
 }
 
 #[tauri::command]
 pub async fn chat_set_user_blocked(
     state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)]
-    userId: String,
+    #[allow(non_snake_case)] userId: String,
     login: String,
     blocked: bool,
 ) -> Result<(), ApiError> {
@@ -1261,9 +1235,10 @@ fn settings_directory_path(shared: &Shared) -> Result<std::path::PathBuf, ApiErr
     if file.as_os_str().is_empty() {
         return Err(ApiError::internal("settings path unset"));
     }
-    let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| {
-        ApiError::internal("settings directory missing")
-    })?;
+    let dir = file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| ApiError::internal("settings directory missing"))?;
     Ok(dir.to_path_buf())
 }
 
@@ -1335,10 +1310,7 @@ pub fn cache_pick_directory() -> Result<String, ApiError> {
 }
 
 #[tauri::command]
-pub fn cache_clear(
-    app: AppHandle,
-    state: tauri::State<'_, Shared>,
-) -> Result<(), ApiError> {
+pub fn cache_clear(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     super::cache::clear(&app, state.inner())
 }
 
@@ -1459,7 +1431,10 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
     if trimmed.chars().count() > MAX_CHAT_CHARS {
         return Err(ApiError::invalid("сообщение длиннее 500 символов"));
     }
-    if trimmed.chars().any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}')) {
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+    {
         return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
     }
     if trimmed.starts_with('/') {
@@ -1492,7 +1467,10 @@ pub fn format_outgoing_helix(raw: &str) -> Result<String, ApiError> {
     if trimmed.chars().count() > MAX_CHAT_CHARS {
         return Err(ApiError::invalid("сообщение длиннее 500 символов"));
     }
-    if trimmed.chars().any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}')) {
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+    {
         return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
     }
     if trimmed.starts_with('/') {
@@ -1648,10 +1626,10 @@ mod tests {
         assert!(!should_send_helix(&shared));
         {
             let mut settings = shared.settings.lock().unwrap();
-            settings
-                .data
-                .knobs
-                .insert("misc.chatSendProtocol".into(), Value::String("Helix".into()));
+            settings.data.knobs.insert(
+                "misc.chatSendProtocol".into(),
+                Value::String("Helix".into()),
+            );
         }
         assert!(should_send_helix(&shared));
         {

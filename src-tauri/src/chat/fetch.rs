@@ -79,10 +79,7 @@ impl EmoteProviderFlags {
 }
 
 fn knob_bool(knobs: &BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(Value::as_bool)
-        .unwrap_or(default)
+    knobs.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
 pub async fn load_globals(
@@ -98,7 +95,8 @@ pub async fn load_globals(
     let client = http_client();
     let mut map = std::collections::HashMap::new();
     if flags.bttv_global {
-        if let Ok(list) = get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await
+        if let Ok(list) =
+            get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await
         {
             collect_bttv(&list, &mut map);
         }
@@ -138,7 +136,9 @@ pub async fn load_channel(
     badges: &std::sync::Arc<std::sync::Mutex<BadgeCatalog>>,
     cheers: &std::sync::Arc<std::sync::Mutex<CheerCatalog>>,
     hub: &std::sync::Arc<std::sync::Mutex<Hub>>,
-    ffz_channel: &std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, FfzChannelExtras>>>,
+    ffz_channel: &std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<String, FfzChannelExtras>>,
+    >,
     login: &str,
     room_id: &str,
     token: Option<&str>,
@@ -383,10 +383,7 @@ pub(crate) fn parse_active_emote(item: &Value, show_unlisted: bool) -> Option<(S
         return None;
     }
     let data = item.get("data")?;
-    let listed = data
-        .get("listed")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    let listed = data.get("listed").and_then(Value::as_bool).unwrap_or(true);
     if !listed && !show_unlisted {
         return None;
     }
@@ -531,7 +528,10 @@ const SEVENTV_ACTIVE_ZERO_WIDTH: u64 = 1;
 
 fn is_7tv_zero_width(item: &Value) -> bool {
     item.get("flags")
-        .and_then(|v| v.as_u64().or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok())))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+        })
         .is_some_and(|flags| flags & SEVENTV_ACTIVE_ZERO_WIDTH != 0)
 }
 
@@ -862,10 +862,17 @@ mod tests {
             allowed_chatterino_badge_url("//fourtf.com/chatterino/badges/helper.PNG"),
             Some("https://fourtf.com/chatterino/badges/helper.PNG".into())
         );
-        assert!(allowed_chatterino_badge_url("http://fourtf.com/chatterino/badges/x.png").is_none());
-        assert!(allowed_chatterino_badge_url("https://evil.example/chatterino/badges/x.png").is_none());
+        assert!(
+            allowed_chatterino_badge_url("http://fourtf.com/chatterino/badges/x.png").is_none()
+        );
+        assert!(
+            allowed_chatterino_badge_url("https://evil.example/chatterino/badges/x.png").is_none()
+        );
         assert!(allowed_chatterino_badge_url("https://fourtf.com/other/x.png").is_none());
-        assert!(allowed_chatterino_badge_url("https://user@fourtf.com/chatterino/badges/x.png").is_none());
+        assert!(
+            allowed_chatterino_badge_url("https://user@fourtf.com/chatterino/badges/x.png")
+                .is_none()
+        );
         assert_eq!(
             allowed_chatterino_badge_url("https://fourtf.com/chatterino/badges/x.png?cache=1"),
             Some("https://fourtf.com/chatterino/badges/x.png".into())

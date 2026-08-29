@@ -140,7 +140,9 @@ pub fn set_notes(shared: &Shared, user_id: &str, notes: &str) -> Result<(), Stri
         next.remove(&id);
     }
 
-    let file = UserDataFile { users: next.clone() };
+    let file = UserDataFile {
+        users: next.clone(),
+    };
     save_file(&store.path, &file)?;
     store.users = next;
     Ok(())

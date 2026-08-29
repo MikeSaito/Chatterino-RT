@@ -68,11 +68,15 @@ Rust lives in `src-tauri/` and is formatted with [rustfmt](https://github.com/ru
 
 ```shell
 cd src-tauri
+cargo fmt --check
 cargo test
 cd ..
+npm run typecheck
 npm test
 npm run build
 ```
+
+GitHub Actions (`CI` workflow) runs four required jobs on `main`, pull requests, and merge groups: `rustfmt`, `Rust tests`, `JS tests` (typecheck + unit), and `Production build`.
 
 `npm test` runs all files in `tests/*.test.ts`. Per-file runners remain as `npm run test:*` for debugging.
 

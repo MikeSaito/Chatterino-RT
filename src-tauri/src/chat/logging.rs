@@ -93,16 +93,18 @@ impl LoggingConfig {
 
 fn listed_from_rows(rows: &[ChannelRow]) -> HashSet<String> {
     rows.iter()
-        .map(|r| r.channel.trim().trim_start_matches('#').to_ascii_lowercase())
+        .map(|r| {
+            r.channel
+                .trim()
+                .trim_start_matches('#')
+                .to_ascii_lowercase()
+        })
         .filter(|s| !s.is_empty())
         .collect()
 }
 
 fn knob_bool(knobs: &std::collections::BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(default)
+    knobs.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 fn knob_str(knobs: &std::collections::BTreeMap<String, Value>, key: &str) -> String {
@@ -131,8 +133,8 @@ pub fn sanitize_fs_name(raw: &str) -> String {
     let upper = trimmed.to_ascii_uppercase();
     let stem = upper.split('.').next().unwrap_or(&upper);
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.contains(&stem) {
         format!("_{trimmed}")
@@ -231,18 +233,8 @@ pub fn format_qt_timestamp(dt: DateTime<Local>, fmt: &str) -> String {
         "h:mm:ss" => format!("{h12}:{:02}:{:02}", dt.minute(), dt.second()),
         "hh:mm:ss" => format!("{:02}:{:02}:{:02}", dt.hour(), dt.minute(), dt.second()),
         "h:mm:ss a" => format!("{h12}:{:02}:{:02} {ampm}", dt.minute(), dt.second()),
-        "hh:mm:ss a" => format!(
-            "{:02}:{:02}:{:02} {ampm}",
-            h12,
-            dt.minute(),
-            dt.second()
-        ),
-        "h:mm:ss.zzz" => format!(
-            "{h12}:{:02}:{:02}.{:03}",
-            dt.minute(),
-            dt.second(),
-            ms
-        ),
+        "hh:mm:ss a" => format!("{:02}:{:02}:{:02} {ampm}", h12, dt.minute(), dt.second()),
+        "h:mm:ss.zzz" => format!("{h12}:{:02}:{:02}.{:03}", dt.minute(), dt.second(), ms),
         "h:mm:ss.zzz a" => format!(
             "{h12}:{:02}:{:02}.{:03} {ampm}",
             dt.minute(),
@@ -305,16 +297,13 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
             reply_to_id,
             ..
         } => {
-            let mut message_text = if display_name.is_empty() || display_name.eq_ignore_ascii_case(login)
-            {
-                format!("{login}: {text}")
-            } else {
-                format!("{display_name} {login}: {text}")
-            };
-            if reply_to_id.is_some()
-                && cfg.strip_reply_mention
-                && !cfg.hide_reply_context
-            {
+            let mut message_text =
+                if display_name.is_empty() || display_name.eq_ignore_ascii_case(login) {
+                    format!("{login}: {text}")
+                } else {
+                    format!("{display_name} {login}: {text}")
+                };
+            if reply_to_id.is_some() && cfg.strip_reply_mention && !cfg.hide_reply_context {
                 if let Some(parent) = reply_to_login.as_deref().filter(|s| !s.is_empty()) {
                     insert_reply_parent(&mut message_text, parent);
                 }
@@ -366,9 +355,9 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
             }
             Some(text)
         }
-        ChatEvent::Clearmsg { .. }
-        | ChatEvent::Roomstate { .. }
-        | ChatEvent::Userstate { .. } => None,
+        ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } | ChatEvent::Userstate { .. } => {
+            None
+        }
     }
 }
 
@@ -416,7 +405,11 @@ impl LoggingChannel {
             self.file = None;
             return;
         }
-        let name = format!("{}-{}.log", sanitize_fs_name(&self.log_key), self.date_string);
+        let name = format!(
+            "{}-{}.log",
+            sanitize_fs_name(&self.log_key),
+            self.date_string
+        );
         let path = dir.join(name);
         match OpenOptions::new().create(true).append(true).open(&path) {
             Ok(file) => {
@@ -774,10 +767,8 @@ mod tests {
 
     #[test]
     fn writes_daily_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "chatterino-rt-log-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("chatterino-rt-log-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let mut logging = Logging::default();

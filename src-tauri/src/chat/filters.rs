@@ -8,9 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use regex::Regex;
 
 use super::auth;
 use super::spans::decorate_text_spans;
@@ -210,7 +210,11 @@ pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool
     false
 }
 
-pub(crate) fn membership_login_ignored(shared: &super::state::Shared, channel: &str, login: &str) -> bool {
+pub(crate) fn membership_login_ignored(
+    shared: &super::state::Shared,
+    channel: &str,
+    login: &str,
+) -> bool {
     let self_login = super::auth::resolved_login_token(shared).map(|(l, _)| l);
     if is_self(login, self_login.as_deref()) {
         return false;
@@ -372,7 +376,11 @@ pub(crate) fn should_drop(
         if is_self(login, self_login) {
             return false;
         }
-        if filters.ignore_logins.iter().any(|item| item.eq_ignore_ascii_case(login)) {
+        if filters
+            .ignore_logins
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(login))
+        {
             return true;
         }
         if login_is_blacklisted(login, ignore_users) {
@@ -383,10 +391,17 @@ pub(crate) fn should_drop(
     if hay.is_empty() {
         return false;
     }
-    if ignore_blocks.iter().any(|rule| phrase_matches_ex(&hay, rule)) {
+    if ignore_blocks
+        .iter()
+        .any(|rule| phrase_matches_ex(&hay, rule))
+    {
         return true;
     }
-    if filters.ignore_phrases.iter().any(|p| phrase_matches(&hay, p)) {
+    if filters
+        .ignore_phrases
+        .iter()
+        .any(|p| phrase_matches(&hay, p))
+    {
         return true;
     }
     false
@@ -518,8 +533,7 @@ pub(crate) fn apply_highlight(
             }
             // HighlightController: Sub before Phrase — overwrite for sub USERNOTICE.
             if kinds.enable_sub && is_subscription_msg_id(msg_id.as_deref()) {
-                let color =
-                    resolve_highlight_color_or(&kinds.sub_color, SUB_HIGHLIGHT_COLOR);
+                let color = resolve_highlight_color_or(&kinds.sub_color, SUB_HIGHLIGHT_COLOR);
                 *highlight_color = Some(color.clone());
                 if let Some(inner) = privmsg.as_mut() {
                     if let ChatEvent::Privmsg {
@@ -537,11 +551,7 @@ pub(crate) fn apply_highlight(
 }
 
 fn is_subscription_msg_id(msg_id: Option<&str>) -> bool {
-    msg_id.is_some_and(|id| {
-        SUB_MSG_IDS
-            .iter()
-            .any(|s| id.eq_ignore_ascii_case(s))
-    })
+    msg_id.is_some_and(|id| SUB_MSG_IDS.iter().any(|s| id.eq_ignore_ascii_case(s)))
 }
 
 fn is_redeemed_system_msg_id(msg_id: Option<&str>) -> bool {
@@ -723,9 +733,7 @@ impl ReplaceRule {
 }
 
 /// Rows from Ignores Messages with `block == false` and non-empty pattern.
-pub fn ignore_replace_rules_from_settings(
-    data: &super::settings::AppSettings,
-) -> Vec<ReplaceRule> {
+pub fn ignore_replace_rules_from_settings(data: &super::settings::AppSettings) -> Vec<ReplaceRule> {
     data.ignore_messages
         .iter()
         .filter(|r| !r.block && !r.pattern.trim().is_empty())
@@ -953,8 +961,7 @@ fn apply_literal_replacements(
     }
     let mut changed = false;
     let mut search_from = 0usize;
-    while let Some((abs_start, abs_end)) =
-        find_literal(text, pattern, search_from, case_sensitive)
+    while let Some((abs_start, abs_end)) = find_literal(text, pattern, search_from, case_sensitive)
     {
         let matched = text[abs_start..abs_end].to_string();
         patch_emote_spans(emote_spans, text, abs_start, abs_end, &matched, replacement);
@@ -1109,9 +1116,7 @@ pub(crate) fn login_is_blacklisted(login: &str, rules: &[BlacklistRule]) -> bool
             return false;
         }
         if rule.is_regex {
-            rule.compiled
-                .as_ref()
-                .is_some_and(|re| re.is_match(login))
+            rule.compiled.as_ref().is_some_and(|re| re.is_match(login))
         } else {
             login.eq_ignore_ascii_case(rule.pattern.trim())
         }
@@ -1276,8 +1281,7 @@ pub(crate) fn resolve_highlight_color_or(raw: &str, fallback: &str) -> String {
         return fallback.to_string();
     }
     let body = t.strip_prefix('#').unwrap_or(t);
-    let ok = matches!(body.len(), 6 | 8)
-        && body.bytes().all(|b| b.is_ascii_hexdigit());
+    let ok = matches!(body.len(), 6 | 8) && body.bytes().all(|b| b.is_ascii_hexdigit());
     if ok {
         format!("#{body}")
     } else {
@@ -1428,10 +1432,7 @@ fn highlight_primary(
         }
         for rule in &sound.phrase_rules {
             if phrase_matches_ex(text, rule) {
-                return (
-                    Some(resolve_highlight_color(&rule.color)),
-                    rule.play,
-                );
+                return (Some(resolve_highlight_color(&rule.color)), rule.play);
             }
         }
         for phrase in &filters.highlight_phrases {
@@ -1484,8 +1485,7 @@ fn highlight_hit(
     badges: &[Badge],
     self_login: Option<&str>,
 ) -> HighlightHit {
-    let (color, sound_flag) =
-        highlight_primary(filters, sound, login, text, badges, self_login);
+    let (color, sound_flag) = highlight_primary(filters, sound, login, text, badges, self_login);
     let sound_path = if sound_flag {
         first_custom_sound_in_check_order(filters, sound, login, text, badges, self_login)
     } else {
@@ -1519,13 +1519,11 @@ fn badge_id_matches(id: &str, badges: &[Badge]) -> bool {
         if set.is_empty() {
             return false;
         }
-        badges.iter().any(|b| {
-            b.set.eq_ignore_ascii_case(set) && b.version.eq_ignore_ascii_case(version)
-        })
-    } else {
         badges
             .iter()
-            .any(|b| b.set.eq_ignore_ascii_case(id))
+            .any(|b| b.set.eq_ignore_ascii_case(set) && b.version.eq_ignore_ascii_case(version))
+    } else {
+        badges.iter().any(|b| b.set.eq_ignore_ascii_case(id))
     }
 }
 
@@ -1563,9 +1561,8 @@ fn phrase_matches_boundary(text: &str, pattern: &str, case_sensitive: bool) -> b
         if !eq {
             continue;
         }
-        let left_ok = i == 0
-            || hay[i - 1].is_whitespace()
-            || is_word(hay[i - 1]) != is_word(needle[0]);
+        let left_ok =
+            i == 0 || hay[i - 1].is_whitespace() || is_word(hay[i - 1]) != is_word(needle[0]);
         let after = i + needle.len();
         let right_ok = after == hay.len()
             || hay[after].is_whitespace()
@@ -1578,9 +1575,9 @@ fn phrase_matches_boundary(text: &str, pattern: &str, case_sensitive: bool) -> b
 }
 
 fn eq_ignore_case(a: &[char], b: &[char]) -> bool {
-    a.iter().zip(b.iter()).all(|(x, y)| {
-        x.to_lowercase().eq(y.to_lowercase())
-    })
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| x.to_lowercase().eq(y.to_lowercase()))
 }
 
 fn is_word(c: char) -> bool {
@@ -1609,7 +1606,9 @@ fn event_user_id(event: &ChatEvent) -> Option<&str> {
     match event {
         ChatEvent::Privmsg { user_id, .. } if !user_id.is_empty() => Some(user_id.as_str()),
         ChatEvent::Usernotice { privmsg, .. } => match privmsg.as_deref() {
-            Some(ChatEvent::Privmsg { user_id, .. }) if !user_id.is_empty() => Some(user_id.as_str()),
+            Some(ChatEvent::Privmsg { user_id, .. }) if !user_id.is_empty() => {
+                Some(user_id.as_str())
+            }
             _ => None,
         },
         _ => None,
@@ -1693,7 +1692,9 @@ fn load_file(path: &Path) -> Filters {
                 Ok(parsed) => match sanitize(parsed) {
                     Ok(clean) => clean,
                     Err(e) => {
-                        eprintln!("filters.json отклонён ({e}), используются значения по умолчанию");
+                        eprintln!(
+                            "filters.json отклонён ({e}), используются значения по умолчанию"
+                        );
                         Filters::default()
                     }
                 },
@@ -1705,7 +1706,9 @@ fn load_file(path: &Path) -> Filters {
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Filters::default(),
         Err(e) => {
-            eprintln!("не удалось прочитать filters.json ({e}), используются значения по умолчанию");
+            eprintln!(
+                "не удалось прочитать filters.json ({e}), используются значения по умолчанию"
+            );
             Filters::default()
         }
     }
@@ -1761,9 +1764,9 @@ mod tests {
             highlight_sound_path: None,
             highlight_flash: false,
             whisper: false,
-        disabled: false,
-        source_room_id: None,
-        source_badges: vec![],
+            disabled: false,
+            source_room_id: None,
+            source_badges: vec![],
         }
     }
 
@@ -1776,10 +1779,7 @@ mod tests {
     }
 
     fn with_badges(mut ev: ChatEvent, badges: Vec<Badge>) -> ChatEvent {
-        if let ChatEvent::Privmsg {
-            badges: slot, ..
-        } = &mut ev
-        {
+        if let ChatEvent::Privmsg { badges: slot, .. } = &mut ev {
             *slot = badges;
         }
         ev
@@ -1801,10 +1801,34 @@ mod tests {
             ignore_logins: vec!["spam".into()],
             ..Filters::default()
         };
-        assert!(should_drop(&filters, &[], &[], &privmsg("spam", "hi"), Some("me")));
-        assert!(should_drop(&filters, &[], &[], &privmsg("SPAM", "hi"), Some("me")));
-        assert!(!should_drop(&filters, &[], &[], &privmsg("spam", "hi"), Some("spam")));
-        assert!(!should_drop(&filters, &[], &[], &privmsg("ok", "hi"), Some("me")));
+        assert!(should_drop(
+            &filters,
+            &[],
+            &[],
+            &privmsg("spam", "hi"),
+            Some("me")
+        ));
+        assert!(should_drop(
+            &filters,
+            &[],
+            &[],
+            &privmsg("SPAM", "hi"),
+            Some("me")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &[],
+            &[],
+            &privmsg("spam", "hi"),
+            Some("spam")
+        ));
+        assert!(!should_drop(
+            &filters,
+            &[],
+            &[],
+            &privmsg("ok", "hi"),
+            Some("me")
+        ));
     }
 
     #[test]
@@ -1827,14 +1851,27 @@ mod tests {
             &privmsg("me", "please buy followers now"),
             Some("me")
         ));
-        assert!(!should_drop(&filters, &[], &[], &privmsg("x", "buyfollowers"), Some("me")));
+        assert!(!should_drop(
+            &filters,
+            &[],
+            &[],
+            &privmsg("x", "buyfollowers"),
+            Some("me")
+        ));
     }
 
     #[test]
     fn self_nick_highlights_other_messages() {
         let filters = Filters::default();
         let mut ev = privmsg("xqc", "hello Mike there");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut ev, Some("mike"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut ev,
+            Some("mike"),
+        );
         match ev {
             ChatEvent::Privmsg {
                 highlight_color,
@@ -1856,7 +1893,9 @@ mod tests {
             Some("mike"),
         );
         match self_ev {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert!(highlight_color.is_none());
             }
             _ => panic!("privmsg"),
@@ -1882,7 +1921,9 @@ mod tests {
             Some("mike"),
         );
         match ev {
-            ChatEvent::Privmsg { highlight_sound, .. } => assert!(highlight_sound),
+            ChatEvent::Privmsg {
+                highlight_sound, ..
+            } => assert!(highlight_sound),
             _ => panic!("privmsg"),
         }
         let mut ev2 = privmsg("ann", "hey mike");
@@ -1898,7 +1939,9 @@ mod tests {
             Some("mike"),
         );
         match ev2 {
-            ChatEvent::Privmsg { highlight_sound, .. } => assert!(!highlight_sound),
+            ChatEvent::Privmsg {
+                highlight_sound, ..
+            } => assert!(!highlight_sound),
             _ => panic!("privmsg"),
         }
     }
@@ -1919,13 +1962,7 @@ mod tests {
                 false,
                 false,
             )],
-            user_sound: vec![(
-                "streamer".into(),
-                true,
-                String::new(),
-                String::new(),
-                true,
-            )],
+            user_sound: vec![("streamer".into(), true, String::new(), String::new(), true)],
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "nice pog");
@@ -1938,7 +1975,9 @@ mod tests {
             Some("me"),
         );
         match by_phrase {
-            ChatEvent::Privmsg { highlight_flash, .. } => assert!(!highlight_flash),
+            ChatEvent::Privmsg {
+                highlight_flash, ..
+            } => assert!(!highlight_flash),
             _ => panic!("privmsg"),
         }
 
@@ -1952,7 +1991,9 @@ mod tests {
             Some("me"),
         );
         match by_user {
-            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            ChatEvent::Privmsg {
+                highlight_flash, ..
+            } => assert!(highlight_flash),
             _ => panic!("privmsg"),
         }
 
@@ -1966,7 +2007,9 @@ mod tests {
             Some("me"),
         );
         match phrase_then_user {
-            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            ChatEvent::Privmsg {
+                highlight_flash, ..
+            } => assert!(highlight_flash),
             _ => panic!("privmsg"),
         }
 
@@ -1974,13 +2017,7 @@ mod tests {
         apply_highlight(
             &filters,
             &HighlightSoundCtx {
-                badge_rows: vec![(
-                    "moderator".into(),
-                    true,
-                    String::new(),
-                    String::new(),
-                    true,
-                )],
+                badge_rows: vec![("moderator".into(), true, String::new(), String::new(), true)],
                 ..HighlightSoundCtx::default()
             },
             &HighlightKindsCtx::default(),
@@ -1989,7 +2026,9 @@ mod tests {
             Some("me"),
         );
         match by_badge {
-            ChatEvent::Privmsg { highlight_flash, .. } => assert!(highlight_flash),
+            ChatEvent::Privmsg {
+                highlight_flash, ..
+            } => assert!(highlight_flash),
             _ => panic!("privmsg"),
         }
     }
@@ -2079,10 +2118,7 @@ mod tests {
                 ..
             } => {
                 assert!(highlight_sound);
-                assert_eq!(
-                    highlight_sound_path.as_deref(),
-                    Some(phrase_path.as_str())
-                );
+                assert_eq!(highlight_sound_path.as_deref(), Some(phrase_path.as_str()));
             }
             _ => panic!("privmsg"),
         }
@@ -2121,10 +2157,7 @@ mod tests {
                 ..
             } => {
                 assert!(highlight_sound);
-                assert_eq!(
-                    highlight_sound_path.as_deref(),
-                    Some(user_path.as_str())
-                );
+                assert_eq!(highlight_sound_path.as_deref(), Some(user_path.as_str()));
             }
             _ => panic!("privmsg"),
         }
@@ -2169,7 +2202,14 @@ mod tests {
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "that was pog");
-        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &[], &mut by_phrase, Some("me"));
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_phrase,
+            Some("me"),
+        );
         match by_phrase {
             ChatEvent::Privmsg {
                 highlight_color,
@@ -2194,13 +2234,24 @@ mod tests {
             Some("me"),
         );
         match silent {
-            ChatEvent::Privmsg { highlight_sound, .. } => assert!(!highlight_sound),
+            ChatEvent::Privmsg {
+                highlight_sound, ..
+            } => assert!(!highlight_sound),
             _ => panic!("privmsg"),
         }
         let mut by_user = privmsg("streamer", "hey");
-        apply_highlight(&filters, &sound, &HighlightKindsCtx::default(), &[], &mut by_user, Some("me"));
+        apply_highlight(
+            &filters,
+            &sound,
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_user,
+            Some("me"),
+        );
         match by_user {
-            ChatEvent::Privmsg { highlight_sound, .. } => assert!(highlight_sound),
+            ChatEvent::Privmsg {
+                highlight_sound, ..
+            } => assert!(highlight_sound),
             _ => panic!("privmsg"),
         }
     }
@@ -2214,18 +2265,40 @@ mod tests {
             ..Filters::default()
         };
         let mut by_user = privmsg("streamer", "hey");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut by_user, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_user,
+            Some("me"),
+        );
         match by_user {
-            ChatEvent::Privmsg { highlight_color, highlight_sound, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
                 assert!(!highlight_sound);
             }
             _ => panic!("privmsg"),
         }
         let mut by_phrase = privmsg("x", "that was pog");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut by_phrase, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut by_phrase,
+            Some("me"),
+        );
         match by_phrase {
-            ChatEvent::Privmsg { highlight_color, highlight_sound, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color,
+                highlight_sound,
+                ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
                 assert!(!highlight_sound);
             }
@@ -2284,7 +2357,15 @@ mod tests {
             enable_self_highlight: false,
             ..Filters::default()
         };
-        let case_row = PhraseRule::from_row("Pog".into(), true, String::new(), String::new(), false, false, true);
+        let case_row = PhraseRule::from_row(
+            "Pog".into(),
+            true,
+            String::new(),
+            String::new(),
+            false,
+            false,
+            true,
+        );
         assert!(phrase_matches_ex("say Pog now", &case_row));
         assert!(!phrase_matches_ex("say pog now", &case_row));
         assert!(!phrase_matches_ex("xPog", &case_row));
@@ -2294,7 +2375,15 @@ mod tests {
         let ignore_case = PhraseRule::plain("Pog", true, "");
         assert!(phrase_matches_ex("say pog now", &ignore_case));
 
-        let re = PhraseRule::from_row(r"\bfoo\b".into(), true, "#11223344".into(), String::new(), false, true, false);
+        let re = PhraseRule::from_row(
+            r"\bfoo\b".into(),
+            true,
+            "#11223344".into(),
+            String::new(),
+            false,
+            true,
+            false,
+        );
         assert!(re.compiled.is_some());
         let mut hit = privmsg("x", "bar foo baz");
         apply_highlight(
@@ -2340,11 +2429,21 @@ mod tests {
             Some("me"),
         );
         match miss {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
 
-        let invalid = PhraseRule::from_row("(".into(), true, "#FF0000".into(), String::new(), false, true, false);
+        let invalid = PhraseRule::from_row(
+            "(".into(),
+            true,
+            "#FF0000".into(),
+            String::new(),
+            false,
+            true,
+            false,
+        );
         assert!(invalid.compiled.is_none());
         assert!(!phrase_matches_ex("anything", &invalid));
         let mut no_hl = privmsg("x", "(");
@@ -2360,19 +2459,53 @@ mod tests {
             Some("me"),
         );
         match no_hl {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
 
-        let case_re = PhraseRule::from_row("Foo".into(), false, String::new(), String::new(), false, true, true);
+        let case_re = PhraseRule::from_row(
+            "Foo".into(),
+            false,
+            String::new(),
+            String::new(),
+            false,
+            true,
+            true,
+        );
         assert!(phrase_matches_ex("Foo", &case_re));
         assert!(!phrase_matches_ex("foo", &case_re));
 
-        let ignore_re = PhraseRule::from_row("[a-z]+".into(), false, String::new(), String::new(), false, true, false);
+        let ignore_re = PhraseRule::from_row(
+            "[a-z]+".into(),
+            false,
+            String::new(),
+            String::new(),
+            false,
+            true,
+            false,
+        );
         assert!(phrase_matches_ex("FOO", &ignore_re));
 
-        let first = PhraseRule::from_row("alpha".into(), true, "#11111111".into(), String::new(), false, false, false);
-        let second = PhraseRule::from_row("beta".into(), false, "#22222222".into(), String::new(), false, false, false);
+        let first = PhraseRule::from_row(
+            "alpha".into(),
+            true,
+            "#11111111".into(),
+            String::new(),
+            false,
+            false,
+            false,
+        );
+        let second = PhraseRule::from_row(
+            "beta".into(),
+            false,
+            "#22222222".into(),
+            String::new(),
+            false,
+            false,
+            false,
+        );
         let mut multi = privmsg("x", "alpha and beta");
         apply_highlight(
             &filters,
@@ -2437,9 +2570,9 @@ mod tests {
             msg_id: None,
             privmsg: None,
             highlight_color: None,
-        highlight_sound: false,
-        highlight_sound_path: None,
-        highlight_flash: false,
+            highlight_sound: false,
+            highlight_sound_path: None,
+            highlight_flash: false,
         }
     }
 
@@ -2451,9 +2584,18 @@ mod tests {
             ..Filters::default()
         };
         let mut ev = usernotice("ann", "ann subscribed");
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &HighlightKindsCtx::default(), &[], &mut ev, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &HighlightKindsCtx::default(),
+            &[],
+            &mut ev,
+            Some("me"),
+        );
         match ev {
-            ChatEvent::Usernotice { highlight_color, .. } => {
+            ChatEvent::Usernotice {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
             }
             _ => panic!("usernotice"),
@@ -2471,20 +2613,41 @@ mod tests {
         if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
             *first_msg = true;
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut first, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &[],
+            &mut first,
+            Some("me"),
+        );
         match &first {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(FIRST_MSG_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
         }
         let mut redeem = privmsg("ann", "hello");
-        if let ChatEvent::Privmsg { custom_reward_id, .. } = &mut redeem {
+        if let ChatEvent::Privmsg {
+            custom_reward_id, ..
+        } = &mut redeem
+        {
             *custom_reward_id = Some("abc".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut redeem, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &[],
+            &mut redeem,
+            Some("me"),
+        );
         match &redeem {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2502,7 +2665,9 @@ mod tests {
             Some("me"),
         );
         match &highlighted {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2517,9 +2682,18 @@ mod tests {
             *first_msg = true;
             *custom_reward_id = Some("abc".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &kinds, &[], &mut both, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &kinds,
+            &[],
+            &mut both,
+            Some("me"),
+        );
         match &both {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2537,7 +2711,9 @@ mod tests {
             Some("me"),
         );
         match &powerup {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(REDEEMED_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2564,7 +2740,9 @@ mod tests {
             Some("me"),
         );
         match ev {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2591,7 +2769,9 @@ mod tests {
             Some("me"),
         );
         match ev {
-            ChatEvent::Usernotice { highlight_color, .. } => {
+            ChatEvent::Usernotice {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SUB_HIGHLIGHT_COLOR));
             }
             _ => panic!("usernotice"),
@@ -2614,18 +2794,36 @@ mod tests {
         if let ChatEvent::Privmsg { first_msg, .. } = &mut first {
             *first_msg = true;
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &[], &mut first, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &off,
+            &[],
+            &mut first,
+            Some("me"),
+        );
         match first {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
         let mut sub = usernotice("ann", "ann subscribed");
         if let ChatEvent::Usernotice { msg_id, .. } = &mut sub {
             *msg_id = Some("sub".into());
         }
-        apply_highlight(&filters, &HighlightSoundCtx::default(), &off, &[], &mut sub, Some("me"));
+        apply_highlight(
+            &filters,
+            &HighlightSoundCtx::default(),
+            &off,
+            &[],
+            &mut sub,
+            Some("me"),
+        );
         match sub {
-            ChatEvent::Usernotice { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Usernotice {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("usernotice"),
         }
     }
@@ -2655,13 +2853,18 @@ mod tests {
             Some("me"),
         );
         match first {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#11111122"));
             }
             _ => panic!("privmsg"),
         }
         let mut redeem = privmsg("ann", "hi");
-        if let ChatEvent::Privmsg { custom_reward_id, .. } = &mut redeem {
+        if let ChatEvent::Privmsg {
+            custom_reward_id, ..
+        } = &mut redeem
+        {
             *custom_reward_id = Some("r1".into());
         }
         apply_highlight(
@@ -2673,7 +2876,9 @@ mod tests {
             Some("me"),
         );
         match redeem {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#33333344"));
             }
             _ => panic!("privmsg"),
@@ -2691,7 +2896,9 @@ mod tests {
             Some("me"),
         );
         match sub {
-            ChatEvent::Usernotice { highlight_color, .. } => {
+            ChatEvent::Usernotice {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#55555566"));
             }
             _ => panic!("usernotice"),
@@ -2713,7 +2920,9 @@ mod tests {
             Some("me"),
         );
         match first_bad {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(FIRST_MSG_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2741,7 +2950,13 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             phrase_rules: vec![PhraseRule::plain("pog", true, "#11223344")],
-            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new(), false)],
+            user_sound: vec![(
+                "streamer".into(),
+                true,
+                "#AABBCC".into(),
+                String::new(),
+                false,
+            )],
             ..HighlightSoundCtx::default()
         };
         let mut by_phrase = privmsg("x", "that was pog");
@@ -2754,7 +2969,9 @@ mod tests {
             Some("me"),
         );
         match by_phrase {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#11223344"));
             }
             _ => panic!("privmsg"),
@@ -2769,7 +2986,9 @@ mod tests {
             Some("me"),
         );
         match by_user {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#AABBCC"));
             }
             _ => panic!("privmsg"),
@@ -2787,7 +3006,9 @@ mod tests {
             Some("me"),
         );
         match empty_color {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2805,7 +3026,9 @@ mod tests {
             Some("me"),
         );
         match bad {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(SELF_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2831,7 +3054,9 @@ mod tests {
             Some("mike"),
         );
         match ev {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#DEADBE"));
             }
             _ => panic!("privmsg"),
@@ -2847,8 +3072,20 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             badge_rows: vec![
-                ("moderator".into(), true, "#AABBCCDD".into(), String::new(), false),
-                ("subscriber/12".into(), false, String::new(), String::new(), false),
+                (
+                    "moderator".into(),
+                    true,
+                    "#AABBCCDD".into(),
+                    String::new(),
+                    false,
+                ),
+                (
+                    "subscriber/12".into(),
+                    false,
+                    String::new(),
+                    String::new(),
+                    false,
+                ),
             ],
             phrase_rules: vec![PhraseRule::plain("hello", false, "#01020304")],
             ..HighlightSoundCtx::default()
@@ -2883,7 +3120,9 @@ mod tests {
             Some("me"),
         );
         match by_ver {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some(BADGE_HIGHLIGHT_COLOR));
             }
             _ => panic!("privmsg"),
@@ -2898,7 +3137,9 @@ mod tests {
             Some("me"),
         );
         match wrong_ver {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
         let mut phrase_wins =
@@ -2912,7 +3153,9 @@ mod tests {
             Some("me"),
         );
         match phrase_wins {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#01020304"));
             }
             _ => panic!("privmsg"),
@@ -2930,7 +3173,9 @@ mod tests {
             Some("me"),
         );
         match first {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#AABBCCDD"));
             }
             _ => panic!("privmsg"),
@@ -2956,7 +3201,9 @@ mod tests {
             Some("mike"),
         );
         match off {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert!(highlight_color.is_none(), "own msg not phrase-highlighted");
             }
             _ => panic!("privmsg"),
@@ -2974,7 +3221,9 @@ mod tests {
             Some("mike"),
         );
         match on {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(
                     highlight_color.as_deref(),
                     Some(SELF_MESSAGE_HIGHLIGHT_COLOR)
@@ -2996,7 +3245,9 @@ mod tests {
             Some("mike"),
         );
         match custom {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#11223344"));
             }
             _ => panic!("privmsg"),
@@ -3015,7 +3266,9 @@ mod tests {
             Some("mike"),
         );
         match other {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#AABBCC"));
             }
             _ => panic!("privmsg"),
@@ -3045,7 +3298,9 @@ mod tests {
             Some("me"),
         );
         match ev {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#01020304"));
             }
             _ => panic!("privmsg"),
@@ -3081,7 +3336,15 @@ mod tests {
     #[test]
     fn ignore_messages_block_regex_and_case() {
         let filters = Filters::default();
-        let case_row = PhraseRule::from_row("Spam".into(), false, String::new(), String::new(), false, false, true);
+        let case_row = PhraseRule::from_row(
+            "Spam".into(),
+            false,
+            String::new(),
+            String::new(),
+            false,
+            false,
+            true,
+        );
         assert!(should_drop(
             &filters,
             &[],
@@ -3097,7 +3360,15 @@ mod tests {
             Some("me")
         ));
 
-        let re = PhraseRule::from_row(r"\bspam\b".into(), false, String::new(), String::new(), false, true, false);
+        let re = PhraseRule::from_row(
+            r"\bspam\b".into(),
+            false,
+            String::new(),
+            String::new(),
+            false,
+            true,
+            false,
+        );
         assert!(should_drop(
             &filters,
             &[],
@@ -3113,7 +3384,15 @@ mod tests {
             Some("me")
         ));
 
-        let invalid = PhraseRule::from_row("(".into(), false, String::new(), String::new(), false, true, false);
+        let invalid = PhraseRule::from_row(
+            "(".into(),
+            false,
+            String::new(),
+            String::new(),
+            false,
+            true,
+            false,
+        );
         assert!(invalid.compiled.is_none());
         assert!(!should_drop(
             &filters,
@@ -3511,7 +3790,13 @@ mod tests {
         };
         let sound = HighlightSoundCtx {
             phrase_rules: vec![PhraseRule::plain("hello", true, "#11223344")],
-            user_sound: vec![("streamer".into(), true, "#AABBCC".into(), String::new(), false)],
+            user_sound: vec![(
+                "streamer".into(),
+                true,
+                "#AABBCC".into(),
+                String::new(),
+                false,
+            )],
             ..HighlightSoundCtx::default()
         };
         let exact = BlacklistRule::from_row("ann".into(), false);
@@ -3545,7 +3830,9 @@ mod tests {
             Some("me"),
         );
         match case_insensitive {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
 
@@ -3561,7 +3848,9 @@ mod tests {
             Some("me"),
         );
         match bot {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
 
@@ -3577,7 +3866,9 @@ mod tests {
             Some("me"),
         );
         match still_hl {
-            ChatEvent::Privmsg { highlight_color, .. } => {
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => {
                 assert_eq!(highlight_color.as_deref(), Some("#11223344"));
             }
             _ => panic!("privmsg"),
@@ -3626,18 +3917,19 @@ mod tests {
             Some("me"),
         );
         match first {
-            ChatEvent::Privmsg { highlight_color, .. } => assert!(highlight_color.is_none()),
+            ChatEvent::Privmsg {
+                highlight_color, ..
+            } => assert!(highlight_color.is_none()),
             _ => panic!("privmsg"),
         }
 
         let shared = super::super::state::Shared::new();
         {
             let mut inner = shared.settings.lock().unwrap();
-            inner.data.highlight_blacklist =
-                vec![super::super::settings::HighlightBlacklistRow {
-                    username: "nightbot".into(),
-                    regex: false,
-                }];
+            inner.data.highlight_blacklist = vec![super::super::settings::HighlightBlacklistRow {
+                username: "nightbot".into(),
+                regex: false,
+            }];
         }
         refresh_highlight_blacklist(&shared);
         let rules = shared.highlight_blacklist.lock().unwrap().clone();

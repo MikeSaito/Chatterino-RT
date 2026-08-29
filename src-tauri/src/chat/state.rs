@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
@@ -7,26 +7,26 @@ use tokio::sync::mpsc;
 
 use super::auth::AuthInner;
 use super::batch::encode_batch;
-use super::cheers::CheerCatalog;
+use super::bttv_badges::BttvBadgeCatalog;
+use super::chatterino_badges::ChatterinoBadgeCatalog;
 use super::chatters::Chatters;
-use super::emotes::Catalog;
+use super::cheers::CheerCatalog;
 use super::custom_commands::CustomCommandSet;
+use super::emotes::Catalog;
+use super::ffz_badges::FfzBadgeCatalog;
+use super::ffz_channel::FfzChannelExtras;
 use super::filter_set::ExpressionFilterSet;
 use super::filters::{BlacklistRule, FiltersInner, HighlightSoundCtx, PhraseRule, ReplaceRule};
 use super::helix::BadgeCatalog;
-use super::bttv_badges::BttvBadgeCatalog;
-use super::chatterino_badges::ChatterinoBadgeCatalog;
-use super::ffz_badges::FfzBadgeCatalog;
-use super::ffz_channel::FfzChannelExtras;
-use super::twitch_blocks::TwitchBlockSet;
-use super::seventv_badges::SeventvBadgeCatalog;
-use super::shared_chat::SharedChatState;
 use super::hub::Hub;
 use super::live_notifications::LiveNotifyState;
 use super::logging::Logging;
 use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
+use super::seventv_badges::SeventvBadgeCatalog;
+use super::shared_chat::SharedChatState;
+use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
 
 #[derive(Debug, Clone)]
@@ -45,7 +45,9 @@ pub enum IrcCmd {
 
 #[derive(Debug, Clone)]
 pub enum EventCmd {
-    SetGlobal { set_id: String },
+    SetGlobal {
+        set_id: String,
+    },
     SetChannel {
         login: String,
         room_id: String,
@@ -60,7 +62,10 @@ pub enum EventCmd {
 
 #[derive(Debug, Clone)]
 pub enum BttvCmd {
-    SetChannel { login: String, room_id: String },
+    SetChannel {
+        login: String,
+        room_id: String,
+    },
     ClearChannel,
     SetEnabled(bool),
     BroadcastMe {
@@ -522,8 +527,14 @@ mod tests {
             user_id: "user1".into(),
         });
         let wanted = shared.snapshot_event_wanted();
-        assert_eq!(wanted.channel.as_ref().map(|c| c.login.as_str()), Some("xqc"));
-        assert_eq!(wanted.channel.as_ref().map(|c| c.room_id.as_str()), Some("999"));
+        assert_eq!(
+            wanted.channel.as_ref().map(|c| c.login.as_str()),
+            Some("xqc")
+        );
+        assert_eq!(
+            wanted.channel.as_ref().map(|c| c.room_id.as_str()),
+            Some("999")
+        );
 
         shared.hub.lock().unwrap().set_active(Some("other".into()));
         shared.notify_event(EventCmd::ClearChannel);

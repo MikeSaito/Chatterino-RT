@@ -79,13 +79,7 @@ pub fn attach_cheers(
                         continue;
                     }
                     if !overlaps(existing, start, end) && !overlaps(&extra, start, end) {
-                        extra.push(cheer_span(
-                            start,
-                            end,
-                            &hit,
-                            Some(bits),
-                            hit.color.clone(),
-                        ));
+                        extra.push(cheer_span(start, end, &hit, Some(bits), hit.color.clone()));
                         stacked = true;
                     }
                     utf16 += segment.chars().map(|c| c.len_utf16()).sum::<usize>();
@@ -231,7 +225,14 @@ mod tests {
 
     #[test]
     fn cheer100_covers_prefix_only() {
-        let extra = attach_cheers("hi Cheer100 there", &[], &cat_with_cheer(), "xqc", 100, false);
+        let extra = attach_cheers(
+            "hi Cheer100 there",
+            &[],
+            &cat_with_cheer(),
+            "xqc",
+            100,
+            false,
+        );
         assert_eq!(extra.len(), 1);
         assert_eq!(extra[0].start, 3);
         assert_eq!(extra[0].end, 8);

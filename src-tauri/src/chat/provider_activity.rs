@@ -117,7 +117,12 @@ async fn maybe_seventv_activity(
         let Ok(mut act) = shared.activity.lock() else {
             return;
         };
-        if !rate_limit_allow(&mut act.seventv_next, channel, now, SEVENTV_ACTIVITY_PESSIMISTIC) {
+        if !rate_limit_allow(
+            &mut act.seventv_next,
+            channel,
+            now,
+            SEVENTV_ACTIVITY_PESSIMISTIC,
+        ) {
             return;
         }
     }
@@ -192,10 +197,7 @@ fn rate_limit_allow(
     now: Instant,
     gap: Duration,
 ) -> bool {
-    if map
-        .get(key)
-        .is_some_and(|until| now < *until)
-    {
+    if map.get(key).is_some_and(|until| now < *until) {
         return false;
     }
     map.insert(key.to_string(), now + gap);

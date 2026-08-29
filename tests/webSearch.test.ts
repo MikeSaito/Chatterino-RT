@@ -11,9 +11,9 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
-assert(presetToEngine("DuckDuckGo")?.url.includes("duckduckgo"), "ddg");
+assert(presetToEngine("DuckDuckGo")?.url.includes("duckduckgo") === true, "ddg");
 assert(presetToEngine("Bing")?.name === "Bing", "bing");
-assert(presetToEngine("Google")?.url.includes("google"), "google");
+assert(presetToEngine("Google")?.url.includes("google") === true, "google");
 assert(presetToEngine("") === null, "empty preset");
 assert(presetToEngine("Yahoo") === null, "unknown");
 

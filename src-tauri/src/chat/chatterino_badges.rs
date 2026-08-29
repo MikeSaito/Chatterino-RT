@@ -93,7 +93,9 @@ pub fn parse_chatterino_badges(value: &Value) -> ChatterinoBadgeCatalog {
                 _ => continue,
             };
             if valid_user_id(user_id) {
-                catalog.user_badges.insert(user_id.to_string(), version.clone());
+                catalog
+                    .user_badges
+                    .insert(user_id.to_string(), version.clone());
             }
         }
     }

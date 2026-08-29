@@ -82,15 +82,11 @@ impl ChannelBuf {
                 return Vec::new();
             }
             ChatEvent::Userstate {
-                badges,
-                is_mod_tag,
-                ..
+                badges, is_mod_tag, ..
             } => {
-                self.self_is_mod =
-                    *is_mod_tag || send_wait::is_mod_badges(badges);
+                self.self_is_mod = *is_mod_tag || send_wait::is_mod_badges(badges);
                 self.self_is_broadcaster = send_wait::is_broadcaster_badges(badges);
-                self.self_high_rate =
-                    send_wait::has_high_rate_limit(badges) || *is_mod_tag;
+                self.self_high_rate = send_wait::has_high_rate_limit(badges) || *is_mod_tag;
                 if self.self_rate_limit() {
                     self.send_wait.clear();
                 }
@@ -122,8 +118,7 @@ impl ChannelBuf {
         let mut flushed: Option<ChatBatch> = None;
         for item in self.expand(event) {
             self.note_send_wait(&item, self_login);
-            if let Some(batch) =
-                self.ingest_one(item, self_login, sim, stack_style, &mut on_added)
+            if let Some(batch) = self.ingest_one(item, self_login, sim, stack_style, &mut on_added)
             {
                 flushed = Some(merge_batches(flushed, batch));
             }
@@ -183,7 +178,8 @@ impl ChannelBuf {
         if matches!(outcome, PushOutcome::Added(_)) {
             on_added(&live_event);
         }
-        if matches!(outcome, PushOutcome::Replaced(_)) && self.pending.upsert_by_id(live_event.clone())
+        if matches!(outcome, PushOutcome::Replaced(_))
+            && self.pending.upsert_by_id(live_event.clone())
         {
             return None;
         }
@@ -329,12 +325,24 @@ mod tests {
     fn snapshot_flushes_pending_and_advances_seq() {
         let mut hub = crate::chat::hub::Hub::default();
         hub.set_active(Some("xqc".into()));
-        hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default(), no_stack());
+        hub.ingest(
+            "xqc",
+            notice("1"),
+            None,
+            &SimilarityCfg::default(),
+            no_stack(),
+        );
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.seq, 1);
         assert_eq!(snap.events.len(), 1);
         assert!(hub.buffer("xqc").flush().is_none());
-        hub.ingest("xqc", notice("2"), None, &SimilarityCfg::default(), no_stack());
+        hub.ingest(
+            "xqc",
+            notice("2"),
+            None,
+            &SimilarityCfg::default(),
+            no_stack(),
+        );
         let live = hub.flush_all();
         assert_eq!(live[0].seq, 2);
         assert_eq!(live[0].events.len(), 1);
@@ -345,7 +353,12 @@ mod tests {
     fn ingest_keeps_overflow_in_scrollback_not_dropped() {
         let mut buf = ChannelBuf::new("xqc", 1000);
         for i in 0..(BATCH_MAX_MESSAGES + 2) {
-            let _ = buf.ingest(notice(&i.to_string()), None, &SimilarityCfg::default(), no_stack());
+            let _ = buf.ingest(
+                notice(&i.to_string()),
+                None,
+                &SimilarityCfg::default(),
+                no_stack(),
+            );
         }
         assert!(buf.scrollback.len() >= BATCH_MAX_MESSAGES);
     }
@@ -448,9 +461,9 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
-            disabled: false,
-            source_room_id: None,
-            source_badges: vec![],
+                disabled: false,
+                source_room_id: None,
+                source_badges: vec![],
             },
             Some("me"),
             &SimilarityCfg::default(),
@@ -503,9 +516,9 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
-            disabled: false,
-            source_room_id: None,
-            source_badges: vec![],
+                disabled: false,
+                source_room_id: None,
+                source_badges: vec![],
             },
             Some("me"),
             &SimilarityCfg::default(),
@@ -577,9 +590,9 @@ mod tests {
                 highlight_sound_path: None,
                 highlight_flash: false,
                 whisper: false,
-            disabled: false,
-            source_room_id: None,
-            source_badges: vec![],
+                disabled: false,
+                source_room_id: None,
+                source_badges: vec![],
             },
             Some("me"),
             &SimilarityCfg::default(),

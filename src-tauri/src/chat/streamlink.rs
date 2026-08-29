@@ -153,10 +153,7 @@ pub fn build_argv(
 }
 
 fn knob_bool(knobs: &std::collections::BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(Value::as_bool)
-        .unwrap_or(default)
+    knobs.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
 fn knob_str(knobs: &std::collections::BTreeMap<String, Value>, key: &str) -> String {

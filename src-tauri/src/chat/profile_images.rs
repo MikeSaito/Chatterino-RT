@@ -137,8 +137,7 @@ pub fn spawn_refresh(app: AppHandle, shared: Shared, login: String) {
             };
             (creds.token.clone(), creds.client_id.clone())
         };
-        let Some(profile) =
-            helix::fetch_user_profile(&login, Some(&token), &client_id).await
+        let Some(profile) = helix::fetch_user_profile(&login, Some(&token), &client_id).await
         else {
             return;
         };
@@ -162,8 +161,7 @@ pub fn spawn_refresh_login(app: AppHandle, shared: Shared, login: String) {
             return;
         };
         let client_id = auth::resolved_client_id(&shared);
-        let Some(profile) =
-            helix::fetch_user_profile(&login, Some(&token), &client_id).await
+        let Some(profile) = helix::fetch_user_profile(&login, Some(&token), &client_id).await
         else {
             return;
         };

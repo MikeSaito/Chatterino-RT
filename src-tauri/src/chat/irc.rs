@@ -149,8 +149,11 @@ async fn connect_session(
 ) -> SessionEnd {
     let status_ch = status_channel(shared, wanted);
     emit_status(app, ChatConnState::Connecting, status_ch.as_deref(), None);
-    let Ok(Ok((stream, _))) =
-        tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::connect_async(IRC_URL)).await
+    let Ok(Ok((stream, _))) = tokio::time::timeout(
+        Duration::from_secs(12),
+        tokio_tungstenite::connect_async(IRC_URL),
+    )
+    .await
     else {
         return SessionEnd::Reconnect { wait: true };
     };
@@ -158,7 +161,8 @@ async fn connect_session(
     let (mut write, mut read) = stream.split();
     let (nick, pass) = credentials(shared);
     let authed = pass.is_some();
-    let mut hello = vec!["CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership".to_string()];
+    let mut hello =
+        vec!["CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership".to_string()];
     if let Some(token) = pass {
         hello.push(format!("PASS oauth:{token}"));
     }
@@ -179,10 +183,8 @@ async fn connect_session(
 
     let mut ticker = tokio::time::interval(Duration::from_millis(BATCH_FLUSH_MS));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut ping_at = tokio::time::interval_at(
-        tokio::time::Instant::now() + CLIENT_PING,
-        CLIENT_PING,
-    );
+    let mut ping_at =
+        tokio::time::interval_at(tokio::time::Instant::now() + CLIENT_PING, CLIENT_PING);
     ping_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut pong_deadline: Option<Instant> = None;
     let mut loaded_room: HashMap<String, String> = HashMap::new();
@@ -613,12 +615,7 @@ fn dispatch_line(
                         self_login.as_deref(),
                         false,
                     ) {
-                        super::membership_batch::record_part(
-                            shared,
-                            app,
-                            channel.clone(),
-                            login,
-                        );
+                        super::membership_batch::record_part(shared, app, channel.clone(), login);
                     }
                 } else if super::membership_batch::should_show(
                     shared,
@@ -627,12 +624,7 @@ fn dispatch_line(
                     self_login.as_deref(),
                     true,
                 ) {
-                    super::membership_batch::record_join(
-                        shared,
-                        app,
-                        channel.clone(),
-                        login,
-                    );
+                    super::membership_batch::record_join(shared, app, channel.clone(), login);
                 }
                 LineAction::None
             }
@@ -744,12 +736,7 @@ fn dispatch_line(
                         .is_some_and(|h| h.active.as_deref() == Some(channel.as_str()));
                     if room_changed {
                         if is_active {
-                            spawn_channel_assets(
-                                app,
-                                shared,
-                                channel.clone(),
-                                id.to_string(),
-                            );
+                            spawn_channel_assets(app, shared, channel.clone(), id.to_string());
                         } else {
                             super::recent_messages::spawn_recent_messages(
                                 app.clone(),
@@ -757,11 +744,7 @@ fn dispatch_line(
                                 channel.clone(),
                             );
                         }
-                        super::shared_chat::spawn_refresh(
-                            shared,
-                            channel.clone(),
-                            id.to_string(),
-                        );
+                        super::shared_chat::spawn_refresh(shared, channel.clone(), id.to_string());
                     }
                 }
             }
@@ -836,11 +819,7 @@ fn remember_chatter(shared: &Shared, channel: &str, event: &ChatEvent) {
             display_name,
             ..
         } => (login.as_str(), display_name.as_str()),
-        ChatEvent::Usernotice {
-            login,
-            privmsg,
-            ..
-        } => {
+        ChatEvent::Usernotice { login, privmsg, .. } => {
             if let Some(ChatEvent::Privmsg {
                 login,
                 display_name,
@@ -885,7 +864,12 @@ fn is_join_failure(msg_id: &str) -> bool {
     )
 }
 
-fn emit_status(app: &AppHandle, state: ChatConnState, channel: Option<&str>, message: Option<&str>) {
+fn emit_status(
+    app: &AppHandle,
+    state: ChatConnState,
+    channel: Option<&str>,
+    message: Option<&str>,
+) {
     let _ = app.emit(
         "chat:status",
         ChatStatus {
@@ -904,10 +888,7 @@ fn emit_send_waits(app: &AppHandle, shared: &Shared) {
         .map(|mut hub| hub.poll_send_waits())
         .unwrap_or_default();
     for (channel_id, text) in updates {
-        let _ = app.emit(
-            "chat:send-wait",
-            ChatSendWait { channel_id, text },
-        );
+        let _ = app.emit("chat:send-wait", ChatSendWait { channel_id, text });
     }
 }
 
@@ -925,10 +906,7 @@ fn deliver_batch(app: &AppHandle, shared: &Shared, batch: &super::types::ChatBat
     match shared.send_batch(batch) {
         super::state::BatchSend::Delivered => {}
         super::state::BatchSend::EncodeError => {
-            eprintln!(
-                "chat batch encode failed for channel {}",
-                batch.channel_id
-            );
+            eprintln!("chat batch encode failed for channel {}", batch.channel_id);
             let n = u32::try_from(batch.events.len()).unwrap_or(u32::MAX).max(1);
             shared.note_undelivered(&batch.channel_id, n);
             let _ = app.emit(
@@ -990,8 +968,8 @@ pub(crate) fn echo_own_privmsg(
     let user_id = auth::resolved_twitch_user_id(shared).unwrap_or_default();
     let (reply_to_login, reply_to_display_name, reply_to_text) = reply_to
         .as_deref()
-        .and_then(|rid| {
-            match shared.hub.lock().ok()?.peek_event(channel, rid)? {
+        .and_then(
+            |rid| match shared.hub.lock().ok()?.peek_event(channel, rid)? {
                 ChatEvent::Privmsg {
                     login,
                     display_name,
@@ -999,8 +977,8 @@ pub(crate) fn echo_own_privmsg(
                     ..
                 } => Some((Some(login), Some(display_name), Some(text))),
                 _ => None,
-            }
-        })
+            },
+        )
         .unwrap_or((None, None, None));
     let mut event = ChatEvent::Privmsg {
         id: synthetic_id("l", now, &text),
@@ -1316,12 +1294,7 @@ fn spawn_helix_globals(shared: &Shared) {
     });
 }
 
-fn spawn_channel_assets(
-    app: &AppHandle,
-    shared: &Shared,
-    login: String,
-    room_id: String,
-) {
+fn spawn_channel_assets(app: &AppHandle, shared: &Shared, login: String, room_id: String) {
     let app = app.clone();
     let cat = shared.catalog.clone();
     let badges = shared.badges.clone();

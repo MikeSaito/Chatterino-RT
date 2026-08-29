@@ -198,9 +198,18 @@ pub async fn load_channel(
         get_helix(&client, &cheer_url, &client_id, &token),
         get_helix(&client, &emote_url, &client_id, &token),
     );
-    let badge_json = recover_helix(&client, &badge_url, &client_id, &token, hub, login, badge_json).await;
-    let cheer_json = recover_helix(&client, &cheer_url, &client_id, &token, hub, login, cheer_json).await;
-    let emote_json = recover_helix(&client, &emote_url, &client_id, &token, hub, login, emote_json).await;
+    let badge_json = recover_helix(
+        &client, &badge_url, &client_id, &token, hub, login, badge_json,
+    )
+    .await;
+    let cheer_json = recover_helix(
+        &client, &cheer_url, &client_id, &token, hub, login, cheer_json,
+    )
+    .await;
+    let emote_json = recover_helix(
+        &client, &emote_url, &client_id, &token, hub, login, emote_json,
+    )
+    .await;
     if !load_gen_active(hub, emotes, login, load_gen) {
         return;
     }
@@ -802,7 +811,10 @@ pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
     else {
         return HelixSendOutcome::Failed("Your message was not sent.".into());
     };
-    let is_sent = item.get("is_sent").and_then(Value::as_bool).unwrap_or(false);
+    let is_sent = item
+        .get("is_sent")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     if is_sent {
         return HelixSendOutcome::Sent;
     }
@@ -854,7 +866,10 @@ pub async fn send_chat_message(
     });
     if let Some(id) = reply_parent_message_id {
         if let Some(obj) = body.as_object_mut() {
-            obj.insert("reply_parent_message_id".into(), Value::String(id.to_string()));
+            obj.insert(
+                "reply_parent_message_id".into(),
+                Value::String(id.to_string()),
+            );
         }
     }
     let url = format!("{HELIX}/chat/messages");
@@ -876,10 +891,12 @@ pub async fn send_chat_message(
                 let status = resp.status();
                 match resp.json::<Value>().await {
                     Ok(v) if status.is_success() => return parse_send_chat_response(&v),
-                    Ok(v) => return HelixSendOutcome::Failed(map_send_chat_http_error(
-                        status.as_u16(),
-                        &v,
-                    )),
+                    Ok(v) => {
+                        return HelixSendOutcome::Failed(map_send_chat_http_error(
+                            status.as_u16(),
+                            &v,
+                        ))
+                    }
                     Err(e) => last = format!("json: {e}"),
                 }
             }
@@ -1002,11 +1019,7 @@ pub async fn load_channel_badges_for_login(
     if login.is_empty() || room_id.is_empty() {
         return;
     }
-    if badges
-        .lock()
-        .ok()
-        .is_some_and(|cat| cat.has_channel(login))
-    {
+    if badges.lock().ok().is_some_and(|cat| cat.has_channel(login)) {
         return;
     }
     let url = helix_query("/chat/badges", &[("broadcaster_id", room_id)]);
@@ -1109,7 +1122,10 @@ mod tests {
     fn parses_chat_emotes_and_drops_bad_id() {
         let v: Value = serde_json::from_str(EMOTES_JSON).unwrap();
         let map = parse_chat_emotes(&v);
-        assert_eq!(map.get("Kappa").map(|d| d.provider.as_str()), Some("twitch"));
+        assert_eq!(
+            map.get("Kappa").map(|d| d.provider.as_str()),
+            Some("twitch")
+        );
         assert_eq!(
             map.get("Kappa").map(|d| d.url.as_str()),
             Some("https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")

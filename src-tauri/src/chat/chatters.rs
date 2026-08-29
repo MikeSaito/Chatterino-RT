@@ -39,9 +39,7 @@ impl Chatters {
         if !valid_login(&key) {
             return;
         }
-        let shown = display
-            .trim()
-            .trim_start_matches(['@', '+', '%', '~', '&']);
+        let shown = display.trim().trim_start_matches(['@', '+', '%', '~', '&']);
         let shown = if shown.eq_ignore_ascii_case(&key) && shown.is_ascii() {
             shown
         } else {
@@ -95,12 +93,7 @@ impl Chatters {
             .unwrap_or(0)
     }
 
-    pub fn prefixed(
-        &self,
-        channel: &str,
-        prefix: &str,
-        include_broadcaster: bool,
-    ) -> Vec<String> {
+    pub fn prefixed(&self, channel: &str, prefix: &str, include_broadcaster: bool) -> Vec<String> {
         let needle = prefix
             .strip_prefix('@')
             .unwrap_or(prefix)
@@ -147,9 +140,7 @@ fn touch(order: &mut VecDeque<String>, key: &str) {
 fn valid_login(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 25
-        && login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn push_broadcaster_if_missing(channel: &str, needle: &str, out: &mut Vec<String>) {
@@ -191,10 +182,16 @@ mod tests {
         set.add("xqc", "bob", "bob");
         set.add("lirik", "alice", "alice");
         assert_eq!(set.prefixed("xqc", "bo", false), vec!["bob".to_string()]);
-        assert_eq!(set.prefixed("lirik", "al", false), vec!["alice".to_string()]);
+        assert_eq!(
+            set.prefixed("lirik", "al", false),
+            vec!["alice".to_string()]
+        );
         set.drop_channel("xqc");
         assert!(set.prefixed("xqc", "bo", false).is_empty());
-        assert_eq!(set.prefixed("lirik", "al", false), vec!["alice".to_string()]);
+        assert_eq!(
+            set.prefixed("lirik", "al", false),
+            vec!["alice".to_string()]
+        );
     }
 
     #[test]

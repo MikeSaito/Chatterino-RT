@@ -288,10 +288,7 @@ fn sample_text(event: &ChatEvent) -> Option<(String, String)> {
                     }
                 }
             }
-            Some((
-                login.clone().unwrap_or_default(),
-                system_text.clone(),
-            ))
+            Some((login.clone().unwrap_or_default(), system_text.clone()))
         }
         ChatEvent::Notice { text, .. } => Some((String::new(), text.clone())),
         _ => None,
@@ -303,10 +300,7 @@ fn eq_login(a: &str, b: &str) -> bool {
 }
 
 fn knob_bool(knobs: &BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(default)
+    knobs.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 fn knob_f32(knobs: &BTreeMap<String, Value>, key: &str, default: f32) -> f32 {
@@ -362,8 +356,8 @@ mod tests {
             highlight_flash: true,
             whisper: false,
             disabled: false,
-        source_room_id: None,
-        source_badges: vec![],
+            source_room_id: None,
+            source_badges: vec![],
         }
     }
 

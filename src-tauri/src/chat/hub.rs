@@ -199,7 +199,11 @@ impl Hub {
             .is_some_and(|b| b.self_high_rate())
     }
 
-    pub fn viewer_role(&self, channel: &str, self_user_id: Option<&str>) -> super::twitch_blocks::ViewerRole {
+    pub fn viewer_role(
+        &self,
+        channel: &str,
+        self_user_id: Option<&str>,
+    ) -> super::twitch_blocks::ViewerRole {
         let buf = self.buffers.get(channel);
         let mut is_broadcaster = buf.is_some_and(|b| b.self_is_broadcaster());
         if !is_broadcaster {
@@ -293,9 +297,7 @@ impl Hub {
     }
 
     pub fn channel_live(&self, channel: &str) -> bool {
-        self.buffers
-            .get(channel)
-            .is_some_and(|buf| buf.is_live())
+        self.buffers.get(channel).is_some_and(|buf| buf.is_live())
     }
 
     /// Returns true when the stored live flag changed.
@@ -370,8 +372,24 @@ mod tests {
     fn ingest_ignores_unknown_inactive() {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
-        assert!(hub.ingest("xqc", notice("1"), None, &SimilarityCfg::default(), no_stack()).is_none());
-        assert!(hub.ingest("other", notice("nope"), None, &SimilarityCfg::default(), no_stack()).is_none());
+        assert!(hub
+            .ingest(
+                "xqc",
+                notice("1"),
+                None,
+                &SimilarityCfg::default(),
+                no_stack()
+            )
+            .is_none());
+        assert!(hub
+            .ingest(
+                "other",
+                notice("nope"),
+                None,
+                &SimilarityCfg::default(),
+                no_stack()
+            )
+            .is_none());
         let snap = hub.snapshot("xqc").unwrap();
         assert_eq!(snap.events.len(), 1);
         assert!(hub.snapshot("other").is_none());
@@ -382,7 +400,13 @@ mod tests {
         let mut hub = Hub::default();
         hub.set_active(Some("xqc".into()));
         hub.buffer("lirik");
-        hub.ingest("lirik", notice("a"), None, &SimilarityCfg::default(), no_stack());
+        hub.ingest(
+            "lirik",
+            notice("a"),
+            None,
+            &SimilarityCfg::default(),
+            no_stack(),
+        );
         hub.set_active(Some("lirik".into()));
         let snap = hub.snapshot("lirik").unwrap();
         assert_eq!(snap.events.len(), 1);
@@ -453,7 +477,8 @@ mod tests {
         hub.buffer("lirik");
         hub.set_joined("lirik", true);
 
-        let batches = hub.ingest_fanout_joined(notice("w"), None, &SimilarityCfg::default(), no_stack());
+        let batches =
+            hub.ingest_fanout_joined(notice("w"), None, &SimilarityCfg::default(), no_stack());
         assert!(batches.is_empty());
         let snap_xqc = hub.snapshot("xqc").unwrap();
         assert_eq!(snap_xqc.events.len(), 1);

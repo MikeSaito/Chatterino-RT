@@ -90,10 +90,7 @@ pub fn validate_sound_path(raw: &str) -> Result<(), ApiError> {
     if !path.is_absolute() {
         return Err(ApiError::invalid("нужен абсолютный путь к файлу"));
     }
-    if path
-        .components()
-        .any(|c| matches!(c, Component::ParentDir))
-    {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(ApiError::invalid("недопустимый путь"));
     }
     let ext = path
@@ -128,20 +125,19 @@ fn path_allowed(shared: &Shared, path: &str, settings_path: Option<&str>) -> boo
         .is_some_and(|set| set.contains(path))
 }
 
-pub fn read_configured(shared: &Shared, override_path: Option<String>) -> Result<SoundFile, ApiError> {
-    let settings_path = shared
-        .settings
-        .lock()
-        .ok()
-        .and_then(|inner| {
-            inner
-                .data
-                .knobs
-                .get("highlighting.pathHighlightSound")
-                .and_then(|v| v.as_str())
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        });
+pub fn read_configured(
+    shared: &Shared,
+    override_path: Option<String>,
+) -> Result<SoundFile, ApiError> {
+    let settings_path = shared.settings.lock().ok().and_then(|inner| {
+        inner
+            .data
+            .knobs
+            .get("highlighting.pathHighlightSound")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
     let path = match override_path {
         Some(p) => {
             let p = p.trim().to_string();

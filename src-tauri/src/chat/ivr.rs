@@ -147,12 +147,8 @@ pub(crate) fn parse_subage_json(root: &Value) -> UserSubageResult {
 
     let (followage, followage_ago) = if let Some(raw) = followed_at {
         if let Some(date) = format_follow_date(raw) {
-            let ago = parse_followed_at(raw).map(|from| {
-                format!(
-                    "{} ago",
-                    format_long_friendly_duration(from, Utc::now())
-                )
-            });
+            let ago = parse_followed_at(raw)
+                .map(|from| format!("{} ago", format_long_friendly_duration(from, Utc::now())));
             (Some(format!("❤ Following since {date}")), ago)
         } else {
             (None, None)
@@ -200,7 +196,10 @@ pub(crate) fn parse_subage_json(root: &Value) -> UserSubageResult {
     }
 }
 
-pub async fn fetch_subage(user_login: &str, channel_login: &str) -> Result<UserSubageResult, String> {
+pub async fn fetch_subage(
+    user_login: &str,
+    channel_login: &str,
+) -> Result<UserSubageResult, String> {
     let url = format!("{API_BASE}/twitch/subage/{user_login}/{channel_login}");
     let client = http_client();
     let mut delay = Duration::from_millis(200);
@@ -225,7 +224,10 @@ pub async fn fetch_subage(user_login: &str, channel_login: &str) -> Result<UserS
                 });
             }
             Ok(resp) if resp.status().is_redirection() => {
-                return Err(format!("IVR HTTP {} (redirects not followed)", resp.status()));
+                return Err(format!(
+                    "IVR HTTP {} (redirects not followed)",
+                    resp.status()
+                ));
             }
             Ok(resp) if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 => {
                 return Err(format!("IVR HTTP {}", resp.status()));
@@ -259,11 +261,11 @@ mod tests {
             "cumulative": { "months": 42 }
         });
         let r = parse_subage_json(&root);
-        assert_eq!(
-            r.followage.as_deref(),
-            Some("❤ Following since 2020-03-15")
-        );
-        assert!(r.followage_ago.as_ref().is_some_and(|s| s.ends_with(" ago")));
+        assert_eq!(r.followage.as_deref(), Some("❤ Following since 2020-03-15"));
+        assert!(r
+            .followage_ago
+            .as_ref()
+            .is_some_and(|s| s.ends_with(" ago")));
         assert_eq!(
             r.subage.as_deref(),
             Some("★ Tier 3 - Subscribed for 42 months")
@@ -331,7 +333,10 @@ mod tests {
         let dt = parse_followed_at("2020-03-15T12:30:00.000Z").unwrap();
         assert_eq!(dt.hour(), 12);
         assert_eq!(dt.minute(), 30);
-        assert_eq!(format_follow_date("2020-03-15T12:30:00.000Z").as_deref(), Some("2020-03-15"));
+        assert_eq!(
+            format_follow_date("2020-03-15T12:30:00.000Z").as_deref(),
+            Some("2020-03-15")
+        );
     }
 
     #[test]

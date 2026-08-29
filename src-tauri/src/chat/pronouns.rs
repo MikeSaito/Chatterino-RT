@@ -54,10 +54,7 @@ fn http_client() -> reqwest::Client {
 }
 
 /// Format from dictionary entries (stock `parsePronoun` rules).
-pub(crate) fn format_from_entries(
-    main: &PronounEntry,
-    alt: Option<&PronounEntry>,
-) -> String {
+pub(crate) fn format_from_entries(main: &PronounEntry, alt: Option<&PronounEntry>) -> String {
     match alt {
         Some(a) => format!("{}/{}", main.subject, a.subject),
         None if main.singular => main.subject.clone(),
@@ -197,7 +194,9 @@ pub async fn lookup(login: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
     if status.is_redirection() {
-        return Err(format!("pronouns user HTTP {status} (redirects not followed)"));
+        return Err(format!(
+            "pronouns user HTTP {status} (redirects not followed)"
+        ));
     }
     if !status.is_success() {
         return Err(format!("pronouns user HTTP {status}"));

@@ -21,19 +21,11 @@ const REDEEMED_MSG_IDS: &[&str] = &[
 const WATCH_STREAK_MSG_IDS: &[&str] = &["viewermilestone", "modiversary"];
 
 fn is_subscription_msg_id(msg_id: Option<&str>) -> bool {
-    msg_id.is_some_and(|id| {
-        SUB_MSG_IDS
-            .iter()
-            .any(|s| id.eq_ignore_ascii_case(s))
-    })
+    msg_id.is_some_and(|id| SUB_MSG_IDS.iter().any(|s| id.eq_ignore_ascii_case(s)))
 }
 
 fn is_redeemed_system_msg_id(msg_id: Option<&str>) -> bool {
-    msg_id.is_some_and(|id| {
-        REDEEMED_MSG_IDS
-            .iter()
-            .any(|s| id.eq_ignore_ascii_case(s))
-    })
+    msg_id.is_some_and(|id| REDEEMED_MSG_IDS.iter().any(|s| id.eq_ignore_ascii_case(s)))
 }
 
 fn is_watch_streak_msg_id(msg_id: Option<&str>) -> bool {
@@ -45,9 +37,7 @@ fn is_watch_streak_msg_id(msg_id: Option<&str>) -> bool {
 }
 
 fn strip_link_tail(word: &str) -> &str {
-    word.trim_matches(|c: char| {
-        matches!(c, '>' | '?' | '!' | '.' | ',' | ':' | '*' | '~' | ')')
-    })
+    word.trim_matches(|c: char| matches!(c, '>' | '?' | '!' | '.' | ',' | ':' | '*' | '~' | ')'))
 }
 
 /// Stock LinkPredicate: scheme URLs + bare hosts (www./domain.tld), via Url parse.
@@ -86,36 +76,14 @@ fn text_has_link(text: &str) -> bool {
 /// One stock-style search predicate (AND-combined by caller).
 #[derive(Debug)]
 pub enum Predicate {
-    Author {
-        authors: Vec<String>,
-        negate: bool,
-    },
-    Badge {
-        badges: Vec<String>,
-        negate: bool,
-    },
-    Subtier {
-        tiers: Vec<String>,
-        negate: bool,
-    },
-    Link {
-        negate: bool,
-    },
-    Channel {
-        channels: Vec<String>,
-        negate: bool,
-    },
-    Flags {
-        flags: FlagWant,
-        negate: bool,
-    },
-    Regex {
-        re: Option<Regex>,
-        negate: bool,
-    },
-    Substring {
-        needle_lower: String,
-    },
+    Author { authors: Vec<String>, negate: bool },
+    Badge { badges: Vec<String>, negate: bool },
+    Subtier { tiers: Vec<String>, negate: bool },
+    Link { negate: bool },
+    Channel { channels: Vec<String>, negate: bool },
+    Flags { flags: FlagWant, negate: bool },
+    Regex { re: Option<Regex>, negate: bool },
+    Substring { needle_lower: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -261,7 +229,10 @@ fn take_bare_token(chars: &[char], mut i: usize) -> (String, usize) {
 }
 
 /// Stock SearchPopup::parsePredicates tokenizer (no lookaround).
-fn next_token(chars: &[char], mut i: usize) -> Option<(Option<bool>, Option<(String, String)>, String, usize)> {
+fn next_token(
+    chars: &[char],
+    mut i: usize,
+) -> Option<(Option<bool>, Option<(String, String)>, String, usize)> {
     while i < chars.len() && chars[i].is_whitespace() {
         i += 1;
     }
@@ -363,8 +334,7 @@ fn apply_negate(inner: bool, negate: bool) -> bool {
 }
 
 fn list_contains_ci(list: &[String], candidate: &str) -> bool {
-    list.iter()
-        .any(|item| item.eq_ignore_ascii_case(candidate))
+    list.iter().any(|item| item.eq_ignore_ascii_case(candidate))
 }
 
 fn author_matches(event: &ChatEvent, authors: &[String]) -> bool {
@@ -374,9 +344,7 @@ fn author_matches(event: &ChatEvent, authors: &[String]) -> bool {
             display_name,
             ..
         } => list_contains_ci(authors, login) || list_contains_ci(authors, display_name),
-        ChatEvent::Usernotice {
-            login, privmsg, ..
-        } => {
+        ChatEvent::Usernotice { login, privmsg, .. } => {
             login
                 .as_deref()
                 .is_some_and(|l| list_contains_ci(authors, l))
@@ -395,9 +363,7 @@ fn badge_matches(event: &ChatEvent, badges: &[String]) -> bool {
     match event {
         ChatEvent::Privmsg {
             badges: msg_badges, ..
-        } => msg_badges
-            .iter()
-            .any(|b| list_contains_ci(badges, &b.set)),
+        } => msg_badges.iter().any(|b| list_contains_ci(badges, &b.set)),
         ChatEvent::Usernotice { privmsg, .. } => privmsg
             .as_ref()
             .is_some_and(|inner| badge_matches(inner, badges)),
@@ -449,9 +415,7 @@ fn event_message_text(event: &ChatEvent) -> String {
             system_text.clone()
         }
         ChatEvent::Notice { text, .. } => text.clone(),
-        ChatEvent::Clearchat { target_login, .. } => {
-            target_login.clone().unwrap_or_default()
-        }
+        ChatEvent::Clearchat { target_login, .. } => target_login.clone().unwrap_or_default(),
         ChatEvent::Roomstate {
             emote_only,
             subs_only,
@@ -468,17 +432,14 @@ fn event_message_text(event: &ChatEvent) -> String {
 fn link_matches(event: &ChatEvent) -> bool {
     match event {
         ChatEvent::Privmsg {
-            text,
-            link_spans,
-            ..
+            text, link_spans, ..
         } => !link_spans.is_empty() || text_has_link(text),
         ChatEvent::Usernotice {
             system_text,
             privmsg,
             ..
         } => {
-            text_has_link(system_text)
-                || privmsg.as_ref().is_some_and(|inner| link_matches(inner))
+            text_has_link(system_text) || privmsg.as_ref().is_some_and(|inner| link_matches(inner))
         }
         ChatEvent::Notice { text, .. } => text_has_link(text),
         _ => false,
@@ -511,10 +472,8 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
             f.redemption =
                 custom_reward_id.is_some() || is_redeemed_system_msg_id(system_msg_id.as_deref());
             f.reply = reply_to_id.is_some();
-            f.shared =
-                shared_chat::is_shared_message(source_room_id.as_deref(), room_id);
-            f.highlighted =
-                highlight_color.is_some() || *highlight_sound || *highlight_flash;
+            f.shared = shared_chat::is_shared_message(source_room_id.as_deref(), room_id);
+            f.highlighted = highlight_color.is_some() || *highlight_sound || *highlight_flash;
         }
         ChatEvent::Usernotice {
             msg_id,
@@ -525,8 +484,7 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
             ..
         } => {
             f.subscription = is_subscription_msg_id(msg_id.as_deref());
-            f.highlighted =
-                highlight_color.is_some() || *highlight_sound || *highlight_flash;
+            f.highlighted = highlight_color.is_some() || *highlight_sound || *highlight_flash;
             if let Some(id) = msg_id.as_deref() {
                 if id.eq_ignore_ascii_case("announcement")
                     || id.to_ascii_lowercase().starts_with("announcement")
@@ -621,9 +579,7 @@ pub fn applies_all(
     channel: &str,
     room_id: Option<&str>,
 ) -> bool {
-    preds
-        .iter()
-        .all(|p| p.applies_to(event, channel, room_id))
+    preds.iter().all(|p| p.applies_to(event, channel, room_id))
 }
 
 #[cfg(test)]
@@ -743,12 +699,7 @@ mod tests {
     fn parse_quoted_regex_and_negation() {
         let preds = parse_predicates(r#"regex:"kap+a""#);
         assert_eq!(preds.len(), 1);
-        assert!(applies_all(
-            &preds,
-            &privmsg("1", "a", "kappaa"),
-            "c",
-            None
-        ));
+        assert!(applies_all(&preds, &privmsg("1", "a", "kappaa"), "c", None));
         let neg = parse_predicates("!from:ann");
         assert_eq!(neg.len(), 1);
         assert!(!applies_all(&neg, &privmsg("1", "ann", "x"), "c", None));
@@ -758,12 +709,7 @@ mod tests {
     #[test]
     fn invalid_regex_never_matches() {
         let preds = parse_predicates("regex:[");
-        assert!(!applies_all(
-            &preds,
-            &privmsg("1", "a", "hello"),
-            "c",
-            None
-        ));
+        assert!(!applies_all(&preds, &privmsg("1", "a", "hello"), "c", None));
     }
 
     #[test]
@@ -846,18 +792,8 @@ mod tests {
             duration_sec: Some(60),
             stack_count: 1,
         };
-        assert!(!applies_all(
-            &parse_predicates("is:system"),
-            &to,
-            "c",
-            None
-        ));
-        assert!(applies_all(
-            &parse_predicates("is:timeout"),
-            &to,
-            "c",
-            None
-        ));
+        assert!(!applies_all(&parse_predicates("is:system"), &to, "c", None));
+        assert!(applies_all(&parse_predicates("is:timeout"), &to, "c", None));
     }
 
     #[test]
@@ -868,12 +804,7 @@ mod tests {
     #[test]
     fn link_without_precomputed_spans() {
         let e = privmsg("1", "a", "https://example.com");
-        assert!(applies_all(
-            &parse_predicates("has:link"),
-            &e,
-            "c",
-            None
-        ));
+        assert!(applies_all(&parse_predicates("has:link"), &e, "c", None));
     }
 
     #[test]
@@ -910,10 +841,7 @@ mod tests {
     #[test]
     fn is_redemption_and_shared_and_watch_streak() {
         let mut redeem = privmsg("1", "ann", "hi");
-        if let ChatEvent::Privmsg {
-            system_msg_id, ..
-        } = &mut redeem
-        {
+        if let ChatEvent::Privmsg { system_msg_id, .. } = &mut redeem {
             *system_msg_id = Some("highlighted-message".into());
         }
         assert!(applies_all(
@@ -924,10 +852,7 @@ mod tests {
         ));
 
         let mut shared = privmsg("2", "ann", "hi");
-        if let ChatEvent::Privmsg {
-            source_room_id, ..
-        } = &mut shared
-        {
+        if let ChatEvent::Privmsg { source_room_id, .. } = &mut shared {
             *source_room_id = Some("999".into());
         }
         assert!(applies_all(

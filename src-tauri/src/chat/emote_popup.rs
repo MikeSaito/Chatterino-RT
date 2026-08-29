@@ -212,11 +212,7 @@ fn collect_emojis(
         if !match_ok {
             continue;
         }
-        push_unique(
-            out,
-            seen,
-            make_emoji_item(unicode, short, set, fav_emojis),
-        );
+        push_unique(out, seen, make_emoji_item(unicode, short, set, fav_emojis));
     }
 }
 
@@ -281,11 +277,7 @@ fn collect_favourites(
         if !match_ok {
             continue;
         }
-        push_unique(
-            out,
-            seen,
-            make_emoji_item(unicode, short, set, fav_emojis),
-        );
+        push_unique(out, seen, make_emoji_item(unicode, short, set, fav_emojis));
     }
 }
 
@@ -543,20 +535,23 @@ mod tests {
             &mut out,
             &mut seen,
         );
-        assert!(out.iter().any(|i| i.code == "Kappa" && i.favourite && i.url.is_some()));
-        assert!(out.iter().any(|i| i.code == "missing" && i.favourite && i.url.is_none()));
-        assert!(out.iter().any(|i| i.kind == "emoji" && i.favourite && i.url.is_some()));
-        assert!(out.iter().any(|i| {
-            i.code == "not_a_real_emoji_zz" && i.kind == "emoji" && i.url.is_none()
-        }));
+        assert!(out
+            .iter()
+            .any(|i| i.code == "Kappa" && i.favourite && i.url.is_some()));
+        assert!(out
+            .iter()
+            .any(|i| i.code == "missing" && i.favourite && i.url.is_none()));
+        assert!(out
+            .iter()
+            .any(|i| i.kind == "emoji" && i.favourite && i.url.is_some()));
+        assert!(out
+            .iter()
+            .any(|i| { i.code == "not_a_real_emoji_zz" && i.kind == "emoji" && i.url.is_none() }));
     }
 
     #[test]
     fn emoji_shortcode_roundtrip() {
-        assert_eq!(
-            emoji_shortcode_for_token("😀").as_deref(),
-            Some("grinning")
-        );
+        assert_eq!(emoji_shortcode_for_token("😀").as_deref(), Some("grinning"));
         assert_eq!(
             emoji_shortcode_for_token("grinning").as_deref(),
             Some("grinning")

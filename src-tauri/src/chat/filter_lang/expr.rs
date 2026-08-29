@@ -47,9 +47,7 @@ impl Expression {
                 let all_strings = vals.iter().all(|v| matches!(v, FilterValue::String(_)));
                 if all_strings {
                     FilterValue::StringList(
-                        vals.into_iter()
-                            .filter_map(|v| v.as_string())
-                            .collect(),
+                        vals.into_iter().filter_map(|v| v.as_string()).collect(),
                     )
                 } else {
                     FilterValue::List(vals)
@@ -59,7 +57,9 @@ impl Expression {
                 TokenType::Not => FilterValue::Bool(!right.execute(ctx).as_bool().unwrap_or(false)),
                 _ => FilterValue::Bool(false),
             },
-            Self::Binary { op, left, right } => eval_binary(*op, left.execute(ctx), right.execute(ctx)),
+            Self::Binary { op, left, right } => {
+                eval_binary(*op, left.execute(ctx), right.execute(ctx))
+            }
         }
     }
 
@@ -108,7 +108,9 @@ impl Expression {
                     PossibleType::IllTyped
                 }
             }
-            Self::Binary { op, left, right } => synth_binary(*op, left.synthesize_type(), right.synthesize_type()),
+            Self::Binary { op, left, right } => {
+                synth_binary(*op, left.synthesize_type(), right.synthesize_type())
+            }
         }
     }
 }
@@ -127,14 +129,16 @@ fn synth_binary(op: TokenType, left: PossibleType, right: PossibleType) -> Possi
     };
     match op {
         TokenType::Plus if l == FilterType::String => PossibleType::Typed(FilterType::String),
-        TokenType::Plus | TokenType::Minus | TokenType::Multiply | TokenType::Divide | TokenType::Mod
+        TokenType::Plus
+        | TokenType::Minus
+        | TokenType::Multiply
+        | TokenType::Divide
+        | TokenType::Mod
             if l == FilterType::Int && r == FilterType::Int =>
         {
             PossibleType::Typed(FilterType::Int)
         }
-        TokenType::And | TokenType::Or
-            if l == FilterType::Bool && r == FilterType::Bool =>
-        {
+        TokenType::And | TokenType::Or if l == FilterType::Bool && r == FilterType::Bool => {
             PossibleType::Typed(FilterType::Bool)
         }
         TokenType::Eq | TokenType::Neq => PossibleType::Typed(FilterType::Bool),
@@ -148,8 +152,9 @@ fn synth_binary(op: TokenType, left: PossibleType, right: PossibleType) -> Possi
         {
             PossibleType::Typed(FilterType::Bool)
         }
-        TokenType::Match if l == FilterType::String
-            && (r == FilterType::RegularExpression || r == FilterType::MatchingSpecifier) =>
+        TokenType::Match
+            if l == FilterType::String
+                && (r == FilterType::RegularExpression || r == FilterType::MatchingSpecifier) =>
         {
             if r == FilterType::MatchingSpecifier {
                 PossibleType::Typed(FilterType::String)
@@ -261,18 +266,18 @@ fn coerce_equal(left: &mut FilterValue, right: &mut FilterValue) -> bool {
 }
 
 fn ci_contains(hay: &str, needle: &str) -> bool {
-    hay.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
+    hay.to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
 }
 
 fn eval_contains(left: FilterValue, right: FilterValue) -> FilterValue {
     if let (Some(list), Some(needle)) = (left.as_string_list(), right.as_string()) {
-        return FilterValue::Bool(
-            list.iter().any(|s| s.eq_ignore_ascii_case(&needle)),
-        );
+        return FilterValue::Bool(list.iter().any(|s| s.eq_ignore_ascii_case(&needle)));
     }
     if let (Some(list), Some(needle)) = (left.as_list(), right.as_string()) {
         return FilterValue::Bool(
-            list.iter().any(|v| v.as_string().as_deref() == Some(needle.as_str())),
+            list.iter()
+                .any(|v| v.as_string().as_deref() == Some(needle.as_str())),
         );
     }
     if let (Some(a), Some(b)) = (left.as_string(), right.as_string()) {
@@ -303,10 +308,7 @@ fn eval_starts_with(left: FilterValue, right: FilterValue) -> FilterValue {
 
 fn eval_ends_with(left: FilterValue, right: FilterValue) -> FilterValue {
     if let (Some(list), Some(needle)) = (left.as_string_list(), right.as_string()) {
-        return FilterValue::Bool(
-            list.last()
-                .is_some_and(|s| s.eq_ignore_ascii_case(&needle)),
-        );
+        return FilterValue::Bool(list.last().is_some_and(|s| s.eq_ignore_ascii_case(&needle)));
     }
     if let (Some(list), Some(needle)) = (left.as_list(), right.as_string()) {
         return FilterValue::Bool(
@@ -470,13 +472,12 @@ impl FilterParser {
     }
 
     fn parse_condition(&mut self) -> Expression {
-        let mut value = if self.tokenizer.has_next()
-            && self.tokenizer.next_token_type() == TokenType::Lp
-        {
-            self.parse_parentheses()
-        } else {
-            self.parse_value()
-        };
+        let mut value =
+            if self.tokenizer.has_next() && self.tokenizer.next_token_type() == TokenType::Lp {
+                self.parse_parentheses()
+            } else {
+                self.parse_value()
+            };
 
         loop {
             if !self.tokenizer.has_next() {
@@ -525,7 +526,10 @@ impl FilterParser {
             e
         } else {
             let msg = if self.tokenizer.has_next() {
-                format!("Missing closing parentheses: got {}", self.tokenizer.preview())
+                format!(
+                    "Missing closing parentheses: got {}",
+                    self.tokenizer.preview()
+                )
             } else {
                 "Missing closing parentheses at end of statement".into()
             };

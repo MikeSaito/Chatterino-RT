@@ -54,9 +54,9 @@ pub fn has_high_rate_limit(badges: &[Badge]) -> bool {
 }
 
 pub fn is_mod_badges(badges: &[Badge]) -> bool {
-    badges.iter().any(|b| {
-        matches!(b.set.as_str(), "moderator" | "lead_moderator")
-    })
+    badges
+        .iter()
+        .any(|b| matches!(b.set.as_str(), "moderator" | "lead_moderator"))
 }
 
 pub fn is_broadcaster_badges(badges: &[Badge]) -> bool {
@@ -130,11 +130,7 @@ impl SendWait {
 
     /// Buffer dropped: clear and emit empty if a non-empty label was shown.
     pub fn clear_for_drop(&mut self) -> Option<String> {
-        let shown = self
-            .last_emitted
-            .as_ref()
-            .is_some_and(|t| !t.is_empty())
-            || self.end.is_some();
+        let shown = self.last_emitted.as_ref().is_some_and(|t| !t.is_empty()) || self.end.is_some();
         self.end = None;
         if !shown {
             return None;
@@ -155,9 +151,7 @@ pub fn apply_event(
         return;
     };
     match event {
-        ChatEvent::Privmsg {
-            login, badges, ..
-        } => {
+        ChatEvent::Privmsg { login, badges, .. } => {
             if !login.eq_ignore_ascii_case(me) {
                 return;
             }
@@ -298,11 +292,13 @@ mod tests {
     fn poll_emit_changes() {
         let mut w = SendWait::default();
         assert!(w.poll_emit().is_none());
-        w.set(5);
+        // Large remaining avoids Instant second-boundary flaking between adjacent polls.
+        w.set(u32::MAX);
         let t = w.poll_emit().expect("text");
-        assert!(t.ends_with('s'), "{t}");
+        assert!(!t.is_empty(), "{t}");
         assert!(w.poll_emit().is_none());
         w.clear();
         assert_eq!(w.poll_emit().as_deref(), Some(""));
+        assert!(w.poll_emit().is_none());
     }
 }

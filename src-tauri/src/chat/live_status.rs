@@ -35,11 +35,7 @@ async fn run_poller(app: AppHandle, shared: Shared) {
         if LIVE_SHUTDOWN.load(Ordering::SeqCst) {
             break;
         }
-        let active = shared
-            .hub
-            .lock()
-            .ok()
-            .and_then(|hub| hub.active.clone());
+        let active = shared.hub.lock().ok().and_then(|hub| hub.active.clone());
         let changed = active != last_active;
         if changed {
             last_active = active.clone();
@@ -62,18 +58,9 @@ fn channel_live_payload(channel: &str, status: &helix::StreamStatus) -> ChannelL
         channel: channel.to_string(),
         live: status.live,
         viewer_count: status.live.then(|| status.viewer_count).flatten(),
-        game_name: status
-            .live
-            .then(|| status.game_name.clone())
-            .flatten(),
-        stream_title: status
-            .live
-            .then(|| status.stream_title.clone())
-            .flatten(),
-        started_at: status
-            .live
-            .then(|| status.started_at.clone())
-            .flatten(),
+        game_name: status.live.then(|| status.game_name.clone()).flatten(),
+        stream_title: status.live.then(|| status.stream_title.clone()).flatten(),
+        started_at: status.live.then(|| status.started_at.clone()).flatten(),
     }
 }
 
@@ -89,8 +76,7 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
     }
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
-    let Some(status) =
-        helix::fetch_channel_stream(channel, token.as_deref(), &client_id).await
+    let Some(status) = helix::fetch_channel_stream(channel, token.as_deref(), &client_id).await
     else {
         return;
     };

@@ -240,23 +240,11 @@ mod tests {
     fn uses_datasource_unified_names() {
         let heart = attach_emoji("\u{2764}", &[], "Twitter");
         assert_eq!(heart.len(), 1);
-        assert!(
-            heart[0].url.ends_with("/2764-fe0f.png"),
-            "{}",
-            heart[0].url
-        );
+        assert!(heart[0].url.ends_with("/2764-fe0f.png"), "{}", heart[0].url);
         let copy = attach_emoji("\u{a9}", &[], "Apple");
         assert_eq!(copy.len(), 1);
-        assert!(
-            copy[0].url.contains("/apple/64/"),
-            "{}",
-            copy[0].url
-        );
-        assert!(
-            copy[0].url.ends_with("/00a9-fe0f.png"),
-            "{}",
-            copy[0].url
-        );
+        assert!(copy[0].url.contains("/apple/64/"), "{}", copy[0].url);
+        assert!(copy[0].url.ends_with("/00a9-fe0f.png"), "{}", copy[0].url);
     }
 
     #[test]

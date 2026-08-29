@@ -13,10 +13,7 @@ pub const AUMID: &str = "com.mike.webtv-chats";
 pub const SHORTCUT_FILE_NAME: &str = "Chatterino RT.lnk";
 
 pub fn should_create_shortcut(knobs: &BTreeMap<String, Value>) -> bool {
-    knobs
-        .get(KNOB)
-        .and_then(Value::as_bool)
-        .unwrap_or(true)
+    knobs.get(KNOB).and_then(Value::as_bool).unwrap_or(true)
 }
 
 pub fn start_menu_programs_lnk(appdata: &Path) -> PathBuf {
@@ -72,9 +69,7 @@ fn ensure_toast_shortcut() -> Result<(), String> {
         CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
-    use windows::Win32::UI::Shell::{
-        IShellLinkW, PropertiesSystem::IPropertyStore, ShellLink,
-    };
+    use windows::Win32::UI::Shell::{IShellLinkW, PropertiesSystem::IPropertyStore, ShellLink};
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe_canon = std::fs::canonicalize(&exe).unwrap_or_else(|_| exe.clone());
@@ -102,8 +97,8 @@ fn ensure_toast_shortcut() -> Result<(), String> {
     }
 
     unsafe {
-        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| e.to_string())?;
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
         let exe_hs = HSTRING::from(exe.as_os_str());
         link.SetPath(&exe_hs).map_err(|e| e.to_string())?;
         if let Some(dir) = exe.parent() {
@@ -176,21 +171,22 @@ fn open_shell_link(lnk: &Path) -> Result<windows::Win32::UI::Shell::IShellLinkW,
     use std::os::windows::ffi::OsStrExt;
 
     use windows::core::{Interface, PCWSTR};
-    use windows::Win32::System::Com::{
-        CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER,
-    };
+    use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER};
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
     unsafe {
-        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| e.to_string())?;
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
         let persist: IPersistFile = link.cast().map_err(|e| e.to_string())?;
         let lnk_wide: Vec<u16> = OsStr::new(lnk)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
         persist
-            .Load(PCWSTR(lnk_wide.as_ptr()), windows::Win32::System::Com::STGM_READ)
+            .Load(
+                PCWSTR(lnk_wide.as_ptr()),
+                windows::Win32::System::Com::STGM_READ,
+            )
             .map_err(|e| e.to_string())?;
         Ok(link)
     }

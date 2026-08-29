@@ -17,9 +17,7 @@ fn knob_usize(knobs: &BTreeMap<String, Value>, key: &str) -> Option<usize> {
 }
 
 pub fn scrollback_split_limit(knobs: &BTreeMap<String, Value>) -> usize {
-    clamp_limit(
-        knob_usize(knobs, "misc.scrollbackSplitLimit").unwrap_or(DEFAULT_SCROLLBACK_LIMIT),
-    )
+    clamp_limit(knob_usize(knobs, "misc.scrollbackSplitLimit").unwrap_or(DEFAULT_SCROLLBACK_LIMIT))
 }
 
 pub fn scrollback_usercard_limit(knobs: &BTreeMap<String, Value>) -> usize {

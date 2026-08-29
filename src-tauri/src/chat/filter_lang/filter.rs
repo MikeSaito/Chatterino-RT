@@ -1,7 +1,7 @@
 // MIT reimpl: Chatterino filters/lang/Filter.cpp + FilterRecord.cpp
 
 use super::context::RunContext;
-use super::expr::{FilterParser, Expression};
+use super::expr::{Expression, FilterParser};
 use super::types::{FilterType, PossibleType};
 
 #[derive(Clone)]
@@ -23,10 +23,7 @@ impl CompiledFilter {
         let Some(expr) = parser.release() else {
             return Err(vec!["Empty filter".into()]);
         };
-        Ok(Self {
-            expr,
-            return_type,
-        })
+        Ok(Self { expr, return_type })
     }
 
     pub fn execute(&self, ctx: &RunContext<'_>) -> bool {
@@ -153,8 +150,9 @@ mod tests {
         )
         .unwrap();
         assert!(f2.execute(&ctx));
-        let f3 = CompiledFilter::from_string(r#"author.external_badges contains "frankerfacez:bot""#)
-            .unwrap();
+        let f3 =
+            CompiledFilter::from_string(r#"author.external_badges contains "frankerfacez:bot""#)
+                .unwrap();
         assert!(f3.execute(&ctx));
     }
 

@@ -37,7 +37,10 @@ pub fn parse_ffz_room_extras(value: &Value) -> FfzChannelExtras {
 }
 
 fn parse_authority_badge(urls: &Value, tooltip: &str) -> Option<AuthorityBadge> {
-    let url = urls.get("1").and_then(Value::as_str).and_then(allowed_ffz_url)?;
+    let url = urls
+        .get("1")
+        .and_then(Value::as_str)
+        .and_then(allowed_ffz_url)?;
     Some(AuthorityBadge {
         url,
         tooltip: tooltip.to_string(),
@@ -195,10 +198,16 @@ mod tests {
             },
         ];
         apply_custom_authority(&mut badges, &extras, true, true);
-        assert!(badges[0].url.as_ref().is_some_and(|u| u.contains("room-badge/mod")));
+        assert!(badges[0]
+            .url
+            .as_ref()
+            .is_some_and(|u| u.contains("room-badge/mod")));
         assert_eq!(badges[0].set, "moderator");
         assert_eq!(badges[0].source, "twitch");
-        assert!(badges[1].url.as_ref().is_some_and(|u| u.contains("room-badge/vip")));
+        assert!(badges[1]
+            .url
+            .as_ref()
+            .is_some_and(|u| u.contains("room-badge/vip")));
     }
 
     #[test]
@@ -253,7 +262,10 @@ mod tests {
             }
         });
         let extras = parse_ffz_room_extras(&value);
-        assert_eq!(extras.user_badges.get("0").map(|v| v.as_slice()), Some(&[1][..]));
+        assert_eq!(
+            extras.user_badges.get("0").map(|v| v.as_slice()),
+            Some(&[1][..])
+        );
         assert!(!extras.user_badges.contains_key(""));
     }
 }

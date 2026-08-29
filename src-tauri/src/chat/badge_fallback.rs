@@ -16,10 +16,7 @@ pub fn seed_global(catalog: &mut BadgeCatalog) {
 fn essential_global_map() -> BadgeMap {
     let mut map = BadgeMap::new();
     for (set, version, uuid) in ESSENTIAL {
-        map.insert(
-            format!("{set}/{version}"),
-            format!("{CDN}/{uuid}/1"),
-        );
+        map.insert(format!("{set}/{version}"), format!("{CDN}/{uuid}/1"));
     }
     map
 }
@@ -43,7 +40,11 @@ const ESSENTIAL: &[(&str, &str, &str)] = &[
     ("glhf-pledge", "1", "3158e758-3cb4-43c5-94b3-7639810451c5"),
     ("hype-train", "1", "fae4086c-3190-44d4-83c8-8ef0cbe1a515"),
     ("hype-train", "2", "9c8d038a-3a29-45ea-96d4-5031fb1a7a81"),
-    ("lead_moderator", "1", "0822047b-65e0-46f2-94a9-d1091d685d33"),
+    (
+        "lead_moderator",
+        "1",
+        "0822047b-65e0-46f2-94a9-d1091d685d33",
+    ),
     ("twitchbot", "1", "df9095f6-a8a0-4cc2-bb33-d908c0adffb8"),
     ("subscriber", "0", "5d9f2208-5dd8-11e7-8513-2ff4adfae661"),
     ("subscriber", "1", "5d9f2208-5dd8-11e7-8513-2ff4adfae661"),
@@ -70,12 +71,36 @@ const ESSENTIAL: &[(&str, &str, &str)] = &[
     ("sub-gifter", "25", "052a5d41-f1cc-455c-bc7b-fe841ffaf17f"),
     ("sub-gifter", "50", "c4a29737-e8a5-4420-917a-314a447f083e"),
     ("sub-gifter", "100", "8343ada7-3451-434e-91c4-e82bdcf54460"),
-    ("sub-gift-leader", "1", "21656088-7da2-4467-acd2-55220e1f45ad"),
-    ("sub-gift-leader", "2", "0d9fe96b-97b7-4215-b5f3-5328ebad271c"),
-    ("sub-gift-leader", "3", "4c6e4497-eed9-4dd3-ac64-e0599d0a63e5"),
-    ("predictions", "blue-1", "e33d8b46-f63b-4e67-996d-4a7dcec0ad33"),
-    ("predictions", "pink-1", "75e27613-caf7-4585-98f1-cb7363a69a4a"),
-    ("predictions", "gray-1", "144f77a2-e324-4a6b-9c17-9304fa193a27"),
+    (
+        "sub-gift-leader",
+        "1",
+        "21656088-7da2-4467-acd2-55220e1f45ad",
+    ),
+    (
+        "sub-gift-leader",
+        "2",
+        "0d9fe96b-97b7-4215-b5f3-5328ebad271c",
+    ),
+    (
+        "sub-gift-leader",
+        "3",
+        "4c6e4497-eed9-4dd3-ac64-e0599d0a63e5",
+    ),
+    (
+        "predictions",
+        "blue-1",
+        "e33d8b46-f63b-4e67-996d-4a7dcec0ad33",
+    ),
+    (
+        "predictions",
+        "pink-1",
+        "75e27613-caf7-4585-98f1-cb7363a69a4a",
+    ),
+    (
+        "predictions",
+        "gray-1",
+        "144f77a2-e324-4a6b-9c17-9304fa193a27",
+    ),
 ];
 
 #[cfg(test)]

@@ -58,18 +58,15 @@ impl SeventvBadgeCatalog {
         if !self.known.contains_key(ref_id) {
             return;
         }
-        self.user_badges.insert(user_id.to_string(), ref_id.to_string());
+        self.user_badges
+            .insert(user_id.to_string(), ref_id.to_string());
     }
 
     pub fn clear_user(&mut self, ref_id: &str, user_id: &str) {
         if ref_id.is_empty() || user_id.is_empty() {
             return;
         }
-        if self
-            .user_badges
-            .get(user_id)
-            .is_some_and(|id| id == ref_id)
-        {
+        if self.user_badges.get(user_id).is_some_and(|id| id == ref_id) {
             self.user_badges.remove(user_id);
         }
     }
@@ -104,13 +101,19 @@ pub fn parse_entitlement(data: &Value) -> Option<(String, String)> {
     if obj.get("kind").and_then(Value::as_str)? != "BADGE" {
         return None;
     }
-    let ref_id = obj.get("ref_id").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+    let ref_id = obj
+        .get("ref_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())?;
     let connections = obj.get("user")?.get("connections")?.as_array()?;
     for conn in connections {
         if conn.get("platform").and_then(Value::as_str) != Some("TWITCH") {
             continue;
         }
-        let user_id = conn.get("id").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+        let user_id = conn
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())?;
         return Some((ref_id.to_string(), user_id.to_string()));
     }
     None
@@ -157,7 +160,9 @@ mod tests {
     #[test]
     fn register_badge_uses_static_webp() {
         let mut cat = SeventvBadgeCatalog::default();
-        let id = cat.register_badge(&sample_badge_data()).expect("registered");
+        let id = cat
+            .register_badge(&sample_badge_data())
+            .expect("registered");
         assert_eq!(id, "badge1");
         let badge = cat.known.get("badge1").expect("known");
         assert_eq!(badge.source, "7tv");

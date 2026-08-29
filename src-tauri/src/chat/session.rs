@@ -51,7 +51,10 @@ pub fn ensure_can_open(shared: &Shared, normalized: &str) -> Result<(), ApiError
     if !valid_login(normalized) {
         return Err(ApiError::invalid("имя канала: 1-25 символов [a-z0-9_]"));
     }
-    let inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+    let inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
     if inner.data.open.iter().any(|c| c == normalized) {
         return Ok(());
     }
@@ -84,7 +87,10 @@ pub fn preferred_focus(shared: &Shared) -> Option<String> {
 pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<Session, ApiError> {
     ensure_can_open(shared, &normalized)?;
     let (path, data) = {
-        let mut inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+        let mut inner = shared
+            .session
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
         let list = &mut inner.data.recents;
         if let Some(pos) = list.iter().position(|c| c == &normalized) {
             list.remove(pos);
@@ -113,7 +119,10 @@ pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<S
 
 pub fn forget_open(shared: &Shared, normalized: &str) -> Result<Session, ApiError> {
     let (path, data) = {
-        let mut inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+        let mut inner = shared
+            .session
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
         // Leave removes the tab entirely: drop from open and recents so hydrate
         // with showRecents does not bring the channel back after restart.
         inner.data.open.retain(|c| c != normalized);
@@ -129,7 +138,10 @@ pub fn forget_open(shared: &Shared, normalized: &str) -> Result<Session, ApiErro
 
 pub fn clear_last(shared: &Shared) -> Result<Session, ApiError> {
     let (path, data) = {
-        let mut inner = shared.session.lock().map_err(|_| ApiError::internal("lock"))?;
+        let mut inner = shared
+            .session
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
         inner.data.last_channel = None;
         inner.data.open.clear();
         (inner.path.clone(), inner.data.clone())
@@ -139,11 +151,7 @@ pub fn clear_last(shared: &Shared) -> Result<Session, ApiError> {
 }
 
 pub fn emit_rooms(app: &AppHandle, shared: &Shared, dropped: Option<String>) {
-    let active = shared
-        .hub
-        .lock()
-        .ok()
-        .and_then(|h| h.active.clone());
+    let active = shared.hub.lock().ok().and_then(|h| h.active.clone());
     let open = shared
         .session
         .lock()
@@ -163,9 +171,7 @@ pub fn emit_rooms(app: &AppHandle, shared: &Shared, dropped: Option<String>) {
 fn valid_login(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 25
-        && login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn load_file(path: &Path) -> Session {
@@ -219,10 +225,8 @@ mod tests {
         let shared = Shared::new();
         {
             let mut inner = shared.session.lock().unwrap();
-            inner.path = std::env::temp_dir().join(format!(
-                "webtv-session-test-{}.json",
-                std::process::id()
-            ));
+            inner.path = std::env::temp_dir()
+                .join(format!("webtv-session-test-{}.json", std::process::id()));
         }
         for i in 0..MAX_OPEN {
             remember(&shared, format!("u{i}"), true).unwrap();
@@ -240,7 +244,10 @@ mod tests {
         assert!(!snap2.open.contains(&"u0".to_string()));
         assert!(!snap2.recents.contains(&"u0".to_string()));
         remember(&shared, "overflow".into(), true).unwrap();
-        assert!(snapshot(&shared).unwrap().open.contains(&"overflow".to_string()));
+        assert!(snapshot(&shared)
+            .unwrap()
+            .open
+            .contains(&"overflow".to_string()));
         remember(&shared, "u1".into(), false).unwrap();
         assert_ne!(snapshot(&shared).unwrap().open[0], "u1");
         let _ = fs::remove_file(&shared.session.lock().unwrap().path);

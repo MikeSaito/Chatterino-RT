@@ -30,7 +30,10 @@ pub fn validate_scheme(raw: &str) -> Result<String, String> {
     if scheme.chars().count() > MAX_SCHEME_CHARS {
         return Err("Custom stream player URI scheme is too long.".into());
     }
-    if scheme.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\') {
+    if scheme
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+    {
         return Err("Custom stream player URI scheme contains forbidden characters.".into());
     }
     let Some(sep) = scheme.find("://") else {

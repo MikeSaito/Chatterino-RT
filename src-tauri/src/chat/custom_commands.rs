@@ -143,8 +143,8 @@ pub fn expand(template: &str, words: &[String], ctx: &ExpandContext) -> String {
     let mut last_end = 0usize;
     for caps in re.captures_iter(template) {
         let m = caps.get(0).expect("full match");
-        let prefix_len = caps.get(1).map(|c| c.len()).unwrap_or(0)
-            + caps.get(2).map(|c| c.len()).unwrap_or(0);
+        let prefix_len =
+            caps.get(1).map(|c| c.len()).unwrap_or(0) + caps.get(2).map(|c| c.len()).unwrap_or(0);
         let prefix_end = m.start() + prefix_len;
         result.push_str(&template[last_end..prefix_end]);
         last_end = m.end();
@@ -252,12 +252,7 @@ mod tests {
 
     #[test]
     fn word_index_and_plus() {
-        let words = vec![
-            "/shout".into(),
-            "one".into(),
-            "two".into(),
-            "three".into(),
-        ];
+        let words = vec!["/shout".into(), "one".into(), "two".into(), "three".into()];
         assert_eq!(expand("/me {1}", &words, &ctx()), "/me one");
         assert_eq!(expand("args {2+}", &words, &ctx()), "args two three");
     }
@@ -266,7 +261,10 @@ mod tests {
     fn vars_and_alt() {
         let c = ctx();
         assert_eq!(expand("{user.name}", &[], &c), "viewer");
-        assert_eq!(expand("{user.name;fallback}", &[], &ExpandContext::default()), "fallback");
+        assert_eq!(
+            expand("{user.name;fallback}", &[], &ExpandContext::default()),
+            "fallback"
+        );
         assert_eq!(expand("{channel.name}", &[], &c), "xqc");
         assert_eq!(expand("{stream.game}", &[], &c), "Just Chatting");
         assert_eq!(expand("{input.text}", &[], &c), "composer");

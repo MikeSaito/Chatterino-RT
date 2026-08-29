@@ -31,10 +31,7 @@ impl FindMentions<'static> {
     }
 }
 
-pub fn decorate_text_spans(
-    text: &str,
-    emotes: &[EmoteSpan],
-) -> (Vec<LinkSpan>, Vec<MentionSpan>) {
+pub fn decorate_text_spans(text: &str, emotes: &[EmoteSpan]) -> (Vec<LinkSpan>, Vec<MentionSpan>) {
     decorate_text_spans_ex(text, emotes, FindMentions::none())
 }
 
@@ -82,7 +79,8 @@ fn parse_links(text: &str, emotes: &[EmoteSpan]) -> Vec<LinkSpan> {
             end = i + strip_url_tail(&chars[i..end], scheme_chars);
             let candidate: String = chars[i..end].iter().collect();
             let span_end = start_u16 + utf16_len(&chars[i..end]);
-            if !overlaps(emotes, start_u16, span_end) && !overlaps_links(&out, start_u16, span_end) {
+            if !overlaps(emotes, start_u16, span_end) && !overlaps_links(&out, start_u16, span_end)
+            {
                 if let Ok(url) = allowed_chat_url(&candidate) {
                     out.push(LinkSpan {
                         start: start_u16,
@@ -230,9 +228,7 @@ fn bare_login_span(word: &str) -> Option<(&str, u32)> {
 fn valid_login_token(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 25
-        && login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn scheme_len(chars: &[char]) -> Option<usize> {
@@ -299,11 +295,17 @@ mod tests {
         let emotes = vec![twitch(0, 5)];
         let (links, mentions) = decorate_text_spans(text, &emotes);
         assert_eq!(links.len(), 1);
-        assert_eq!(&text[links[0].start as usize..links[0].end as usize], "https://example.com");
+        assert_eq!(
+            &text[links[0].start as usize..links[0].end as usize],
+            "https://example.com"
+        );
         assert_eq!(links[0].url, "https://example.com/");
         assert_eq!(mentions.len(), 1);
         assert_eq!(mentions[0].login, "bob");
-        assert_eq!(&text[mentions[0].start as usize..mentions[0].end as usize], "@bob");
+        assert_eq!(
+            &text[mentions[0].start as usize..mentions[0].end as usize],
+            "@bob"
+        );
     }
 
     #[test]
@@ -328,7 +330,10 @@ mod tests {
         let text = "go https://example.com.";
         let (links, _) = decorate_text_spans(text, &[]);
         assert_eq!(links.len(), 1);
-        assert_eq!(&text[links[0].start as usize..links[0].end as usize], "https://example.com");
+        assert_eq!(
+            &text[links[0].start as usize..links[0].end as usize],
+            "https://example.com"
+        );
     }
 
     #[test]

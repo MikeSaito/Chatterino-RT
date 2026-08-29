@@ -169,10 +169,20 @@ mod tests {
             source_badges: vec![],
         };
         assert!(!expression_filter_passes(
-            &set, false, &event, "xqc", false, Some("me")
+            &set,
+            false,
+            &event,
+            "xqc",
+            false,
+            Some("me")
         ));
         assert!(expression_filter_passes(
-            &set, true, &event, "xqc", false, Some("me")
+            &set,
+            true,
+            &event,
+            "xqc",
+            false,
+            Some("me")
         ));
     }
 }

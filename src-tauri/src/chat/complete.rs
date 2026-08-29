@@ -138,10 +138,7 @@ pub fn apply_smart_emotes(
         if !have_upper {
             return Vec::new();
         }
-        matched = codes
-            .into_iter()
-            .filter(|c| matches(&c, false))
-            .collect();
+        matched = codes.into_iter().filter(|c| matches(&c, false)).collect();
         if matched.is_empty() {
             return matched;
         }
@@ -243,10 +240,7 @@ pub fn rank_prefix(items: &mut Vec<String>, prefix: &str) {
     if needle.is_empty() {
         return;
     }
-    if let Some(i) = items
-        .iter()
-        .position(|n| n.eq_ignore_ascii_case(needle))
-    {
+    if let Some(i) = items.iter().position(|n| n.eq_ignore_ascii_case(needle)) {
         let exact = items.remove(i);
         items.insert(0, exact);
     }
@@ -412,9 +406,7 @@ mod tests {
 
     #[test]
     fn reserves_user_slots_when_emotes_flood() {
-        let emotes: Vec<String> = (0..COMPLETE_LIMIT)
-            .map(|i| format!("aa{i}"))
-            .collect();
+        let emotes: Vec<String> = (0..COMPLETE_LIMIT).map(|i| format!("aa{i}")).collect();
         let users = vec!["aardvark".to_string()];
         let out = suggestions("aa", false, emotes, users);
         assert_eq!(out.len(), COMPLETE_LIMIT);
@@ -461,13 +453,8 @@ mod tests {
             false,
         );
         assert_eq!(empty_q.first().map(String::as_str), Some("Ab"));
-        let colon_code = apply_smart_emotes(
-            ")",
-            vec![":)".into(), "Kappa".into()],
-            true,
-            true,
-            false,
-        );
+        let colon_code =
+            apply_smart_emotes(")", vec![":)".into(), "Kappa".into()], true, true, false);
         assert_eq!(colon_code.first().map(String::as_str), Some(":)"));
     }
 

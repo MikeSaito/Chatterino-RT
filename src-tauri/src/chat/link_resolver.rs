@@ -27,7 +27,8 @@ pub struct LinkInfoResponse {
 struct LinkResolverState {
     cache: HashMap<String, LinkInfoResponse>,
     order: Vec<String>,
-    inflight: HashMap<String, Vec<tokio::sync::oneshot::Sender<Result<LinkInfoResponse, ApiError>>>>,
+    inflight:
+        HashMap<String, Vec<tokio::sync::oneshot::Sender<Result<LinkInfoResponse, ApiError>>>>,
 }
 
 impl LinkResolverState {
@@ -72,9 +73,8 @@ fn state() -> &'static Mutex<LinkResolverState> {
 }
 
 fn resolver_base_url() -> String {
-    std::env::var("CHATTERINO2_LINK_RESOLVER_URL").unwrap_or_else(|_| {
-        "https://braize.pajlada.com/chatterino/link_resolver/".to_string()
-    })
+    std::env::var("CHATTERINO2_LINK_RESOLVER_URL")
+        .unwrap_or_else(|_| "https://braize.pajlada.com/chatterino/link_resolver/".to_string())
 }
 
 /// Qt QUrl::toPercentEncoding(url, {}, "/:")
@@ -209,9 +209,7 @@ pub async fn resolve_link_info(url: String) -> Result<LinkInfoResponse, ApiError
             .await
             .unwrap_or_else(|_| Err(ApiError::internal("link resolver wait failed")));
     }
-    guard
-        .inflight
-        .insert(normalized.clone(), Vec::new());
+    guard.inflight.insert(normalized.clone(), Vec::new());
     drop(guard);
 
     let result = fetch_link_info(&normalized).await;

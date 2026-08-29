@@ -31,9 +31,8 @@ pub fn allow_embed_storage<R: Runtime>(app: &impl Manager<R>) {
         if let Err(err) = window.with_webview(move |platform| {
             if let Err(e) = disable_tracking_prevention(platform) {
                 eprintln!("webview tracking prevention: {e}");
-                let _ = window_for_js.eval(
-                    "console.error('WebView2: storage для Twitch embed не включён')",
-                );
+                let _ = window_for_js
+                    .eval("console.error('WebView2: storage для Twitch embed не включён')");
             }
         }) {
             eprintln!("webview handle: {err}");

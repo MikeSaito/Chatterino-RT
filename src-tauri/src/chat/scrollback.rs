@@ -111,11 +111,7 @@ impl Scrollback {
         if events.is_empty() {
             return 0;
         }
-        let existing: HashSet<String> = self
-            .items
-            .iter()
-            .map(|e| e.id().to_string())
-            .collect();
+        let existing: HashSet<String> = self.items.iter().map(|e| e.id().to_string()).collect();
         let mut incoming: Vec<ChatEvent> = events
             .iter()
             .filter(|e| !e.id().is_empty() && !existing.contains(e.id()))
@@ -158,12 +154,7 @@ impl Scrollback {
 
     /// Stock SearchPopup predicates (AND). Empty query: full snapshot capped.
     /// Chronological order; prefer newest when capped. `channel`/`room_id` for `in:`/`is:shared`.
-    pub fn search_hits(
-        &self,
-        query: &str,
-        channel: &str,
-        room_id: Option<&str>,
-    ) -> Vec<SearchHit> {
+    pub fn search_hits(&self, query: &str, channel: &str, room_id: Option<&str>) -> Vec<SearchHit> {
         let cap = self.limit;
         let needle = query.trim();
         if needle.is_empty() {
@@ -366,9 +357,7 @@ mod tests {
         let extra = notice("new-live", "live");
         q.push(extra, no_stack());
         assert_eq!(q.len(), DEFAULT_SCROLLBACK_LIMIT);
-        let history: Vec<ChatEvent> = (0..10)
-            .map(|i| notice(&format!("hist-{i}"), "h"))
-            .collect();
+        let history: Vec<ChatEvent> = (0..10).map(|i| notice(&format!("hist-{i}"), "h")).collect();
         assert_eq!(q.prepend_front(&history), 0);
         assert_eq!(q.snapshot().first().unwrap().id(), "1");
     }

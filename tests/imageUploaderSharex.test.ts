@@ -140,6 +140,9 @@ assertEq(parseShareXUrl("{data.link}"), "{data.link}", "passthrough");
   const text = JSON.stringify(round);
   const validated = validateImportJson(text);
   assert(validated.ok, "round validate");
+  if (!validated.ok) {
+    throw new Error("unreachable");
+  }
   const got = importImageUploaderSettings(validated.value);
   assert(got !== null, "round import");
   assertEq(got!.url, "https://api.imgur.com/3/image", "round url");

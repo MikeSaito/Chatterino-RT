@@ -379,13 +379,15 @@ pub fn mutate_highlight_blacklist(
     shared: &Shared,
     mutator: impl FnOnce(&mut Vec<HighlightBlacklistRow>) -> Result<(), String>,
 ) -> Result<(), ApiError> {
-    let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
+    let mut inner = shared
+        .settings
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
     if inner.path.as_os_str().is_empty() {
         return Err(ApiError::internal("settings path unset"));
     }
     let mut next = inner.data.clone();
-    mutator(&mut next.highlight_blacklist)
-        .map_err(|message| ApiError::internal(&message))?;
+    mutator(&mut next.highlight_blacklist).map_err(|message| ApiError::internal(&message))?;
     if next.highlight_blacklist.len() > MAX_TABLE_ROWS {
         return Err(ApiError::internal("highlight blacklist limit reached"));
     }
@@ -409,14 +411,18 @@ pub fn mutate_favourites(
     shared: &Shared,
     mutator: impl FnOnce(&mut Vec<String>, &mut Vec<String>) -> Result<(), String>,
 ) -> Result<(), ApiError> {
-    let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
+    let mut inner = shared
+        .settings
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
     if inner.path.as_os_str().is_empty() {
         return Err(ApiError::internal("settings path unset"));
     }
     let mut next = inner.data.clone();
     mutator(&mut next.favourite_emotes, &mut next.favourite_emojis)
         .map_err(|message| ApiError::internal(&message))?;
-    if next.favourite_emotes.len() > MAX_TABLE_ROWS || next.favourite_emojis.len() > MAX_TABLE_ROWS {
+    if next.favourite_emotes.len() > MAX_TABLE_ROWS || next.favourite_emojis.len() > MAX_TABLE_ROWS
+    {
         return Err(ApiError::invalid("favourites limit reached"));
     }
     for s in &mut next.favourite_emotes {
@@ -450,9 +456,14 @@ pub fn mutate_favourites(
 pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, ApiError> {
     let mut clean = sanitize(incoming)?;
     sync_filter_valid_flags(&mut clean.filters);
-    let mut inner = shared.settings.lock().map_err(|_| ApiError::internal("lock"))?;
+    let mut inner = shared
+        .settings
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
     if inner.path.as_os_str().is_empty() {
-        return Err(ApiError::internal("каталог конфигурации не инициализирован"));
+        return Err(ApiError::internal(
+            "каталог конфигурации не инициализирован",
+        ));
     }
     let prev_autorun = super::autorun::is_registered();
     if let Err(e) = super::autorun::apply_knob_to_registry(&clean.knobs) {
@@ -489,10 +500,13 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
     }
     super::highlight_sound::rebuild_allowed_paths(shared, &clean);
     if let Ok(mut pending) = shared.pending_highlight_sound.lock() {
-        if pending
-            .as_deref()
-            .is_some_and(|p| shared.allowed_highlight_sounds.lock().ok().is_some_and(|set| set.contains(p)))
-        {
+        if pending.as_deref().is_some_and(|p| {
+            shared
+                .allowed_highlight_sounds
+                .lock()
+                .ok()
+                .is_some_and(|set| set.contains(p))
+        }) {
             *pending = None;
         }
     }
@@ -532,11 +546,7 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
         } else {
             shared.notify_event(super::state::EventCmd::ClearGlobal);
         }
-        let active = shared
-            .hub
-            .lock()
-            .ok()
-            .and_then(|h| h.active.clone());
+        let active = shared.hub.lock().ok().and_then(|h| h.active.clone());
         let Some(login) = active else {
             return;
         };
@@ -921,10 +931,8 @@ mod tests {
         let shared = Shared::new();
         {
             let mut inner = shared.settings.lock().unwrap();
-            inner.path = std::env::temp_dir().join(format!(
-                "webtv-settings-test-{}.json",
-                std::process::id()
-            ));
+            inner.path = std::env::temp_dir()
+                .join(format!("webtv-settings-test-{}.json", std::process::id()));
         }
         let saved = replace(
             &shared,
@@ -960,10 +968,8 @@ mod tests {
     #[test]
     fn mutate_favourites_persists() {
         let shared = Shared::new();
-        let path = std::env::temp_dir().join(format!(
-            "webtv-favs-test-{}.json",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("webtv-favs-test-{}.json", std::process::id()));
         {
             let mut inner = shared.settings.lock().unwrap();
             inner.path = path.clone();
@@ -982,10 +988,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_display_json() {
-        let path = std::env::temp_dir().join(format!(
-            "webtv-settings-legacy-{}.json",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("webtv-settings-legacy-{}.json", std::process::id()));
         fs::write(
             &path,
             r#"{"fontScale":1.5,"showTimestamps":false,"hideModerated":true}"#,

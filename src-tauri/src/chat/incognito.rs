@@ -12,9 +12,7 @@ pub fn private_switch(exe: &Path) -> Option<&'static str> {
         .unwrap_or_default();
     match stem.as_str() {
         "librewolf" | "waterfox" | "icecat" => Some("-private-window"),
-        "chrome" | "google-chrome-stable" | "chromium" | "brave" | "vivaldi" => {
-            Some("-incognito")
-        }
+        "chrome" | "google-chrome-stable" | "chromium" | "brave" | "vivaldi" => Some("-incognito"),
         "opera" => Some("-newprivatetab"),
         "msedge" => Some("-inprivate"),
         _ if stem.starts_with("firefox") => Some("-private-window"),
@@ -35,7 +33,8 @@ pub fn open_incognito(url: &str) -> Result<(), String> {
     if exe.is_absolute() && !exe.is_file() {
         return Err("браузер по умолчанию не найден".into());
     }
-    let switch = private_switch(&exe).ok_or_else(|| "private mode не поддерживается".to_string())?;
+    let switch =
+        private_switch(&exe).ok_or_else(|| "private mode не поддерживается".to_string())?;
     let mut cmd = Command::new(&exe);
     cmd.arg(switch)
         .arg(url)
@@ -231,7 +230,9 @@ mod tests {
     #[test]
     fn private_switch_known_browsers() {
         assert_eq!(
-            private_switch(Path::new("C:/Program Files/Google/Chrome/Application/chrome.exe")),
+            private_switch(Path::new(
+                "C:/Program Files/Google/Chrome/Application/chrome.exe"
+            )),
             Some("-incognito")
         );
         assert_eq!(

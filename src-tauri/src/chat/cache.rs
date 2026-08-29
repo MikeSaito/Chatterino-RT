@@ -73,11 +73,7 @@ fn canon_existing_or_create(path: &Path) -> Result<PathBuf, ApiError> {
 }
 
 /// Wipe only if resolved equals default cache or the configured custom path.
-pub fn clear_allowed(
-    resolved: &Path,
-    default_dir: &Path,
-    custom: &str,
-) -> Result<bool, ApiError> {
+pub fn clear_allowed(resolved: &Path, default_dir: &Path, custom: &str) -> Result<bool, ApiError> {
     let resolved_c = canon_existing_or_create(resolved)?;
     let default_c = canon_existing_or_create(default_dir)?;
     if resolved_c == default_c {

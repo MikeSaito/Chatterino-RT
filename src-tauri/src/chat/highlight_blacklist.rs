@@ -2,9 +2,9 @@
 
 use serde::Serialize;
 
-use super::filters::{login_is_blacklisted, BlacklistRule};
 #[cfg(test)]
 use super::filters::blacklist_rules_from_settings;
+use super::filters::{login_is_blacklisted, BlacklistRule};
 use super::settings::{self, HighlightBlacklistRow};
 use super::state::Shared;
 
@@ -21,9 +21,7 @@ fn validate_login(raw: &str) -> Result<String, String> {
     let login = raw.trim().to_ascii_lowercase();
     if login.is_empty()
         || login.len() > 25
-        || !login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         return Err("invalid login".into());
     }
@@ -31,15 +29,14 @@ fn validate_login(raw: &str) -> Result<String, String> {
 }
 
 fn has_exact_row(rows: &[HighlightBlacklistRow], login: &str) -> bool {
-    rows.iter().any(|row| {
-        !row.regex && row.username.trim().eq_ignore_ascii_case(login)
-    })
+    rows.iter()
+        .any(|row| !row.regex && row.username.trim().eq_ignore_ascii_case(login))
 }
 
 fn has_exact_rule(rules: &[BlacklistRule], login: &str) -> bool {
-    rules.iter().any(|rule| {
-        !rule.is_regex && rule.pattern.trim().eq_ignore_ascii_case(login)
-    })
+    rules
+        .iter()
+        .any(|rule| !rule.is_regex && rule.pattern.trim().eq_ignore_ascii_case(login))
 }
 
 fn state_from_rules(rules: &[BlacklistRule], login: &str) -> IgnoreHighlightsState {

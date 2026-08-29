@@ -289,10 +289,7 @@ fn is_authority_badge(set: &str) -> bool {
 
 fn dedup_local_authority_badges(badges: &mut Vec<Badge>, source_sets: &[String]) {
     badges.retain(|b| {
-        !is_authority_badge(&b.set)
-            || !source_sets
-                .iter()
-                .any(|s| s.eq_ignore_ascii_case(&b.set))
+        !is_authority_badge(&b.set) || !source_sets.iter().any(|s| s.eq_ignore_ascii_case(&b.set))
     });
 }
 
@@ -363,10 +360,7 @@ async fn refresh_joined_channels(shared: &Shared) {
         .map(|hub| {
             hub.joined_channels()
                 .into_iter()
-                .filter_map(|login| {
-                    hub.room_id(&login)
-                        .map(|rid| (login, rid.to_string()))
-                })
+                .filter_map(|login| hub.room_id(&login).map(|rid| (login, rid.to_string())))
                 .collect()
         })
         .unwrap_or_default();

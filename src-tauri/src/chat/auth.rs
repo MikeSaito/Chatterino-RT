@@ -234,10 +234,7 @@ pub fn snapshot(app: &AppHandle, shared: &Shared) -> AuthInfo {
         };
     let env_pair = env_login_token();
     let from_env = env_pair.is_some();
-    let login = env_pair
-        .as_ref()
-        .map(|(l, _)| l.clone())
-        .or(current_login);
+    let login = env_pair.as_ref().map(|(l, _)| l.clone()).or(current_login);
     let has_token = env_pair.is_some() || login.is_some();
     let active = shared.hub.lock().ok();
     let can_send = has_token
@@ -291,7 +288,11 @@ fn valid_twitch_user_id(raw: &str) -> bool {
 
 pub fn resolved_twitch_user_id(shared: &Shared) -> Option<String> {
     let inner = shared.auth.lock().ok()?;
-    if let Some(id) = inner.cached_user_id.as_deref().filter(|s| valid_twitch_user_id(s)) {
+    if let Some(id) = inner
+        .cached_user_id
+        .as_deref()
+        .filter(|s| valid_twitch_user_id(s))
+    {
         return Some(id.to_string());
     }
     current_creds(&inner)
@@ -455,7 +456,9 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
 fn parse_chatterino_blob(raw: &str) -> Result<ParsedLogin, AuthFail> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err(AuthFail::invalid("вставьте код со страницы входа Chatterino"));
+        return Err(AuthFail::invalid(
+            "вставьте код со страницы входа Chatterino",
+        ));
     }
     if raw.len() > MAX_LOGIN_BLOB {
         return Err(AuthFail::invalid("код входа слишком длинный"));
@@ -590,11 +593,7 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
     remove_account(app, shared, login).await
 }
 
-pub async fn select_account(
-    app: AppHandle,
-    shared: Shared,
-    login: String,
-) -> Result<(), AuthFail> {
+pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
         return Err(AuthFail::config(
             "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
@@ -638,11 +637,7 @@ pub async fn select_account(
     Ok(())
 }
 
-pub async fn remove_account(
-    app: AppHandle,
-    shared: Shared,
-    login: String,
-) -> Result<(), AuthFail> {
+pub async fn remove_account(app: AppHandle, shared: Shared, login: String) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
         return Err(AuthFail::config(
             "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
@@ -781,7 +776,8 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
                             oauth_client_id(),
                             validated.user_id,
                         )
-                        .await {
+                        .await
+                        {
                             return;
                         }
                     }
@@ -870,8 +866,7 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
     if validate_login(&http_client(), &token).await.is_err() {
         let still = shared.auth.lock().ok().is_some_and(|inner| {
             inner.poll_gen == gen
-                && current_creds(&inner)
-                    .is_some_and(|c| c.login == login && c.token == token)
+                && current_creds(&inner).is_some_and(|c| c.login == login && c.token == token)
         });
         if still {
             reject_session(app, shared, "сохранённый вход недействителен").await;
@@ -903,11 +898,7 @@ fn still_current(shared: &Shared, gen: u64) -> bool {
 }
 
 async fn request_relogin(shared: &Shared) {
-    let tx = shared
-        .irc_tx
-        .lock()
-        .ok()
-        .and_then(|g| g.clone());
+    let tx = shared.irc_tx.lock().ok().and_then(|g| g.clone());
     if let Some(tx) = tx {
         let _ = tokio::time::timeout(Duration::from_secs(10), tx.send(IrcCmd::Relogin)).await;
     }
@@ -934,9 +925,8 @@ async fn request_device(client_id: &str) -> Result<DeviceJson, AuthFail> {
                 let status = resp.status();
                 match resp.json::<serde_json::Value>().await {
                     Ok(v) if status.is_success() => {
-                        return serde_json::from_value::<DeviceJson>(v).map_err(|_| {
-                            AuthFail::internal("некорректный ответ device code")
-                        });
+                        return serde_json::from_value::<DeviceJson>(v)
+                            .map_err(|_| AuthFail::internal("некорректный ответ device code"));
                     }
                     Ok(v) => {
                         last = v
@@ -1108,9 +1098,7 @@ fn env_oauth_token() -> Option<String> {
 fn valid_login(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 25
-        && login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn load_file(path: &Path) -> AuthStore {
@@ -1130,12 +1118,12 @@ fn parse_auth_json(raw: &str) -> Option<AuthStore> {
                 }
             }
             let current = multi.current.trim().to_lowercase();
-            let current_login = if valid_login(&current) && accounts.iter().any(|a| a.login == current)
-            {
-                Some(current)
-            } else {
-                accounts.first().map(|a| a.login.clone())
-            };
+            let current_login =
+                if valid_login(&current) && accounts.iter().any(|a| a.login == current) {
+                    Some(current)
+                } else {
+                    accounts.first().map(|a| a.login.clone())
+                };
             return Some(AuthStore {
                 accounts,
                 current_login,
@@ -1181,7 +1169,9 @@ fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AuthFail::internal(format!("не удалось удалить сессию: {e}"))),
+        Err(e) => Err(AuthFail::internal(format!(
+            "не удалось удалить сессию: {e}"
+        ))),
     }
 }
 
@@ -1211,8 +1201,8 @@ fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
             user_id: c.user_id.as_deref().filter(|id| valid_twitch_user_id(id)),
         })
         .collect();
-    let json = serde_json::to_string(&DiskMultiOut { current, accounts })
-        .map_err(|e| e.to_string())?;
+    let json =
+        serde_json::to_string(&DiskMultiOut { current, accounts }).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -1260,8 +1250,10 @@ mod tests {
         assert_eq!(parsed.token, "abc123");
         assert_eq!(parsed.client_id, CHATTERINO_CLIENT_ID);
         assert_eq!(parsed.user_id, "42");
-        assert!(parse_chatterino_blob("oauth_token=abc;username=bad name;user_id=1;client_id=x")
-            .is_err());
+        assert!(
+            parse_chatterino_blob("oauth_token=abc;username=bad name;user_id=1;client_id=x")
+                .is_err()
+        );
         assert!(parse_chatterino_blob("").is_err());
         assert!(parse_chatterino_blob("javascript:alert(1)").is_err());
     }

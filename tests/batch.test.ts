@@ -1,7 +1,7 @@
 import { encode } from "@msgpack/msgpack";
 import { decodeBatch } from "../src/chat/batchDecode.ts";
 
-function assert(cond: boolean, msg: string): void {
+function assert(cond: boolean, msg: string): asserts cond {
   if (!cond) {
     throw new Error(msg);
   }

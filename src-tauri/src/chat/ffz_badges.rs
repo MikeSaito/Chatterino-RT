@@ -45,9 +45,7 @@ impl FfzBadgeCatalog {
         let Some(ids) = self.user_badges.get(user_id) else {
             return Vec::new();
         };
-        ids.iter()
-            .filter_map(|id| self.badge_for_id(*id))
-            .collect()
+        ids.iter().filter_map(|id| self.badge_for_id(*id)).collect()
     }
 
     pub fn append_for_user(&self, badges: &mut Vec<Badge>, user_id: &str) {
@@ -83,13 +81,7 @@ pub fn parse_ffz_badges(value: &Value) -> FfzBadgeCatalog {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        catalog.badges.insert(
-            id,
-            FfzBadgeDef {
-                url,
-                tooltip,
-            },
-        );
+        catalog.badges.insert(id, FfzBadgeDef { url, tooltip });
         let badge_id_str = id.to_string();
         let Some(user_list) = users_root.and_then(|u| u.get(&badge_id_str)) else {
             continue;
@@ -182,8 +174,14 @@ mod tests {
         assert_eq!(cat.badges.len(), 1);
         assert!(cat.badges.contains_key(&42));
         assert!(!cat.badges.contains_key(&99));
-        assert_eq!(cat.user_badges.get("12345").map(|v| v.as_slice()), Some(&[42][..]));
-        assert_eq!(cat.user_badges.get("67890").map(|v| v.as_slice()), Some(&[42][..]));
+        assert_eq!(
+            cat.user_badges.get("12345").map(|v| v.as_slice()),
+            Some(&[42][..])
+        );
+        assert_eq!(
+            cat.user_badges.get("67890").map(|v| v.as_slice()),
+            Some(&[42][..])
+        );
     }
 
     #[test]
@@ -195,7 +193,10 @@ mod tests {
         assert_eq!(badges[0].set, "ffz");
         assert_eq!(badges[0].version, "42");
         assert_eq!(badges[0].tooltip.as_deref(), Some("FFZ Developer"));
-        assert!(badges[0].url.as_ref().is_some_and(|u| u.contains("frankerfacez")));
+        assert!(badges[0]
+            .url
+            .as_ref()
+            .is_some_and(|u| u.contains("frankerfacez")));
     }
 
     #[test]

@@ -35,10 +35,6 @@ assert(isInReplyThread(chain, "a", "c"), "leaf in thread");
 assert(isInReplyThread(chain, "a", "d"), "sibling reply in thread");
 assert(!isInReplyThread(chain, "a", "missing"), "unknown not in thread");
 
-const unrelated = [
-  { id: "x", login: "x", text: "x" },
-  { id: "y", login: "y", text: "y", replyToId: "x" },
-];
 assert(!isInReplyThread(chain, "a", "y"), "other thread not in chain");
 
 console.log("replyRoot.test.ts ok");

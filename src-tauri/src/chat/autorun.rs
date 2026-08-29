@@ -119,10 +119,7 @@ fn write_run_value(command: &str) -> Result<(), String> {
         RegCloseKey, RegOpenKeyExW, RegSetValueExW, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ,
     };
 
-    let wide: Vec<u16> = command
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let wide: Vec<u16> = command.encode_utf16().chain(std::iter::once(0)).collect();
     let bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2) };
 

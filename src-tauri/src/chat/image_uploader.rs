@@ -57,10 +57,7 @@ pub struct UploadConfig {
 }
 
 fn knob_bool(knobs: &std::collections::BTreeMap<String, Value>, key: &str, default: bool) -> bool {
-    knobs
-        .get(key)
-        .and_then(Value::as_bool)
-        .unwrap_or(default)
+    knobs.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
 fn knob_str(knobs: &std::collections::BTreeMap<String, Value>, key: &str) -> String {
@@ -229,11 +226,16 @@ pub fn load_config(shared: &Shared) -> Result<UploadConfig, String> {
     }
     let url = knob_str(knobs, "external.imageUploaderUrl");
     validate_upload_url(&url)?;
-    let form_field = knob_str(knobs, "external.imageUploaderFormField").trim().to_string();
+    let form_field = knob_str(knobs, "external.imageUploaderFormField")
+        .trim()
+        .to_string();
     if form_field.is_empty() {
         return Err("Image uploader form field is empty.".into());
     }
-    if form_field.chars().any(|c| c.is_control() || c == '"' || c == '\n') {
+    if form_field
+        .chars()
+        .any(|c| c.is_control() || c == '"' || c == '\n')
+    {
         return Err("Image uploader form field is invalid.".into());
     }
     let headers = parse_header_list(&knob_str(knobs, "external.imageUploaderHeaders"))?;
@@ -369,7 +371,8 @@ mod tests {
 
     #[test]
     fn json_path_and_link() {
-        let body = r#"{"data":{"link":"https://cdn.example/a.png","del":["https://del.example/1"]}}"#;
+        let body =
+            r#"{"data":{"link":"https://cdn.example/a.png","del":["https://del.example/1"]}}"#;
         assert_eq!(
             link_from_response(body, "{data.link}"),
             "https://cdn.example/a.png"
