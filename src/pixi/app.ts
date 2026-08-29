@@ -3,6 +3,8 @@ import "pixi.js/unsafe-eval";
 import { Application, Assets } from "pixi.js";
 
 let app: Application | null = null;
+/** Pixi ResizePlugin only listens to window.resize; splitter/grid changes need RO. */
+let hostResizeRo: ResizeObserver | null = null;
 
 export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement): Promise<Application> {
   if (app) {
@@ -20,6 +22,12 @@ export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement
     resolution: Math.min(window.devicePixelRatio || 1, 2),
     resizeTo: host,
   });
+  hostResizeRo?.disconnect();
+  hostResizeRo = new ResizeObserver(() => {
+    created.queueResize();
+  });
+  hostResizeRo.observe(host);
+  created.queueResize();
   app = created;
   return created;
 }
@@ -39,6 +47,8 @@ export function chatApp(): Application {
 }
 
 export function destroyChatApp(): void {
+  hostResizeRo?.disconnect();
+  hostResizeRo = null;
   if (!app) {
     return;
   }
