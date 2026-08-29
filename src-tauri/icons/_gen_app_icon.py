@@ -87,7 +87,8 @@ def main() -> None:
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-    tx = CX - tw // 2 - 36
+    # Правее центра: зазор между внутренним краем C и ножкой R.
+    tx = CX - tw // 2 + 20
     ty = CY - th // 2 - bbox[1] - 8
     draw.text((tx + 3, ty + 5), text, font=font, fill=(0, 0, 0, 110))
     draw.text((tx, ty), text, font=font, fill=(244, 251, 255, 255))
@@ -105,7 +106,7 @@ def main() -> None:
     </linearGradient>
   </defs>
   <path fill="url(#cGrad)" d="{path_d(pts)}"/>
-  <text x="476" y="610" text-anchor="middle" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="290" font-weight="700" letter-spacing="-8" fill="#F4FBFF">RT</text>
+  <text x="532" y="610" text-anchor="middle" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="290" font-weight="700" letter-spacing="-8" fill="#F4FBFF">RT</text>
 </svg>
 """
     OUT_SVG.write_text(svg, encoding="utf-8")
