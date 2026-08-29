@@ -1,5 +1,6 @@
 /** EditableModelView-like table (Add / Remove / Move up / down). */
 
+import { t } from "../../i18n";
 import { iconEl, type IconName } from "../icons";
 
 export type TableColumn = {
@@ -52,10 +53,10 @@ export function mountEditableTable(
     btn.append(svg, text);
     return btn;
   };
-  const addBtn = makeToolBtn("Add", "plus");
-  const removeBtn = makeToolBtn("Remove", "trash");
-  const upBtn = makeToolBtn("Move up", "chevron-up");
-  const downBtn = makeToolBtn("Move down", "chevron-down");
+  const addBtn = makeToolBtn(t("settings.table.tool.add"), "plus");
+  const removeBtn = makeToolBtn(t("settings.table.tool.remove"), "trash");
+  const upBtn = makeToolBtn(t("settings.table.tool.moveUp"), "chevron-up");
+  const downBtn = makeToolBtn(t("settings.table.tool.moveDown"), "chevron-down");
   toolbar.append(addBtn, removeBtn, upBtn, downBtn);
 
   host.append(toolbar, table);
@@ -83,11 +84,9 @@ export function mountEditableTable(
       const td = document.createElement("td");
       td.colSpan = model.columns.length;
       const filtered = Boolean(rowFilter);
-      if (filtered) {
-        td.textContent = "Нет совпадений.";
-      } else {
-        td.textContent = "Пусто. Добавьте строку кнопкой Add.";
-      }
+      td.textContent = filtered
+        ? t("settings.table.emptyFiltered")
+        : t("settings.table.empty");
       tr.append(td);
       tbody.append(tr);
       syncToolbar();

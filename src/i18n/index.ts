@@ -1,13 +1,17 @@
 import { en, type MessageKey } from "./en.ts";
 import { ru } from "./ru.ts";
+import { settingsEn, type SettingsMessageKey } from "./settings.en.ts";
+import { settingsRu } from "./settings.ru.ts";
 import { parseLocale, type Locale } from "./types.ts";
 
-export type { Locale, MessageKey };
-export { parseLocale, en, ru };
+export type { Locale, MessageKey, SettingsMessageKey };
+export type UiMessageKey = MessageKey | SettingsMessageKey;
+export { parseLocale, en, ru, settingsEn, settingsRu };
+export * from "./settingsKeys.ts";
 
-const catalogs: Record<Locale, Record<MessageKey, string>> = {
-  en: en as Record<MessageKey, string>,
-  ru,
+const catalogs: Record<Locale, Record<string, string>> = {
+  en: { ...(en as Record<string, string>), ...settingsEn },
+  ru: { ...ru, ...settingsRu },
 };
 
 let locale: Locale = "en";
@@ -49,7 +53,7 @@ function interpolate(
 
 /** Translate a message key; falls back to English if missing in current locale. */
 export function t(
-  key: MessageKey,
+  key: UiMessageKey | string,
   vars?: Record<string, string | number>,
 ): string {
   const primary = catalogs[locale][key];
@@ -68,7 +72,7 @@ export function applyDomI18n(root?: ParentNode): void {
     return;
   }
   target.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
-    const key = el.getAttribute("data-i18n") as MessageKey | null;
+    const key = el.getAttribute("data-i18n");
     if (!key) {
       return;
     }
@@ -98,7 +102,7 @@ export function applyDomI18n(root?: ParentNode): void {
   ];
   for (const [dataAttr, htmlAttr] of pair) {
     target.querySelectorAll<HTMLElement>(`[${dataAttr}]`).forEach((el) => {
-      const key = el.getAttribute(dataAttr) as MessageKey | null;
+      const key = el.getAttribute(dataAttr);
       if (!key) {
         return;
       }

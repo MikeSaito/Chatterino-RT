@@ -211,4 +211,36 @@ export const ru: Record<MessageKey, string> = {
   "settings.language": "Язык",
   "settings.language.en": "English",
   "settings.language.ru": "Русский",
+
+  "settings.table.tool.add": "Добавить",
+  "settings.table.tool.remove": "Удалить",
+  "settings.table.tool.moveUp": "Вверх",
+  "settings.table.tool.moveDown": "Вниз",
+  "settings.table.empty": "Пусто. Добавьте строку кнопкой «Добавить».",
+  "settings.table.emptyFiltered": "Нет совпадений.",
+
+  "settings.about.version": "Версия",
+  "settings.about.settingsDirectory": "Каталог настроек:",
+  "settings.about.openDirectory": "Открыть каталог настроек",
+  "settings.about.chatterino": "О Chatterino…",
+  "settings.about.oss": "Используемое ПО с открытым исходным кодом…",
+  "settings.about.loading": "Загрузка…",
+  "settings.about.unavailable": "(недоступно)",
+  "settings.about.versionLine": "Chatterino RT {version}",
+  "settings.about.versionUnavailable": "Chatterino RT (версия недоступна)",
+  "settings.about.mit":
+    "Поведение чата реимплементирует логику Chatterino 2 по лицензии MIT. Это не порт Qt/C++ и не включает штатные ассеты Chatterino.",
+
+  "settings.accounts.add": "Добавить",
+  "settings.accounts.remove": "Удалить",
+  "settings.accounts.select": "Выбрать",
+  "settings.accounts.note":
+    "Выберите аккаунт для чата. «Добавить» использует тот же вход Chatterino, что и боковая панель.",
+  "settings.accounts.noteEnv":
+    "Аккаунт задан через TWITCH_LOGIN / TWITCH_OAUTH_TOKEN. Управление несколькими аккаунтами отключено.",
+  "settings.accounts.noteReady":
+    "Выделите строку, затем «Выбрать» для переключения или «Удалить». «Добавить» запускает вход Chatterino.",
+  "settings.accounts.empty": "Нет сохранённых аккаунтов.",
+  "settings.accounts.current": "текущий",
+  "settings.accounts.deviceLogin": "Завершите вход устройства в браузере.",
 };

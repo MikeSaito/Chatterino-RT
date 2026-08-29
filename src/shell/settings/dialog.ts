@@ -32,8 +32,17 @@ import {
   validateImportJson,
 } from "../imageUploaderSharex";
 import { iconEl, setButtonIcon } from "../icons";
-import { t } from "../../i18n";
-import { applyLocale, localeFromSettings } from "../../i18n";
+import { applyLocale, getLocale, localeFromSettings, t } from "../../i18n";
+import {
+  tKnobLabel,
+  tKnobOption,
+  tPageNav,
+  tPageTitle,
+  tSectionTitle,
+  tTabLabel,
+  tTableCol,
+  tTableColOption,
+} from "../../i18n/settingsT";
 import { settingsNavIcon } from "./navIcons";
 import {
   applySettingsDisplay,
@@ -52,6 +61,8 @@ import {
 import { setSettingsWindowOpen } from "./settingsWindowState";
 
 export type AppSettings = AppliedSettings;
+
+let uiLocale = getLocale();
 
 type KnobControl = HTMLInputElement | HTMLSelectElement | HTMLButtonElement;
 
@@ -156,6 +167,15 @@ export function mountSettingsPanel(opts: {
   const applyDraft = (data: AppSettings): void => {
     lastSettings = data;
     applyLocale(localeFromSettings(data.knobs as Record<string, unknown>), root);
+    const nextLocale = getLocale();
+    if (nextLocale !== uiLocale) {
+      uiLocale = nextLocale;
+      const page = activePage;
+      buildPages();
+      paintDraft(data);
+      showPage(page);
+      return;
+    }
     const clearBtn = root.querySelector<HTMLButtonElement>("#settings-search-clear");
     if (clearBtn) {
       setButtonIcon(clearBtn, "close", {
@@ -653,13 +673,15 @@ export function mountSettingsPanel(opts: {
   };
 
   const renderKnob = (knob: KnobDef, block: HTMLElement): void => {
+    const knobLabel = tKnobLabel(knob.id);
+    const knobSearch = `${knobLabel} ${knob.label} ${knob.search ?? ""}`;
     if (knob.id === "cache-path-display") {
       const wrap = document.createElement("div");
       wrap.className = "settings-cache-path";
-      wrap.dataset.search = "cache path directory";
+      wrap.dataset.search = knobSearch;
       const caption = document.createElement("p");
       caption.className = "settings-label-note";
-      caption.textContent = "Cache saved at";
+      caption.textContent = knobLabel;
       const resolved = document.createElement("code");
       resolved.className = "settings-about-path";
       resolved.id = "settings-cache-resolved";
@@ -676,14 +698,14 @@ export function mountSettingsPanel(opts: {
     if (knob.type === "blocked-list") {
       const wrap = document.createElement("div");
       wrap.className = "settings-blocked-users";
-      wrap.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      wrap.dataset.search = knobSearch;
       const caption = document.createElement("p");
       caption.className = "settings-label-note";
-      caption.textContent = knob.label;
+      caption.textContent = knobLabel;
       const list = document.createElement("ul");
       list.className = "settings-blocked-users-list";
       list.id = "settings-blocked-users-list";
-      list.setAttribute("aria-label", "Twitch blocked users");
+      list.setAttribute("aria-label", knobLabel);
       wrap.append(caption, list);
       block.append(wrap);
       return;
@@ -691,11 +713,11 @@ export function mountSettingsPanel(opts: {
     if (knob.type === "label") {
       const p = document.createElement("p");
       p.className = "settings-label-note";
-      if (knob.label.includes("\n")) {
+      if (knob.label.includes("\n") || knobLabel.includes("\n")) {
         p.classList.add("settings-label-note--pre");
       }
-      p.textContent = knob.label;
-      p.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      p.textContent = knobLabel;
+      p.dataset.search = knobSearch;
       block.append(p);
       return;
     }
@@ -703,8 +725,8 @@ export function mountSettingsPanel(opts: {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "settings-action-btn";
-      btn.textContent = knob.label;
-      btn.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      btn.textContent = knobLabel;
+      btn.dataset.search = knobSearch;
       btn.dataset.path = knob.path;
       btn.addEventListener("click", () => {
         void handleSettingsAction(knob.path);
@@ -715,7 +737,7 @@ export function mountSettingsPanel(opts: {
     if (knob.type === "checkbox") {
       const row = document.createElement("div");
       row.className = "settings-switch";
-      row.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      row.dataset.search = knobSearch;
       const labelId = `settings-knob-label-${knob.id}`;
       const btn = document.createElement("button");
       btn.type = "button";
@@ -735,7 +757,7 @@ export function mountSettingsPanel(opts: {
       const text = document.createElement("span");
       text.className = "settings-switch-label";
       text.id = labelId;
-      text.textContent = knob.label;
+      text.textContent = knobLabel;
       row.append(btn, text);
       text.addEventListener("click", () => {
         if (btn.disabled) {
@@ -753,10 +775,10 @@ export function mountSettingsPanel(opts: {
     }
     const row = document.createElement("div");
     row.className = "settings-row";
-    row.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+    row.dataset.search = knobSearch;
     const lab = document.createElement("label");
     lab.htmlFor = `settings-knob-${knob.id}`;
-    lab.textContent = knob.label;
+    lab.textContent = knobLabel;
     let input: HTMLInputElement | HTMLSelectElement;
     if (knob.type === "select") {
       const select = document.createElement("select");
@@ -764,7 +786,7 @@ export function mountSettingsPanel(opts: {
       for (const option of knob.options ?? []) {
         const opt = document.createElement("option");
         opt.value = option.value;
-        opt.textContent = option.label;
+        opt.textContent = tKnobOption(knob.id, option.value, option.label);
         select.append(opt);
       }
       input = select;
@@ -830,7 +852,14 @@ export function mountSettingsPanel(opts: {
     const api = mountEditableTable(
       host,
       {
-        columns: def.columns,
+        columns: def.columns.map((col) => ({
+          ...col,
+          label: tTableCol(def.id, col.key),
+          options: col.options?.map((option) => ({
+            ...option,
+            label: tTableColOption(def.id, col.key, option.value, option.label),
+          })),
+        })),
         blankRow: { ...def.blankRow },
         rows: [],
       },
@@ -880,12 +909,12 @@ export function mountSettingsPanel(opts: {
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", "false");
         tab.dataset.page = page.id;
-        tab.dataset.search = `${page.navLabel} ${page.search}`;
+        tab.dataset.search = `${tPageNav(page.id)} ${page.navLabel} ${page.search}`;
         const icon = iconEl(settingsNavIcon(page.id), 16);
         icon.classList.add("settings-tab-icon");
         const label = document.createElement("span");
         label.className = "settings-tab-label";
-        label.textContent = page.navLabel;
+        label.textContent = tPageNav(page.id);
         tab.append(icon, label);
         tab.addEventListener("click", () => {
           showPage(page.id);
@@ -907,10 +936,11 @@ export function mountSettingsPanel(opts: {
       }
       const wrap = document.createElement("div");
       wrap.className = "settings-block";
-      wrap.dataset.search = block.title;
+      const sectionTitle = tSectionTitle(block.title);
+      wrap.dataset.search = `${sectionTitle} ${block.title}`;
       const h = document.createElement("h4");
       h.className = "settings-section";
-      h.textContent = block.title;
+      h.textContent = sectionTitle;
       wrap.append(h);
       for (const knob of knobs) {
         renderKnob(knob, wrap);
@@ -923,10 +953,11 @@ export function mountSettingsPanel(opts: {
     const section = document.createElement("section");
     section.className = "settings-page";
     section.dataset.page = page.id;
-    section.dataset.search = `${page.title} ${page.search}`;
+    const pageTitle = tPageTitle(page.id);
+    section.dataset.search = `${pageTitle} ${page.title} ${page.search}`;
     const title = document.createElement("h3");
     title.className = "settings-page-title";
-    title.textContent = page.title;
+    title.textContent = pageTitle;
     section.append(title);
 
     if (page.kind === "about") {
@@ -939,22 +970,22 @@ export function mountSettingsPanel(opts: {
       versionBlock.dataset.search = "version settings directory";
       const versionTitle = document.createElement("h4");
       versionTitle.className = "settings-section";
-      versionTitle.textContent = "Version";
+      versionTitle.textContent = t("settings.about.version");
       const versionLine = document.createElement("p");
       versionLine.className = "settings-about-meta";
-      versionLine.textContent = "Loading…";
+      versionLine.textContent = t("settings.about.loading");
       const dirRow = document.createElement("div");
       dirRow.className = "settings-about-dir";
       const dirLabel = document.createElement("p");
       dirLabel.className = "settings-about-meta";
-      dirLabel.textContent = "Settings directory:";
+      dirLabel.textContent = t("settings.about.settingsDirectory");
       const dirPath = document.createElement("code");
       dirPath.className = "settings-about-path";
       dirPath.textContent = "…";
       const openDirBtn = document.createElement("button");
       openDirBtn.type = "button";
       openDirBtn.className = "settings-action-btn";
-      openDirBtn.textContent = "Open settings directory";
+      openDirBtn.textContent = t("settings.about.openDirectory");
       openDirBtn.addEventListener("click", () => {
         void invoke("open_settings_directory")
           .then(() => {
@@ -975,7 +1006,7 @@ export function mountSettingsPanel(opts: {
       chatterinoBlock.dataset.search = "wiki features discord chatterino";
       const chatterinoTitle = document.createElement("h4");
       chatterinoTitle.className = "settings-section";
-      chatterinoTitle.textContent = "About Chatterino…";
+      chatterinoTitle.textContent = t("settings.about.chatterino");
       const chatterinoLinks = document.createElement("ul");
       chatterinoLinks.className = "settings-about-links";
       const aboutLinks: Array<{ label: string; url: string }> = [
@@ -1015,15 +1046,14 @@ export function mountSettingsPanel(opts: {
       const mit = document.createElement("p");
       mit.className = "settings-about-meta";
       mit.dataset.search = "mit license chatterino";
-      mit.textContent =
-        "Chat behaviour reimplements Chatterino 2 logic under the MIT License. This is not a Qt/C++ port and does not ship stock Chatterino assets.";
+      mit.textContent = t("settings.about.mit");
 
       const ossBlock = document.createElement("div");
       ossBlock.className = "settings-about-block";
       ossBlock.dataset.search = "open source license tauri pixi";
       const ossTitle = document.createElement("h4");
       ossTitle.className = "settings-section";
-      ossTitle.textContent = "Open source software used…";
+      ossTitle.textContent = t("settings.about.oss");
       const ossLinks = document.createElement("ul");
       ossLinks.className = "settings-about-links";
       const ossItems: Array<{ label: string; url: string }> = [
@@ -1061,12 +1091,14 @@ export function mountSettingsPanel(opts: {
 
       void invoke<{ version: string; settingsDirectory: string }>("about_info")
         .then((info) => {
-          versionLine.textContent = `Chatterino RT ${info.version}`;
+          versionLine.textContent = t("settings.about.versionLine", {
+            version: info.version,
+          });
           dirPath.textContent = info.settingsDirectory;
         })
         .catch(() => {
-          versionLine.textContent = "Chatterino RT (version unavailable)";
-          dirPath.textContent = "(unavailable)";
+          versionLine.textContent = t("settings.about.versionUnavailable");
+          dirPath.textContent = t("settings.about.unavailable");
         });
 
       return section;
@@ -1075,8 +1107,7 @@ export function mountSettingsPanel(opts: {
     if (page.kind === "accounts") {
       const note = document.createElement("p");
       note.className = "settings-empty";
-      note.textContent =
-        "Select an account to use for chat. Add uses the same Chatterino login flow as the sidebar.";
+      note.textContent = t("settings.accounts.note");
       const list = document.createElement("ul");
       list.className = "settings-accounts-list";
       list.id = "settings-accounts-list";
@@ -1084,14 +1115,14 @@ export function mountSettingsPanel(opts: {
       actions.className = "settings-accounts-actions";
       const addBtn = document.createElement("button");
       addBtn.type = "button";
-      addBtn.textContent = "Add";
+      addBtn.textContent = t("settings.accounts.add");
       const selectBtn = document.createElement("button");
       selectBtn.type = "button";
-      selectBtn.textContent = "Select";
+      selectBtn.textContent = t("settings.accounts.select");
       selectBtn.disabled = true;
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.textContent = "Remove";
+      removeBtn.textContent = t("settings.accounts.remove");
       removeBtn.disabled = true;
       const status = document.createElement("p");
       status.className = "settings-accounts-status";
@@ -1126,19 +1157,17 @@ export function mountSettingsPanel(opts: {
       const paintAccounts = (info: AuthInfo): void => {
         list.replaceChildren();
         if (info.fromEnv) {
-          note.textContent =
-            "Account is fixed by TWITCH_LOGIN / TWITCH_OAUTH_TOKEN. Multi-account controls are disabled.";
+          note.textContent = t("settings.accounts.noteEnv");
           selectedLogin = null;
           syncActionButtons(true);
           return;
         }
-        note.textContent =
-          "Highlight a row, then Select to switch or Remove. Add uses the Chatterino login flow.";
+        note.textContent = t("settings.accounts.noteReady");
         const accounts = Array.isArray(info.accounts) ? info.accounts : [];
         if (accounts.length === 0) {
           const empty = document.createElement("li");
           empty.className = "settings-accounts-empty";
-          empty.textContent = "No saved accounts.";
+          empty.textContent = t("settings.accounts.empty");
           list.append(empty);
           selectedLogin = null;
           syncActionButtons(false);
@@ -1167,7 +1196,7 @@ export function mountSettingsPanel(opts: {
           meta.className = "settings-accounts-meta";
           const bits: string[] = [];
           if (info.login?.toLowerCase() === login) {
-            bits.push("current");
+            bits.push(t("settings.accounts.current"));
           }
           if (row.userId) {
             bits.push(`id ${row.userId}`);
@@ -1218,7 +1247,7 @@ export function mountSettingsPanel(opts: {
               setStatus("");
               await refresh();
             } else {
-              setStatus("Complete device login in the browser.");
+              setStatus(t("settings.accounts.deviceLogin"));
             }
           } catch (err) {
             setStatus(formatError(err));
@@ -1399,7 +1428,7 @@ export function mountSettingsPanel(opts: {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = index === 0 ? "settings-inner-tab is-active" : "settings-inner-tab";
-        btn.textContent = tab.label;
+        btn.textContent = tTabLabel(page.id, tab.id);
         const panel = document.createElement("div");
         panel.className = index === 0 ? "settings-inner-panel is-active" : "settings-inner-panel";
         panel.hidden = index !== 0;

@@ -209,6 +209,38 @@ export const en = {
   "settings.language": "Language",
   "settings.language.en": "English",
   "settings.language.ru": "Русский",
+
+  "settings.table.tool.add": "Add",
+  "settings.table.tool.remove": "Remove",
+  "settings.table.tool.moveUp": "Move up",
+  "settings.table.tool.moveDown": "Move down",
+  "settings.table.empty": "Empty. Add a row with Add.",
+  "settings.table.emptyFiltered": "No matches.",
+
+  "settings.about.version": "Version",
+  "settings.about.settingsDirectory": "Settings directory:",
+  "settings.about.openDirectory": "Open settings directory",
+  "settings.about.chatterino": "About Chatterino…",
+  "settings.about.oss": "Open source software used…",
+  "settings.about.loading": "Loading…",
+  "settings.about.unavailable": "(unavailable)",
+  "settings.about.versionLine": "Chatterino RT {version}",
+  "settings.about.versionUnavailable": "Chatterino RT (version unavailable)",
+  "settings.about.mit":
+    "Chat behaviour reimplements Chatterino 2 logic under the MIT License. This is not a Qt/C++ port and does not ship stock Chatterino assets.",
+
+  "settings.accounts.add": "Add",
+  "settings.accounts.remove": "Remove",
+  "settings.accounts.select": "Select",
+  "settings.accounts.note":
+    "Select an account to use for chat. Add uses the same Chatterino login flow as the sidebar.",
+  "settings.accounts.noteEnv":
+    "Account is fixed by TWITCH_LOGIN / TWITCH_OAUTH_TOKEN. Multi-account controls are disabled.",
+  "settings.accounts.noteReady":
+    "Highlight a row, then Select to switch or Remove. Add uses the Chatterino login flow.",
+  "settings.accounts.empty": "No saved accounts.",
+  "settings.accounts.current": "current",
+  "settings.accounts.deviceLogin": "Complete device login in the browser.",
 } as const;
 
 export type MessageKey = keyof typeof en;
