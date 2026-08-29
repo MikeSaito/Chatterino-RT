@@ -17,14 +17,26 @@
     >
       <header id="settings-dialog-head">
         <h2 id="settings-title">Chatterino Settings</h2>
-        <label class="sr-only" for="settings-search">Find in settings</label>
-        <input
-          id="settings-search"
-          type="search"
-          placeholder="Find in settings... (Ctrl+F)"
-          autocomplete="off"
-          spellcheck="false"
-        />
+        <div id="settings-search-wrap">
+          <span id="settings-search-icon" class="settings-search-icon" aria-hidden="true"></span>
+          <label class="sr-only" for="settings-search">Find in settings</label>
+          <input
+            id="settings-search"
+            type="search"
+            placeholder="Find in settings... (Ctrl+F)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            type="button"
+            id="settings-search-clear"
+            class="btn-icon"
+            title="Clear"
+            aria-label="Clear search"
+            hidden
+          ></button>
+          <span id="settings-search-count" class="settings-search-count" hidden aria-live="polite"></span>
+        </div>
       </header>
       <div id="settings-body">
         <nav id="settings-tabs" aria-label="Settings pages"></nav>

@@ -1,5 +1,7 @@
 /** EditableModelView-like table (Add / Remove / Move up / down). */
 
+import { iconEl, type IconName } from "../icons";
+
 export type TableColumn = {
   key: string;
   label: string;
@@ -40,18 +42,20 @@ export function mountEditableTable(
 
   const toolbar = document.createElement("div");
   toolbar.className = "editable-table-toolbar";
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.textContent = "Add";
-  const removeBtn = document.createElement("button");
-  removeBtn.type = "button";
-  removeBtn.textContent = "Remove";
-  const upBtn = document.createElement("button");
-  upBtn.type = "button";
-  upBtn.textContent = "Move up";
-  const downBtn = document.createElement("button");
-  downBtn.type = "button";
-  downBtn.textContent = "Move down";
+  const makeToolBtn = (label: string, icon: IconName): HTMLButtonElement => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost";
+    const svg = iconEl(icon, 14);
+    const text = document.createElement("span");
+    text.textContent = label;
+    btn.append(svg, text);
+    return btn;
+  };
+  const addBtn = makeToolBtn("Add", "plus");
+  const removeBtn = makeToolBtn("Remove", "trash");
+  const upBtn = makeToolBtn("Move up", "chevron-up");
+  const downBtn = makeToolBtn("Move down", "chevron-down");
   toolbar.append(addBtn, removeBtn, upBtn, downBtn);
 
   host.append(toolbar, table);

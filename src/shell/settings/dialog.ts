@@ -31,6 +31,8 @@ import {
   importImageUploaderSettings,
   validateImportJson,
 } from "../imageUploaderSharex";
+import { iconEl, setButtonIcon } from "../icons";
+import { settingsNavIcon } from "./navIcons";
 import {
   applySettingsDisplay,
   emptySettings,
@@ -48,6 +50,20 @@ import {
 import { setSettingsWindowOpen } from "./settingsWindowState";
 
 export type AppSettings = AppliedSettings;
+
+type KnobControl = HTMLInputElement | HTMLSelectElement | HTMLButtonElement;
+
+function isSwitchControl(el: KnobControl): el is HTMLButtonElement {
+  return el instanceof HTMLButtonElement && el.getAttribute("role") === "switch";
+}
+
+function switchChecked(el: HTMLButtonElement): boolean {
+  return el.getAttribute("aria-checked") === "true";
+}
+
+function setSwitchChecked(el: HTMLButtonElement, on: boolean): void {
+  el.setAttribute("aria-checked", on ? "true" : "false");
+}
 
 type TableApi = {
   getRows: () => Record<string, string | boolean>[];
@@ -144,6 +160,9 @@ export function mountSettingsPanel(opts: {
     }
   };
   const search = root.querySelector<HTMLInputElement>("#settings-search");
+  const searchClear = root.querySelector<HTMLButtonElement>("#settings-search-clear");
+  const searchCount = root.querySelector<HTMLElement>("#settings-search-count");
+  const searchIconHost = root.querySelector<HTMLElement>("#settings-search-icon");
   const tabsHost = root.querySelector<HTMLElement>("#settings-tabs");
   const pagesHost = root.querySelector<HTMLElement>("#settings-pages");
   const okBtn = root.querySelector<HTMLButtonElement>("#settings-ok");
@@ -155,8 +174,14 @@ export function mountSettingsPanel(opts: {
       bumpZoom: async () => undefined,
     };
   }
+  if (searchIconHost) {
+    searchIconHost.replaceChildren(iconEl("search", 14));
+  }
+  if (searchClear) {
+    setButtonIcon(searchClear, "close", { size: 14, label: "Clear" });
+  }
 
-  const knobInputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
+  const knobInputs = new Map<string, KnobControl>();
   const tableApis = new Map<string, TableApi>();
   let baseline: AppSettings = emptySettings();
   let baselineFilters: Filters = {
@@ -288,8 +313,8 @@ export function mountSettingsPanel(opts: {
           input.value = picked;
         }
         const custom = knobInputs.get("notifications.notificationCustomSound");
-        if (custom instanceof HTMLInputElement) {
-          custom.checked = true;
+        if (custom && isSwitchControl(custom)) {
+          setSwitchChecked(custom, true);
         }
         statusEl.textContent = "";
         schedulePreview();
@@ -586,8 +611,8 @@ export function mountSettingsPanel(opts: {
           writeText("external.imageUploaderHeaders", imported.headers);
         }
         const enabled = knobInputs.get("external.imageUploaderEnabled");
-        if (enabled instanceof HTMLInputElement) {
-          enabled.checked = true;
+        if (enabled && isSwitchControl(enabled)) {
+          setSwitchChecked(enabled, true);
         }
         statusEl.textContent =
           "Image uploader settings have been imported successfully!";
@@ -668,20 +693,40 @@ export function mountSettingsPanel(opts: {
       return;
     }
     if (knob.type === "checkbox") {
-      const label = document.createElement("label");
-      label.className = "filters-check";
-      label.dataset.search = `${knob.label} ${knob.search ?? ""}`;
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.id = `settings-knob-${knob.id}`;
-      input.dataset.path = knob.path;
+      const row = document.createElement("div");
+      row.className = "settings-switch";
+      row.dataset.search = `${knob.label} ${knob.search ?? ""}`;
+      const labelId = `settings-knob-label-${knob.id}`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "switch";
+      btn.id = `settings-knob-${knob.id}`;
+      btn.dataset.path = knob.path;
+      btn.setAttribute("role", "switch");
+      btn.setAttribute("aria-checked", "false");
+      btn.setAttribute("aria-labelledby", labelId);
       if (knob.inverse) {
-        input.dataset.inverse = "1";
+        btn.dataset.inverse = "1";
       }
-      label.append(input, document.createTextNode(` ${knob.label}`));
-      block.append(label);
-      knobInputs.set(knob.path, input);
-      input.addEventListener("change", () => {
+      const knobEl = document.createElement("span");
+      knobEl.className = "switch-knob";
+      knobEl.setAttribute("aria-hidden", "true");
+      btn.append(knobEl);
+      const text = document.createElement("span");
+      text.className = "settings-switch-label";
+      text.id = labelId;
+      text.textContent = knob.label;
+      row.append(btn, text);
+      text.addEventListener("click", () => {
+        if (btn.disabled) {
+          return;
+        }
+        btn.click();
+      });
+      block.append(row);
+      knobInputs.set(knob.path, btn);
+      btn.addEventListener("click", () => {
+        setSwitchChecked(btn, !switchChecked(btn));
         schedulePreview();
       });
       return;
@@ -814,7 +859,12 @@ export function mountSettingsPanel(opts: {
         tab.className = "settings-tab";
         tab.dataset.page = page.id;
         tab.dataset.search = `${page.navLabel} ${page.search}`;
-        tab.textContent = page.navLabel;
+        const icon = iconEl(settingsNavIcon(page.id), 16);
+        icon.classList.add("settings-tab-icon");
+        const label = document.createElement("span");
+        label.className = "settings-tab-label";
+        label.textContent = page.navLabel;
+        tab.append(icon, label);
         tab.addEventListener("click", () => {
           showPage(page.id);
         });
@@ -1387,23 +1437,23 @@ export function mountSettingsPanel(opts: {
         draft.showTimestamps = input.value !== "Disable";
         continue;
       }
-      if (path === "__wired.hideModerated" && input instanceof HTMLInputElement) {
-        draft.hideModerated = input.checked;
+      if (path === "__wired.hideModerated" && isSwitchControl(input)) {
+        draft.hideModerated = switchChecked(input);
         continue;
       }
-      if (path === "__wired.enableSelfHighlight" && input instanceof HTMLInputElement) {
-        draft.enableSelfHighlight = input.checked;
+      if (path === "__wired.enableSelfHighlight" && isSwitchControl(input)) {
+        draft.enableSelfHighlight = switchChecked(input);
         continue;
       }
       if (path.startsWith("__")) {
         continue;
       }
-      if (input instanceof HTMLInputElement && input.type === "checkbox") {
-        const checked = input.checked;
+      if (isSwitchControl(input)) {
+        const checked = switchChecked(input);
         draft.knobs[path] = input.dataset.inverse === "1" ? !checked : checked;
       } else if (input instanceof HTMLInputElement && input.type === "number") {
         draft.knobs[path] = Number(input.value);
-      } else {
+      } else if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement) {
         draft.knobs[path] = input.value;
       }
     }
@@ -1431,26 +1481,32 @@ export function mountSettingsPanel(opts: {
         input.value = data.timestampFormat || (data.showTimestamps ? "hh:mm" : "Disable");
         continue;
       }
-      if (path === "__wired.hideModerated" && input instanceof HTMLInputElement) {
-        input.checked = data.hideModerated;
+      if (path === "__wired.hideModerated" && isSwitchControl(input)) {
+        setSwitchChecked(input, data.hideModerated);
         continue;
       }
-      if (path === "__wired.enableSelfHighlight" && input instanceof HTMLInputElement) {
-        input.checked = data.enableSelfHighlight;
+      if (path === "__wired.enableSelfHighlight" && isSwitchControl(input)) {
+        setSwitchChecked(input, data.enableSelfHighlight);
         continue;
       }
       if (path.startsWith("__")) {
         continue;
       }
       const raw = data.knobs[path];
-      if (input instanceof HTMLInputElement && input.type === "checkbox") {
+      if (isSwitchControl(input)) {
         const stored = typeof raw === "boolean" ? raw : Boolean(raw);
-        input.checked = input.dataset.inverse === "1" ? !stored : stored;
+        setSwitchChecked(
+          input,
+          input.dataset.inverse === "1" ? !stored : stored,
+        );
       } else if (input instanceof HTMLInputElement && input.type === "number") {
         input.value = String(typeof raw === "number" ? raw : Number(raw) || 0);
       } else if (input instanceof HTMLInputElement && input.type === "hidden") {
         input.value = raw != null ? String(raw) : "";
-      } else if (raw != null) {
+      } else if (
+        (input instanceof HTMLInputElement || input instanceof HTMLSelectElement) &&
+        raw != null
+      ) {
         input.value = String(raw);
       }
     }
@@ -1471,10 +1527,17 @@ export function mountSettingsPanel(opts: {
 
   const applySearch = (query: string): void => {
     const q = query.trim().toLowerCase();
+    const wrap = search.closest("#settings-search-wrap");
+    wrap?.classList.toggle("has-query", q.length > 0);
+    if (searchClear) {
+      searchClear.hidden = q.length === 0;
+    }
     tabsHost.querySelectorAll<HTMLButtonElement>(".settings-tab").forEach((tab) => {
       const hay = (tab.dataset.search ?? tab.textContent ?? "").toLowerCase();
       tab.hidden = q.length > 0 && !hay.includes(q);
+      tab.classList.toggle("is-search-hit", q.length > 0 && hay.includes(q));
     });
+    let hits = 0;
     pagesHost.querySelectorAll<HTMLElement>(".settings-page").forEach((page) => {
       const pageHay = (page.dataset.search ?? "").toLowerCase();
       let pageMatch = q.length === 0 || pageHay.includes(q);
@@ -1483,10 +1546,19 @@ export function mountSettingsPanel(opts: {
           return;
         }
         const hay = (el.dataset.search ?? el.textContent ?? "").toLowerCase();
-        const match = q.length === 0 || hay.includes(q) || pageHay.includes(q);
+        const textMatch = q.length === 0 || hay.includes(q);
+        const match = textMatch || pageHay.includes(q);
         el.hidden = !match;
         if (match) {
           pageMatch = true;
+          if (
+            q.length > 0 &&
+            textMatch &&
+            !el.classList.contains("settings-block") &&
+            el.dataset.search
+          ) {
+            hits += 1;
+          }
         }
       });
       if (q.length > 0) {
@@ -1495,9 +1567,20 @@ export function mountSettingsPanel(opts: {
         );
         if (tab && pageMatch) {
           tab.hidden = false;
+          tab.classList.add("is-search-hit");
         }
       }
     });
+    if (searchCount) {
+      if (q.length === 0) {
+        searchCount.hidden = true;
+        searchCount.textContent = "";
+      } else {
+        searchCount.hidden = false;
+        searchCount.textContent = `${hits}`;
+        searchCount.title = `${hits} results`;
+      }
+    }
   };
 
   const closePanel = (restore: boolean): void => {
@@ -1530,6 +1613,19 @@ export function mountSettingsPanel(opts: {
       "behaviour.searchIncognito",
     ] as const) {
       const input = knobInputs.get(path);
+      if (!input) {
+        continue;
+      }
+      if (isSwitchControl(input)) {
+        input.disabled = !ok;
+        if (!ok) {
+          input.title =
+            "Private browsing is not available for the default browser.";
+        } else {
+          input.removeAttribute("title");
+        }
+        continue;
+      }
       if (!(input instanceof HTMLInputElement)) {
         continue;
       }
@@ -1641,6 +1737,11 @@ export function mountSettingsPanel(opts: {
   });
   search.addEventListener("input", () => {
     applySearch(search.value);
+  });
+  searchClear?.addEventListener("click", () => {
+    search.value = "";
+    applySearch("");
+    search.focus();
   });
 
   window.addEventListener("keydown", (ev) => {

@@ -26,12 +26,12 @@
 }
 
 #settings-root #settings-tabs {
-  padding: 12px 0;
+  padding: var(--space-3) 0;
 }
 
 #settings-root .settings-tab {
-  padding: 8px 16px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-md);
 }
 
 #settings-root #settings-pages {
@@ -40,25 +40,25 @@
 
 #settings-root .settings-page-title {
   font-size: 20px;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 #settings-root .settings-section {
-  font-size: 14px;
-  margin-top: 8px;
+  font-size: var(--font-md);
+  margin-top: var(--space-2);
 }
 
 #settings-root .settings-block {
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 #settings-root .settings-row {
   grid-template-columns: minmax(160px, 240px) minmax(160px, 320px);
-  gap: 16px;
+  gap: var(--space-4);
 }
 
-#settings-root .editable-table-toolbar button {
-  font-size: 12px;
+#settings-root .editable-table-toolbar .btn-ghost {
+  font-size: var(--font-xs);
   padding: 5px 12px;
   border-radius: var(--radius-sm);
 }
@@ -69,8 +69,12 @@
 }
 
 #settings-root #settings-dialog-foot {
-  padding: 12px 16px;
-  gap: 16px;
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
+}
+
+#settings-root #settings-search-wrap {
+  max-width: 100%;
 }
 
 #settings-root #settings-ok,

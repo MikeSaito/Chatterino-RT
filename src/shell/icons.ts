@@ -30,7 +30,13 @@ export type IconName =
   | "chevron-right"
   | "clock"
   | "star"
-  | "user";
+  | "user"
+  | "bell"
+  | "filter"
+  | "keyboard"
+  | "shield"
+  | "info"
+  | "slash";
 
 const PATHS: Record<IconName, string> = {
   settings:
@@ -75,6 +81,15 @@ const PATHS: Record<IconName, string> = {
     '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.3L12 15.8 6.2 17.8l.9-5.3L3.2 8.7l5.4-.8L12 3z"/>',
   user:
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  bell:
+    '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+  filter:
+    '<path d="M4 5h16l-6 7v5l-4 2v-7L4 5z"/>',
+  keyboard:
+    '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  slash: '<circle cx="12" cy="12" r="9"/><path d="M5 5l14 14"/>',
 };
 
 export function iconSvg(name: IconName, size = 16): string {

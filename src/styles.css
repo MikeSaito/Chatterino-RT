@@ -979,13 +979,76 @@ body,
 
 #settings-title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--font-lg);
   font-weight: 600;
+}
+
+#settings-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+}
+
+.settings-search-icon {
+  position: absolute;
+  left: 10px;
+  display: flex;
+  color: var(--c-muted);
+  pointer-events: none;
+  z-index: 1;
+}
+
+#settings-search-wrap #settings-search {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  font-size: var(--font-sm);
+  padding-left: 32px;
+  padding-right: 12px;
+}
+
+#settings-search-wrap.has-query #settings-search {
+  padding-right: 64px;
+}
+
+#settings-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+#settings-search-clear {
+  position: absolute;
+  right: 36px;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+#settings-search-clear[hidden] {
+  display: none !important;
+}
+
+.settings-search-count {
+  position: absolute;
+  right: 8px;
+  min-width: 1.25em;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--c-muted);
+  text-align: right;
+  pointer-events: none;
+}
+
+.settings-search-count[hidden] {
+  display: none !important;
 }
 
 #settings-search {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 #settings-body {
@@ -1007,6 +1070,9 @@ body,
 }
 
 .settings-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   width: 100%;
   text-align: left;
   border: 0;
@@ -1014,21 +1080,46 @@ body,
   border-radius: 0;
   background: transparent;
   color: var(--c-window-text);
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-md);
   transition:
     background-color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.settings-tab-icon {
+  flex-shrink: 0;
+  color: var(--c-muted);
+}
+
+.settings-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-tab:hover:not(:disabled) {
   background: var(--c-surface-2);
 }
 
+.settings-tab:hover:not(:disabled) .settings-tab-icon {
+  color: var(--c-window-text);
+}
+
 .settings-tab.is-active {
   border-left-color: var(--c-accent);
   background: var(--c-surface-2);
   font-weight: 600;
+}
+
+.settings-tab.is-active .settings-tab-icon {
+  color: var(--c-accent);
+}
+
+.settings-tab.is-search-hit:not(.is-active) {
+  border-left-color: color-mix(in srgb, var(--c-accent) 45%, transparent);
 }
 
 .settings-tab[hidden] {
@@ -1073,8 +1164,10 @@ body,
 }
 
 .settings-section {
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--c-border);
+  font-size: var(--font-md);
   font-weight: 600;
   color: var(--c-accent);
 }
@@ -1082,11 +1175,85 @@ body,
 .settings-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .settings-block[hidden] {
   display: none;
+}
+
+.settings-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-md);
+  color: var(--c-window-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-switch[hidden] {
+  display: none !important;
+}
+
+.settings-switch-label {
+  min-width: 0;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.switch:hover:not(:disabled) {
+  background: var(--c-surface-3);
+}
+
+.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.switch[aria-checked="true"] {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+.switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--c-window-text);
+  transition: transform 120ms ease;
+  pointer-events: none;
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  transform: translateX(14px);
+  background: var(--c-accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch-knob {
+    transition: none;
+  }
 }
 
 .settings-row {
@@ -1111,18 +1278,24 @@ body,
 .editable-table-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
-.editable-table-toolbar button {
-  font-size: 12px;
+.editable-table-toolbar .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-xs);
   padding: 4px 10px;
+  height: auto;
+  min-height: 28px;
 }
 
 .editable-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--font-xs);
 }
 
 .editable-table th,
@@ -1131,9 +1304,13 @@ body,
   padding: 4px 6px;
   text-align: left;
   vertical-align: middle;
+  background: var(--c-surface-1);
 }
 
 .editable-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
   background: var(--c-header-bg);
   color: var(--c-muted);
   font-weight: 600;
@@ -1144,7 +1321,11 @@ body,
 }
 
 .editable-table tr.is-selected td {
-  background: color-mix(in srgb, var(--c-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 12%, var(--c-surface-2));
+}
+
+.editable-table tr.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-accent);
 }
 
 .editable-table input[type="text"] {
@@ -1318,7 +1499,7 @@ body,
   color: var(--c-muted);
 }
 
-.settings-block > label:not(.filters-check) {
+.settings-block > label:not(.filters-check):not(.settings-switch) {
   font-size: 12px;
   color: var(--c-muted);
 }
@@ -1403,8 +1584,8 @@ body,
 #settings-dialog-foot {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--c-border);
   background: var(--c-split-bg);
   flex-shrink: 0;
@@ -1414,14 +1595,14 @@ body,
   margin: 0;
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--c-muted);
   word-break: break-word;
 }
 
 #settings-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 

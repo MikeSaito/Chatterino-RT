@@ -16,6 +16,12 @@ assert(hasIcon("star"), "star icon");
 assert(hasIcon("link"), "link icon");
 assert(hasIcon("external"), "external icon");
 assert(hasIcon("user"), "user icon");
+assert(hasIcon("bell"), "bell icon");
+assert(hasIcon("filter"), "filter icon");
+assert(hasIcon("keyboard"), "keyboard icon");
+assert(hasIcon("shield"), "shield icon");
+assert(hasIcon("info"), "info icon");
+assert(hasIcon("slash"), "slash icon");
 assert(!hasIcon("not-a-real-icon"), "unknown rejected");
 
 const svg = iconSvg("settings", 16);
