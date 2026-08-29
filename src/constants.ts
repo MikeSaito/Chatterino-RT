@@ -36,7 +36,8 @@ export const EMOTE_SLOTS_PER_ROW = 12;
 export const MENTION_SLOTS_PER_ROW = 8;
 export const BADGE_SLOTS_PER_ROW = 12;
 export const MOD_ACTION_SLOTS_PER_ROW = 8;
-export const BADGE_SIZE = 18;
+/** Twitch badge base is 18; slightly under line height at default chat font. */
+export const BADGE_SIZE = 14;
 export const TEXTURE_LRU_LIMIT = 256;
 /** Hard cap on decoded GIF/WebP animation frames per emote (VRAM bound). */
 export const MAX_GIF_FRAMES = 48;

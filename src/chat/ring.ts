@@ -3660,7 +3660,7 @@ export class MessageRing {
   private emotePixelSize(): number {
     return Math.max(
       1,
-      Math.round((chatTextRowHeight(this.fontSize) - 4) * this.emoteScale),
+      Math.round(chatTextRowHeight(this.fontSize) * this.emoteScale),
     );
   }
 
