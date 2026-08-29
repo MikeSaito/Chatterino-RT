@@ -1,4 +1,5 @@
-/** Pure open-tab reorder (kept free of DOM so node tests can import it). */
+/** Pure open-tab reorder helpers (no DOM — safe for node tests). */
+
 export function moveOpenTab(
   open: readonly string[],
   fromIndex: number,
@@ -20,4 +21,30 @@ export function moveOpenTab(
   }
   next.splice(toIndex, 0, item);
   return next;
+}
+
+export type TabLayoutBox = { left: number; width: number };
+
+/**
+ * Chatterino-style tabAt: index whose horizontal midpoint is to the right of `x`
+ * (content coordinates: scrollLeft + clientX - listLeft).
+ */
+export function indexAtContentX(
+  tabs: readonly TabLayoutBox[],
+  x: number,
+): number {
+  if (tabs.length === 0) {
+    return -1;
+  }
+  for (let i = 0; i < tabs.length; i += 1) {
+    const tab = tabs[i];
+    if (!tab || tab.width <= 0) {
+      continue;
+    }
+    const mid = tab.left + tab.width / 2;
+    if (x < mid) {
+      return i;
+    }
+  }
+  return tabs.length - 1;
 }

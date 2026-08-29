@@ -322,14 +322,20 @@ body,
 
 .channel-row {
   touch-action: none;
+  cursor: grab;
 }
 
 .channel-row.is-dragging {
-  opacity: 0.75;
+  opacity: 0.85;
+  z-index: 2;
+  position: relative;
+  pointer-events: none;
+  cursor: grabbing;
 }
 
 .channel-row.is-dragging .channel-item {
   background: var(--c-surface-3);
+  color: var(--c-window-text);
 }
 
 .filters-check {
