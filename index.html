@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="stylesheet" href="/src/styles.css" />
@@ -12,13 +12,13 @@
       <aside id="sidebar">
         <p id="brand">Chatterino RT</p>
         <form id="join-form">
-          <label for="channel-input">канал</label>
+          <label for="channel-input" data-i18n="sidebar.join.label">channel</label>
           <input id="channel-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
-          <button type="submit" class="btn btn-primary">Join</button>
+          <button type="submit" class="btn btn-primary" data-i18n="sidebar.join.submit">Join</button>
         </form>
-        <button type="button" id="join-toggle" class="btn-icon" hidden title="Join channel" aria-label="Join channel" aria-haspopup="dialog" aria-expanded="false" aria-controls="join-popover"></button>
+        <button type="button" id="join-toggle" class="btn-icon" hidden data-i18n-title="sidebar.join.toggle" data-i18n-aria-label="sidebar.join.toggle" title="Join channel" aria-label="Join channel" aria-haspopup="dialog" aria-expanded="false" aria-controls="join-popover"></button>
         <div id="channel-list-host" class="channel-list-host">
-          <ul id="channel-list" role="tablist" aria-label="Channels"></ul>
+          <ul id="channel-list" role="tablist" data-i18n-aria-label="sidebar.channels.aria" aria-label="Channels"></ul>
         </div>
         <div id="auth-box">
           <button type="button" id="auth-chip" class="auth-chip" hidden aria-haspopup="menu" aria-expanded="false" aria-controls="auth-menu">
@@ -27,13 +27,13 @@
             <span id="auth-chip-login" class="auth-chip-login"></span>
           </button>
           <p id="auth-login"></p>
-          <button type="button" id="auth-signin" class="btn btn-primary">Войти</button>
-          <button type="button" id="settings-open" class="btn-icon" title="Настройки" aria-label="Настройки"></button>
-          <button type="button" id="auth-logout" class="btn" hidden>Выйти</button>
+          <button type="button" id="auth-signin" class="btn btn-primary" data-i18n="auth.signin">Log in</button>
+          <button type="button" id="settings-open" class="btn-icon" data-i18n-title="settings.open" data-i18n-aria-label="settings.open" title="Settings" aria-label="Settings"></button>
+          <button type="button" id="auth-logout" class="btn" hidden>Log out</button>
           <p id="auth-device" hidden></p>
-          <label class="sr-only" for="auth-paste">код входа Chatterino</label>
+          <label class="sr-only" for="auth-paste" data-i18n="auth.paste.label">Chatterino login code</label>
           <textarea id="auth-paste" hidden rows="3" spellcheck="false" autocomplete="off"></textarea>
-          <button type="button" id="auth-import" class="btn" hidden>Вставить код</button>
+          <button type="button" id="auth-import" class="btn" hidden data-i18n="auth.import">Paste code</button>
         </div>
       </aside>
       <div id="main">
@@ -43,15 +43,15 @@
             <span id="header-channel-avatar-letter" class="header-avatar-letter" hidden aria-hidden="true"></span>
           </span>
           <span id="header-channel-name"></span>
-          <span id="header-live" hidden title="Live">LIVE</span>
+          <span id="header-live" hidden data-i18n="header.live" data-i18n-title="header.live.title" title="Live">LIVE</span>
           <p id="channel-title" class="header-meta"></p>
-          <button type="button" id="moderation-mode-btn" class="btn-ghost" title="Moderation mode" aria-pressed="false">Mod</button>
-          <span id="streamer-badge" hidden title="Streamer Mode">Streamer Mode</span>
+          <button type="button" id="moderation-mode-btn" class="btn-ghost" data-i18n="header.mod" data-i18n-title="header.mod.title" title="Moderation mode" aria-pressed="false">Mod</button>
+          <span id="streamer-badge" hidden data-i18n="header.streamer" data-i18n-title="header.streamer.title" title="Streamer Mode">Streamer Mode</span>
           <p id="status" class="status-line">
             <span id="status-spinner" class="status-spinner" hidden aria-hidden="true"></span>
             <span id="status-text"></span>
           </p>
-          <button type="button" id="header-more" class="btn-icon" title="Ещё" aria-label="Ещё" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu"></button>
+          <button type="button" id="header-more" class="btn-icon" data-i18n-title="header.more" data-i18n-aria-label="header.more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu"></button>
           <div id="stream-tooltip" class="ui-tooltip" hidden>
             <img id="stream-tooltip-img" alt="" />
             <span id="stream-tooltip-text"></span>
@@ -63,7 +63,8 @@
             id="stage-split"
             role="separator"
             aria-orientation="vertical"
-            aria-label="Размер плеера"
+            data-i18n-aria-label="header.split.aria"
+            aria-label="Player size"
             tabindex="0"
           ></div>
           <div id="chat-column">
@@ -75,18 +76,18 @@
                   <span id="emote-tooltip-text"></span>
                 </div>
                 <div id="chat-quick-actions" hidden>
-                  <button type="button" id="chat-qa-reply" class="btn-icon" title="Ответить" aria-label="Ответить"></button>
-                  <button type="button" id="chat-qa-copy" class="btn-icon" title="Копировать" aria-label="Копировать"></button>
-                  <button type="button" id="chat-qa-more" class="btn-icon" title="Ещё" aria-label="Ещё"></button>
+                  <button type="button" id="chat-qa-reply" class="btn-icon" data-i18n-title="chat.qa.reply" data-i18n-aria-label="chat.qa.reply" title="Reply" aria-label="Reply"></button>
+                  <button type="button" id="chat-qa-copy" class="btn-icon" data-i18n-title="chat.qa.copy" data-i18n-aria-label="chat.qa.copy" title="Copy" aria-label="Copy"></button>
+                  <button type="button" id="chat-qa-more" class="btn-icon" data-i18n-title="chat.qa.more" data-i18n-aria-label="chat.qa.more" title="More" aria-label="More"></button>
                 </div>
                 <div id="chat-empty" hidden>
                   <div class="chat-empty-inner">
                     <span class="chat-empty-icon" aria-hidden="true"></span>
-                    <p class="chat-empty-title">Выберите канал</p>
-                    <p class="chat-empty-hint">Подключитесь к каналу, чтобы видеть сообщения</p>
+                    <p class="chat-empty-title">Select a channel</p>
+                    <p class="chat-empty-hint">Join a channel to see messages</p>
                   </div>
                 </div>
-                <button id="chat-jump-bottom" type="button" class="btn-icon" hidden title="Вниз" aria-label="Вниз">
+                <button id="chat-jump-bottom" type="button" class="btn-icon" hidden data-i18n-title="chat.jumpBottom" data-i18n-aria-label="chat.jumpBottom" title="Bottom" aria-label="Bottom">
                   <span id="chat-jump-badge" hidden></span>
                 </button>
               </div>
@@ -107,15 +108,15 @@
             <ul id="complete-list" hidden></ul>
             <div id="reply-bar" hidden>
               <p id="reply-label"></p>
-              <button type="button" id="reply-cancel" class="btn-icon" title="Отмена" aria-label="Отмена"></button>
+              <button type="button" id="reply-cancel" class="btn-icon" data-i18n-title="reply.cancel" data-i18n-aria-label="reply.cancel" title="Cancel" aria-label="Cancel"></button>
             </div>
             <form id="composer">
-              <label class="sr-only" for="composer-input">сообщение</label>
+              <label class="sr-only" for="composer-input" data-i18n="composer.label">message</label>
               <div id="composer-inner">
-                <p id="composer-drop-hint" class="composer-drop-hint" hidden aria-hidden="true">
-                  Перетащите изображение сюда
+                <p id="composer-drop-hint" class="composer-drop-hint" hidden aria-hidden="true" data-i18n="composer.dropHint">
+                  Drop an image here
                 </p>
-                <button type="button" id="emote-open" class="btn-icon" title="Emotes" aria-label="Emotes"></button>
+                <button type="button" id="emote-open" class="btn-icon" data-i18n-title="composer.emotes" data-i18n-aria-label="composer.emotes" title="Emotes" aria-label="Emotes"></button>
                 <div id="composer-field">
                   <textarea
                     id="composer-input"
@@ -137,7 +138,8 @@
                   class="btn-icon btn-primary"
                   type="submit"
                   disabled
-                  title="Нужен вход Twitch, чтобы отправлять сообщения"
+                  data-i18n-aria-label="composer.send.aria"
+                  title="Twitch login required to send messages"
                   aria-label="Send"
                 ></button>
               </div>
@@ -146,16 +148,16 @@
         </div>
       </div>
     </div>
-    <menu id="header-menu" hidden role="menu" aria-label="More"></menu>
-    <menu id="auth-menu" hidden role="menu" aria-label="Account"></menu>
-    <div id="join-popover" hidden role="dialog" aria-label="Join channel">
+    <menu id="header-menu" hidden role="menu" data-i18n-aria-label="header.menu.aria" aria-label="More"></menu>
+    <menu id="auth-menu" hidden role="menu" data-i18n-aria-label="auth.menu.aria" aria-label="Account"></menu>
+    <div id="join-popover" hidden role="dialog" data-i18n-aria-label="joinPopover.aria" aria-label="Join channel">
       <form id="join-popover-form">
-        <label class="sr-only" for="join-popover-input">канал</label>
+        <label class="sr-only" for="join-popover-input" data-i18n="joinPopover.label">channel</label>
         <input id="join-popover-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
-        <button type="submit" class="btn btn-primary">Join</button>
+        <button type="submit" class="btn btn-primary" data-i18n="joinPopover.submit">Join</button>
       </form>
     </div>
-    <menu id="chat-context" hidden role="menu" aria-label="Message">
+    <menu id="chat-context" hidden role="menu" data-i18n-aria-label="context.aria" aria-label="Message">
       <div id="chat-context-custom" class="chat-context-custom" hidden></div>
       <hr id="chat-context-custom-sep" hidden />
       <div id="chat-context-image-open" class="chat-context-submenu" hidden>
@@ -205,18 +207,18 @@
             <p id="usercard-pronouns" class="popup-sub usercard-pronouns" hidden></p>
           </div>
           <div class="popup-head-actions">
-            <button type="button" id="usercard-pin" class="btn-icon" title="Pin" aria-label="Pin"></button>
-            <button type="button" id="usercard-close" class="btn-icon" title="Close" aria-label="Close"></button>
+            <button type="button" id="usercard-pin" class="btn-icon" data-i18n-title="usercard.pin" data-i18n-aria-label="usercard.pin" title="Pin" aria-label="Pin"></button>
+            <button type="button" id="usercard-close" class="btn-icon" data-i18n-title="usercard.close" data-i18n-aria-label="usercard.close" title="Close" aria-label="Close"></button>
           </div>
         </header>
         <div id="usercard-meta" class="usercard-meta">
           <p id="usercard-localized" class="usercard-meta-row" hidden>
             <span id="usercard-localized-text"></span>
-            <button type="button" id="usercard-copy-localized" title="Copy localized name">Copy</button>
+            <button type="button" id="usercard-copy-localized" data-i18n="usercard.copyLocalized" data-i18n-title="usercard.copyLocalized.title" title="Copy localized name">Copy</button>
           </p>
           <p id="usercard-userid" class="usercard-meta-row usercard-meta-muted" hidden>
             <span id="usercard-userid-text"></span>
-            <button type="button" id="usercard-copy-id" title="Copy ID">Copy ID</button>
+            <button type="button" id="usercard-copy-id" data-i18n="usercard.copyId" data-i18n-title="usercard.copyId.title" title="Copy ID">Copy ID</button>
           </p>
           <p id="usercard-followers" class="usercard-meta-row" hidden></p>
           <p id="usercard-created" class="usercard-meta-row" hidden></p>
@@ -225,30 +227,30 @@
         </div>
         <label id="usercard-block-row" class="usercard-block-row" hidden>
           <input type="checkbox" id="usercard-block" />
-          Block
+          <span data-i18n="usercard.block">Block</span>
         </label>
         <label id="usercard-ignore-highlights-row" class="usercard-ignore-highlights-row" hidden>
           <input type="checkbox" id="usercard-ignore-highlights" />
-          Ignore highlights
+          <span data-i18n="usercard.ignoreHighlights">Ignore highlights</span>
         </label>
         <p id="usercard-notes-preview" class="usercard-notes-preview" hidden></p>
         <div class="popup-actions">
-          <button type="button" id="usercard-add-notes" class="btn btn-primary" disabled>Add notes</button>
-          <button type="button" id="usercard-open-twitch" class="btn btn-primary">Open on Twitch</button>
+          <button type="button" id="usercard-add-notes" class="btn btn-primary" disabled data-i18n="usercard.addNotes">Add notes</button>
+          <button type="button" id="usercard-open-twitch" class="btn btn-primary" data-i18n="usercard.openTwitch">Open on Twitch</button>
         </div>
         <div id="usercard-mod-row" class="usercard-mod-row" hidden>
           <div id="usercard-roles" class="usercard-roles" hidden>
-            <button type="button" id="usercard-mod" title="Mod">Mod</button>
-            <button type="button" id="usercard-unmod" title="Unmod">Unmod</button>
-            <button type="button" id="usercard-vip" title="VIP">VIP</button>
-            <button type="button" id="usercard-unvip" title="UnVIP">UnVIP</button>
+            <button type="button" id="usercard-mod" data-i18n="usercard.mod" data-i18n-title="usercard.mod" title="Mod">Mod</button>
+            <button type="button" id="usercard-unmod" data-i18n="usercard.unmod" data-i18n-title="usercard.unmod" title="Unmod">Unmod</button>
+            <button type="button" id="usercard-vip" data-i18n="usercard.vip" data-i18n-title="usercard.vip" title="VIP">VIP</button>
+            <button type="button" id="usercard-unvip" data-i18n="usercard.unvip" data-i18n-title="usercard.unvip" title="UnVIP">UnVIP</button>
           </div>
-          <button type="button" id="usercard-unban" title="Unban" hidden>Unban</button>
-          <div id="usercard-timeouts" class="usercard-timeouts" aria-label="Timeout durations"></div>
-          <button type="button" id="usercard-ban" class="is-danger" title="Ban" hidden>Ban</button>
+          <button type="button" id="usercard-unban" data-i18n="usercard.unban" data-i18n-title="usercard.unban" title="Unban" hidden>Unban</button>
+          <div id="usercard-timeouts" class="usercard-timeouts" data-i18n-aria-label="usercard.timeouts.aria" aria-label="Timeout durations"></div>
+          <button type="button" id="usercard-ban" class="is-danger" data-i18n="usercard.ban" data-i18n-title="usercard.ban" title="Ban" hidden>Ban</button>
         </div>
         <p id="usercard-status" class="usercard-status" hidden></p>
-        <div id="usercard-recent" aria-label="Recent messages"></div>
+        <div id="usercard-recent" data-i18n-aria-label="usercard.recent.aria" aria-label="Recent messages"></div>
       </div>
     </div>
     <div id="notes-modal" hidden>
@@ -261,7 +263,7 @@
       >
         <header class="popup-head">
           <h2 id="notes-title">Editing notes</h2>
-          <button type="button" id="notes-close" class="btn-icon" title="Close" aria-label="Close"></button>
+          <button type="button" id="notes-close" class="btn-icon" data-i18n-title="notes.close" data-i18n-aria-label="notes.close" title="Close" aria-label="Close"></button>
         </header>
         <textarea
           id="notes-editor"
@@ -272,8 +274,8 @@
         <footer class="popup-foot notes-foot">
           <span id="notes-counter" class="notes-counter">0</span>
           <div class="notes-foot-actions">
-            <button type="button" id="notes-ok" class="btn btn-primary">Ok</button>
-            <button type="button" id="notes-cancel" class="btn">Cancel</button>
+            <button type="button" id="notes-ok" class="btn btn-primary" data-i18n="notes.ok">Ok</button>
+            <button type="button" id="notes-cancel" class="btn" data-i18n="notes.cancel">Cancel</button>
           </div>
         </footer>
       </div>
@@ -288,14 +290,14 @@
             <p id="replythread-sub" class="popup-sub"></p>
           </div>
           <div class="popup-head-actions">
-            <button type="button" id="replythread-pin" class="btn-icon" title="Pin" aria-label="Pin" hidden></button>
-            <button type="button" id="replythread-close" class="btn-icon" title="Close" aria-label="Close"></button>
+            <button type="button" id="replythread-pin" class="btn-icon" data-i18n-title="thread.pin" data-i18n-aria-label="thread.pin" title="Pin" aria-label="Pin" hidden></button>
+            <button type="button" id="replythread-close" class="btn-icon" data-i18n-title="thread.close" data-i18n-aria-label="thread.close" title="Close" aria-label="Close"></button>
           </div>
         </header>
         <div id="replythread-view"></div>
         <footer class="popup-foot replythread-foot">
           <textarea id="replythread-input" rows="2" spellcheck="false" autocomplete="off" placeholder="Reply..."></textarea>
-          <button type="button" id="replythread-send" class="btn btn-primary">Send</button>
+          <button type="button" id="replythread-send" class="btn btn-primary" data-i18n="thread.send">Send</button>
         </footer>
       </div>
     </div>
@@ -304,16 +306,16 @@
       <div id="emotepopup-dialog" role="dialog" aria-modal="false" aria-labelledby="emotepopup-title">
         <header class="popup-head">
           <h2 id="emotepopup-title">Emotes</h2>
-          <button type="button" id="emotepopup-close" class="btn-icon" title="Close" aria-label="Close"></button>
+          <button type="button" id="emotepopup-close" class="btn-icon" data-i18n-title="emotes.close" data-i18n-aria-label="emotes.close" title="Close" aria-label="Close"></button>
         </header>
         <div class="emotepopup-tabs" role="tablist">
-          <button type="button" class="emotepopup-tab" data-tab="favourite" role="tab" aria-selected="false">Favourite</button>
-          <button type="button" class="emotepopup-tab is-active" data-tab="subs" role="tab" aria-selected="true">Subs</button>
-          <button type="button" class="emotepopup-tab" data-tab="channel" role="tab" aria-selected="false">Channel</button>
-          <button type="button" class="emotepopup-tab" data-tab="global" role="tab" aria-selected="false">Global</button>
-          <button type="button" class="emotepopup-tab" data-tab="emojis" role="tab" aria-selected="false">Emojis</button>
+          <button type="button" class="emotepopup-tab" data-tab="favourite" role="tab" aria-selected="false" data-i18n="emotes.tab.favourite">Favourite</button>
+          <button type="button" class="emotepopup-tab is-active" data-tab="subs" role="tab" aria-selected="true" data-i18n="emotes.tab.subs">Subs</button>
+          <button type="button" class="emotepopup-tab" data-tab="channel" role="tab" aria-selected="false" data-i18n="emotes.tab.channel">Channel</button>
+          <button type="button" class="emotepopup-tab" data-tab="global" role="tab" aria-selected="false" data-i18n="emotes.tab.global">Global</button>
+          <button type="button" class="emotepopup-tab" data-tab="emojis" role="tab" aria-selected="false" data-i18n="emotes.tab.emojis">Emojis</button>
         </div>
-        <input id="emotepopup-search" type="search" placeholder="Search emotes" autocomplete="off" spellcheck="false" />
+        <input id="emotepopup-search" type="search" data-i18n-placeholder="emotes.search.placeholder" placeholder="Search emotes" autocomplete="off" spellcheck="false" />
         <div id="emotepopup-view" role="tabpanel"></div>
       </div>
     </div>
@@ -326,14 +328,15 @@
         aria-labelledby="search-title"
       >
         <header id="search-dialog-head">
-          <h2 id="search-title">Поиск в истории</h2>
-          <button type="button" id="search-close" class="btn-icon" title="Закрыть" aria-label="Закрыть"></button>
+          <h2 id="search-title">Searching in history</h2>
+          <button type="button" id="search-close" class="btn-icon" data-i18n-title="find.close" data-i18n-aria-label="find.close" title="Close" aria-label="Close"></button>
         </header>
         <div id="search-input-row">
-          <label class="sr-only" for="search-input">Type to search</label>
+          <label class="sr-only" for="search-input" data-i18n="find.label">Type to search</label>
           <input
             id="search-input"
             type="text"
+            data-i18n-placeholder="find.placeholder"
             placeholder="Type to search"
             autocomplete="off"
             spellcheck="false"
@@ -342,15 +345,17 @@
             type="button"
             id="search-clear"
             class="btn-icon"
-            title="Clear"
+            data-i18n-title="find.clear"
             hidden
+            data-i18n-aria-label="find.clear.aria"
+            title="Clear"
             aria-label="Clear search"
           ></button>
         </div>
-        <div id="search-view" role="list" aria-label="Результаты поиска"></div>
+        <div id="search-view" role="list" data-i18n-aria-label="find.results.aria" aria-label="Search results"></div>
       </div>
     </div>
     </div>
-    <div id="toast-host" role="region" aria-label="Уведомления"></div>
+    <div id="toast-host" role="region" data-i18n-aria-label="toast.host.aria" aria-label="Notifications"></div>
   </body>
 </html>

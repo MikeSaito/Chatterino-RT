@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent, ViewerRole } from "../chat/types";
+import { t } from "../i18n";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import {
   closeModal,
@@ -71,6 +72,7 @@ export function bindUserCard(opts: {
   syncMod: () => void;
   syncSubage: () => void;
   syncNotes: () => void;
+  relabelChrome: () => void;
 } {
   const {
     modal,
@@ -149,10 +151,12 @@ export function bindUserCard(opts: {
       syncMod: () => undefined,
       syncSubage: () => undefined,
       syncNotes: () => undefined,
+      relabelChrome: () => undefined,
     };
   }
 
   let currentLogin = "";
+  let currentName = "";
   let pinned = false;
   let modBusy = false;
   let currentUserId = "";
@@ -272,7 +276,7 @@ export function bindUserCard(opts: {
       return;
     }
     if (getHideUserNotes()) {
-      notesPreviewEl.textContent = "Notes hidden in streamer mode.";
+      notesPreviewEl.textContent = t("usercard.notes.hiddenStreamer");
       notesPreviewEl.hidden = false;
       return;
     }
@@ -321,7 +325,9 @@ export function bindUserCard(opts: {
     if (isSettingsWindowOpen() || !searchModal.hidden) {
       return;
     }
-    notesTitle.textContent = `Editing notes for ${nameEl.textContent?.trim() || currentLogin || "user"}`;
+    notesTitle.textContent = t("usercard.notes.title", {
+      name: nameEl.textContent?.trim() || currentLogin || t("usercard.notes.title.fallbackUser"),
+    });
     notesEditor.value = cachedNotes;
     paintNotesCounter();
     prepareModalOpen(notesModal);
@@ -390,15 +396,15 @@ export function bindUserCard(opts: {
 
   const showMetaUnavailable = (): void => {
     if (userIdText && userIdRow) {
-      userIdText.textContent = "ID: (not available)";
+      userIdText.textContent = t("usercard.id.na");
       userIdRow.hidden = false;
     }
     if (followersEl) {
-      followersEl.textContent = "Followers: (not available)";
+      followersEl.textContent = t("usercard.followers.na");
       followersEl.hidden = false;
     }
     if (createdEl) {
-      createdEl.textContent = "Created: (not available)";
+      createdEl.textContent = t("usercard.created.na");
       createdEl.removeAttribute("title");
       createdEl.hidden = false;
     }
@@ -410,6 +416,7 @@ export function bindUserCard(opts: {
     const displayName = profile.displayName.trim();
     if (displayName && displayName.toLowerCase() !== login) {
       nameEl.textContent = login;
+      currentName = login;
       if (localizedText) {
         localizedText.textContent = displayName;
       }
@@ -419,26 +426,31 @@ export function bindUserCard(opts: {
     } else if (localizedRow) {
       localizedRow.hidden = true;
       nameEl.textContent = displayName || login;
+      currentName = displayName || login;
     }
 
     if (userIdText && userIdRow) {
-      userIdText.textContent = currentUserId ? `ID: ${currentUserId}` : "ID: (not available)";
+      userIdText.textContent = currentUserId
+        ? t("usercard.id", { id: currentUserId })
+        : t("usercard.id.na");
       userIdRow.hidden = false;
     }
 
     if (followersEl) {
-      followersEl.textContent = "Followers: (not available)";
+      followersEl.textContent = t("usercard.followers.na");
       followersEl.hidden = false;
     }
 
     if (createdEl) {
       const created = profile.createdAt?.trim() ?? "";
       if (created) {
-        createdEl.textContent = `Created: ${formatCreatedDate(created)}`;
+        createdEl.textContent = t("usercard.created", {
+          date: formatCreatedDate(created),
+        });
         createdEl.title = created;
         createdEl.hidden = false;
       } else {
-        createdEl.textContent = "Created: (not available)";
+        createdEl.textContent = t("usercard.created.na");
         createdEl.removeAttribute("title");
         createdEl.hidden = false;
       }
@@ -582,7 +594,7 @@ export function bindUserCard(opts: {
     }
     ignoreHighlightsCheckbox.disabled = state.regexLocked;
     if (state.regexLocked) {
-      ignoreHighlightsCheckbox.title = "Name matched by regex";
+      ignoreHighlightsCheckbox.title = t("usercard.ignoreHighlights.regexTitle");
     } else {
       ignoreHighlightsCheckbox.removeAttribute("title");
     }
@@ -718,7 +730,7 @@ export function bindUserCard(opts: {
             const btn = document.createElement("button");
             btn.type = "button";
             btn.textContent = btnDef.label;
-            btn.title = `Timeout ${btnDef.seconds}s`;
+            btn.title = t("usercard.timeout.title", { n: btnDef.seconds });
             btn.dataset.seconds = String(btnDef.seconds);
             btn.addEventListener("click", () => {
               void sendMod("timeout", btnDef.seconds);
@@ -745,7 +757,7 @@ export function bindUserCard(opts: {
     const loginAtSend = currentLogin;
     const text = moderationSlashCommand(kind, loginAtSend, seconds);
     if (!text) {
-      setStatus("Invalid user.");
+      setStatus(t("usercard.error.invalidUser"));
       return;
     }
     setStatus("");
@@ -759,7 +771,7 @@ export function bindUserCard(opts: {
       const msg =
         e && typeof e === "object" && "message" in e
           ? String((e as { message: unknown }).message)
-          : "Could not send moderation command.";
+          : t("usercard.error.modSend");
       setStatus(msg);
     } finally {
       if (!modal.hidden && currentLogin === loginAtSend) {
@@ -804,12 +816,13 @@ export function bindUserCard(opts: {
     void closeModal(modal);
     currentLogin = "";
     currentUserId = "";
+    currentName = "";
     pinned = false;
     modBusy = false;
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
-      pinBtn.title = "Pin";
-      pinBtn.setAttribute("aria-label", "Pin");
+      pinBtn.title = t("usercard.pin");
+      pinBtn.setAttribute("aria-label", t("usercard.pin"));
     }
     clearAvatar();
     clearPronouns();
@@ -887,14 +900,14 @@ export function bindUserCard(opts: {
       }
       followersEl.textContent =
         count == null
-          ? "Followers: (not available)"
-          : `Followers: ${formatFollowerCount(count)}`;
+          ? t("usercard.followers.na")
+          : t("usercard.followers", { count: formatFollowerCount(count) });
       followersEl.hidden = false;
     } catch {
       if (login !== currentLogin) {
         return;
       }
-      followersEl.textContent = "Followers: (not available)";
+      followersEl.textContent = t("usercard.followers.na");
       followersEl.hidden = false;
     }
   };
@@ -987,7 +1000,7 @@ export function bindUserCard(opts: {
       clearPronouns();
       return;
     }
-    setPronounsLabel("Pronouns: (loading…)");
+    setPronounsLabel(t("usercard.pronouns.loading"));
     try {
       const result = await invoke<{ pronouns: string | null }>("chat_user_pronouns", {
         login,
@@ -1001,9 +1014,9 @@ export function bindUserCard(opts: {
       }
       const text = result.pronouns?.trim();
       if (text) {
-        setPronounsLabel(`Pronouns: ${text}`);
+        setPronounsLabel(t("usercard.pronouns", { text }));
       } else {
-        setPronounsLabel("Pronouns: (unspecified)");
+        setPronounsLabel(t("usercard.pronouns.unspecified"));
       }
     } catch {
       if (login !== currentLogin) {
@@ -1013,7 +1026,7 @@ export function bindUserCard(opts: {
         clearPronouns();
         return;
       }
-      setPronounsLabel("Pronouns: (unspecified)");
+      setPronounsLabel(t("usercard.pronouns.unspecified"));
     }
   };
 
@@ -1023,6 +1036,7 @@ export function bindUserCard(opts: {
     }
     currentLogin = info.login.toLowerCase();
     currentUserId = "";
+    currentName = info.nick || info.login;
     subageSeq += 1;
     notesSeq += 1;
     cachedNotes = "";
@@ -1031,7 +1045,7 @@ export function bindUserCard(opts: {
     forceCloseNotesDialog();
     resetBlockUi();
     resetIgnoreHighlightsUi();
-    nameEl.textContent = info.nick || info.login;
+    nameEl.textContent = currentName;
     loginEl.textContent = info.login ? `@${info.login}` : "";
     clearAvatar();
     clearPronouns();
@@ -1055,7 +1069,7 @@ export function bindUserCard(opts: {
       recent.replaceChildren();
       const empty = document.createElement("p");
       empty.className = "usercard-empty";
-      empty.textContent = "No active channel.";
+      empty.textContent = t("usercard.empty.noChannel");
       recent.append(empty);
       return;
     }
@@ -1074,7 +1088,7 @@ export function bindUserCard(opts: {
       if (hits.length === 0) {
         const empty = document.createElement("p");
         empty.className = "usercard-empty";
-        empty.textContent = "No recent messages in scrollback.";
+        empty.textContent = t("usercard.empty.noMessages");
         recent.append(empty);
         return;
       }
@@ -1104,7 +1118,7 @@ export function bindUserCard(opts: {
       recent.replaceChildren();
       const err = document.createElement("p");
       err.className = "usercard-empty";
-      err.textContent = "Could not load messages.";
+      err.textContent = t("usercard.error.loadMessages");
       recent.append(err);
     }
   };
@@ -1117,8 +1131,8 @@ export function bindUserCard(opts: {
     pinBtn.addEventListener("click", () => {
       pinned = !pinned;
       pinBtn.classList.toggle("is-pinned", pinned);
-      pinBtn.title = pinned ? "Unpin" : "Pin";
-      pinBtn.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
+      pinBtn.title = pinned ? t("usercard.unpin") : t("usercard.pin");
+      pinBtn.setAttribute("aria-label", pinned ? t("usercard.unpin") : t("usercard.pin"));
     });
   }
 
@@ -1143,8 +1157,8 @@ export function bindUserCard(opts: {
     if (ev.button !== 0) {
       return;
     }
-    const t = ev.target as HTMLElement;
-    if (t.closest("button")) {
+    const el = ev.target as HTMLElement;
+    if (el.closest("button")) {
       return;
     }
     drag = {
@@ -1231,7 +1245,11 @@ export function bindUserCard(opts: {
           if (login !== currentLogin || modal.hidden) {
             return;
           }
-          setStatus(wantBlocked ? `Blocked @${login}` : `Unblocked @${login}`);
+          setStatus(
+            wantBlocked
+              ? t("usercard.status.blocked", { login })
+              : t("usercard.status.unblocked", { login }),
+          );
         } catch (e) {
           if (login !== currentLogin || modal.hidden) {
             return;
@@ -1242,7 +1260,7 @@ export function bindUserCard(opts: {
           const msg =
             e && typeof e === "object" && "message" in e
               ? String((e as { message: unknown }).message)
-              : "Could not update block.";
+              : t("usercard.error.block");
           setStatus(msg);
         } finally {
           blockBusy = false;
@@ -1278,8 +1296,8 @@ export function bindUserCard(opts: {
           }
           setStatus(
             wantIgnored
-              ? `Highlights ignored for @${login}`
-              : `Highlights restored for @${login}`,
+              ? t("usercard.status.highlightsIgnored", { login })
+              : t("usercard.status.highlightsRestored", { login }),
           );
         } catch (e) {
           if (login !== currentLogin || modal.hidden) {
@@ -1291,7 +1309,7 @@ export function bindUserCard(opts: {
           const msg =
             e && typeof e === "object" && "message" in e
               ? String((e as { message: unknown }).message)
-              : "Could not update ignore highlights.";
+              : t("usercard.error.ignoreHighlights");
           setStatus(msg);
         } finally {
           ignoreHighlightsBusy = false;
@@ -1358,7 +1376,7 @@ export function bindUserCard(opts: {
         const msg =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not save notes.";
+            : t("usercard.error.saveNotes");
         setStatus(msg);
       } finally {
         notesBusy = false;
@@ -1398,12 +1416,63 @@ export function bindUserCard(opts: {
     if (modal.hidden || pinned || !autoClose()) {
       return;
     }
-    const t = ev.target as Node;
-    if (dialog.contains(t)) {
+    const node = ev.target as Node;
+    if (dialog.contains(node)) {
       return;
     }
     close();
   });
+
+  const relabelChrome = (): void => {
+    if (pinBtn) {
+      pinBtn.title = pinned ? t("usercard.unpin") : t("usercard.pin");
+      pinBtn.setAttribute(
+        "aria-label",
+        pinned ? t("usercard.unpin") : t("usercard.pin"),
+      );
+    }
+    if (!modal.hidden && currentLogin) {
+      if (currentName) {
+        nameEl.textContent = currentName;
+      }
+      if (currentUserId) {
+        if (userIdText && userIdRow) {
+          userIdText.textContent = t("usercard.id", { id: currentUserId });
+          userIdRow.hidden = false;
+        }
+      } else if (userIdText && userIdRow && !userIdRow.hidden) {
+        userIdText.textContent = t("usercard.id.na");
+      }
+      applyNotesPreview(cachedNotes);
+      if (!notesModal.hidden && notesTitle) {
+        notesTitle.textContent = t("usercard.notes.title", {
+          name:
+            nameEl.textContent?.trim() ||
+            currentLogin ||
+            t("usercard.notes.title.fallbackUser"),
+        });
+      }
+      if (timeoutsEl) {
+        for (const btn of timeoutsEl.querySelectorAll("button")) {
+          const seconds = Number((btn as HTMLButtonElement).dataset.seconds);
+          if (Number.isFinite(seconds) && seconds > 0) {
+            (btn as HTMLButtonElement).title = t("usercard.timeout.title", {
+              n: seconds,
+            });
+          }
+        }
+      }
+      if (
+        ignoreHighlightsCheckbox &&
+        !ignoreHighlightsCheckbox.disabled &&
+        ignoreHighlightsCheckbox.title
+      ) {
+        ignoreHighlightsCheckbox.title = t(
+          "usercard.ignoreHighlights.regexTitle",
+        );
+      }
+    }
+  };
 
   return {
     open,
@@ -1413,5 +1482,6 @@ export function bindUserCard(opts: {
     syncMod: refreshModUi,
     syncSubage,
     syncNotes,
+    relabelChrome,
   };
 }

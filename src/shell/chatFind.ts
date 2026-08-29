@@ -4,6 +4,7 @@ import type { MessageRing } from "../chat/ring";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
+import { t } from "../i18n";
 
 /** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
 export type SearchHit = {
@@ -40,6 +41,7 @@ export function bindSearchPopup(opts: {
   onChannelChanged: () => void;
   open: () => void;
   close: () => void;
+  relabel: () => void;
 } {
   const { ring, modal, activeChannel, onOpen } = opts;
   const appRoot = document.querySelector<HTMLElement>("#app");
@@ -55,6 +57,7 @@ export function bindSearchPopup(opts: {
       onChannelChanged: () => undefined,
       open: () => undefined,
       close: () => undefined,
+      relabel: () => undefined,
     };
   }
 
@@ -81,8 +84,8 @@ export function bindSearchPopup(opts: {
     const ch = activeChannel();
     // SearchPopup::updateWindowTitle — "Searching in {name}'s history"
     titleEl.textContent = ch
-      ? `Searching in ${ch}'s history`
-      : "Searching in history";
+      ? t("find.title.channel", { ch })
+      : t("find.title");
   };
 
   const setActiveRow = (id: string): void => {
@@ -103,7 +106,7 @@ export function bindSearchPopup(opts: {
         iconWrap.className = "search-hit-empty-icon";
         iconWrap.append(iconEl("search", 40));
         const text = document.createElement("p");
-        text.textContent = "Ничего не найдено";
+        text.textContent = t("find.empty");
         empty.append(iconWrap, text);
         view.append(empty);
       }
@@ -116,7 +119,7 @@ export function bindSearchPopup(opts: {
       row.className = hit.id === activeId ? "search-hit is-active" : "search-hit";
       row.dataset.id = hit.id;
       row.setAttribute("role", "listitem");
-      row.title = "Перейти к сообщению";
+      row.title = t("find.hit.go");
       const time = document.createElement("span");
       time.className = "search-hit-time";
       time.textContent = formatTime(hit.timestampMs);
@@ -294,9 +297,9 @@ export function bindSearchPopup(opts: {
     const id = row.dataset.id;
     setActiveRow(id);
     if (!ring.scrollToMsgId(id)) {
-      row.title = "Сообщение не в текущей ленте";
+      row.title = t("find.hit.notInFeed");
     } else {
-      row.title = "Перейти к сообщению";
+      row.title = t("find.hit.go");
     }
   });
 
@@ -305,5 +308,5 @@ export function bindSearchPopup(opts: {
     scheduleSearch();
   });
 
-  return { onChannelChanged, open, close };
+  return { onChannelChanged, open, close, relabel: paintTitle };
 }

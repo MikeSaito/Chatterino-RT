@@ -1,5 +1,6 @@
 import { setButtonIcon } from "./icons";
 import { channelTabAttrs } from "./channelTabAria";
+import { t } from "../i18n";
 
 export type ChannelList = {
   hydrate: (recents: string[], open: string[], active: string) => void;
@@ -17,7 +18,7 @@ export function bindChannelList(
   onLeave: (login: string) => void,
 ): ChannelList {
   list.setAttribute("role", "tablist");
-  list.setAttribute("aria-label", "Channels");
+  list.setAttribute("aria-label", t("sidebar.channels.aria"));
   const recents: string[] = [];
   const open = new Set<string>();
   let activeLogin = "";
@@ -25,6 +26,7 @@ export function bindChannelList(
 
   const paint = (active: string): void => {
     activeLogin = active;
+    list.setAttribute("aria-label", t("sidebar.channels.aria"));
     list.replaceChildren();
     const order = showRecents
       ? [
@@ -55,7 +57,10 @@ export function bindChannelList(
         const leave = document.createElement("button");
         leave.type = "button";
         leave.className = "channel-leave btn-icon";
-        setButtonIcon(leave, "close", { size: 12, label: "Покинуть" });
+        setButtonIcon(leave, "close", {
+          size: 12,
+          label: t("sidebar.channel.leave"),
+        });
         leave.addEventListener("click", (ev) => {
           ev.stopPropagation();
           onLeave(login);

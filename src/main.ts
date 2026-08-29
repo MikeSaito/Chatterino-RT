@@ -16,6 +16,7 @@ import { bindChannelList } from "./shell/channels";
 import { normalizeChannelInput } from "./shell/channelName";
 import { applyChromeIcons } from "./shell/chromeIcons";
 import { applyContextMenuChrome, setContextMenuLabel } from "./shell/contextMenuChrome";
+import { applyLocale, onLocaleChange, t, applyDomI18n } from "./i18n";
 import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
@@ -116,7 +117,7 @@ if (import.meta.hot) {
 
 window.addEventListener("DOMContentLoaded", () => {
   void boot().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err ?? "ошибка загрузки");
+    const message = err instanceof Error ? err.message : String(err ?? t("status.bootError"));
     const statusText = document.querySelector<HTMLElement>("#status-text");
     const statusLine = document.querySelector<HTMLElement>("#status");
     if (statusText) {
@@ -143,6 +144,8 @@ window.addEventListener("pagehide", () => {
 
 async function boot(): Promise<void> {
   const myEpoch = ++bootEpoch;
+  applyLocale("en");
+  applyDomI18n();
   applyChromeIcons();
   const composerWaitIcon = document.querySelector<HTMLElement>(".composer-wait-icon");
   if (composerWaitIcon) {
@@ -321,7 +324,7 @@ async function boot(): Promise<void> {
   }
   const toast = bindToastHost(toastHostEl);
   const toastCopied = (): void => {
-    toast.push({ kind: "success", text: "Скопировано" });
+    toast.push({ kind: "success", text: t("toast.copied") });
   };
   const syncToastLift = (): void => {
     const replyH = replyBar.hidden ? 0 : replyBar.getBoundingClientRect().height;
@@ -422,7 +425,7 @@ async function boot(): Promise<void> {
     messageInput.focus();
   });
 
-  setStatus("Загрузка чата…");
+  setStatus(t("status.boot"));
   messageInput.disabled = true;
   sendBtn.disabled = true;
   emoteOpen.disabled = true;
@@ -462,7 +465,7 @@ async function boot(): Promise<void> {
       return;
     }
     pendingJoins.push({ name, focus });
-    setStatus("Загрузка чата…");
+    setStatus(t("status.boot"));
   };
 
   let prepareSettingsOpen: (() => void) | null = null;
@@ -535,7 +538,7 @@ async function boot(): Promise<void> {
         chromeReady.headerAction(action);
         return;
       }
-      setStatus("Загрузка чата…");
+      setStatus(t("status.boot"));
     },
   });
 
@@ -553,7 +556,7 @@ async function boot(): Promise<void> {
         signinBtn.disabled = true;
         try {
           await invoke("auth_start");
-          setStatus("Ожидание входа…");
+          setStatus(t("status.authWaiting"));
         } catch (err) {
           setStatus(formatError(err));
         } finally {
@@ -578,7 +581,7 @@ async function boot(): Promise<void> {
         logoutBtn.disabled = true;
         try {
           await invoke("auth_logout");
-          setStatus("Вход отменён");
+          setStatus(t("status.authCancelled"));
         } catch (err) {
           setStatus(formatError(err));
         } finally {
@@ -603,7 +606,7 @@ async function boot(): Promise<void> {
         importBtn.disabled = true;
         try {
           await invoke("auth_import", { blob: pasteEl.value });
-          setStatus("Код принят");
+          setStatus(t("status.authCodeAccepted"));
         } catch (err) {
           setStatus(formatError(err));
         } finally {
@@ -808,10 +811,10 @@ async function boot(): Promise<void> {
     if (!ch) {
       chatEmptyEl.hidden = false;
       if (chatEmptyTitleEl) {
-        chatEmptyTitleEl.textContent = "Выберите канал";
+        chatEmptyTitleEl.textContent = t("chat.empty.noChannel.title");
       }
       if (chatEmptyHintEl) {
-        chatEmptyHintEl.textContent = "Подключитесь к каналу, чтобы видеть сообщения";
+        chatEmptyHintEl.textContent = t("chat.empty.noChannel.hint");
       }
       if (chatEmptyIconEl) {
         chatEmptyIconEl.replaceChildren(iconEl("plus", 64));
@@ -821,10 +824,10 @@ async function boot(): Promise<void> {
     if (occupied === 0) {
       chatEmptyEl.hidden = false;
       if (chatEmptyTitleEl) {
-        chatEmptyTitleEl.textContent = "Сообщений пока нет";
+        chatEmptyTitleEl.textContent = t("chat.empty.noMessages.title");
       }
       if (chatEmptyHintEl) {
-        chatEmptyHintEl.textContent = "Напишите первым или дождитесь активности в чате";
+        chatEmptyHintEl.textContent = t("chat.empty.noMessages.hint");
       }
       if (chatEmptyIconEl) {
         chatEmptyIconEl.replaceChildren(iconEl("emote", 64));
@@ -1037,10 +1040,10 @@ async function boot(): Promise<void> {
       toast.push({ kind: "danger", text: message });
     },
     onStart: () => {
-      toast.push({ kind: "info", text: "Загрузка изображения…" });
+      toast.push({ kind: "info", text: t("toast.image.loading") });
     },
     onSuccess: () => {
-      toast.push({ kind: "success", text: "Изображение загружено" });
+      toast.push({ kind: "success", text: t("toast.image.uploaded") });
     },
   });
 
@@ -1228,7 +1231,7 @@ async function boot(): Promise<void> {
           break;
         case "open-browser":
           if (!channel) {
-            setStatus("нет активного канала");
+            setStatus(t("status.noChannel"));
             return;
           }
           void invoke("open_chat_link", {
@@ -1240,7 +1243,7 @@ async function boot(): Promise<void> {
           break;
         case "open-streamlink":
           if (!channel) {
-            setStatus("нет активного канала");
+            setStatus(t("status.noChannel"));
             return;
           }
           void invoke("open_in_streamlink", { channel }).catch((err) => {
@@ -1249,7 +1252,11 @@ async function boot(): Promise<void> {
           break;
         case "open-custom-player":
           if (!channel || !customUriScheme) {
-            setStatus(!customUriScheme ? "custom player не настроен" : "нет активного канала");
+            setStatus(
+              !customUriScheme
+                ? t("status.customPlayerUnset")
+                : t("status.noChannel"),
+            );
             return;
           }
           void invoke("open_in_custom_player", { channel }).catch((err) => {
@@ -1258,14 +1265,14 @@ async function boot(): Promise<void> {
           break;
         case "reconnect":
           if (!channel) {
-            setStatus("нет активного канала");
+            setStatus(t("status.noChannel"));
             return;
           }
           void joinChannel(channel, true);
           break;
         case "leave":
           if (!channel) {
-            setStatus("нет активного канала");
+            setStatus(t("status.noChannel"));
             return;
           }
           void leaveChannel(channel);
@@ -1416,6 +1423,28 @@ async function boot(): Promise<void> {
     },
   );
 
+  const refreshLocaleChrome = (): void => {
+    applyChromeIcons();
+    headerMenuCtl?.relabel();
+    applyContextMenuChrome(contextMenuEl);
+    channels.paint(ipc.active());
+    syncChatEmpty();
+    syncComposer();
+    applyAuth(lastAuth);
+    if (replyTarget) {
+      setReply(replyTarget.id, replyTarget.login, replyTarget.text);
+    }
+    userCard?.relabelChrome();
+    replyThreadCtl?.relabelChrome();
+    chatFindCtl.relabel();
+    emotePopup.relabel();
+  };
+
+  onLocaleChange(() => {
+    refreshLocaleChrome();
+  });
+  refreshLocaleChrome();
+
   window.addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented) {
       return;
@@ -1512,7 +1541,7 @@ async function boot(): Promise<void> {
       channel: ipc.active() || "",
     });
     if (!text) {
-      setStatus("Could not build moderation command.");
+      setStatus(t("status.modBuildFailed"));
       return;
     }
     modSendBusy = true;
@@ -1640,7 +1669,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          setStatus("нет активного канала");
+          setStatus(t("status.noChannel"));
           return;
         }
         try {
@@ -1651,7 +1680,7 @@ async function boot(): Promise<void> {
           const events = Array.isArray(snap.events) ? snap.events : [];
           const event = findEventByMsgId(events, msgId);
           if (!event) {
-            setStatus("сообщение не найдено в scrollback");
+            setStatus(t("status.msgNotInScrollback"));
             return;
           }
           await navigator.clipboard.writeText(JSON.stringify(event, null, 2));
@@ -1729,7 +1758,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          setStatus("нет активного канала");
+          setStatus(t("status.noChannel"));
           return;
         }
         try {
@@ -1742,7 +1771,7 @@ async function boot(): Promise<void> {
           );
           const root = resolveReplyRoot(events, msgId);
           if (!root) {
-            setStatus("не удалось найти корень ветки");
+            setStatus(t("status.threadRootMissing"));
             return;
           }
           setReply(root.id, root.login, root.text);
@@ -1759,7 +1788,7 @@ async function boot(): Promise<void> {
       void (async () => {
         const channel = ipc.active().trim();
         if (!channel) {
-          setStatus("нет активного канала");
+          setStatus(t("status.noChannel"));
           return;
         }
         try {
@@ -1779,7 +1808,7 @@ async function boot(): Promise<void> {
           const root = resolveReplyRoot(events, msgId);
           if (!root) {
             replyThread.close();
-            setStatus("не удалось найти корень ветки");
+            setStatus(t("status.threadRootMissing"));
             return;
           }
           replyThread.completeOpen({
@@ -1814,7 +1843,7 @@ async function boot(): Promise<void> {
     if (action === "open-streamlink") {
       const channel = ipc.active().trim();
       if (!channel) {
-        setStatus("нет активного канала");
+        setStatus(t("status.noChannel"));
         return;
       }
       void invoke("open_in_streamlink", { channel }).catch((err) => {
@@ -1825,7 +1854,7 @@ async function boot(): Promise<void> {
     if (action === "open-custom-player") {
       const channel = ipc.active().trim();
       if (!channel) {
-        setStatus("нет активного канала");
+        setStatus(t("status.noChannel"));
         return;
       }
       void invoke("open_in_custom_player", { channel }).catch((err) => {
@@ -2023,7 +2052,7 @@ async function boot(): Promise<void> {
     void importLogin();
   };
   emoteOpen.disabled = false;
-  if (statusTextEl.textContent === "Загрузка чата…") {
+  if (statusTextEl.textContent === t("status.boot")) {
     setStatus("");
   }
 
@@ -2231,7 +2260,7 @@ async function boot(): Promise<void> {
   function setReply(id: string, login: string, text: string): void {
     replyTarget = { id, login, text };
     const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
-    replyLabelEl.textContent = `Ответ @${login}: ${preview}`;
+    replyLabelEl.textContent = t("reply.label", { login, preview });
     replyBarEl.hidden = false;
     composerChrome.sync();
   }
@@ -2297,7 +2326,7 @@ async function boot(): Promise<void> {
     settingsBtn.hidden = showChip;
     // Pending: «Отмена»; signed idle — logout только через chip-меню.
     logoutBtn.hidden = !pending;
-    logoutBtn.textContent = "Отмена";
+    logoutBtn.textContent = t("auth.cancel");
     logoutBtn.disabled = authOp === "logout";
     // «Вставить код» только в pendingPaste, никогда в idle.
     pasteEl.hidden = !pendingPaste;
@@ -2305,13 +2334,12 @@ async function boot(): Promise<void> {
     importBtn.disabled = authOp === "import";
     if (pendingDevice) {
       deviceEl.hidden = false;
-      const code = `код: ${info.userCode}`;
+      const code = t("auth.device.code", { code: info.userCode ?? "" });
       deviceEl.textContent = info.message ? `${code}\n${info.message}` : code;
     } else if (pendingPaste) {
       deviceEl.hidden = false;
       deviceEl.textContent =
-        info.message ||
-        "Войдите на chatterino.com/client_login, скопируйте строку и вставьте сюда";
+        info.message || t("auth.device.pasteHint");
     } else if (info.message && !signed) {
       deviceEl.hidden = false;
       deviceEl.textContent = info.message;
@@ -2337,7 +2365,9 @@ async function boot(): Promise<void> {
     messageInput.disabled = !lastAuth.canSend;
     sendBtn.title = lastAuth.canSend
       ? ""
-      : "Нужен вход Twitch и активный канал";
+      : lastAuth.login
+        ? t("composer.send.title.needChannel")
+        : t("composer.send.title.needAuth");
     composerChrome.sync();
   }
 
@@ -2807,7 +2837,7 @@ async function boot(): Promise<void> {
     const name = normalizeChannelInput(raw);
     if (!name) {
       holdStatus = true;
-      setStatus("имя канала: 1-25 символов [a-z0-9_]");
+      setStatus(t("status.channelNameInvalid"));
       return;
     }
     if (channelBusy) {
@@ -2843,13 +2873,13 @@ function formatStatus(s: ChatStatus): string {
     case "connected":
       return "";
     case "reconnecting":
-      return "переподключение…";
+      return t("status.reconnecting");
     case "error":
-      return s.message || "ошибка";
+      return s.message || t("status.error");
     case "connecting":
-      return "подключение…";
+      return t("status.connecting");
     default:
-      return "подключение…";
+      return t("status.connecting");
   }
 }
 
@@ -2863,7 +2893,7 @@ function formatError(err: unknown): string {
       return rec.message;
     }
   }
-  return String(err);
+  return t("status.bootError");
 }
 
 function menuCommandsFromSettings(data: AppSettings): AppSettings["commands"] {

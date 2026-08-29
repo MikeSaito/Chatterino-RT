@@ -1,5 +1,7 @@
 /** CDN scale links for emote/badge context menu (stock addEmoteContextMenuItems). */
 
+import { t } from "../i18n/index.ts";
+
 export type EmoteImageLink = {
   factor: number;
   url: string;
@@ -211,5 +213,5 @@ export function deriveEmoteScaleUrls(
 
 /** Stock submenu label: `1x link`, `2x link`, … */
 export function emoteScaleLinkLabel(factor: number): string {
-  return `${factor}x link`;
+  return t("context.imageLinkNx", { factor });
 }

@@ -1,4 +1,5 @@
 import { iconEl, type IconName } from "./icons";
+import { t, type MessageKey } from "../i18n";
 
 const ACTION_ICONS: Record<string, IconName> = {
   copy: "copy",
@@ -21,6 +22,23 @@ const ACTION_ICONS: Record<string, IconName> = {
 const ACTION_SHORTCUTS: Record<string, string> = {
   copy: "Ctrl+C",
   "copy-full": "Ctrl+Shift+C",
+};
+
+const ACTION_LABELS: Record<string, MessageKey> = {
+  copy: "context.copyMessage",
+  "copy-full": "context.copyFull",
+  "copy-id": "context.copyId",
+  "copy-json": "context.copyJson",
+  "open-link": "context.openLink",
+  "open-link-incognito": "context.openLinkIncognito",
+  "copy-link": "context.copyLink",
+  reply: "context.reply",
+  "reply-original": "context.replyOriginal",
+  thread: "context.thread",
+  user: "context.user",
+  "open-twitch": "context.openTwitch",
+  "open-streamlink": "context.openStreamlink",
+  "open-custom-player": "context.openCustomPlayer",
 };
 
 export function setContextMenuLabel(btn: HTMLButtonElement, label: string): void {
@@ -49,7 +67,7 @@ function decorateButton(btn: HTMLButtonElement): void {
   if (iconName) {
     const iconWrap = document.createElement("span");
     iconWrap.className = "chat-context-icon";
-    iconWrap.append(iconEl(iconName, 16));
+    iconWrap.append(iconEl(iconName, 14));
     btn.append(iconWrap);
   }
   const text = document.createElement("span");
@@ -63,13 +81,34 @@ function decorateButton(btn: HTMLButtonElement): void {
     hint.textContent = shortcut;
     btn.append(hint);
   }
-  if (action.includes("ban") || btn.classList.contains("is-danger")) {
-    btn.classList.add("is-danger");
+}
+
+function applyStaticLabels(menu: HTMLElement): void {
+  for (const [action, key] of Object.entries(ACTION_LABELS)) {
+    const btn = menu.querySelector<HTMLButtonElement>(
+      `button[data-action="${action}"]`,
+    );
+    if (btn) {
+      setContextMenuLabel(btn, t(key));
+    }
+  }
+  const openLab = menu.querySelector<HTMLButtonElement>(
+    "#chat-context-image-open .chat-context-submenu-label",
+  );
+  if (openLab) {
+    setContextMenuLabel(openLab, t("context.open"));
+  }
+  const copyLab = menu.querySelector<HTMLButtonElement>(
+    "#chat-context-image-copy .chat-context-submenu-label",
+  );
+  if (copyLab) {
+    setContextMenuLabel(copyLab, t("context.copy"));
   }
 }
 
 /** Icons and shortcut hints for chat context menu rows. */
 export function applyContextMenuChrome(menu: HTMLElement): void {
+  applyStaticLabels(menu);
   menu.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(decorateButton);
   const submenuLabels = menu.querySelectorAll<HTMLButtonElement>(
     ".chat-context-submenu-label",

@@ -23,6 +23,7 @@ import {
   resolveThemePreset,
 } from "../theme";
 import { applyWindowTopMost } from "../windowTopMost";
+import { applyLocale, localeFromSettings } from "../../i18n";
 import {
   defaultAppSettingsTables,
   defaultKnobs,
@@ -298,5 +299,6 @@ export function applySettingsDisplay(
   });
   ring.configureStackBits(data.knobs["emotes.stackBits"] === true);
   applyWindowTopMost(data.knobs["appearance.windowTopMost"] === true);
+  applyLocale(localeFromSettings(data.knobs as Record<string, unknown>));
   onDisplay?.(data);
 }

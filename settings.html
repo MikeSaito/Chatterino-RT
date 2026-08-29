@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="stylesheet" href="/src/styles.css" />
@@ -16,13 +16,14 @@
       aria-labelledby="settings-title"
     >
       <header id="settings-dialog-head">
-        <h2 id="settings-title">Chatterino Settings</h2>
+        <h2 id="settings-title" data-i18n="settings.title">Chatterino Settings</h2>
         <div id="settings-search-wrap">
           <span id="settings-search-icon" class="settings-search-icon" aria-hidden="true"></span>
-          <label class="sr-only" for="settings-search">Find in settings</label>
+          <label class="sr-only" for="settings-search" data-i18n="settings.search.label">Find in settings</label>
           <input
             id="settings-search"
             type="search"
+            data-i18n-placeholder="settings.search.placeholder"
             placeholder="Find in settings... (Ctrl+F)"
             autocomplete="off"
             spellcheck="false"
@@ -31,6 +32,8 @@
             type="button"
             id="settings-search-clear"
             class="btn-icon"
+            data-i18n-title="settings.search.clear"
+            data-i18n-aria-label="settings.search.clear.aria"
             title="Clear"
             aria-label="Clear search"
             hidden
@@ -39,14 +42,14 @@
         </div>
       </header>
       <div id="settings-body">
-        <nav id="settings-tabs" aria-label="Settings pages"></nav>
+        <nav id="settings-tabs" data-i18n-aria-label="settings.tabs.aria" aria-label="Settings pages"></nav>
         <div id="settings-pages"></div>
       </div>
       <footer id="settings-dialog-foot">
         <p id="settings-status"></p>
         <div id="settings-actions">
-          <button type="button" id="settings-ok" class="btn btn-primary">Ok</button>
-          <button type="button" id="settings-cancel" class="btn">Cancel</button>
+          <button type="button" id="settings-ok" class="btn btn-primary" data-i18n="settings.ok">Ok</button>
+          <button type="button" id="settings-cancel" class="btn" data-i18n="settings.cancel">Cancel</button>
         </div>
       </footer>
     </div>

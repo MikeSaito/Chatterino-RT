@@ -654,6 +654,14 @@ const GENERAL_SECTIONS: SectionDef[] = [
     knobs: [
       sel("theme", "appearance.theme", "Theme", THEME_OPTIONS, "Dark"),
       sel(
+        "ui-language",
+        "appearance.uiLanguage",
+        "Language",
+        [opt("English", "en"), opt("Русский", "ru")],
+        "en",
+        "locale language i18n translation",
+      ),
+      sel(
         "ui-layout",
         "appearance.uiLayout",
         "User interface",

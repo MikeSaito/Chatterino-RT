@@ -1,5 +1,7 @@
 /** Account chip dropdown (switch account / settings / logout). */
 
+import { t } from "../i18n";
+
 export type AuthMenuAction =
   | { kind: "select"; login: string }
   | { kind: "settings" }
@@ -41,14 +43,14 @@ export function bindAuthMenu(opts: {
     settings.type = "button";
     settings.setAttribute("role", "menuitem");
     settings.dataset.action = "settings";
-    settings.textContent = "Настройки";
+    settings.textContent = t("auth.menu.settings");
     menu.appendChild(settings);
     if (canLogout()) {
       const logout = document.createElement("button");
       logout.type = "button";
       logout.setAttribute("role", "menuitem");
       logout.dataset.action = "logout";
-      logout.textContent = "Выйти";
+      logout.textContent = t("auth.menu.logout");
       logout.className = "auth-menu-danger";
       menu.appendChild(logout);
     }
@@ -86,12 +88,12 @@ export function bindAuthMenu(opts: {
   };
 
   const onMenuClick = (ev: MouseEvent): void => {
-    const t = ev.target;
-    if (!(t instanceof HTMLButtonElement)) {
+    const el = ev.target;
+    if (!(el instanceof HTMLButtonElement)) {
       return;
     }
-    const action = t.dataset.action;
-    if (!action || t.disabled) {
+    const action = el.dataset.action;
+    if (!action || el.disabled) {
       return;
     }
     hide();
@@ -104,7 +106,7 @@ export function bindAuthMenu(opts: {
       return;
     }
     if (action === "select") {
-      const login = t.dataset.login?.trim();
+      const login = el.dataset.login?.trim();
       if (login) {
         onAction({ kind: "select", login });
       }
@@ -115,11 +117,11 @@ export function bindAuthMenu(opts: {
     if (menu.hidden) {
       return;
     }
-    const t = ev.target;
-    if (!(t instanceof Node)) {
+    const el = ev.target;
+    if (!(el instanceof Node)) {
       return;
     }
-    if (menu.contains(t) || chip.contains(t)) {
+    if (menu.contains(el) || chip.contains(el)) {
       return;
     }
     hide();

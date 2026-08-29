@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
+import { t, type MessageKey } from "../i18n";
 
 type EmotePopupTab = "favourite" | "subs" | "channel" | "global" | "emojis";
 
@@ -14,12 +15,12 @@ type EmotePopupItem = {
 
 const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis"];
 
-const EMPTY_BY_TAB: Record<EmotePopupTab, string> = {
-  favourite: "Нет избранных эмодзи. Ctrl+клик по эмодзи добавляет в избранное.",
-  subs: "Нет subscriber emotes.",
-  channel: "Нет эмодзи канала.",
-  global: "Нет global emotes.",
-  emojis: "Нет эмодзи.",
+const EMPTY_KEY: Record<EmotePopupTab, MessageKey> = {
+  favourite: "emotes.empty.favourite",
+  subs: "emotes.empty.subs",
+  channel: "emotes.empty.channel",
+  global: "emotes.empty.global",
+  emojis: "emotes.empty.emojis",
 };
 
 const VIEWPORT_PAD = 8;
@@ -34,7 +35,7 @@ export function bindEmotePopup(opts: {
   anchor: HTMLElement;
   insertEmote: (code: string) => void;
   activeChannel: () => string | null;
-}): { open: () => void; close: () => void; toggle: () => void } {
+}): { open: () => void; close: () => void; toggle: () => void; relabel: () => void } {
   const { modal, anchor, insertEmote, activeChannel } = opts;
   const dialog = modal.querySelector<HTMLElement>("#emotepopup-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#emotepopup-backdrop");
@@ -50,6 +51,7 @@ export function bindEmotePopup(opts: {
       open: () => undefined,
       close: () => undefined,
       toggle: () => undefined,
+      relabel: () => undefined,
     };
   }
 
@@ -112,7 +114,9 @@ export function bindEmotePopup(opts: {
       return;
     }
     const channel = activeChannel()?.trim() || "";
-    title.textContent = channel ? `Emotes in #${channel}` : "Emotes";
+    title.textContent = channel
+      ? t("emotes.title.channel", { channel })
+      : t("emotes.title");
     prepareModalOpen(modal);
     trap.activate();
     anchor.setAttribute("aria-expanded", "true");
@@ -135,9 +139,9 @@ export function bindEmotePopup(opts: {
 
   const emptyMessage = (query: string): string => {
     if (query.trim()) {
-      return "Нет эмодзи по запросу.";
+      return t("emotes.empty.query");
     }
-    return EMPTY_BY_TAB[tab];
+    return t(EMPTY_KEY[tab]);
   };
 
   const paint = (items: EmotePopupItem[]): void => {
@@ -159,7 +163,9 @@ export function bindEmotePopup(opts: {
       if (item.favourite) {
         btn.classList.add("is-favourite");
       }
-      btn.title = item.favourite ? `${item.code} (favourite)` : item.code;
+      btn.title = item.favourite
+        ? t("emotes.item.favouriteSuffix", { code: item.code })
+        : item.code;
       btn.dataset.code = item.code;
       btn.dataset.kind = item.kind;
       btn.dataset.favourite = item.favourite ? "1" : "0";
@@ -175,7 +181,7 @@ export function bindEmotePopup(opts: {
         const ph = document.createElement("span");
         ph.className = "emotepopup-item-ph";
         ph.textContent = "?";
-        ph.title = "Unavailable";
+        ph.title = t("emotes.item.unavailable");
         btn.append(ph);
         btn.classList.add("is-unavailable");
       }
@@ -217,7 +223,7 @@ export function bindEmotePopup(opts: {
         const msg =
           err && typeof err === "object" && "message" in err
             ? String((err as { message: unknown }).message)
-            : "Could not update favourite";
+            : t("emotes.error.favourite");
         btn.title = msg;
       } finally {
         busyFav = false;
@@ -291,10 +297,20 @@ export function bindEmotePopup(opts: {
     }
   });
 
+  const relabel = (): void => {
+    if (modal.hidden) {
+      return;
+    }
+    const channel = activeChannel()?.trim() || "";
+    title.textContent = channel
+      ? t("emotes.title.channel", { channel })
+      : t("emotes.title");
+  };
+
   setTab("subs");
   anchor.setAttribute("aria-haspopup", "dialog");
   anchor.setAttribute("aria-expanded", "false");
   anchor.setAttribute("aria-controls", "emotepopup-dialog");
 
-  return { open, close, toggle };
+  return { open, close, toggle, relabel };
 }

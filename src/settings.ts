@@ -6,6 +6,7 @@ import { SETTINGS_OPENED_EVENT } from "./shell/settings/settingsBridge";
 import { applyResolvedTheme, resolveThemePreset, subscribeSystemTheme } from "./shell/theme";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSettings } from "./shell/settings/settingsApply";
+import { applyLocale, localeFromSettings } from "./i18n";
 
 const root = document.querySelector<HTMLElement>("#settings-root");
 if (!root) {
@@ -15,6 +16,7 @@ if (!root) {
 async function applySettingsWindowTheme(): Promise<void> {
   try {
     const settings = await invoke<AppSettings>("settings_get");
+    applyLocale(localeFromSettings(settings.knobs as Record<string, unknown>));
     const preset = resolveThemePreset({
       theme: String(settings.knobs["appearance.theme"] ?? "Dark"),
       darkSystem: String(settings.knobs["appearance.darkSystemTheme"] ?? "Dark"),
@@ -22,6 +24,7 @@ async function applySettingsWindowTheme(): Promise<void> {
     });
     applyResolvedTheme(preset);
   } catch {
+    applyLocale("en");
     applyResolvedTheme("Dark");
   }
 }

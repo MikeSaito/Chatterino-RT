@@ -5,6 +5,7 @@ import { collectReplyThread, isInReplyThread } from "./replyRoot";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
+import { t } from "../i18n";
 
 type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
@@ -41,6 +42,7 @@ export function bindReplyThread(opts: {
   isOpen: () => boolean;
   syncComposer: () => void;
   repaint: () => void;
+  relabelChrome: () => void;
 } {
   const {
     modal,
@@ -74,6 +76,7 @@ export function bindReplyThread(opts: {
       isOpen: () => false,
       syncComposer: () => undefined,
       repaint: () => undefined,
+      relabelChrome: () => undefined,
     };
   }
 
@@ -108,13 +111,13 @@ export function bindReplyThread(opts: {
     sendBtn.disabled = !canSend || sending || !input.value.trim();
     const login = getSelfLogin();
     if (!getCanSend()) {
-      input.placeholder = "Log in to send messages...";
+      input.placeholder = t("thread.placeholder.login");
     } else if (!channelMatches()) {
-      input.placeholder = "Channel changed — close thread";
+      input.placeholder = t("thread.placeholder.channelChanged");
     } else if (login) {
-      input.placeholder = `Reply as ${login}...`;
+      input.placeholder = t("thread.placeholder.asUser", { login });
     } else {
-      input.placeholder = "Reply...";
+      input.placeholder = t("thread.placeholder");
     }
     syncPinVisibility();
   };
@@ -235,8 +238,8 @@ export function bindReplyThread(opts: {
     pinned = false;
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
-      pinBtn.title = "Pin";
-      pinBtn.setAttribute("aria-label", "Pin");
+      pinBtn.title = t("thread.pin");
+      pinBtn.setAttribute("aria-label", t("thread.pin"));
     }
     input.value = "";
     view.replaceChildren();
@@ -262,7 +265,7 @@ export function bindReplyThread(opts: {
     if (subEl) {
       subEl.textContent = channel ? `#${channel}` : "";
     }
-    titleEl.textContent = nick ? `@${nick}` : "Thread";
+    titleEl.textContent = nick ? `@${nick}` : t("thread.title");
   };
 
   const mountOpen = (info: ReplyThreadOpen): void => {
@@ -278,8 +281,8 @@ export function bindReplyThread(opts: {
     pinned = false;
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
-      pinBtn.title = "Pin";
-      pinBtn.setAttribute("aria-label", "Pin");
+      pinBtn.title = t("thread.pin");
+      pinBtn.setAttribute("aria-label", t("thread.pin"));
     }
     paintHeader(info, channel);
     input.value = "";
@@ -398,7 +401,7 @@ export function bindReplyThread(opts: {
       return;
     }
     if (!channelMatches()) {
-      onStatus?.("Channel changed; close and reopen the thread.");
+      onStatus?.(t("thread.status.channelChanged"));
       return;
     }
     const text = input.value.trim();
@@ -416,7 +419,7 @@ export function bindReplyThread(opts: {
       const msg =
         err && typeof err === "object" && "message" in err
           ? String((err as { message: unknown }).message)
-          : "Send failed";
+          : t("thread.error.send");
       onStatus?.(msg);
     } finally {
       sending = false;
@@ -438,8 +441,8 @@ export function bindReplyThread(opts: {
     pinBtn.addEventListener("click", () => {
       pinned = !pinned;
       pinBtn.classList.toggle("is-pinned", pinned);
-      pinBtn.title = pinned ? "Unpin" : "Pin";
-      pinBtn.setAttribute("aria-label", pinned ? "Unpin" : "Pin");
+      pinBtn.title = pinned ? t("thread.unpin") : t("thread.pin");
+      pinBtn.setAttribute("aria-label", pinned ? t("thread.unpin") : t("thread.pin"));
     });
   }
 
@@ -462,8 +465,8 @@ export function bindReplyThread(opts: {
     if (modal.hidden || !autoClose() || pinned) {
       return;
     }
-    const t = ev.target as Node;
-    if (dialog.contains(t)) {
+    const node = ev.target as Node;
+    if (dialog.contains(node)) {
       return;
     }
     close();
@@ -479,5 +482,29 @@ export function bindReplyThread(opts: {
     paintThread(threadMessages, rootId, replyTarget?.id);
   };
 
-  return { open, beginOpen, completeOpen, close, ingestLive, isOpen, syncComposer, repaint };
+  const relabelChrome = (): void => {
+    if (pinBtn) {
+      pinBtn.title = pinned ? t("thread.unpin") : t("thread.pin");
+      pinBtn.setAttribute(
+        "aria-label",
+        pinned ? t("thread.unpin") : t("thread.pin"),
+      );
+    }
+    if (!modal.hidden && current) {
+      paintHeader(current, openChannel || activeChannel().trim());
+    }
+    syncComposer();
+  };
+
+  return {
+    open,
+    beginOpen,
+    completeOpen,
+    close,
+    ingestLive,
+    isOpen,
+    syncComposer,
+    repaint,
+    relabelChrome,
+  };
 }

@@ -1,5 +1,6 @@
 import type { MessageRing, SlotContext } from "../chat/ring";
 import { setButtonIcon } from "./icons";
+import { t } from "../i18n";
 
 export type ChatQuickActions = {
   hide: () => void;
@@ -32,9 +33,9 @@ export function bindChatQuickActions(opts: {
   let pinned = false;
   let overBar = false;
 
-  setButtonIcon(replyBtn, "reply", { size: 14, label: "Ответить" });
-  setButtonIcon(copyBtn, "copy", { size: 14, label: "Копировать" });
-  setButtonIcon(moreBtn, "more", { size: 14, label: "Ещё" });
+  setButtonIcon(replyBtn, "reply", { size: 14, label: t("chat.qa.reply") });
+  setButtonIcon(copyBtn, "copy", { size: 14, label: t("chat.qa.copy") });
+  setButtonIcon(moreBtn, "more", { size: 14, label: t("chat.qa.more") });
 
   let hideTimer = 0;
 

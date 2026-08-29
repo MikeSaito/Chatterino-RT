@@ -1,5 +1,7 @@
 /** Dropdown next to settings (Chatterino SplitHeader kebab). */
 
+import { t, type MessageKey } from "../i18n";
+
 export type HeaderMenuAction =
   | "search"
   | "open-browser"
@@ -10,23 +12,23 @@ export type HeaderMenuAction =
 
 type HeaderMenuItem = {
   action: HeaderMenuAction;
-  label: string;
+  labelKey: MessageKey;
   needsChannel: boolean;
   needsCustomScheme?: boolean;
 };
 
 const ITEMS: HeaderMenuItem[] = [
-  { action: "search", label: "Search…", needsChannel: false },
-  { action: "open-browser", label: "Open in browser", needsChannel: true },
-  { action: "open-streamlink", label: "Open in Streamlink", needsChannel: true },
+  { action: "search", labelKey: "header.menu.search", needsChannel: false },
+  { action: "open-browser", labelKey: "header.menu.openBrowser", needsChannel: true },
+  { action: "open-streamlink", labelKey: "header.menu.openStreamlink", needsChannel: true },
   {
     action: "open-custom-player",
-    label: "Open in custom player",
+    labelKey: "header.menu.openCustomPlayer",
     needsChannel: true,
     needsCustomScheme: true,
   },
-  { action: "reconnect", label: "Reconnect", needsChannel: true },
-  { action: "leave", label: "Leave channel", needsChannel: true },
+  { action: "reconnect", labelKey: "header.menu.reconnect", needsChannel: true },
+  { action: "leave", labelKey: "header.menu.leave", needsChannel: true },
 ];
 
 export function bindHeaderMenu(opts: {
@@ -35,7 +37,7 @@ export function bindHeaderMenu(opts: {
   getChannel: () => string;
   hasCustomPlayer: () => boolean;
   onAction: (action: HeaderMenuAction) => void;
-}): { hide: () => void; dispose: () => void } {
+}): { hide: () => void; dispose: () => void; relabel: () => void } {
   const { button, menu, getChannel, hasCustomPlayer, onAction } = opts;
   const pad = 8;
   let disposed = false;
@@ -43,6 +45,17 @@ export function bindHeaderMenu(opts: {
   const hide = (): void => {
     menu.hidden = true;
     button.setAttribute("aria-expanded", "false");
+  };
+
+  const relabel = (): void => {
+    for (const item of ITEMS) {
+      const btn = menu.querySelector<HTMLButtonElement>(
+        `button[data-action="${item.action}"]`,
+      );
+      if (btn) {
+        btn.textContent = t(item.labelKey);
+      }
+    }
   };
 
   const paintItems = (): void => {
@@ -54,6 +67,7 @@ export function bindHeaderMenu(opts: {
       if (!spec) {
         continue;
       }
+      btn.textContent = t(spec.labelKey);
       if (spec.needsCustomScheme) {
         btn.hidden = !schemeOk;
       } else {
@@ -91,7 +105,7 @@ export function bindHeaderMenu(opts: {
     btn.type = "button";
     btn.setAttribute("role", "menuitem");
     btn.dataset.action = item.action;
-    btn.textContent = item.label;
+    btn.textContent = t(item.labelKey);
     menu.appendChild(btn);
   }
 
@@ -151,6 +165,7 @@ export function bindHeaderMenu(opts: {
 
   return {
     hide,
+    relabel,
     dispose: () => {
       if (disposed) {
         return;

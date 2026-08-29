@@ -1,5 +1,7 @@
 /** Stock Chatterino context-menu web search helpers. */
 
+import { t } from "../i18n/index.ts";
+
 export type SearchEngine = {
   url: string;
   name: string;
@@ -85,6 +87,10 @@ export function webSearchMenuLabel(
   privateMode = false,
 ): string {
   const name = engineName.trim();
-  const base = name ? `Search with ${name}` : "Search";
-  return privateMode ? `${base} in private mode` : base;
+  if (!name) {
+    return privateMode ? t("context.searchPrivate") : t("context.search");
+  }
+  return privateMode
+    ? t("context.searchWithPrivate", { name })
+    : t("context.searchWith", { name });
 }

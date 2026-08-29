@@ -1,6 +1,7 @@
 /** In-app toast stack: bottom-right, max 3 visible, FIFO queue. */
 
 import { iconEl, setButtonIcon, type IconName } from "./icons";
+import { t } from "../i18n";
 import {
   TOAST_QUEUE_CAP,
   defaultToastDuration,
@@ -160,7 +161,7 @@ export function bindToastHost(host: HTMLElement): ToastHost {
     const close = document.createElement("button");
     close.type = "button";
     close.className = "btn-icon toast-close";
-    setButtonIcon(close, "close", { size: 14, label: "Закрыть" });
+    setButtonIcon(close, "close", { size: 14, label: t("toast.close") });
 
     el.append(iconWrap, text, close);
     host.append(el);

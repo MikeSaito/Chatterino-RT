@@ -32,6 +32,8 @@ import {
   validateImportJson,
 } from "../imageUploaderSharex";
 import { iconEl, setButtonIcon } from "../icons";
+import { t } from "../../i18n";
+import { applyLocale, localeFromSettings } from "../../i18n";
 import { settingsNavIcon } from "./navIcons";
 import {
   applySettingsDisplay,
@@ -153,6 +155,17 @@ export function mountSettingsPanel(opts: {
   }
   const applyDraft = (data: AppSettings): void => {
     lastSettings = data;
+    applyLocale(localeFromSettings(data.knobs as Record<string, unknown>), root);
+    const clearBtn = root.querySelector<HTMLButtonElement>("#settings-search-clear");
+    if (clearBtn) {
+      setButtonIcon(clearBtn, "close", {
+        size: 14,
+        label: t("settings.search.clear.aria"),
+      });
+    }
+    root
+      .querySelector("#settings-tabs")
+      ?.setAttribute("aria-label", t("settings.tabs.aria"));
     if (ring) {
       applySettingsDisplay(ring, data, onDisplay);
     } else {
@@ -176,13 +189,16 @@ export function mountSettingsPanel(opts: {
   }
   tabsHost.setAttribute("role", "tablist");
   if (!tabsHost.getAttribute("aria-label")) {
-    tabsHost.setAttribute("aria-label", "Settings");
+    tabsHost.setAttribute("aria-label", t("settings.tabs.aria"));
   }
   if (searchIconHost) {
     searchIconHost.replaceChildren(iconEl("search", 14));
   }
   if (searchClear) {
-    setButtonIcon(searchClear, "close", { size: 14, label: "Clear" });
+    setButtonIcon(searchClear, "close", {
+      size: 14,
+      label: t("settings.search.clear.aria"),
+    });
   }
 
   const knobInputs = new Map<string, KnobControl>();
