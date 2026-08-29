@@ -1,4 +1,5 @@
-![Chatterino RT](src-tauri/icons/128x128.png)
+![Chatterino RT](public/logo.png)
+
 Chatterino RT [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ============
 

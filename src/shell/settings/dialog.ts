@@ -936,9 +936,19 @@ export function mountSettingsPanel(opts: {
     section.append(title);
 
     if (page.kind === "about") {
+      const brand = document.createElement("div");
+      brand.className = "settings-about-brand";
+      const logo = document.createElement("img");
+      logo.className = "settings-about-logo";
+      logo.src = "/logo.png";
+      logo.alt = "";
+      logo.width = 128;
+      logo.height = 128;
+      logo.decoding = "async";
       const name = document.createElement("p");
       name.className = "settings-about-name";
       name.textContent = "Chatterino RT";
+      brand.append(logo, name);
 
       const versionBlock = document.createElement("div");
       versionBlock.className = "settings-about-block";
@@ -1078,7 +1088,7 @@ export function mountSettingsPanel(opts: {
       }
       ossBlock.append(ossTitle, ossLinks);
 
-      section.append(name, versionBlock, chatterinoBlock, mit, ossBlock);
+      section.append(brand, versionBlock, chatterinoBlock, mit, ossBlock);
 
       const token = aboutGen;
       void invoke<{ version: string; settingsDirectory: string }>("about_info")

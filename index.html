@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/logo-128.png" sizes="128x128" />
+    <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta charset="utf-8" />
     <title>Chatterino RT</title>
@@ -10,7 +12,10 @@
   <body>
     <div id="app" data-ui-layout="extended">
       <aside id="sidebar">
-        <p id="brand">Chatterino RT</p>
+        <p id="brand">
+          <img id="brand-logo" src="/logo-128.png" width="28" height="28" alt="" />
+          <span id="brand-name">Chatterino RT</span>
+        </p>
         <form id="join-form">
           <label for="channel-input" data-i18n="sidebar.join.label">channel</label>
           <input id="channel-input" name="channel" maxlength="25" autocomplete="off" spellcheck="false" />
