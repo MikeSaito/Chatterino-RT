@@ -2534,7 +2534,7 @@ export class MessageRing {
       slot.root.hitArea.height = slot.lineCount * this.lineHeight;
     }
     this.paintHighlight(slot);
-    this.paintMentions(slot, firstOriginX, contOriginX, contentY, layoutOpts);
+    slot.mentions.clear();
     this.paintLinks(slot, firstOriginX, contOriginX, contentY, layoutOpts);
     this.paintMentionTexts(
       slot,
@@ -2696,63 +2696,6 @@ export class MessageRing {
         color: this.themeFills.disabled,
         alpha: this.themeFills.disabledAlpha,
       });
-  }
-
-  private paintMentions(
-    slot: Slot,
-    firstOriginX: number,
-    contOriginX: number,
-    contentY: number,
-    wrapOpts: WrapOptions,
-  ): void {
-    slot.mentions.clear();
-    for (const span of slot.mentionSpans) {
-      // Purple highlight only for @mentions; bare findAllUsernames = text chrome only.
-      if (slot.bodyRaw.charAt(span.start) !== "@") {
-        continue;
-      }
-      for (const line of slot.wrapLines) {
-        const a = Math.max(span.start, line.start);
-        const b = Math.min(span.end, line.end);
-        if (a >= b) {
-          continue;
-        }
-        const start = indexToLineCol(
-          slot.bodyRaw,
-          slot.wrapLines,
-          a,
-          slot.spansRaw,
-          wrapOpts,
-        );
-        const end = indexToLineCol(
-          slot.bodyRaw,
-          slot.wrapLines,
-          Math.max(a, b - 1),
-          slot.spansRaw,
-          wrapOpts,
-        );
-        if (!start || !end || start.line !== end.line) {
-          continue;
-        }
-        const mentionFont =
-          this.boldUsernames ? "ChatNickFont" : "ChatFont";
-        const mentionW = Math.max(
-          1,
-          this.measureBitmapTextWidth(
-            mentionFont,
-            slot.bodyRaw.slice(a, b),
-          ),
-        );
-        slot.mentions
-          .rect(
-            wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col,
-            contentY + start.line * this.lineHeight,
-            mentionW,
-            this.lineHeight,
-          )
-          .fill({ color: 0x5c65f9, alpha: 0.35 });
-      }
-    }
   }
 
   /** Underline link spans (hit-test uses the same ranges). */
