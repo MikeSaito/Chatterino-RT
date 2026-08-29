@@ -195,6 +195,8 @@ type BindOpts = {
   getKnobs: () => ImageUploadKnobs;
   getChannel: () => string;
   onError: (message: string) => void;
+  onStart?: () => void;
+  onSuccess?: (link: string) => void;
 };
 
 async function runUpload(
@@ -228,6 +230,7 @@ async function runUpload(
       return true;
     }
   }
+  opts.onStart?.();
   try {
     const bytesBase64 = await blobToBase64(hit.blob);
     const result = await invoke<ImageUploadResult>("image_upload", {
@@ -239,6 +242,9 @@ async function runUpload(
     if (link) {
       insertAtCursor(opts.input, `${link} `);
       opts.input.focus();
+      opts.onSuccess?.(link);
+    } else {
+      opts.onError("пустой ответ загрузчика");
     }
   } catch (err) {
     const message =

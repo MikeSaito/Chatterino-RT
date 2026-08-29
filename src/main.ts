@@ -81,6 +81,7 @@ import {
   parseImageUploadKnobs,
   type ImageUploadKnobs,
 } from "./shell/imageUpload";
+import { bindToastHost } from "./shell/toast";
 import { bindReplyThread } from "./shell/replyThread";
 import { resolveReplyRoot } from "./shell/replyRoot";
 import { findEventByMsgId } from "./shell/eventLookup";
@@ -312,6 +313,34 @@ async function boot(): Promise<void> {
       statusSpinnerEl.hidden = !spin;
     }
   };
+  const toastHostEl = document.querySelector<HTMLElement>("#toast-host");
+  if (!toastHostEl) {
+    throw new Error("toast-host missing");
+  }
+  const toast = bindToastHost(toastHostEl);
+  const toastCopied = (): void => {
+    toast.push({ kind: "success", text: "Скопировано" });
+  };
+  const syncToastLift = (): void => {
+    const replyH = replyBar.hidden ? 0 : replyBar.getBoundingClientRect().height;
+    const completeH = completeList.hidden
+      ? 0
+      : completeList.getBoundingClientRect().height;
+    const lift = composer.getBoundingClientRect().height + replyH + completeH;
+    toastHostEl.style.bottom = `calc(var(--space-3) + ${Math.ceil(lift)}px)`;
+  };
+  syncToastLift();
+  const toastLiftRo = new ResizeObserver(() => {
+    syncToastLift();
+  });
+  toastLiftRo.observe(composer);
+  toastLiftRo.observe(replyBar);
+  toastLiftRo.observe(completeList);
+  const replyBarAttrObs = new MutationObserver(() => {
+    syncToastLift();
+  });
+  replyBarAttrObs.observe(replyBar, { attributes: true, attributeFilter: ["hidden"] });
+  replyBarAttrObs.observe(completeList, { attributes: true, attributeFilter: ["hidden"] });
   const composerInner = document.querySelector<HTMLElement>("#composer-inner");
   const composerWaitText = document.querySelector<HTMLElement>(".composer-wait-text");
   const composerDropHint = document.querySelector<HTMLElement>("#composer-drop-hint");
@@ -583,6 +612,15 @@ async function boot(): Promise<void> {
     authMenuCtl?.dispose();
     authMenuCtl = null;
   };
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      toast.dismissAll();
+      toastLiftRo.disconnect();
+      replyBarAttrObs.disconnect();
+      priorTeardown?.();
+    };
+  }
 
   let app;
   try {
@@ -704,7 +742,7 @@ async function boot(): Promise<void> {
           private: openLinksIncognito,
         });
       } catch (err) {
-        setStatus(formatError(err));
+        toast.push({ kind: "danger", text: formatError(err) });
       }
     })();
   });
@@ -976,7 +1014,13 @@ async function boot(): Promise<void> {
     getKnobs: () => imageUploadKnobs,
     getChannel: () => ipc.active(),
     onError: (message) => {
-      setStatus(message);
+      toast.push({ kind: "danger", text: message });
+    },
+    onStart: () => {
+      toast.push({ kind: "info", text: "Загрузка изображения…" });
+    },
+    onSuccess: () => {
+      toast.push({ kind: "success", text: "Изображение загружено" });
     },
   });
 
@@ -1242,7 +1286,7 @@ async function boot(): Promise<void> {
       messageInput.focus();
     },
     onCopy: (text) => {
-      void navigator.clipboard.writeText(text).catch(() => undefined);
+      void navigator.clipboard.writeText(text).then(toastCopied).catch(() => undefined);
     },
     onMore: (ctx) => {
       openContextMenu(ctx);
@@ -1529,15 +1573,21 @@ async function boot(): Promise<void> {
       return;
     }
     if (action === "copy") {
-      void navigator.clipboard.writeText(target.text).catch(() => undefined);
+      void navigator.clipboard.writeText(target.text).then(toastCopied).catch(() => undefined);
       return;
     }
     if (action === "copy-full" && target.fullText) {
-      void navigator.clipboard.writeText(target.fullText).catch(() => undefined);
+      void navigator.clipboard
+        .writeText(target.fullText)
+        .then(toastCopied)
+        .catch(() => undefined);
       return;
     }
     if (action === "copy-id" && target.msgId) {
-      void navigator.clipboard.writeText(target.msgId).catch(() => undefined);
+      void navigator.clipboard
+        .writeText(target.msgId)
+        .then(toastCopied)
+        .catch(() => undefined);
       return;
     }
     if (action === "copy-json" && target.msgId) {
@@ -1561,6 +1611,7 @@ async function boot(): Promise<void> {
             return;
           }
           await navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+          toastCopied();
         } catch (err) {
           setStatus(formatError(err));
         }
@@ -1574,22 +1625,29 @@ async function boot(): Promise<void> {
       const forcePrivate = action === "open-link-incognito";
       const linkUrl = target.linkUrl;
       void (async () => {
-        const openUrl = await resolveOpenUrlForChatLink(linkUrl, unshortLinks);
-        await invoke("open_chat_link", {
-          url: openUrl,
-          private: forcePrivate,
-        }).catch(() => undefined);
+        try {
+          const openUrl = await resolveOpenUrlForChatLink(linkUrl, unshortLinks);
+          await invoke("open_chat_link", {
+            url: openUrl,
+            private: forcePrivate,
+          });
+        } catch (err) {
+          toast.push({ kind: "danger", text: formatError(err) });
+        }
       })();
       return;
     }
     if (action === "copy-link" && target.linkUrl) {
-      void navigator.clipboard.writeText(target.linkUrl).catch(() => undefined);
+      void navigator.clipboard
+        .writeText(target.linkUrl)
+        .then(toastCopied)
+        .catch(() => undefined);
       return;
     }
     if (action === "copy-image-link") {
       const imageUrl = btn.dataset.url?.trim();
       if (imageUrl) {
-        void navigator.clipboard.writeText(imageUrl).catch(() => undefined);
+        void navigator.clipboard.writeText(imageUrl).then(toastCopied).catch(() => undefined);
       }
       return;
     }
