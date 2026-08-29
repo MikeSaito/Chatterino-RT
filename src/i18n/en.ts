@@ -203,6 +203,7 @@ export const en = {
   "settings.search.placeholder": "Find in settings... (Ctrl+F)",
   "settings.search.clear": "Clear",
   "settings.search.clear.aria": "Clear search",
+  "settings.search.results": "{count} results",
   "settings.tabs.aria": "Settings pages",
   "settings.ok": "Ok",
   "settings.cancel": "Cancel",
@@ -228,6 +229,9 @@ export const en = {
   "settings.about.versionUnavailable": "Chatterino RT (version unavailable)",
   "settings.about.mit":
     "Chat behaviour reimplements Chatterino 2 logic under the MIT License. This is not a Qt/C++ port and does not ship stock Chatterino assets.",
+  "settings.about.link.wiki": "Chatterino Wiki",
+  "settings.about.link.features": "Features",
+  "settings.about.link.discord": "Discord",
 
   "settings.accounts.add": "Add",
   "settings.accounts.remove": "Remove",
@@ -241,6 +245,9 @@ export const en = {
   "settings.accounts.empty": "No saved accounts.",
   "settings.accounts.current": "current",
   "settings.accounts.deviceLogin": "Complete device login in the browser.",
+  "settings.accounts.userId": "id {id}",
+  "settings.accounts.pastePrompt":
+    "Paste the Chatterino login line (oauth_token=…;username=…;…)",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -62,8 +62,6 @@ import { setSettingsWindowOpen } from "./settingsWindowState";
 
 export type AppSettings = AppliedSettings;
 
-let uiLocale = getLocale();
-
 type KnobControl = HTMLInputElement | HTMLSelectElement | HTMLButtonElement;
 
 function isSwitchControl(el: KnobControl): el is HTMLButtonElement {
@@ -148,6 +146,9 @@ export function mountSettingsPanel(opts: {
   const { root, ring, onDisplay } = opts;
   const detached = true;
   let lastSettings: AppSettings | null = null;
+  let panelLocale = getLocale();
+  let aboutGen = 0;
+  let accountsPainter: ((info: AuthInfo) => void) | null = null;
   if (ring) {
     setStreamerModeOnChange(() => {
       if (lastSettings) {
@@ -164,34 +165,6 @@ export function mountSettingsPanel(opts: {
       applySettingsDisplay(ring, lastSettings, onDisplay);
     });
   }
-  const applyDraft = (data: AppSettings): void => {
-    lastSettings = data;
-    applyLocale(localeFromSettings(data.knobs as Record<string, unknown>), root);
-    const nextLocale = getLocale();
-    if (nextLocale !== uiLocale) {
-      uiLocale = nextLocale;
-      const page = activePage;
-      buildPages();
-      paintDraft(data);
-      showPage(page);
-      return;
-    }
-    const clearBtn = root.querySelector<HTMLButtonElement>("#settings-search-clear");
-    if (clearBtn) {
-      setButtonIcon(clearBtn, "close", {
-        size: 14,
-        label: t("settings.search.clear.aria"),
-      });
-    }
-    root
-      .querySelector("#settings-tabs")
-      ?.setAttribute("aria-label", t("settings.tabs.aria"));
-    if (ring) {
-      applySettingsDisplay(ring, data, onDisplay);
-    } else {
-      void emitSettingsPreview(data);
-    }
-  };
   const search = root.querySelector<HTMLInputElement>("#settings-search");
   const searchClear = root.querySelector<HTMLButtonElement>("#settings-search-clear");
   const searchCount = root.querySelector<HTMLElement>("#settings-search-count");
@@ -207,6 +180,8 @@ export function mountSettingsPanel(opts: {
       bumpZoom: async () => undefined,
     };
   }
+
+  let applyDraft: (data: AppSettings) => void = () => undefined;
   tabsHost.setAttribute("role", "tablist");
   if (!tabsHost.getAttribute("aria-label")) {
     tabsHost.setAttribute("aria-label", t("settings.tabs.aria"));
@@ -967,7 +942,11 @@ export function mountSettingsPanel(opts: {
 
       const versionBlock = document.createElement("div");
       versionBlock.className = "settings-about-block";
-      versionBlock.dataset.search = "version settings directory";
+      versionBlock.dataset.search = [
+        t("settings.about.version"),
+        t("settings.about.settingsDirectory"),
+        "version settings directory",
+      ].join(" ");
       const versionTitle = document.createElement("h4");
       versionTitle.className = "settings-section";
       versionTitle.textContent = t("settings.about.version");
@@ -1003,20 +982,29 @@ export function mountSettingsPanel(opts: {
 
       const chatterinoBlock = document.createElement("div");
       chatterinoBlock.className = "settings-about-block";
-      chatterinoBlock.dataset.search = "wiki features discord chatterino";
+      const wikiLabel = t("settings.about.link.wiki");
+      const featuresLabel = t("settings.about.link.features");
+      const discordLabel = t("settings.about.link.discord");
+      chatterinoBlock.dataset.search = [
+        t("settings.about.chatterino"),
+        wikiLabel,
+        featuresLabel,
+        discordLabel,
+        "wiki features discord chatterino",
+      ].join(" ");
       const chatterinoTitle = document.createElement("h4");
       chatterinoTitle.className = "settings-section";
       chatterinoTitle.textContent = t("settings.about.chatterino");
       const chatterinoLinks = document.createElement("ul");
       chatterinoLinks.className = "settings-about-links";
       const aboutLinks: Array<{ label: string; url: string }> = [
-        { label: "Chatterino Wiki", url: "https://wiki.chatterino.com" },
+        { label: wikiLabel, url: "https://wiki.chatterino.com" },
         {
-          label: "Features",
+          label: featuresLabel,
           url: "https://chatterino.com/#features",
         },
         {
-          label: "Discord",
+          label: discordLabel,
           url: "https://discord.gg/7Y5AYhAK4z",
         },
       ];
@@ -1045,12 +1033,15 @@ export function mountSettingsPanel(opts: {
 
       const mit = document.createElement("p");
       mit.className = "settings-about-meta";
-      mit.dataset.search = "mit license chatterino";
+      mit.dataset.search = `${t("settings.about.mit")} mit license chatterino`;
       mit.textContent = t("settings.about.mit");
 
       const ossBlock = document.createElement("div");
       ossBlock.className = "settings-about-block";
-      ossBlock.dataset.search = "open source license tauri pixi";
+      ossBlock.dataset.search = [
+        t("settings.about.oss"),
+        "open source license tauri pixi",
+      ].join(" ");
       const ossTitle = document.createElement("h4");
       ossTitle.className = "settings-section";
       ossTitle.textContent = t("settings.about.oss");
@@ -1089,14 +1080,21 @@ export function mountSettingsPanel(opts: {
 
       section.append(name, versionBlock, chatterinoBlock, mit, ossBlock);
 
+      const token = aboutGen;
       void invoke<{ version: string; settingsDirectory: string }>("about_info")
         .then((info) => {
+          if (token !== aboutGen) {
+            return;
+          }
           versionLine.textContent = t("settings.about.versionLine", {
             version: info.version,
           });
           dirPath.textContent = info.settingsDirectory;
         })
         .catch(() => {
+          if (token !== aboutGen) {
+            return;
+          }
           versionLine.textContent = t("settings.about.versionUnavailable");
           dirPath.textContent = t("settings.about.unavailable");
         });
@@ -1199,7 +1197,7 @@ export function mountSettingsPanel(opts: {
             bits.push(t("settings.accounts.current"));
           }
           if (row.userId) {
-            bits.push(`id ${row.userId}`);
+            bits.push(t("settings.accounts.userId", { id: row.userId }));
           }
           meta.textContent = bits.join(" · ");
           li.append(label, meta);
@@ -1237,9 +1235,7 @@ export function mountSettingsPanel(opts: {
           try {
             const started = await invoke<{ mode: string }>("auth_start");
             if (started.mode === "paste") {
-              const blob = window.prompt(
-                "Paste the Chatterino login line (oauth_token=…;username=…;…)",
-              );
+              const blob = window.prompt(t("settings.accounts.pastePrompt"));
               if (!blob) {
                 return;
               }
@@ -1281,9 +1277,7 @@ export function mountSettingsPanel(opts: {
       });
 
       void refresh();
-      void listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
-        paintAccounts(ev.payload);
-      });
+      accountsPainter = paintAccounts;
 
       return section;
     }
@@ -1428,6 +1422,7 @@ export function mountSettingsPanel(opts: {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = index === 0 ? "settings-inner-tab is-active" : "settings-inner-tab";
+        btn.dataset.tab = tab.id;
         btn.textContent = tTabLabel(page.id, tab.id);
         const panel = document.createElement("div");
         panel.className = index === 0 ? "settings-inner-panel is-active" : "settings-inner-panel";
@@ -1477,6 +1472,33 @@ export function mountSettingsPanel(opts: {
     });
   };
 
+  const captureInnerTabs = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    pagesHost.querySelectorAll<HTMLElement>(".settings-page").forEach((page) => {
+      const pageId = page.dataset.page;
+      const active = page.querySelector<HTMLElement>(".settings-inner-tab.is-active");
+      const tabId = active?.dataset.tab;
+      if (pageId && tabId) {
+        out[pageId] = tabId;
+      }
+    });
+    return out;
+  };
+
+  const restoreInnerTabs = (saved: Record<string, string>): void => {
+    for (const [pageId, tabId] of Object.entries(saved)) {
+      const page = pagesHost.querySelector<HTMLElement>(
+        `.settings-page[data-page="${pageId}"]`,
+      );
+      const btn = page?.querySelector<HTMLButtonElement>(
+        `.settings-inner-tab[data-tab="${tabId}"]`,
+      );
+      if (btn && !btn.classList.contains("is-active")) {
+        btn.click();
+      }
+    }
+  };
+
   const readDraft = (): AppSettings => {
     const draft = emptySettings();
     draft.knobs = { ...baseline.knobs };
@@ -1524,7 +1546,7 @@ export function mountSettingsPanel(opts: {
     return draft;
   };
 
-  const paintDraft = (data: AppSettings): void => {
+  const paintValues = (data: AppSettings): void => {
     for (const [path, input] of knobInputs) {
       if (path === "__wired.fontScale" && input instanceof HTMLSelectElement) {
         input.value = String(nearestZoom(data.fontScale));
@@ -1566,6 +1588,10 @@ export function mountSettingsPanel(opts: {
     for (const [path, api] of tableApis) {
       api.setRows(tablePathGet(data, path));
     }
+  };
+
+  const paintDraft = (data: AppSettings): void => {
+    paintValues(data);
     applyDraft(data);
     refreshCacheResolved();
   };
@@ -1631,14 +1657,49 @@ export function mountSettingsPanel(opts: {
       } else {
         searchCount.hidden = false;
         searchCount.textContent = `${hits}`;
-        searchCount.title = `${hits} results`;
+        searchCount.title = t("settings.search.results", { count: hits });
       }
+    }
+  };
+
+  applyDraft = (data: AppSettings): void => {
+    lastSettings = data;
+    applyLocale(localeFromSettings(data.knobs as Record<string, unknown>), root);
+    const nextLocale = getLocale();
+    if (nextLocale !== panelLocale) {
+      const page = activePage;
+      const innerTabs = captureInnerTabs();
+      panelLocale = nextLocale;
+      aboutGen += 1;
+      accountsPainter = null;
+      buildPages();
+      paintValues(data);
+      refreshCacheResolved();
+      showPage(page);
+      restoreInnerTabs(innerTabs);
+      applySearch(search.value);
+    }
+    const clearBtn = root.querySelector<HTMLButtonElement>("#settings-search-clear");
+    if (clearBtn) {
+      setButtonIcon(clearBtn, "close", {
+        size: 14,
+        label: t("settings.search.clear.aria"),
+      });
+    }
+    root
+      .querySelector("#settings-tabs")
+      ?.setAttribute("aria-label", t("settings.tabs.aria"));
+    if (ring) {
+      applySettingsDisplay(ring, data, onDisplay);
+    } else {
+      void emitSettingsPreview(data);
     }
   };
 
   const closePanel = (restore: boolean): void => {
     window.clearTimeout(previewTimer);
     resetHotkeyFilter?.();
+    aboutGen += 1;
     if (restore) {
       paintDraft(baseline);
     }
@@ -1781,6 +1842,10 @@ export function mountSettingsPanel(opts: {
 
   buildPages();
   showPage("general");
+
+  void listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
+    accountsPainter?.(ev.payload);
+  });
 
   cancelBtn.addEventListener("click", () => {
     closePanel(true);

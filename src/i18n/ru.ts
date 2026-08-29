@@ -205,6 +205,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.search.placeholder": "Поиск в настройках… (Ctrl+F)",
   "settings.search.clear": "Очистить",
   "settings.search.clear.aria": "Очистить поиск",
+  "settings.search.results": "{count} совпадений",
   "settings.tabs.aria": "Страницы настроек",
   "settings.ok": "Ok",
   "settings.cancel": "Отмена",
@@ -230,6 +231,9 @@ export const ru: Record<MessageKey, string> = {
   "settings.about.versionUnavailable": "Chatterino RT (версия недоступна)",
   "settings.about.mit":
     "Поведение чата реимплементирует логику Chatterino 2 по лицензии MIT. Это не порт Qt/C++ и не включает штатные ассеты Chatterino.",
+  "settings.about.link.wiki": "Вики Chatterino",
+  "settings.about.link.features": "Возможности",
+  "settings.about.link.discord": "Discord",
 
   "settings.accounts.add": "Добавить",
   "settings.accounts.remove": "Удалить",
@@ -243,4 +247,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.accounts.empty": "Нет сохранённых аккаунтов.",
   "settings.accounts.current": "текущий",
   "settings.accounts.deviceLogin": "Завершите вход устройства в браузере.",
+  "settings.accounts.userId": "id {id}",
+  "settings.accounts.pastePrompt":
+    "Вставьте строку входа Chatterino (oauth_token=…;username=…;…)",
 };

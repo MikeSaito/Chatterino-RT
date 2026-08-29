@@ -88,10 +88,4 @@ writeFileSync(
   "utf8",
 );
 
-writeFileSync(
-  join(root, "scripts/settings-en-keys.json"),
-  JSON.stringify(en, null, 2),
-  "utf8",
-);
-
 console.log("wrote src/i18n/settings.en.ts");
