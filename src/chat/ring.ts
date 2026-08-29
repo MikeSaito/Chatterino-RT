@@ -23,6 +23,7 @@ import {
 import type { ModActionBtn } from "../shell/modActions";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import { resolveEmojiUrl } from "./emoteUrl";
+import { trailingDebounce, type TrailingDebounce } from "./debounce";
 import {
   badgeVisibilityEqual,
   DEFAULT_BADGE_VISIBILITY,
@@ -277,6 +278,12 @@ export class MessageRing {
   private wheelMultiplier = 1;
   private hoverPauseTimer = 0;
   private scrollRaf = 0;
+  private resizeDebounce: TrailingDebounce | null = null;
+  private perfLogAt = 0;
+  private readonly perfOn: boolean;
+  private readonly onRendererResize = (): void => {
+    this.resizeDebounce?.schedule();
+  };
   private themeFills: ThemePixiFills = {
     canvasBg: 0x191919,
     body: 0xffffff,
@@ -314,6 +321,10 @@ export class MessageRing {
     this.poolSize = poolSize;
     this.textures = textures;
     this.emoteTicker.subscribe(() => this.tickEmoteFrames());
+    this.perfOn =
+      import.meta.env.DEV === true ||
+      (typeof localStorage !== "undefined" &&
+        localStorage.getItem("crt-debug") === "1");
   }
 
   setOnScroll(cb: (state: ScrollSnapshot) => void): void {
@@ -1660,7 +1671,10 @@ export class MessageRing {
       this.slots.push(slot);
     }
     this.ready = true;
-    this.app.renderer.on("resize", () => this.layout());
+    this.resizeDebounce = trailingDebounce(() => {
+      this.layout();
+    }, 100);
+    this.app.renderer.on("resize", this.onRendererResize);
   }
 
   reset(): void {
@@ -1688,6 +1702,13 @@ export class MessageRing {
   }
 
   destroy(): void {
+    this.ready = false;
+    this.resizeDebounce?.cancel();
+    this.resizeDebounce = null;
+    this.app.renderer.off("resize", this.onRendererResize);
+    window.clearTimeout(this.hoverPauseTimer);
+    this.hoverPauseTimer = 0;
+    this.pauseMouse = false;
     this.emoteTicker.destroy();
     if (this.lastReadFadeRaf !== 0) {
       cancelAnimationFrame(this.lastReadFadeRaf);
@@ -1696,6 +1717,10 @@ export class MessageRing {
     if (this.mediaRepaintRaf !== 0) {
       cancelAnimationFrame(this.mediaRepaintRaf);
       this.mediaRepaintRaf = 0;
+    }
+    if (this.scrollRaf !== 0) {
+      cancelAnimationFrame(this.scrollRaf);
+      this.scrollRaf = 0;
     }
     this.mediaRepaintSlots.clear();
     this.clearSlots();
@@ -2761,6 +2786,15 @@ export class MessageRing {
   }
 
   private layout(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
+    if (!this.ready) {
+      return;
+    }
+    this.withPerfMeasure("crt-layout", () => {
+      this.layoutInner(anchor, paintOnly);
+    });
+  }
+
+  private layoutInner(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
     const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     const visible: Slot[] = [];
@@ -2798,6 +2832,27 @@ export class MessageRing {
     this.afterScrollChange();
   }
 
+  private perfEnabled(): boolean {
+    return this.perfOn;
+  }
+
+  private withPerfMeasure(name: string, fn: () => void): void {
+    if (!this.perfEnabled() || typeof performance === "undefined") {
+      fn();
+      return;
+    }
+    const t0 = performance.now();
+    fn();
+    const ms = performance.now() - t0;
+    if (ms > 16) {
+      const now = performance.now();
+      if (now - this.perfLogAt >= 1000) {
+        this.perfLogAt = now;
+        console.warn(`[crt-perf] ${name} ${ms.toFixed(1)}ms (>16ms)`);
+      }
+    }
+  }
+
   private afterScrollChange(): void {
     if (this.scroll.atBottom) {
       this.pendingBelow = 0;
@@ -2819,14 +2874,20 @@ export class MessageRing {
       return;
     }
     const step = (now: number): void => {
-      const cont = this.scroll.tick(now);
-      this.applyStageY();
-      this.notifyScroll();
-      if (cont) {
-        this.scrollRaf = requestAnimationFrame(step);
-      } else {
+      if (!this.ready) {
         this.scrollRaf = 0;
+        return;
       }
+      this.withPerfMeasure("crt-scroll-tick", () => {
+        const cont = this.scroll.tick(now);
+        this.applyStageY();
+        this.notifyScroll();
+        if (cont && this.ready) {
+          this.scrollRaf = requestAnimationFrame(step);
+        } else {
+          this.scrollRaf = 0;
+        }
+      });
     };
     this.scrollRaf = requestAnimationFrame(step);
   }

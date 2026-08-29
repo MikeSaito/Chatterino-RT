@@ -9,6 +9,7 @@ import {
 } from "./chat/emoteImageLinks";
 import { bindChatIpc, type ChatIpc } from "./chat/ipc";
 import { TextureLru } from "./chat/textures";
+import { textureLruLimitForDisplay } from "./chat/textureLruLimit";
 import { mountPlayer, unmountPlayer, setPlayerLiveHint, bindPlayerOpenTwitch } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
 import { bindChannelList } from "./shell/channels";
@@ -630,7 +631,13 @@ async function boot(): Promise<void> {
     teardownChat = null;
     throw err;
   }
-  const textures = new TextureLru();
+  const textures = new TextureLru(
+    textureLruLimitForDisplay({
+      dpr: typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
+      width: canvasHost.clientWidth || window.innerWidth || 1920,
+      height: canvasHost.clientHeight || window.innerHeight || 1080,
+    }),
+  );
   let bootKnobs: AppSettings["knobs"] = {};
   let menuCommands: AppSettings["commands"] = [];
   let bootModActions: ModActionBtn[] = [];
