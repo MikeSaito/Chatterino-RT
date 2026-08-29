@@ -1,4 +1,5 @@
 import { setButtonIcon } from "./icons";
+import { channelTabAttrs } from "./channelTabAria";
 
 export type ChannelList = {
   hydrate: (recents: string[], open: string[], active: string) => void;
@@ -15,6 +16,8 @@ export function bindChannelList(
   onSelect: (login: string) => void,
   onLeave: (login: string) => void,
 ): ChannelList {
+  list.setAttribute("role", "tablist");
+  list.setAttribute("aria-label", "Channels");
   const recents: string[] = [];
   const open = new Set<string>();
   let activeLogin = "";
@@ -39,7 +42,10 @@ export function bindChannelList(
       item.className = "channel-row";
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = login === active ? "channel-item is-active" : "channel-item";
+      const aria = channelTabAttrs(login, active);
+      btn.className = aria.className;
+      btn.setAttribute("role", aria.role);
+      btn.setAttribute("aria-selected", aria.ariaSelected);
       btn.textContent = `#${login}`;
       btn.addEventListener("click", () => {
         onSelect(login);

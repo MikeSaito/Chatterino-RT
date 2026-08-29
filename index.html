@@ -18,7 +18,7 @@
         </form>
         <button type="button" id="join-toggle" class="btn-icon" hidden title="Join channel" aria-label="Join channel" aria-haspopup="dialog" aria-expanded="false" aria-controls="join-popover"></button>
         <div id="channel-list-host" class="channel-list-host">
-          <ul id="channel-list" role="list"></ul>
+          <ul id="channel-list" role="tablist" aria-label="Channels"></ul>
         </div>
         <div id="auth-box">
           <button type="button" id="auth-chip" class="auth-chip" hidden aria-haspopup="menu" aria-expanded="false" aria-controls="auth-menu">
@@ -146,8 +146,8 @@
         </div>
       </div>
     </div>
-    <menu id="header-menu" hidden></menu>
-    <menu id="auth-menu" hidden></menu>
+    <menu id="header-menu" hidden role="menu" aria-label="More"></menu>
+    <menu id="auth-menu" hidden role="menu" aria-label="Account"></menu>
     <div id="join-popover" hidden role="dialog" aria-label="Join channel">
       <form id="join-popover-form">
         <label class="sr-only" for="join-popover-input">канал</label>
@@ -155,7 +155,7 @@
         <button type="submit" class="btn btn-primary">Join</button>
       </form>
     </div>
-    <menu id="chat-context" hidden>
+    <menu id="chat-context" hidden role="menu" aria-label="Message">
       <div id="chat-context-custom" class="chat-context-custom" hidden></div>
       <hr id="chat-context-custom-sep" hidden />
       <div id="chat-context-image-open" class="chat-context-submenu" hidden>
@@ -167,21 +167,21 @@
         <div class="chat-context-submenu-items"></div>
       </div>
       <hr id="chat-context-image-sep" hidden />
-      <button type="button" data-action="copy">Copy message</button>
-      <button type="button" data-action="copy-full">Copy full message</button>
-      <button type="button" data-action="copy-id" hidden>Copy message ID</button>
-      <button type="button" data-action="copy-json" hidden>Copy message JSON</button>
-      <button type="button" data-action="open-link">Open link</button>
-      <button type="button" data-action="open-link-incognito">Open link incognito</button>
-      <button type="button" data-action="copy-link">Copy link</button>
-      <button type="button" data-action="web-search" hidden>Search</button>
-      <button type="button" data-action="reply">Reply</button>
-      <button type="button" data-action="reply-original" hidden>Reply to original thread</button>
-      <button type="button" data-action="thread">View thread</button>
-      <button type="button" data-action="user">User card</button>
-      <button type="button" data-action="open-twitch">Open in browser</button>
-      <button type="button" data-action="open-streamlink">Open in Streamlink</button>
-      <button type="button" data-action="open-custom-player">Open in custom player</button>
+      <button type="button" role="menuitem" data-action="copy">Copy message</button>
+      <button type="button" role="menuitem" data-action="copy-full">Copy full message</button>
+      <button type="button" role="menuitem" data-action="copy-id" hidden>Copy message ID</button>
+      <button type="button" role="menuitem" data-action="copy-json" hidden>Copy message JSON</button>
+      <button type="button" role="menuitem" data-action="open-link">Open link</button>
+      <button type="button" role="menuitem" data-action="open-link-incognito">Open link incognito</button>
+      <button type="button" role="menuitem" data-action="copy-link">Copy link</button>
+      <button type="button" role="menuitem" data-action="web-search" hidden>Search</button>
+      <button type="button" role="menuitem" data-action="reply">Reply</button>
+      <button type="button" role="menuitem" data-action="reply-original" hidden>Reply to original thread</button>
+      <button type="button" role="menuitem" data-action="thread">View thread</button>
+      <button type="button" role="menuitem" data-action="user">User card</button>
+      <button type="button" role="menuitem" data-action="open-twitch">Open in browser</button>
+      <button type="button" role="menuitem" data-action="open-streamlink">Open in Streamlink</button>
+      <button type="button" role="menuitem" data-action="open-custom-player">Open in custom player</button>
     </menu>
     <div id="usercard-modal" hidden>
       <div

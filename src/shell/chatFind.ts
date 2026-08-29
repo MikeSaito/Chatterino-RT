@@ -3,6 +3,7 @@ import { iconEl } from "./icons";
 import type { MessageRing } from "../chat/ring";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
+import { bindFocusTrap } from "./focusTrap";
 
 /** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
 export type SearchHit = {
@@ -24,13 +25,6 @@ function formatTime(ms: number): string {
   const h = d.getHours().toString().padStart(2, "0");
   const m = d.getMinutes().toString().padStart(2, "0");
   return `${h}:${m}`;
-}
-
-function focusables(root: HTMLElement): HTMLElement[] {
-  const nodes = root.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  );
-  return [...nodes].filter((el) => !el.hidden && el.getClientRects().length > 0);
 }
 
 /**
@@ -209,6 +203,7 @@ export function bindSearchPopup(opts: {
     syncClear();
     view.replaceChildren();
     ring.clearFindHit();
+    trap.deactivate();
     const focusBack = restoreFocus;
     restoreFocus = null;
     const closeToken = seq;
@@ -222,6 +217,14 @@ export function bindSearchPopup(opts: {
       }
     });
   };
+
+  const trap = bindFocusTrap(dialog, {
+    isActive: () => !modal.hidden,
+    onEscape: () => {
+      close();
+      return true;
+    },
+  });
 
   const open = (): void => {
     if (isSettingsWindowOpen()) {
@@ -239,6 +242,7 @@ export function bindSearchPopup(opts: {
     paintTitle();
     prepareModalOpen(modal);
     setAppInert(true);
+    trap.activate();
     syncClear();
     input.focus();
     input.select();
@@ -299,43 +303,6 @@ export function bindSearchPopup(opts: {
   input.addEventListener("input", () => {
     syncClear();
     scheduleSearch();
-  });
-
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      close();
-    }
-  });
-
-  window.addEventListener("keydown", (ev) => {
-    if (modal.hidden || isSettingsWindowOpen()) {
-      return;
-    }
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      close();
-      return;
-    }
-    if (ev.key === "Tab") {
-      const items = focusables(dialog);
-      if (items.length === 0) {
-        ev.preventDefault();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (ev.shiftKey) {
-        if (!active || active === first || !dialog.contains(active)) {
-          ev.preventDefault();
-          last.focus();
-        }
-      } else if (!active || active === last || !dialog.contains(active)) {
-        ev.preventDefault();
-        first.focus();
-      }
-    }
   });
 
   return { onChannelChanged, open, close };

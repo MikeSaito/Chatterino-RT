@@ -4,6 +4,7 @@ import { formatTime } from "../chat/ring";
 import { collectReplyThread, isInReplyThread } from "./replyRoot";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
+import { bindFocusTrap } from "./focusTrap";
 
 type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
@@ -223,6 +224,7 @@ export function bindReplyThread(opts: {
   };
 
   const close = (): void => {
+    trap.deactivate();
     void closeModal(modal);
     current = null;
     openChannel = "";
@@ -240,6 +242,17 @@ export function bindReplyThread(opts: {
     view.replaceChildren();
     syncComposer();
   };
+
+  const trap = bindFocusTrap(dialog, {
+    isActive: () => !modal.hidden,
+    onEscape: () => {
+      if (pinned) {
+        return false;
+      }
+      close();
+      return true;
+    },
+  });
 
   const paintHeader = (info: ReplyThreadOpen, channel: string): void => {
     const nick = info.login.trim();
@@ -271,6 +284,7 @@ export function bindReplyThread(opts: {
     paintHeader(info, channel);
     input.value = "";
     prepareModalOpen(modal);
+    trap.activate();
     syncComposer();
     syncPinVisibility();
   };
@@ -441,13 +455,6 @@ export function bindReplyThread(opts: {
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
       void sendReply();
-    }
-  });
-
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !modal.hidden && !pinned) {
-      ev.preventDefault();
-      close();
     }
   });
 

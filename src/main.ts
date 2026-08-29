@@ -87,6 +87,7 @@ import { bindReplyThread } from "./shell/replyThread";
 import { resolveReplyRoot } from "./shell/replyRoot";
 import { findEventByMsgId } from "./shell/eventLookup";
 import { bindEmotePopup } from "./shell/emotePopup";
+import { cycleChannelIndex } from "./shell/focusTrap";
 import {
   bindEmoteTooltip,
   resolveOpenUrlForChatLink,
@@ -351,6 +352,18 @@ async function boot(): Promise<void> {
   const replyLabelEl = replyLabel;
   const replyCancelBtn = replyCancel;
   const contextMenuEl = contextMenu;
+  window.addEventListener(
+    "keydown",
+    (ev) => {
+      if (ev.key !== "Escape" || contextMenuEl.hidden) {
+        return;
+      }
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      hideContextMenu();
+    },
+    true,
+  );
   const authChipBtn = authChip;
   const authChipAvatarEl = authChipAvatar;
   const authChipLetterEl = authChipLetter;
@@ -1337,24 +1350,6 @@ async function boot(): Promise<void> {
   emoteOpen.addEventListener("click", () => {
     emotePopup.toggle();
   });
-  window.addEventListener("keydown", (ev) => {
-    if (ev.defaultPrevented) {
-      return;
-    }
-    const action = resolveAction(ev);
-    if (!action) {
-      return;
-    }
-    if (!actionAllowsEditable(action) && isEditableTarget(ev.target)) {
-      return;
-    }
-    if (isSettingsWindowOpen()) {
-      return;
-    }
-    if (dispatchHotkey(action)) {
-      ev.preventDefault();
-    }
-  });
   function dispatchHotkey(action: HotkeyAction): boolean {
     switch (action) {
       case "showSearch":
@@ -1420,6 +1415,48 @@ async function boot(): Promise<void> {
       void leaveChannel(login);
     },
   );
+
+  window.addEventListener("keydown", (ev) => {
+    if (ev.defaultPrevented) {
+      return;
+    }
+    if (
+      ev.key === "Tab" &&
+      (ev.ctrlKey || ev.metaKey) &&
+      !ev.altKey &&
+      !isSettingsWindowOpen()
+    ) {
+      const joined = channels.joined();
+      if (joined.length < 2) {
+        return;
+      }
+      const active = ipc.active();
+      const cur = joined.indexOf(active);
+      if (cur < 0) {
+        return;
+      }
+      ev.preventDefault();
+      const next = cycleChannelIndex(cur, joined.length, ev.shiftKey);
+      const login = next >= 0 ? joined[next] : undefined;
+      if (login) {
+        void joinChannel(login, true);
+      }
+      return;
+    }
+    const action = resolveAction(ev);
+    if (!action) {
+      return;
+    }
+    if (!actionAllowsEditable(action) && isEditableTarget(ev.target)) {
+      return;
+    }
+    if (isSettingsWindowOpen()) {
+      return;
+    }
+    if (dispatchHotkey(action)) {
+      ev.preventDefault();
+    }
+  });
 
   tabOverflowCtl = bindTabOverflow({ list, host: channelListHost });
   authMenuCtl = bindAuthMenu({
@@ -2046,6 +2083,7 @@ async function boot(): Promise<void> {
     for (const link of links) {
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.setAttribute("role", "menuitem");
       btn.dataset.action = action;
       btn.dataset.url = link.url;
       btn.textContent = emoteScaleLinkLabel(link.factor);
@@ -2065,6 +2103,7 @@ async function boot(): Promise<void> {
         const trigger = String(row.trigger).trim();
         const btn = document.createElement("button");
         btn.type = "button";
+        btn.setAttribute("role", "menuitem");
         btn.dataset.customCmd = trigger;
         btn.textContent = trigger;
         contextCustomHost.appendChild(btn);

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
+import { bindFocusTrap } from "./focusTrap";
 
 type EmotePopupTab = "favourite" | "subs" | "channel" | "global" | "emojis";
 
@@ -91,11 +92,20 @@ export function bindEmotePopup(opts: {
   const close = (): void => {
     window.clearTimeout(timer);
     seq += 1;
+    trap.deactivate();
     void closeModal(modal);
     anchor.setAttribute("aria-expanded", "false");
     search.value = "";
     view.replaceChildren();
   };
+
+  const trap = bindFocusTrap(dialog, {
+    isActive: () => !modal.hidden,
+    onEscape: () => {
+      close();
+      return true;
+    },
+  });
 
   const open = (): void => {
     if (isSettingsWindowOpen()) {
@@ -104,6 +114,7 @@ export function bindEmotePopup(opts: {
     const channel = activeChannel()?.trim() || "";
     title.textContent = channel ? `Emotes in #${channel}` : "Emotes";
     prepareModalOpen(modal);
+    trap.activate();
     anchor.setAttribute("aria-expanded", "true");
     positionNearAnchor();
     search.focus();
@@ -273,12 +284,6 @@ export function bindEmotePopup(opts: {
   });
   backdrop.addEventListener("click", () => {
     close();
-  });
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !modal.hidden) {
-      ev.preventDefault();
-      close();
-    }
   });
   window.addEventListener("resize", () => {
     if (!modal.hidden) {

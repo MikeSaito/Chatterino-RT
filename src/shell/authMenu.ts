@@ -26,6 +26,7 @@ export function bindAuthMenu(opts: {
     for (const row of getAccounts()) {
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.setAttribute("role", "menuitem");
       btn.dataset.action = "select";
       btn.dataset.login = row.login;
       btn.textContent = row.current ? `${row.login} ✓` : row.login;
@@ -38,12 +39,14 @@ export function bindAuthMenu(opts: {
     }
     const settings = document.createElement("button");
     settings.type = "button";
+    settings.setAttribute("role", "menuitem");
     settings.dataset.action = "settings";
     settings.textContent = "Настройки";
     menu.appendChild(settings);
     if (canLogout()) {
       const logout = document.createElement("button");
       logout.type = "button";
+      logout.setAttribute("role", "menuitem");
       logout.dataset.action = "logout";
       logout.textContent = "Выйти";
       logout.className = "auth-menu-danger";

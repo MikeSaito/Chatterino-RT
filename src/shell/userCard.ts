@@ -6,6 +6,7 @@ import {
   closeModalImmediate,
   prepareModalOpen,
 } from "./modalClose";
+import { bindFocusTrap } from "./focusTrap";
 import {
   moderationSlashCommand,
   type ModerationCommandKind,
@@ -86,6 +87,7 @@ export function bindUserCard(opts: {
     getSelfLogin,
   } = opts;
   const dialog = modal.querySelector<HTMLElement>("#usercard-dialog");
+  const notesDialog = notesModal.querySelector<HTMLElement>("#notes-dialog");
   const closeBtn = modal.querySelector<HTMLButtonElement>("#usercard-close");
   const pinBtn = modal.querySelector<HTMLButtonElement>("#usercard-pin");
   const avatarEl = modal.querySelector<HTMLImageElement>("#usercard-avatar");
@@ -129,7 +131,16 @@ export function bindUserCard(opts: {
   const notesCancel = notesModal.querySelector<HTMLButtonElement>("#notes-cancel");
   const notesClose = notesModal.querySelector<HTMLButtonElement>("#notes-close");
   const notesBackdrop = notesModal.querySelector<HTMLElement>("#notes-backdrop");
-  if (!dialog || !closeBtn || !nameEl || !loginEl || !recent || !openTwitch || !head) {
+  if (
+    !dialog ||
+    !notesDialog ||
+    !closeBtn ||
+    !nameEl ||
+    !loginEl ||
+    !recent ||
+    !openTwitch ||
+    !head
+  ) {
     return {
       open: () => undefined,
       close: () => undefined,
@@ -276,10 +287,12 @@ export function bindUserCard(opts: {
     if (notesEditor) {
       notesEditor.value = "";
     }
+    notesTrap.deactivate();
     void closeModal(notesModal);
   };
 
   const forceCloseNotesDialog = (): void => {
+    notesTrap.deactivate();
     closeModalImmediate(notesModal);
     if (notesEditor) {
       notesEditor.value = "";
@@ -312,6 +325,7 @@ export function bindUserCard(opts: {
     notesEditor.value = cachedNotes;
     paintNotesCounter();
     prepareModalOpen(notesModal);
+    notesTrap.activate();
     notesEditor.focus();
   };
 
@@ -786,6 +800,7 @@ export function bindUserCard(opts: {
   };
 
   const close = (): void => {
+    cardTrap.deactivate();
     void closeModal(modal);
     currentLogin = "";
     currentUserId = "";
@@ -824,8 +839,30 @@ export function bindUserCard(opts: {
     forceCloseNotesDialog();
   };
 
+  const cardTrap = bindFocusTrap(dialog, {
+    isActive: () => !modal.hidden && notesModal.hidden,
+    onEscape: () => {
+      if (pinned) {
+        return false;
+      }
+      close();
+      return true;
+    },
+  });
+  const notesTrap = bindFocusTrap(notesDialog, {
+    isActive: () => !notesModal.hidden,
+    onEscape: () => {
+      if (notesBusy) {
+        return false;
+      }
+      closeNotesDialog();
+      return true;
+    },
+  });
+
   const placeNear = (clientX: number, clientY: number): void => {
     prepareModalOpen(modal);
+    cardTrap.activate();
     const pad = 8;
     const w = dialog.offsetWidth || 360;
     const h = dialog.offsetHeight || 420;
@@ -1366,20 +1403,6 @@ export function bindUserCard(opts: {
       return;
     }
     close();
-  });
-
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !notesModal.hidden) {
-      ev.preventDefault();
-      if (!notesBusy) {
-        closeNotesDialog();
-      }
-      return;
-    }
-    if (ev.key === "Escape" && !modal.hidden && !pinned) {
-      ev.preventDefault();
-      close();
-    }
   });
 
   return {

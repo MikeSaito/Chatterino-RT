@@ -174,6 +174,10 @@ export function mountSettingsPanel(opts: {
       bumpZoom: async () => undefined,
     };
   }
+  tabsHost.setAttribute("role", "tablist");
+  if (!tabsHost.getAttribute("aria-label")) {
+    tabsHost.setAttribute("aria-label", "Settings");
+  }
   if (searchIconHost) {
     searchIconHost.replaceChildren(iconEl("search", 14));
   }
@@ -857,6 +861,8 @@ export function mountSettingsPanel(opts: {
         const tab = document.createElement("button");
         tab.type = "button";
         tab.className = "settings-tab";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", "false");
         tab.dataset.page = page.id;
         tab.dataset.search = `${page.navLabel} ${page.search}`;
         const icon = iconEl(settingsNavIcon(page.id), 16);
@@ -1417,7 +1423,9 @@ export function mountSettingsPanel(opts: {
   const showPage = (id: string): void => {
     activePage = id;
     tabsHost.querySelectorAll<HTMLButtonElement>(".settings-tab").forEach((tab) => {
-      tab.classList.toggle("is-active", tab.dataset.page === id);
+      const on = tab.dataset.page === id;
+      tab.classList.toggle("is-active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
     });
     pagesHost.querySelectorAll<HTMLElement>(".settings-page").forEach((page) => {
       page.classList.toggle("is-active", page.dataset.page === id);

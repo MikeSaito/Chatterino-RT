@@ -89,6 +89,7 @@ export function bindHeaderMenu(opts: {
   for (const item of ITEMS) {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.setAttribute("role", "menuitem");
     btn.dataset.action = item.action;
     btn.textContent = item.label;
     menu.appendChild(btn);
