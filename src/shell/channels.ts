@@ -5,7 +5,7 @@ import { t } from "../i18n";
 
 export { moveOpenTab, indexAtContentX } from "./channelTabOrder";
 
-const DRAG_ARM_PX = 5;
+const DRAG_ARM_PX = 8;
 const EDGE_SCROLL_PX = 28;
 const EDGE_SCROLL_STEP = 14;
 
@@ -75,20 +75,23 @@ export function bindChannelList(
     drag = null;
   };
 
-  const finishDrag = (): void => {
+  const finishPointer = (): void => {
     if (!drag) {
       return;
     }
-    const shouldPersist = drag.armed && drag.fromIndex !== drag.startIndex;
+    const login = drag.login;
+    const reordered = drag.armed && drag.fromIndex !== drag.startIndex;
     clearDrag();
-    if (!shouldPersist) {
-      return;
-    }
+    // Always own activation here: setPointerCapture / is-dragging break the synthetic click.
     suppressNextClick = true;
     window.setTimeout(() => {
       suppressNextClick = false;
     }, 0);
-    onReorder?.([...open]);
+    if (reordered) {
+      onReorder?.([...open]);
+      return;
+    }
+    onSelect(login);
   };
 
   const readTabBoxes = (): { left: number; width: number }[] => {
@@ -116,7 +119,7 @@ export function bindChannelList(
     }
   };
 
-  const syncDomToOpen = (dragLogin: string): void => {
+  const syncDomToOpen = (dragLogin: string, showDragging: boolean): void => {
     const rows = new Map<string, HTMLElement>();
     for (const node of [...list.children]) {
       if (!(node instanceof HTMLElement)) {
@@ -133,10 +136,14 @@ export function bindChannelList(
         list.appendChild(row);
       }
     }
-    const active = list.querySelector<HTMLElement>(
-      `.channel-row[data-channel="${CSS.escape(dragLogin)}"]`,
-    );
-    active?.classList.add("is-dragging");
+    clearDragChrome();
+    if (showDragging) {
+      list.classList.add("is-reordering");
+      const active = list.querySelector<HTMLElement>(
+        `.channel-row[data-channel="${CSS.escape(dragLogin)}"]`,
+      );
+      active?.classList.add("is-dragging");
+    }
   };
 
   const applyDragIndex = (toIndex: number): void => {
@@ -150,7 +157,8 @@ export function bindChannelList(
     open.length = 0;
     open.push(...next);
     drag.fromIndex = toIndex;
-    syncDomToOpen(drag.login);
+    const moved = drag.fromIndex !== drag.startIndex;
+    syncDomToOpen(drag.login, moved);
   };
 
   const onWindowPointerMove = (ev: PointerEvent): void => {
@@ -162,8 +170,11 @@ export function bindChannelList(
         return;
       }
       drag.armed = true;
-      drag.row.classList.add("is-dragging");
-      list.classList.add("is-reordering");
+      try {
+        drag.row.setPointerCapture(ev.pointerId);
+      } catch {
+        /* optional */
+      }
       ev.preventDefault();
     }
     autoScroll(ev.clientX);
@@ -179,9 +190,7 @@ export function bindChannelList(
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
-    finishDrag();
-    // Channel select stays on the button click (keyboard + mouse).
-    // Reorder path sets suppressNextClick inside finishDrag when order changed.
+    finishPointer();
   };
 
   const onTabPointerDown = (
@@ -209,11 +218,7 @@ export function bindChannelList(
       armed: false,
       row: item,
     };
-    try {
-      item.setPointerCapture(ev.pointerId);
-    } catch {
-      /* capture optional */
-    }
+    // Do not capture yet — capture + pointer-events:none kill the click path.
     window.addEventListener("pointermove", onWindowPointerMove);
     window.addEventListener("pointerup", onWindowPointerUp);
     window.addEventListener("pointercancel", onWindowPointerUp);
