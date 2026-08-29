@@ -386,7 +386,10 @@ pub fn toggle_favourite(
             code.trim_matches(':').to_string()
         });
         if short.is_empty() || has_control(&short) {
-            return Err(ApiError::coded("error.emote.unknown_emoji", "unknown emoji"));
+            return Err(ApiError::coded(
+                "error.emote.unknown_emoji",
+                "unknown emoji",
+            ));
         }
         settings::mutate_favourites(shared, |_emotes, emojis| {
             if add {

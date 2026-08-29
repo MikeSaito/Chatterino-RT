@@ -33,8 +33,7 @@ pub fn open_incognito(url: &str) -> Result<(), String> {
     if exe.is_absolute() && !exe.is_file() {
         return Err("default browser not found".into());
     }
-    let switch =
-        private_switch(&exe).ok_or_else(|| "private mode is not supported".to_string())?;
+    let switch = private_switch(&exe).ok_or_else(|| "private mode is not supported".to_string())?;
     let mut cmd = Command::new(&exe);
     cmd.arg(switch)
         .arg(url)

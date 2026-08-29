@@ -67,6 +67,12 @@ fn strip_extended_prefix(path: PathBuf) -> PathBuf {
 }
 
 #[cfg(windows)]
+fn is_file_not_found(err: &windows::core::Error) -> bool {
+    use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    err.code() == ERROR_FILE_NOT_FOUND.to_hresult() || err.code().0 as u32 == ERROR_FILE_NOT_FOUND.0
+}
+
+#[cfg(windows)]
 fn read_run_value() -> Result<Option<String>, String> {
     use windows::core::{w, PCWSTR};
     use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
@@ -77,15 +83,19 @@ fn read_run_value() -> Result<Option<String>, String> {
 
     unsafe {
         let mut key = Default::default();
-        RegOpenKeyExW(
+        let open = RegOpenKeyExW(
             HKEY_CURRENT_USER,
             w!(r"Software\Microsoft\Windows\CurrentVersion\Run"),
             None,
             KEY_READ,
             &mut key,
-        )
-        .ok()
-        .map_err(|e| e.to_string())?;
+        );
+        if let Err(e) = open.ok() {
+            if is_file_not_found(&e) {
+                return Ok(None);
+            }
+            return Err(e.to_string());
+        }
 
         let mut data = vec![0u16; 1024];
         let mut data_bytes = (data.len() * 2) as u32;
@@ -151,15 +161,19 @@ fn delete_run_value() -> Result<(), String> {
 
     unsafe {
         let mut key = Default::default();
-        RegOpenKeyExW(
+        let open = RegOpenKeyExW(
             HKEY_CURRENT_USER,
             w!(r"Software\Microsoft\Windows\CurrentVersion\Run"),
             None,
             KEY_SET_VALUE,
             &mut key,
-        )
-        .ok()
-        .map_err(|e| e.to_string())?;
+        );
+        if let Err(e) = open.ok() {
+            if is_file_not_found(&e) {
+                return Ok(());
+            }
+            return Err(e.to_string());
+        }
         let name = HSTRING::from(RUN_VALUE_NAME);
         let status = RegDeleteValueW(key, &name);
         let _ = RegCloseKey(key);
@@ -198,5 +212,11 @@ mod tests {
         assert_eq!(p, PathBuf::from(r"\\server\share\app.exe"));
         let local = strip_extended_prefix(PathBuf::from(r"\\?\C:\Apps\app.exe"));
         assert_eq!(local, PathBuf::from(r"C:\Apps\app.exe"));
+    }
+
+    #[test]
+    fn disable_autorun_is_idempotent() {
+        set_registered(false).expect("disable autorun");
+        set_registered(false).expect("disable autorun again");
     }
 }

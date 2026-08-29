@@ -357,9 +357,9 @@ fn active_send_channel(state: &Shared) -> Result<String, ApiError> {
             "channel is not connected yet",
         ));
     }
-    hub.active.clone().ok_or_else(|| {
-        ApiError::coded("error.channel.none_active", "no active channel")
-    })
+    hub.active
+        .clone()
+        .ok_or_else(|| ApiError::coded("error.channel.none_active", "no active channel"))
 }
 
 fn ensure_can_send(state: &Shared) -> Result<(), ApiError> {
@@ -698,10 +698,8 @@ pub fn session_reorder_open(
     state: tauri::State<'_, Shared>,
     open: Vec<String>,
 ) -> Result<super::session::Session, ApiError> {
-    let normalized: Result<Vec<String>, ApiError> = open
-        .into_iter()
-        .map(|c| normalize_channel(&c))
-        .collect();
+    let normalized: Result<Vec<String>, ApiError> =
+        open.into_iter().map(|c| normalize_channel(&c)).collect();
     super::session::reorder_open(&state, normalized?)
 }
 
@@ -1142,10 +1140,7 @@ pub async fn chat_user_followers(
 ) -> Result<Option<u64>, ApiError> {
     let id = broadcaster_id.trim();
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
-        return Err(ApiError::coded(
-            "error.user.invalid_id",
-            "invalid user id",
-        ));
+        return Err(ApiError::coded("error.user.invalid_id", "invalid user id"));
     }
     let token = auth::oauth_token(&state);
     let client_id = auth::resolved_client_id(&state);

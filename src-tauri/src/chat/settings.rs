@@ -423,7 +423,10 @@ pub fn mutate_favourites(
         .map_err(|message| ApiError::internal(&message))?;
     if next.favourite_emotes.len() > MAX_TABLE_ROWS || next.favourite_emojis.len() > MAX_TABLE_ROWS
     {
-        return Err(ApiError::coded("error.settings.favourites_limit", "favourites limit reached"));
+        return Err(ApiError::coded(
+            "error.settings.favourites_limit",
+            "favourites limit reached",
+        ));
     }
     for s in &mut next.favourite_emotes {
         *s = s.trim().to_string();
@@ -431,7 +434,10 @@ pub fn mutate_favourites(
             || s.chars()
                 .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
         {
-            return Err(ApiError::coded("error.settings.favourite_emote", "favourite emote invalid"));
+            return Err(ApiError::coded(
+                "error.settings.favourite_emote",
+                "favourite emote invalid",
+            ));
         }
     }
     next.favourite_emotes.retain(|s| !s.is_empty());
@@ -442,7 +448,10 @@ pub fn mutate_favourites(
             || s.chars()
                 .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
         {
-            return Err(ApiError::coded("error.settings.favourite_emoji", "favourite emoji invalid"));
+            return Err(ApiError::coded(
+                "error.settings.favourite_emoji",
+                "favourite emoji invalid",
+            ));
         }
     }
     next.favourite_emojis.retain(|s| !s.is_empty());
@@ -461,7 +470,10 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
         .lock()
         .map_err(|_| ApiError::internal("lock"))?;
     if inner.path.as_os_str().is_empty() {
-        return Err(ApiError::coded("error.settings.config_dir", "config directory is not initialized"));
+        return Err(ApiError::coded(
+            "error.settings.config_dir",
+            "config directory is not initialized",
+        ));
     }
     let prev_autorun = super::autorun::is_registered();
     if let Err(e) = super::autorun::apply_knob_to_registry(&clean.knobs) {
@@ -614,7 +626,10 @@ fn spawn_emote_catalog_reload(shared: &Shared) {
 
 pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     if !raw.font_scale.is_finite() {
-        return Err(ApiError::coded("error.settings.font_scale_number", "font scale must be a number"));
+        return Err(ApiError::coded(
+            "error.settings.font_scale_number",
+            "font scale must be a number",
+        ));
     }
     if raw.font_scale < MIN_SCALE || raw.font_scale > MAX_SCALE {
         return Err(ApiError::coded_params(
@@ -646,13 +661,19 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
     ];
     let fmt_owned = fmt.to_string();
     if !ALLOWED_FMT.iter().any(|a| *a == fmt_owned.as_str()) {
-        return Err(ApiError::coded("error.settings.timestamp_format", "message timestamp format"));
+        return Err(ApiError::coded(
+            "error.settings.timestamp_format",
+            "message timestamp format",
+        ));
     }
     raw.show_timestamps = fmt_owned != "Disable";
     raw.timestamp_format = fmt_owned;
 
     if raw.knobs.len() > MAX_KNOBS {
-        return Err(ApiError::coded("error.settings.too_many_knobs", "too many settings"));
+        return Err(ApiError::coded(
+            "error.settings.too_many_knobs",
+            "too many settings",
+        ));
     }
     let mut clean_knobs = BTreeMap::new();
     for (key, value) in raw.knobs {
@@ -673,12 +694,18 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
             Value::Bool(_) | Value::Null => {}
             Value::Number(n) => {
                 if !n.is_f64() && !n.is_i64() && !n.is_u64() {
-                    return Err(ApiError::coded("error.settings.knob_number", "settings number"));
+                    return Err(ApiError::coded(
+                        "error.settings.knob_number",
+                        "settings number",
+                    ));
                 }
             }
             Value::String(s) => {
                 if s.len() > MAX_CELL || s.contains('\0') {
-                    return Err(ApiError::coded("error.settings.knob_string", "settings string"));
+                    return Err(ApiError::coded(
+                        "error.settings.knob_string",
+                        "settings string",
+                    ));
                 }
             }
             _ => return Err(ApiError::coded("error.settings.knob_type", "settings type")),
@@ -722,7 +749,10 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         || raw.favourite_emotes.len() > MAX_TABLE_ROWS
         || raw.favourite_emojis.len() > MAX_TABLE_ROWS
     {
-        return Err(ApiError::coded("error.settings.table_rows", "too many table rows"));
+        return Err(ApiError::coded(
+            "error.settings.table_rows",
+            "too many table rows",
+        ));
     }
 
     for row in &mut raw.nicknames {
@@ -733,10 +763,16 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         trim_cell(&mut row.trigger)?;
         trim_cell(&mut row.command)?;
         if row.trigger.chars().count() > super::custom_commands::MAX_COMMAND_FIELD_CHARS {
-            return Err(ApiError::coded("error.settings.command_trigger", "command trigger too long"));
+            return Err(ApiError::coded(
+                "error.settings.command_trigger",
+                "command trigger too long",
+            ));
         }
         if row.command.chars().count() > super::custom_commands::MAX_COMMAND_FIELD_CHARS {
-            return Err(ApiError::coded("error.settings.command_text", "command text too long"));
+            return Err(ApiError::coded(
+                "error.settings.command_text",
+                "command text too long",
+            ));
         }
     }
     for row in &mut raw.highlight_messages {
@@ -776,10 +812,16 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         trim_cell(&mut row.name)?;
         trim_cell(&mut row.keybinding)?;
         if !HOTKEY_ACTIONS.contains(&row.action.as_str()) {
-            return Err(ApiError::coded("error.settings.hotkey_action", "invalid hotkey action"));
+            return Err(ApiError::coded(
+                "error.settings.hotkey_action",
+                "invalid hotkey action",
+            ));
         }
         if row.keybinding.is_empty() || row.keybinding.len() > 64 {
-            return Err(ApiError::coded("error.settings.hotkey_binding", "invalid hotkey keybinding"));
+            return Err(ApiError::coded(
+                "error.settings.hotkey_binding",
+                "invalid hotkey keybinding",
+            ));
         }
     }
     for row in &mut raw.mod_actions {

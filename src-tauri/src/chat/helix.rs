@@ -24,6 +24,8 @@ const BADGE_HOSTS: &[&str] = &["static-cdn.jtvnw.net"];
 const CHEER_HOSTS: &[&str] = &["d3aqoihi2n8ty8.cloudfront.net"];
 const RETRY_WAIT: Duration = Duration::from_secs(2);
 
+static LAST_HELIX_FAIL_LOG_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 enum HelixFetch {
     Ok(Value),
     Auth,
@@ -779,7 +781,12 @@ async fn get_helix(
                 } else {
                     last = format!("http {status}");
                     if status.as_u16() == 401 || status.as_u16() == 403 {
-                        eprintln!("helix fetch failed ({last}): {url}");
+                        super::fetch::log_http_fail_throttled(
+                            &LAST_HELIX_FAIL_LOG_MS,
+                            "helix",
+                            &last,
+                            url,
+                        );
                         return HelixFetch::Auth;
                     }
                 }
@@ -791,7 +798,12 @@ async fn get_helix(
             delay *= 2;
         }
     }
-    eprintln!("helix fetch failed after {ATTEMPTS} attempts ({last}): {url}");
+    super::fetch::log_http_fail_throttled(
+        &LAST_HELIX_FAIL_LOG_MS,
+        "helix",
+        &format!("after {ATTEMPTS} attempts: {last}"),
+        url,
+    );
     HelixFetch::Fail
 }
 

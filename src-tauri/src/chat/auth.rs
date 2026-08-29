@@ -456,10 +456,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
         .await
         .map_err(AuthFail::internal)?;
     if !still_current(&shared, gen) {
-        return Err(AuthFail::coded(
-            "error.auth.cancelled",
-            "login cancelled",
-        ));
+        return Err(AuthFail::coded("error.auth.cancelled", "login cancelled"));
     }
     if !persist_and_relogin(
         &app,
@@ -580,10 +577,7 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
     {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         if inner.poll_gen != gen {
-            return Err(AuthFail::coded(
-                "error.auth.cancelled",
-                "login cancelled",
-            ));
+            return Err(AuthFail::coded("error.auth.cancelled", "login cancelled"));
         }
         inner.pending_user_code = Some(device.user_code.clone());
         inner.pending_paste = false;
@@ -649,10 +643,7 @@ pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Re
     }
     let login = login.trim().to_lowercase();
     if !valid_login(&login) {
-        return Err(AuthFail::coded(
-            "error.auth.login.invalid",
-            "invalid login",
-        ));
+        return Err(AuthFail::coded("error.auth.login.invalid", "invalid login"));
     }
     {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
@@ -697,10 +688,7 @@ pub async fn remove_account(app: AppHandle, shared: Shared, login: String) -> Re
     }
     let login = login.trim().to_lowercase();
     if !valid_login(&login) {
-        return Err(AuthFail::coded(
-            "error.auth.login.invalid",
-            "invalid login",
-        ));
+        return Err(AuthFail::coded("error.auth.login.invalid", "invalid login"));
     }
     let was_current = {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
@@ -708,9 +696,7 @@ pub async fn remove_account(app: AppHandle, shared: Shared, login: String) -> Re
             .accounts
             .iter()
             .position(|c| c.login == login)
-            .ok_or_else(|| {
-                AuthFail::coded("error.auth.account.not_found", "account not found")
-            })?;
+            .ok_or_else(|| AuthFail::coded("error.auth.account.not_found", "account not found"))?;
         let was_current = inner.current_login.as_deref() == Some(login.as_str());
         let prev = AuthStore {
             accounts: inner.accounts.clone(),
@@ -982,9 +968,8 @@ async fn request_device(client_id: &str) -> Result<DeviceJson, AuthFail> {
                 let status = resp.status();
                 match resp.json::<serde_json::Value>().await {
                     Ok(v) if status.is_success() => {
-                        return serde_json::from_value::<DeviceJson>(v).map_err(|_| {
-                            AuthFail::internal("invalid device code response")
-                        });
+                        return serde_json::from_value::<DeviceJson>(v)
+                            .map_err(|_| AuthFail::internal("invalid device code response"));
                     }
                     Ok(v) => {
                         last = v

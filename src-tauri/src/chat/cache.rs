@@ -57,7 +57,10 @@ pub fn validate_absolute_dir_path(path: &str) -> Result<(), ApiError> {
     }
     let p = Path::new(path);
     if !p.is_absolute() {
-        return Err(ApiError::coded("error.path.absolute", "absolute path required"));
+        return Err(ApiError::coded(
+            "error.path.absolute",
+            "absolute path required",
+        ));
     }
     for c in p.components() {
         if matches!(c, Component::ParentDir) {
@@ -90,7 +93,10 @@ pub fn clear_allowed(resolved: &Path, default_dir: &Path, custom: &str) -> Resul
 
 pub fn clear_cache_dir(resolved: &Path, default_dir: &Path, custom: &str) -> Result<(), ApiError> {
     if !clear_allowed(resolved, default_dir, custom)? {
-        return Err(ApiError::coded("error.cache.clear_forbidden", "clearing this directory is not allowed"));
+        return Err(ApiError::coded(
+            "error.cache.clear_forbidden",
+            "clearing this directory is not allowed",
+        ));
     }
     let resolved_c = canon_existing_or_create(resolved)?;
     fs::remove_dir_all(&resolved_c).map_err(|e| ApiError::internal(&e.to_string()))?;
@@ -147,7 +153,10 @@ pub fn clear(app: &AppHandle, shared: &Shared) -> Result<(), ApiError> {
             canon_existing_or_create(&config_dir),
         ) {
             if resolved_c == config_c {
-                return Err(ApiError::coded("error.cache.clear_settings_forbidden", "clearing the settings directory is not allowed"));
+                return Err(ApiError::coded(
+                    "error.cache.clear_settings_forbidden",
+                    "clearing the settings directory is not allowed",
+                ));
             }
         }
     }

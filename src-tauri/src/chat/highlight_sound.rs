@@ -32,7 +32,10 @@ pub fn path_from_settings(shared: &Shared) -> Result<String, ApiError> {
         .trim()
         .to_string();
     if path.is_empty() {
-        return Err(ApiError::coded("error.sound.path_unset", "sound path is not set"));
+        return Err(ApiError::coded(
+            "error.sound.path_unset",
+            "sound path is not set",
+        ));
     }
     Ok(path)
 }
@@ -88,7 +91,10 @@ pub fn rebuild_allowed_paths(shared: &Shared, data: &super::settings::AppSetting
 pub fn validate_sound_path(raw: &str) -> Result<(), ApiError> {
     let path = Path::new(raw);
     if !path.is_absolute() {
-        return Err(ApiError::coded("error.path.absolute_file", "absolute file path required"));
+        return Err(ApiError::coded(
+            "error.path.absolute_file",
+            "absolute file path required",
+        ));
     }
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(ApiError::coded("error.path.invalid", "invalid path"));
@@ -100,7 +106,10 @@ pub fn validate_sound_path(raw: &str) -> Result<(), ApiError> {
         .to_ascii_lowercase();
     match ext.as_str() {
         "wav" | "ogg" | "mp3" => Ok(()),
-        _ => Err(ApiError::coded("error.sound.format", "format: wav, ogg, or mp3")),
+        _ => Err(ApiError::coded(
+            "error.sound.format",
+            "format: wav, ogg, or mp3",
+        )),
     }
 }
 
@@ -142,15 +151,22 @@ pub fn read_configured(
         Some(p) => {
             let p = p.trim().to_string();
             if p.is_empty() {
-                return Err(ApiError::coded("error.sound.path_unset", "sound path is not set"));
+                return Err(ApiError::coded(
+                    "error.sound.path_unset",
+                    "sound path is not set",
+                ));
             }
             let allowed = path_allowed(&shared, &p, settings_path.as_deref());
             if !allowed {
-                return Err(ApiError::coded("error.sound.path_denied", "sound path is not allowed"));
+                return Err(ApiError::coded(
+                    "error.sound.path_denied",
+                    "sound path is not allowed",
+                ));
             }
             p
         }
-        None => settings_path.ok_or_else(|| ApiError::coded("error.sound.path_unset", "sound path is not set"))?,
+        None => settings_path
+            .ok_or_else(|| ApiError::coded("error.sound.path_unset", "sound path is not set"))?,
     };
     read_path(&path)
 }
@@ -184,14 +200,23 @@ pub fn read_path(raw: &str) -> Result<SoundFile, ApiError> {
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
         "mp3" => "audio/mpeg",
-        _ => return Err(ApiError::coded("error.sound.format", "format: wav, ogg, or mp3")),
+        _ => {
+            return Err(ApiError::coded(
+                "error.sound.format",
+                "format: wav, ogg, or mp3",
+            ))
+        }
     };
-    let meta = fs::metadata(path).map_err(|_| ApiError::coded("error.sound.file_missing", "file not found"))?;
+    let meta = fs::metadata(path)
+        .map_err(|_| ApiError::coded("error.sound.file_missing", "file not found"))?;
     if !meta.is_file() {
         return Err(ApiError::coded("error.sound.not_a_file", "not a file"));
     }
     if meta.len() == 0 || meta.len() > MAX_BYTES {
-        return Err(ApiError::coded("error.sound.size", "file size: 1 byte – 2 MiB"));
+        return Err(ApiError::coded(
+            "error.sound.size",
+            "file size: 1 byte – 2 MiB",
+        ));
     }
     let bytes = fs::read(path).map_err(|e| ApiError::internal(&e.to_string()))?;
     Ok(SoundFile {

@@ -28,10 +28,7 @@ mod tests {
             clearchat_text_en(Some("bob"), Some(60), 1),
             "bob timed out for 60s"
         );
-        assert_eq!(
-            clearchat_text_en(Some("bob"), None, 1),
-            "bob was banned"
-        );
+        assert_eq!(clearchat_text_en(Some("bob"), None, 1), "bob was banned");
         assert_eq!(
             clearchat_text_en(Some("dev"), Some(60), 3),
             "dev timed out for 60s (3 times)"

@@ -12,6 +12,30 @@ use super::hub::Hub;
 use super::state::Shared;
 
 const ATTEMPTS: u32 = 3;
+const FETCH_LOG_COOLDOWN_MS: u64 = 30_000;
+
+static LAST_EMOTE_FAIL_LOG_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Rate-limit stderr on transport storms (TLS reset / offline).
+pub(crate) fn log_http_fail_throttled(
+    stamp: &std::sync::atomic::AtomicU64,
+    kind: &str,
+    detail: &str,
+    url: &str,
+) {
+    use std::sync::atomic::Ordering;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let prev = stamp.load(Ordering::Relaxed);
+    if now.saturating_sub(prev) < FETCH_LOG_COOLDOWN_MS {
+        return;
+    }
+    stamp.store(now, Ordering::Relaxed);
+    eprintln!("{kind} fetch failed ({detail}); further noise suppressed ~30s. example: {url}");
+}
 
 /// Show-provider knobs (defaults match Settings catalog / Chatterino).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,7 +353,12 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
                     last = format!("http {status}");
                 } else {
                     // Прочие 4xx без ретраев.
-                    eprintln!("emote fetch failed (http {status}): {url}");
+                    log_http_fail_throttled(
+                        &LAST_EMOTE_FAIL_LOG_MS,
+                        "emote",
+                        &format!("http {status}"),
+                        url,
+                    );
                     return Err(());
                 }
             }
@@ -340,7 +369,12 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
             delay *= 2;
         }
     }
-    eprintln!("emote fetch failed after {ATTEMPTS} attempts ({last}): {url}");
+    log_http_fail_throttled(
+        &LAST_EMOTE_FAIL_LOG_MS,
+        "emote",
+        &format!("after {ATTEMPTS} attempts: {last}"),
+        url,
+    );
     Err(())
 }
 
