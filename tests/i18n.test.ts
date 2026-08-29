@@ -10,6 +10,7 @@ import {
   t,
 } from "../src/i18n/index.ts";
 import { tKnobLabel, tPageNav } from "../src/i18n/settingsT.ts";
+import { formatInvokeError } from "../src/i18n/formatError.ts";
 import {
   clearchatText,
   deletionNoticeText,
@@ -116,6 +117,46 @@ assert(
 assert(clearchatText("bob", undefined) === "bob забанен", "clearchat ban ru");
 assert(whisperPrefix() === "Шёпот: ", "whisper ru");
 assert(formatReplyHeader("bob", "") === "Ответ @bob", "reply empty ru");
+setLocale("en");
+
+setLocale("ru");
+assert(
+  formatInvokeError({
+    code: "error.channel.none_active",
+    message: "no active channel",
+  }) === "нет активного канала",
+  "formatInvokeError ru code",
+);
+assert(
+  formatInvokeError({
+    code: "error.channel.limit",
+    message: "no more than 8 open channels",
+    params: { max: "8" },
+  }) === "не больше 8 открытых каналов",
+  "formatInvokeError params",
+);
+assert(
+  formatInvokeError({
+    code: "internal",
+    message: "lock",
+  }) === "lock",
+  "formatInvokeError fallback message",
+);
+assert(
+  formatInvokeError({
+    code: "error.filters.list_limit",
+    message: "ignore logins: no more than 200 entries",
+  }) === "ignore logins: no more than 200 entries",
+  "formatInvokeError placeholder falls back to message",
+);
+assert(
+  formatInvokeError({
+    code: "error.filters.list_limit",
+    message: "ignore logins: no more than 200 entries",
+    params: { label: "ignore logins", max: "200" },
+  }) === "ignore logins: не больше 200 записей",
+  "formatInvokeError list_limit with params",
+);
 setLocale("en");
 
 console.log("i18n tests ok");

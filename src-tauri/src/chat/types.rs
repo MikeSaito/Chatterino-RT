@@ -392,6 +392,12 @@ pub struct SearchHit {
     pub login: String,
     pub text: String,
     pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_login: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_duration_sec: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_stack_count: Option<u32>,
 }
 
 impl ChatEvent {
@@ -411,6 +417,9 @@ impl ChatEvent {
                 login: login.clone(),
                 text: text.clone(),
                 color: color.clone(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
             },
             ChatEvent::Usernotice {
                 timestamp_ms,
@@ -436,6 +445,9 @@ impl ChatEvent {
                             login: pl.clone(),
                             text: format!("{system_text} {text}"),
                             color: color.clone(),
+                            clear_login: None,
+                            clear_duration_sec: None,
+                            clear_stack_count: None,
                         };
                     }
                 }
@@ -446,6 +458,9 @@ impl ChatEvent {
                     login: login.clone().unwrap_or_default(),
                     text: system_text.clone(),
                     color: "#adadc0".into(),
+                    clear_login: None,
+                    clear_duration_sec: None,
+                    clear_stack_count: None,
                 }
             }
             ChatEvent::Notice {
@@ -457,6 +472,9 @@ impl ChatEvent {
                 login: String::new(),
                 text: text.clone(),
                 color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
             },
             ChatEvent::Clearchat {
                 timestamp_ms,
@@ -465,14 +483,11 @@ impl ChatEvent {
                 stack_count,
                 ..
             } => {
-                let mut text = match (target_login.as_deref(), *duration_sec) {
-                    (None, _) => "чат очищен".to_string(),
-                    (Some(login), Some(sec)) => format!("{login} тайм-аут {sec}с"),
-                    (Some(login), None) => format!("{login} забанен"),
-                };
-                if *stack_count > 1 {
-                    text.push_str(&format!(" ({stack_count} раз)"));
-                }
+                let text = super::clearchat_text::clearchat_text_en(
+                    target_login.as_deref(),
+                    duration_sec.map(u64::from),
+                    *stack_count,
+                );
                 SearchHit {
                     id: self.search_jump_id().to_string(),
                     timestamp_ms: *timestamp_ms,
@@ -480,6 +495,9 @@ impl ChatEvent {
                     login: target_login.clone().unwrap_or_default(),
                     text,
                     color: "#adadc0".into(),
+                    clear_login: target_login.clone(),
+                    clear_duration_sec: duration_sec.map(u64::from),
+                    clear_stack_count: Some(*stack_count),
                 }
             }
             ChatEvent::Roomstate {
@@ -496,6 +514,9 @@ impl ChatEvent {
                 login: String::new(),
                 text: roomstate_text(*emote_only, *subs_only, *slow_sec, *followers_only),
                 color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
             },
             ChatEvent::Clearmsg { .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
@@ -504,6 +525,9 @@ impl ChatEvent {
                 login: String::new(),
                 text: String::new(),
                 color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
             },
             ChatEvent::Userstate { timestamp_ms, .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
@@ -512,6 +536,9 @@ impl ChatEvent {
                 login: String::new(),
                 text: String::new(),
                 color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
             },
         }
     }

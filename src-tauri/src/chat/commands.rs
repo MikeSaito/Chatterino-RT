@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,24 +20,49 @@ use super::types::ChatBatch;
 
 const MAX_CHAT_CHARS: usize = 500;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ApiError {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
 }
 
 impl ApiError {
+    pub fn coded(code: impl Into<String>, message_en: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message_en.into(),
+            params: BTreeMap::new(),
+        }
+    }
+
+    pub fn coded_params(
+        code: impl Into<String>,
+        message_en: impl Into<String>,
+        params: BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message_en.into(),
+            params,
+        }
+    }
+
     pub fn internal(msg: &str) -> Self {
         Self {
             code: "internal".into(),
             message: msg.into(),
+            params: BTreeMap::new(),
         }
     }
 
     pub fn invalid(message: impl Into<String>) -> Self {
+        // Prefer coded() for user-facing; keep for transitional EN-only diagnostics
         Self {
             code: "invalid_input".into(),
             message: message.into(),
+            params: BTreeMap::new(),
         }
     }
 }
@@ -46,6 +72,7 @@ impl From<AuthFail> for ApiError {
         Self {
             code: e.code,
             message: e.message,
+            params: e.params,
         }
     }
 }
@@ -197,9 +224,12 @@ pub fn chat_snapshot(
     let normalized = normalize_channel(&channel)?;
     let mut batch = {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        hub.snapshot(&normalized).ok_or_else(|| ApiError {
-            code: "not_found".into(),
-            message: format!("нет истории для {normalized}"),
+        hub.snapshot(&normalized).ok_or_else(|| {
+            ApiError::coded_params(
+                "error.channel.no_history",
+                format!("no history for {normalized}"),
+                BTreeMap::from([("channel".into(), normalized.clone())]),
+            )
         })?
     };
     for event in &mut batch.events {
@@ -293,11 +323,17 @@ pub async fn chat_exec_custom_command(
         input_text: invoke.input_text.as_deref(),
     };
     if menu.trigger.is_empty() {
-        return Err(ApiError::invalid("пустой trigger команды"));
+        return Err(ApiError::coded(
+            "error.command.empty_trigger",
+            "empty command trigger",
+        ));
     }
     let set = load_custom_commands(&state);
     if !set.allows_menu_trigger(menu.trigger) {
-        return Err(ApiError::invalid("команда недоступна из меню сообщения"));
+        return Err(ApiError::coded(
+            "error.command.menu_unavailable",
+            "command is not available from the message menu",
+        ));
     }
     let text = prepare_outgoing_text(&state, &channel, "", Some(menu))?;
     dispatch_chat_send(&app, &state, &channel, text, reply_to).await
@@ -316,17 +352,21 @@ struct MenuExpand<'a> {
 fn active_send_channel(state: &Shared) -> Result<String, ApiError> {
     let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
     if !hub.joined_active() {
-        return Err(ApiError::invalid("канал ещё не подключён"));
+        return Err(ApiError::coded(
+            "error.channel.not_joined",
+            "channel is not connected yet",
+        ));
     }
-    hub.active
-        .clone()
-        .ok_or_else(|| ApiError::invalid("нет активного канала"))
+    hub.active.clone().ok_or_else(|| {
+        ApiError::coded("error.channel.none_active", "no active channel")
+    })
 }
 
 fn ensure_can_send(state: &Shared) -> Result<(), ApiError> {
     if auth::resolved_login_token(state).is_none() {
-        return Err(ApiError::invalid(
-            "нужен вход Twitch, чтобы отправлять сообщения",
+        return Err(ApiError::coded(
+            "error.auth.required_send",
+            "Twitch login required to send messages",
         ));
     }
     Ok(())
@@ -404,7 +444,7 @@ fn prepare_outgoing_text(
         Some(m) => {
             let ctx = build_expand_context(state, channel, Some(&m), Some(text));
             custom_commands::expand_menu_command(&set, m.trigger, m.message_text, &ctx)
-                .ok_or_else(|| ApiError::invalid("команда не найдена"))?
+                .ok_or_else(|| ApiError::coded("error.command.not_found", "command not found"))?
         }
         None => {
             let ctx = build_expand_context(state, channel, None, Some(text));
@@ -412,7 +452,11 @@ fn prepare_outgoing_text(
         }
     };
     if expanded.chars().count() > MAX_CHAT_CHARS {
-        return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+        return Err(ApiError::coded_params(
+            "error.message.too_long",
+            format!("message longer than {MAX_CHAT_CHARS} characters"),
+            BTreeMap::from([("max".into(), MAX_CHAT_CHARS.to_string())]),
+        ));
     }
     Ok(expanded)
 }
@@ -440,8 +484,9 @@ async fn dispatch_chat_send(
         }
     }
     if !state.try_reserve_outbound(MAX_PENDING_OUT) {
-        return Err(ApiError::invalid(
-            "очередь отправки полна, подождите подключения",
+        return Err(ApiError::coded(
+            "error.message.send_queue_full",
+            "send queue is full, wait for connection",
         ));
     }
     if let Err(err) = send_cmd(
@@ -535,8 +580,12 @@ async fn send_via_helix(
         );
         return Ok(());
     };
-    let token = auth::oauth_token(state)
-        .ok_or_else(|| ApiError::invalid("нужен вход Twitch, чтобы отправлять сообщения"))?;
+    let token = auth::oauth_token(state).ok_or_else(|| {
+        ApiError::coded(
+            "error.auth.required_send",
+            "Twitch login required to send messages",
+        )
+    })?;
     let client_id = auth::resolved_client_id(state);
     if let Ok(mut last) = state.last_sent.lock() {
         last.insert(channel.to_string(), payload.clone());
@@ -871,17 +920,26 @@ pub fn chat_search(
 ) -> Result<SearchResult, ApiError> {
     let normalized = normalize_channel(&channel)?;
     if query.chars().count() > MAX_CHAT_CHARS {
-        return Err(ApiError::invalid("запрос слишком длинный"));
+        return Err(ApiError::coded(
+            "error.search.query_too_long",
+            "search query is too long",
+        ));
     }
     if query
         .chars()
         .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
     {
-        return Err(ApiError::invalid("недопустимые символы в запросе"));
+        return Err(ApiError::coded(
+            "error.search.query_chars",
+            "search query has invalid characters",
+        ));
     }
     let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
     if hub.active.as_deref() != Some(normalized.as_str()) {
-        return Err(ApiError::invalid("канал не активен"));
+        return Err(ApiError::coded(
+            "error.channel.inactive",
+            "channel is not active",
+        ));
     }
     if !hub.has_channel(&normalized) {
         return Ok(SearchResult { hits: Vec::new() });
@@ -901,7 +959,48 @@ pub fn filters_get(state: tauri::State<'_, Shared>) -> Result<Filters, ApiError>
 
 #[tauri::command]
 pub fn filters_set(state: tauri::State<'_, Shared>, filters: Filters) -> Result<Filters, ApiError> {
-    filters::replace(&state, filters).map_err(ApiError::invalid)
+    filters::replace(&state, filters).map_err(|message| {
+        let mut params = BTreeMap::new();
+        if let Some(caps) = regex_filters_list_limit(&message) {
+            params.insert("label".into(), caps.0);
+            params.insert("max".into(), caps.1);
+            return ApiError::coded_params("error.filters.list_limit", message, params);
+        }
+        if let Some(caps) = regex_filters_phrase_long(&message) {
+            params.insert("label".into(), caps.0);
+            params.insert("n".into(), caps.1);
+            return ApiError::coded_params("error.filters.phrase_too_long", message, params);
+        }
+        if let Some(label) = message
+            .strip_suffix(": phrase contains forbidden characters")
+            .map(str::to_string)
+        {
+            params.insert("label".into(), label);
+            return ApiError::coded_params("error.filters.phrase_chars", message, params);
+        }
+        let code = if message.starts_with("login:") {
+            "error.filters.login"
+        } else if message.contains("config directory") {
+            "error.filters.config_dir"
+        } else {
+            "error.filters.invalid"
+        };
+        ApiError::coded(code, message)
+    })
+}
+
+fn regex_filters_list_limit(message: &str) -> Option<(String, String)> {
+    // "{label}: no more than {max} entries"
+    let (label, rest) = message.split_once(": no more than ")?;
+    let max = rest.strip_suffix(" entries")?;
+    Some((label.to_string(), max.to_string()))
+}
+
+fn regex_filters_phrase_long(message: &str) -> Option<(String, String)> {
+    // "{label}: phrase longer than {n} characters"
+    let (label, rest) = message.split_once(": phrase longer than ")?;
+    let n = rest.strip_suffix(" characters")?;
+    Some((label.to_string(), n.to_string()))
 }
 
 #[tauri::command]
@@ -952,7 +1051,10 @@ pub fn highlight_request_attention(
 ) -> Result<(), ApiError> {
     use tauri::UserAttentionType;
     let Some(window) = app.get_webview_window("main") else {
-        return Err(ApiError::internal("окно main недоступно"));
+        return Err(ApiError::coded(
+            "error.window.main_unavailable",
+            "main window unavailable",
+        ));
     };
     let kind = if long_alerts {
         UserAttentionType::Critical
@@ -987,17 +1089,14 @@ pub async fn chat_user_profile(
     let token = auth::oauth_token(&state);
     let client_id = auth::resolved_client_id(&state);
     if token.is_none() {
-        return Err(ApiError {
-            code: "auth_required".into(),
-            message: "нужен вход Twitch для профиля".into(),
-        });
+        return Err(ApiError::coded(
+            "error.auth.required_profile",
+            "Twitch login required for profile",
+        ));
     }
     super::helix::fetch_user_profile(&normalized, token.as_deref(), &client_id)
         .await
-        .ok_or_else(|| ApiError {
-            code: "not_found".into(),
-            message: "пользователь не найден".into(),
-        })
+        .ok_or_else(|| ApiError::coded("error.user.not_found", "user not found"))
 }
 
 #[derive(Serialize)]
@@ -1031,18 +1130,18 @@ pub async fn chat_user_followers(
 ) -> Result<Option<u64>, ApiError> {
     let id = broadcaster_id.trim();
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
-        return Err(ApiError {
-            code: "invalid_id".into(),
-            message: "некорректный user id".into(),
-        });
+        return Err(ApiError::coded(
+            "error.user.invalid_id",
+            "invalid user id",
+        ));
     }
     let token = auth::oauth_token(&state);
     let client_id = auth::resolved_client_id(&state);
     let Some((client_id, token)) = super::helix::helix_creds(token.as_deref(), &client_id) else {
-        return Err(ApiError {
-            code: "auth_required".into(),
-            message: "нужен вход Twitch для профиля".into(),
-        });
+        return Err(ApiError::coded(
+            "error.auth.required_profile",
+            "Twitch login required for profile",
+        ));
     };
     Ok(super::helix::fetch_channel_followers(id, &token, &client_id).await)
 }
@@ -1054,10 +1153,7 @@ pub async fn chat_user_pronouns(
     let normalized = normalize_channel(&login)?;
     let pronouns = super::pronouns::lookup(&normalized)
         .await
-        .map_err(|e| ApiError {
-            code: "pronouns_error".into(),
-            message: e,
-        })?;
+        .map_err(|e| ApiError::coded("error.pronouns", e))?;
     Ok(super::pronouns::UserPronounsResult { pronouns })
 }
 
@@ -1070,10 +1166,7 @@ pub async fn chat_user_subage(
     let channel = normalize_channel(&channel)?;
     super::ivr::fetch_subage(&user, &channel)
         .await
-        .map_err(|message| ApiError {
-            code: "ivr_error".into(),
-            message,
-        })
+        .map_err(|message| ApiError::coded("error.ivr", message))
 }
 
 #[tauri::command]
@@ -1081,10 +1174,8 @@ pub fn chat_user_notes(
     state: tauri::State<'_, Shared>,
     #[allow(non_snake_case)] userId: String,
 ) -> Result<super::user_data::UserNotesResult, ApiError> {
-    let notes = super::user_data::get_notes(&state, userId.trim()).map_err(|message| ApiError {
-        code: "invalid".into(),
-        message,
-    })?;
+    let notes = super::user_data::get_notes(&state, userId.trim())
+        .map_err(|message| ApiError::coded("error.notes.invalid", message))?;
     Ok(super::user_data::UserNotesResult { notes })
 }
 
@@ -1095,14 +1186,10 @@ pub fn chat_set_user_notes(
     notes: String,
 ) -> Result<(), ApiError> {
     super::user_data::set_notes(&state, userId.trim(), &notes).map_err(|message| {
-        let code = if message.contains("too long") || message.contains("invalid") {
-            "invalid"
+        if message.contains("too long") || message.contains("invalid") {
+            ApiError::coded("error.notes.invalid", message)
         } else {
-            "internal"
-        };
-        ApiError {
-            code: code.into(),
-            message,
+            ApiError::internal(&message)
         }
     })
 }
@@ -1167,15 +1254,14 @@ pub async fn chat_set_user_blocked(
 ) -> Result<(), ApiError> {
     super::twitch_blocks::set_user_blocked(&state, userId.trim(), login.trim(), blocked)
         .await
-        .map_err(|message| ApiError {
-            code: if message.contains("not logged in") {
-                "auth".into()
+        .map_err(|message| {
+            if message.contains("not logged in") {
+                ApiError::coded("error.auth.required", message)
             } else if message.contains("permission") {
-                "forbidden".into()
+                ApiError::coded("error.helix.forbidden", message)
             } else {
-                "helix_error".into()
-            },
-            message,
+                ApiError::coded("error.helix", message)
+            }
         })
 }
 
@@ -1205,9 +1291,15 @@ pub fn supports_incognito_links() -> bool {
 
 #[tauri::command]
 pub fn open_chat_link(url: String, private: Option<bool>) -> Result<(), ApiError> {
-    let allowed = allowed_chat_url(&url).map_err(|message| ApiError {
-        code: "invalid_input".into(),
-        message,
+    let allowed = allowed_chat_url(&url).map_err(|message| {
+        let code = match message.as_str() {
+            "invalid url" => "error.url.invalid",
+            "only http or https" => "error.url.scheme",
+            "missing host" => "error.url.host",
+            "userinfo not allowed" => "error.url.userinfo",
+            _ => "error.url.invalid",
+        };
+        ApiError::coded(code, message)
     })?;
     if private.unwrap_or(false) && super::incognito::supports_incognito() {
         if super::incognito::open_incognito(&allowed).is_ok() {
@@ -1323,30 +1415,21 @@ pub async fn image_upload(
     format: String,
 ) -> Result<super::image_uploader::UploadResult, ApiError> {
     let login = normalize_channel(&channel)?;
-    let fmt = super::image_uploader::normalize_format(&format).map_err(|message| ApiError {
-        code: "invalid_input".into(),
-        message,
-    })?;
-    let cfg = super::image_uploader::load_config(state.inner()).map_err(|message| ApiError {
-        code: "invalid_input".into(),
-        message,
-    })?;
-    let _guard = super::image_uploader::try_begin_upload().map_err(|message| ApiError {
-        code: "busy".into(),
-        message,
-    })?;
-    let bytes = super::image_uploader::decode_bytes(&bytesBase64).map_err(|message| ApiError {
-        code: "invalid_input".into(),
-        message,
-    })?;
+    let fmt = super::image_uploader::normalize_format(&format)
+        .map_err(|message| ApiError::coded("error.upload.format", message))?;
+    let cfg = super::image_uploader::load_config(state.inner())
+        .map_err(|message| ApiError::coded("error.upload.config", message))?;
+    let _guard = super::image_uploader::try_begin_upload()
+        .map_err(|message| ApiError::coded("error.upload.busy", message))?;
+    let bytes = super::image_uploader::decode_bytes(&bytesBase64)
+        .map_err(|message| ApiError::coded("error.upload.decode", message))?;
     if bytes.len() > super::image_uploader::MAX_IMAGE_BYTES {
-        return Err(ApiError {
-            code: "invalid_input".into(),
-            message: format!(
-                "Image is too large (max {} MiB).",
-                super::image_uploader::MAX_IMAGE_BYTES / (1024 * 1024)
-            ),
-        });
+        let max_mib = super::image_uploader::MAX_IMAGE_BYTES / (1024 * 1024);
+        return Err(ApiError::coded_params(
+            "error.upload.too_large",
+            format!("Image is too large (max {max_mib} MiB)."),
+            BTreeMap::from([("max".into(), max_mib.to_string())]),
+        ));
     }
     state.post_channel_notice(&app, &login, "Started upload...".into());
     let result = super::image_uploader::post_image(&cfg, bytes, fmt).await;
@@ -1361,10 +1444,7 @@ pub async fn image_upload(
         }
         Err(message) => {
             state.post_channel_notice(&app, &login, message.clone());
-            Err(ApiError {
-                code: "internal".into(),
-                message,
-            })
+            Err(ApiError::internal(&message))
         }
     }
 }
@@ -1375,18 +1455,14 @@ pub fn open_in_streamlink(
     channel: String,
 ) -> Result<(), ApiError> {
     super::streamlink::open_for_channel(state.inner(), &channel).map_err(|message| {
-        let code = if message.contains("channel name")
+        if message.contains("channel name")
             || message.contains("custom path")
             || message.contains("options")
             || message.contains("Unable to find")
         {
-            "invalid_input"
+            ApiError::coded("error.streamlink.invalid", message)
         } else {
-            "internal"
-        };
-        ApiError {
-            code: code.into(),
-            message,
+            ApiError::internal(&message)
         }
     })
 }
@@ -1397,17 +1473,13 @@ pub fn open_in_custom_player(
     channel: String,
 ) -> Result<(), ApiError> {
     super::custom_player::open_for_channel(state.inner(), &channel).map_err(|message| {
-        let code = if message.contains("channel name")
+        if message.contains("channel name")
             || message.contains("URI scheme")
             || message.contains("forbidden")
         {
-            "invalid_input"
+            ApiError::coded("error.player.invalid", message)
         } else {
-            "internal"
-        };
-        ApiError {
-            code: code.into(),
-            message,
+            ApiError::internal(&message)
         }
     })
 }
@@ -1415,10 +1487,10 @@ pub fn open_in_custom_player(
 pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
     let s = raw.trim().trim_start_matches('#').to_lowercase();
     if s.is_empty() || s.len() > 25 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(ApiError {
-            code: "invalid_input".into(),
-            message: "имя канала: 1-25 символов [a-z0-9_]".into(),
-        });
+        return Err(ApiError::coded(
+            "error.channel.name",
+            "channel name: 1-25 characters [a-z0-9_]",
+        ));
     }
     Ok(s)
 }
@@ -1426,16 +1498,23 @@ pub fn normalize_channel(raw: &str) -> Result<String, ApiError> {
 pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ApiError::invalid("сообщение пустое"));
+        return Err(ApiError::coded("error.message.empty", "message is empty"));
     }
     if trimmed.chars().count() > MAX_CHAT_CHARS {
-        return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+        return Err(ApiError::coded_params(
+            "error.message.too_long",
+            format!("message longer than {MAX_CHAT_CHARS} characters"),
+            BTreeMap::from([("max".into(), MAX_CHAT_CHARS.to_string())]),
+        ));
     }
     if trimmed
         .chars()
         .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
     {
-        return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
+        return Err(ApiError::coded(
+            "error.message.forbidden_chars",
+            "message contains forbidden characters",
+        ));
     }
     if trimmed.starts_with('/') {
         let mut parts = trimmed.splitn(2, char::is_whitespace);
@@ -1443,17 +1522,27 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
         let rest = parts.next().unwrap_or("").trim();
         if cmd.eq_ignore_ascii_case("/me") {
             if rest.is_empty() {
-                return Err(ApiError::invalid("пустое действие /me"));
+                return Err(ApiError::coded(
+                    "error.message.me_empty",
+                    "empty /me action",
+                ));
             }
             let wire = format!("\u{0001}ACTION {rest}\u{0001}");
             if wire.chars().count() > MAX_CHAT_CHARS {
-                return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+                return Err(ApiError::coded_params(
+                    "error.message.too_long",
+                    format!("message longer than {MAX_CHAT_CHARS} characters"),
+                    BTreeMap::from([("max".into(), MAX_CHAT_CHARS.to_string())]),
+                ));
             }
             return Ok(wire);
         }
         let name = cmd.trim_start_matches('/');
         if !complete::is_known_command(name) {
-            return Err(ApiError::invalid("неизвестная slash-команда"));
+            return Err(ApiError::coded(
+                "error.command.unknown_slash",
+                "unknown slash command",
+            ));
         }
     }
     Ok(trimmed.to_string())
@@ -1462,23 +1551,33 @@ pub fn format_outgoing(raw: &str) -> Result<String, ApiError> {
 pub fn format_outgoing_helix(raw: &str) -> Result<String, ApiError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ApiError::invalid("сообщение пустое"));
+        return Err(ApiError::coded("error.message.empty", "message is empty"));
     }
     if trimmed.chars().count() > MAX_CHAT_CHARS {
-        return Err(ApiError::invalid("сообщение длиннее 500 символов"));
+        return Err(ApiError::coded_params(
+            "error.message.too_long",
+            format!("message longer than {MAX_CHAT_CHARS} characters"),
+            BTreeMap::from([("max".into(), MAX_CHAT_CHARS.to_string())]),
+        ));
     }
     if trimmed
         .chars()
         .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
     {
-        return Err(ApiError::invalid("сообщение содержит запрещённые символы"));
+        return Err(ApiError::coded(
+            "error.message.forbidden_chars",
+            "message contains forbidden characters",
+        ));
     }
     if trimmed.starts_with('/') {
         let mut parts = trimmed.splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");
         let rest = parts.next().unwrap_or("").trim();
         if cmd.eq_ignore_ascii_case("/me") && rest.is_empty() {
-            return Err(ApiError::invalid("пустое действие /me"));
+            return Err(ApiError::coded(
+                "error.message.me_empty",
+                "empty /me action",
+            ));
         }
     }
     Ok(trimmed.to_string())
@@ -1519,13 +1618,19 @@ pub fn prepare_duplicate_message(message: &str) -> String {
 
 fn validate_msg_id(id: &str) -> Result<String, ApiError> {
     if id.is_empty() || id.len() > 64 {
-        return Err(ApiError::invalid("некорректный id ответа"));
+        return Err(ApiError::coded(
+            "error.message.reply_id",
+            "invalid reply id",
+        ));
     }
     if !id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(ApiError::invalid("некорректный id ответа"));
+        return Err(ApiError::coded(
+            "error.message.reply_id",
+            "invalid reply id",
+        ));
     }
     Ok(id.to_string())
 }
@@ -1536,11 +1641,11 @@ async fn send_cmd(state: &Shared, cmd: IrcCmd) -> Result<(), ApiError> {
         .lock()
         .map_err(|_| ApiError::internal("lock"))?
         .clone()
-        .ok_or_else(|| ApiError::internal("irc не запущен"))?;
+        .ok_or_else(|| ApiError::internal("irc not running"))?;
     tokio::time::timeout(Duration::from_secs(10), tx.send(cmd))
         .await
-        .map_err(|_| ApiError::internal("таймаут очереди irc"))?
-        .map_err(|_| ApiError::internal("очередь irc"))?;
+        .map_err(|_| ApiError::internal("irc queue timeout"))?
+        .map_err(|_| ApiError::internal("irc queue"))?;
     Ok(())
 }
 

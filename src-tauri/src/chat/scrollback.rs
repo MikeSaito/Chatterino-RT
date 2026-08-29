@@ -436,7 +436,10 @@ mod tests {
         );
         let hits = q.search_hits("dev", "test", None);
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].text.contains("(3 раз)"));
+        assert!(hits[0].text.contains("(3 times)"));
+        assert_eq!(hits[0].clear_login.as_deref(), Some("dev"));
+        assert_eq!(hits[0].clear_duration_sec, Some(60));
+        assert_eq!(hits[0].clear_stack_count, Some(3));
     }
 
     #[test]

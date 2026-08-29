@@ -33,6 +33,7 @@ import {
 } from "../imageUploaderSharex";
 import { iconEl, setButtonIcon } from "../icons";
 import { applyLocale, getLocale, localeFromSettings, t } from "../../i18n";
+import { formatInvokeError } from "../../i18n/formatError";
 import {
   tKnobLabel,
   tKnobOption,
@@ -85,16 +86,7 @@ type TableApi = {
 };
 
 function formatError(err: unknown): string {
-  if (typeof err === "string") {
-    return err;
-  }
-  if (err && typeof err === "object" && "message" in err) {
-    const message = (err as { message: unknown }).message;
-    if (typeof message === "string" && message.length > 0) {
-      return message;
-    }
-  }
-  return "error";
+  return formatInvokeError(err, "status.error");
 }
 
 function hasDuplicateCommandTriggers(

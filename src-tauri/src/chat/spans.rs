@@ -48,18 +48,18 @@ pub fn decorate_text_spans_ex(
 pub fn allowed_chat_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.bytes().any(|b| b < 0x20 || b == b'\\') {
-        return Err("недопустимый url".into());
+        return Err("invalid url".into());
     }
-    let parsed = Url::parse(trimmed).map_err(|_| "недопустимый url".to_string())?;
+    let parsed = Url::parse(trimmed).map_err(|_| "invalid url".to_string())?;
     match parsed.scheme() {
         "https" | "http" => {}
-        _ => return Err("только http или https".into()),
+        _ => return Err("only http or https".into()),
     }
     if parsed.host_str().map(|h| h.is_empty()).unwrap_or(true) {
-        return Err("нет хоста".into());
+        return Err("missing host".into());
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("userinfo запрещён".into());
+        return Err("userinfo not allowed".into());
     }
     Ok(parsed.as_str().to_string())
 }

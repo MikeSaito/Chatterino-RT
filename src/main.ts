@@ -17,6 +17,7 @@ import { normalizeChannelInput } from "./shell/channelName";
 import { applyChromeIcons } from "./shell/chromeIcons";
 import { applyContextMenuChrome, setContextMenuLabel } from "./shell/contextMenuChrome";
 import { applyLocale, onLocaleChange, t, applyDomI18n } from "./i18n";
+import { formatInvokeError } from "./i18n/formatError";
 import { applyUiLayout, parseUiLayout, type UiLayout } from "./shell/uiLayout";
 import { applyWindowMinForLayout } from "./shell/windowMinSize";
 import {
@@ -2886,16 +2887,7 @@ function formatStatus(s: ChatStatus): string {
 }
 
 function formatError(err: unknown): string {
-  if (typeof err === "string") {
-    return err;
-  }
-  if (err && typeof err === "object") {
-    const rec = err as { message?: unknown; code?: unknown };
-    if (typeof rec.message === "string") {
-      return rec.message;
-    }
-  }
-  return t("status.bootError");
+  return formatInvokeError(err, "status.bootError");
 }
 
 function menuCommandsFromSettings(data: AppSettings): AppSettings["commands"] {

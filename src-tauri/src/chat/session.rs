@@ -49,7 +49,10 @@ pub fn snapshot(shared: &Shared) -> Result<Session, ApiError> {
 
 pub fn ensure_can_open(shared: &Shared, normalized: &str) -> Result<(), ApiError> {
     if !valid_login(normalized) {
-        return Err(ApiError::invalid("имя канала: 1-25 символов [a-z0-9_]"));
+        return Err(ApiError::coded(
+            "error.channel.name",
+            "channel name: 1-25 characters [a-z0-9_]",
+        ));
     }
     let inner = shared
         .session
@@ -59,9 +62,11 @@ pub fn ensure_can_open(shared: &Shared, normalized: &str) -> Result<(), ApiError
         return Ok(());
     }
     if inner.data.open.len() >= MAX_OPEN {
-        return Err(ApiError::invalid(format!(
-            "не больше {MAX_OPEN} открытых каналов"
-        )));
+        return Err(ApiError::coded_params(
+            "error.channel.limit",
+            format!("no more than {MAX_OPEN} open channels"),
+            std::collections::BTreeMap::from([("max".into(), MAX_OPEN.to_string())]),
+        ));
     }
     Ok(())
 }

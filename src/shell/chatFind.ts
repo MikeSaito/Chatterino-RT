@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { iconEl } from "./icons";
+import { t } from "../i18n/index.ts";
+import { clearchatText } from "../chat/chatSystemText";
 import type { MessageRing } from "../chat/ring";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
-import { t } from "../i18n";
+import { iconEl } from "./icons";
 
 /** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
 export type SearchHit = {
@@ -14,7 +15,21 @@ export type SearchHit = {
   login: string;
   text: string;
   color: string;
+  clearLogin?: string | null;
+  clearDurationSec?: number | null;
+  clearStackCount?: number | null;
 };
+
+function hitDisplayText(hit: SearchHit): string {
+  if (hit.clearStackCount != null) {
+    return clearchatText(
+      hit.clearLogin ?? undefined,
+      hit.clearDurationSec ?? undefined,
+      hit.clearStackCount,
+    );
+  }
+  return hit.text;
+}
 
 type SearchResult = { hits: SearchHit[] };
 
@@ -133,7 +148,7 @@ export function bindSearchPopup(opts: {
       }
       const text = document.createElement("span");
       text.className = "search-hit-text";
-      text.textContent = hit.text;
+      text.textContent = hitDisplayText(hit);
       body.append(nick, document.createTextNode(" "), text);
       row.append(time, body);
       frag.append(row);
@@ -308,5 +323,13 @@ export function bindSearchPopup(opts: {
     scheduleSearch();
   });
 
-  return { onChannelChanged, open, close, relabel: paintTitle };
+  return {
+    onChannelChanged,
+    open,
+    close,
+    relabel: () => {
+      paintTitle();
+      paintHits(false);
+    },
+  };
 }

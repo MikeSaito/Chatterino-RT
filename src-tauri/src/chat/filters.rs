@@ -106,7 +106,7 @@ pub fn replace(shared: &Shared, incoming: Filters) -> Result<Filters, String> {
     save_file(&path, &clean)?;
     let mut inner = shared.filters.lock().map_err(|e| e.to_string())?;
     if inner.path != path {
-        return Err("каталог конфигурации сменился".into());
+        return Err("config directory changed".into());
     }
     inner.data = clean.clone();
     Ok(clean)
@@ -357,10 +357,10 @@ pub fn refresh_ignore_replace_rules(shared: &Shared) {
 pub(crate) fn sanitize(raw: Filters) -> Result<Filters, String> {
     Ok(Filters {
         enable_self_highlight: raw.enable_self_highlight,
-        ignore_logins: sanitize_logins(raw.ignore_logins, "игнор логинов")?,
-        ignore_phrases: sanitize_phrases(raw.ignore_phrases, "игнор фраз")?,
-        highlight_phrases: sanitize_phrases(raw.highlight_phrases, "хайлайт фраз")?,
-        highlight_logins: sanitize_logins(raw.highlight_logins, "хайлайт логинов")?,
+        ignore_logins: sanitize_logins(raw.ignore_logins, "ignore logins")?,
+        ignore_phrases: sanitize_phrases(raw.ignore_phrases, "ignore phrases")?,
+        highlight_phrases: sanitize_phrases(raw.highlight_phrases, "highlight phrases")?,
+        highlight_logins: sanitize_logins(raw.highlight_logins, "highlight logins")?,
     })
 }
 
@@ -1644,7 +1644,7 @@ fn sanitize_logins(items: Vec<String>, label: &str) -> Result<Vec<String>, Strin
             out.push(login);
         }
         if out.len() > MAX_LIST {
-            return Err(format!("{label}: не больше {MAX_LIST} записей"));
+            return Err(format!("{label}: no more than {MAX_LIST} entries"));
         }
     }
     Ok(out)
@@ -1658,16 +1658,16 @@ fn sanitize_phrases(items: Vec<String>, label: &str) -> Result<Vec<String>, Stri
             continue;
         }
         if phrase.chars().count() > MAX_PATTERN {
-            return Err(format!("{label}: фраза длиннее {MAX_PATTERN} символов"));
+            return Err(format!("{label}: phrase longer than {MAX_PATTERN} characters"));
         }
         if phrase.chars().any(|c| c.is_control()) {
-            return Err(format!("{label}: фраза содержит запрещённые символы"));
+            return Err(format!("{label}: phrase contains forbidden characters"));
         }
         if !out.iter().any(|x| x.eq_ignore_ascii_case(phrase)) {
             out.push(phrase.to_string());
         }
         if out.len() > MAX_LIST {
-            return Err(format!("{label}: не больше {MAX_LIST} записей"));
+            return Err(format!("{label}: no more than {MAX_LIST} entries"));
         }
     }
     Ok(out)
@@ -1676,7 +1676,7 @@ fn sanitize_phrases(items: Vec<String>, label: &str) -> Result<Vec<String>, Stri
 fn normalize_login(raw: &str) -> Result<String, String> {
     let s = raw.trim().trim_start_matches('#').to_lowercase();
     if s.is_empty() || s.len() > 25 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err("логин: 1-25 символов [a-z0-9_]".into());
+        return Err("login: 1-25 characters [a-z0-9_]".into());
     }
     Ok(s)
 }
@@ -1716,7 +1716,7 @@ fn load_file(path: &Path) -> Filters {
 
 fn save_file(path: &Path, data: &Filters) -> Result<(), String> {
     if path.as_os_str().is_empty() {
-        return Err("каталог конфигурации не задан".into());
+        return Err("config directory is not set".into());
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;

@@ -710,7 +710,7 @@ fn dispatch_line(
                     let app2 = app.clone();
                     let shared2 = shared.clone();
                     tauri::async_runtime::spawn(async move {
-                        auth::reject_session(app2, shared2, "вход IRC отклонён").await;
+                        auth::reject_session(app2, shared2, "IRC login rejected").await;
                     });
                 }
                 if wanted.contains(&channel) && is_join_failure(id) {

@@ -149,15 +149,15 @@ pub fn validate_log_path(raw: &str) -> Result<(), ApiError> {
         return Ok(());
     }
     if s.len() > MAX_CELL || s.contains('\0') {
-        return Err(ApiError::invalid("путь лога"));
+        return Err(ApiError::coded("error.log.path", "log path"));
     }
     let p = Path::new(s);
     if !p.is_absolute() {
-        return Err(ApiError::invalid("путь лога должен быть абсолютным"));
+        return Err(ApiError::coded("error.log.path_absolute", "log path must be absolute"));
     }
     for c in p.components() {
         if matches!(c, std::path::Component::ParentDir) {
-            return Err(ApiError::invalid("недопустимый путь лога"));
+            return Err(ApiError::coded("error.log.path_invalid", "invalid log path"));
         }
     }
     Ok(())
@@ -344,17 +344,11 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
             duration_sec,
             stack_count,
             ..
-        } => {
-            let mut text = match (target_login.as_deref(), *duration_sec) {
-                (None, _) => "чат очищен".to_string(),
-                (Some(login), Some(sec)) => format!("{login} тайм-аут {sec}с"),
-                (Some(login), None) => format!("{login} забанен"),
-            };
-            if *stack_count > 1 {
-                text.push_str(&format!(" ({stack_count} раз)"));
-            }
-            Some(text)
-        }
+        } => Some(super::clearchat_text::clearchat_text_en(
+            target_login.as_deref(),
+            duration_sec.map(u64::from),
+            *stack_count,
+        )),
         ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } | ChatEvent::Userstate { .. } => {
             None
         }
@@ -612,21 +606,21 @@ pub fn pick_directory(_shared: &Shared) -> Result<String, ApiError> {
     let dir = rfd::FileDialog::new()
         .set_title("Select log directory")
         .pick_folder()
-        .ok_or_else(|| ApiError::invalid("каталог не выбран"))?;
+        .ok_or_else(|| ApiError::coded("error.path.dir_not_chosen", "directory not chosen"))?;
     let path = dir
         .to_str()
-        .ok_or_else(|| ApiError::invalid("недопустимый путь"))?
+        .ok_or_else(|| ApiError::coded("error.path.invalid", "invalid path"))?
         .to_string();
     if path.trim().is_empty() {
-        return Err(ApiError::invalid("недопустимый путь"));
+        return Err(ApiError::coded("error.path.invalid", "invalid path"));
     }
     let p = Path::new(&path);
     if !p.is_absolute() {
-        return Err(ApiError::invalid("нужен абсолютный путь"));
+        return Err(ApiError::coded("error.path.absolute", "absolute path required"));
     }
     for c in p.components() {
         if matches!(c, std::path::Component::ParentDir) {
-            return Err(ApiError::invalid("недопустимый путь"));
+            return Err(ApiError::coded("error.path.invalid", "invalid path"));
         }
     }
     Ok(path)
@@ -716,7 +710,7 @@ mod tests {
             stack_count: 1,
         };
         let line = format_log_line(&ev, &cfg).unwrap();
-        assert_eq!(line, "bob тайм-аут 60с");
+        assert_eq!(line, "bob timed out for 60s");
     }
 
     #[test]

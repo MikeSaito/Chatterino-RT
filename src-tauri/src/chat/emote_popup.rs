@@ -375,7 +375,10 @@ pub fn toggle_favourite(
 ) -> Result<(), ApiError> {
     let code = code.trim();
     if code.is_empty() || code.len() > MAX_FAV_CODE || has_control(code) {
-        return Err(ApiError::invalid("invalid favourite code"));
+        return Err(ApiError::coded(
+            "error.emote.favourite_code",
+            "invalid favourite code",
+        ));
     }
     if is_emoji {
         let short = emoji_shortcode_for_token(code).unwrap_or_else(|| {
@@ -383,7 +386,7 @@ pub fn toggle_favourite(
             code.trim_matches(':').to_string()
         });
         if short.is_empty() || has_control(&short) {
-            return Err(ApiError::invalid("unknown emoji"));
+            return Err(ApiError::coded("error.emote.unknown_emoji", "unknown emoji"));
         }
         settings::mutate_favourites(shared, |_emotes, emojis| {
             if add {

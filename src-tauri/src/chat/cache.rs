@@ -53,15 +53,15 @@ pub fn resolve_cache_dir(default_dir: &Path, custom: &str) -> Result<PathBuf, Ap
 
 pub fn validate_absolute_dir_path(path: &str) -> Result<(), ApiError> {
     if path.trim().is_empty() {
-        return Err(ApiError::invalid("недопустимый путь"));
+        return Err(ApiError::coded("error.path.invalid", "invalid path"));
     }
     let p = Path::new(path);
     if !p.is_absolute() {
-        return Err(ApiError::invalid("нужен абсолютный путь"));
+        return Err(ApiError::coded("error.path.absolute", "absolute path required"));
     }
     for c in p.components() {
         if matches!(c, Component::ParentDir) {
-            return Err(ApiError::invalid("недопустимый путь"));
+            return Err(ApiError::coded("error.path.invalid", "invalid path"));
         }
     }
     Ok(())
@@ -90,7 +90,7 @@ pub fn clear_allowed(resolved: &Path, default_dir: &Path, custom: &str) -> Resul
 
 pub fn clear_cache_dir(resolved: &Path, default_dir: &Path, custom: &str) -> Result<(), ApiError> {
     if !clear_allowed(resolved, default_dir, custom)? {
-        return Err(ApiError::invalid("очистка этого каталога запрещена"));
+        return Err(ApiError::coded("error.cache.clear_forbidden", "clearing this directory is not allowed"));
     }
     let resolved_c = canon_existing_or_create(resolved)?;
     fs::remove_dir_all(&resolved_c).map_err(|e| ApiError::internal(&e.to_string()))?;
@@ -120,10 +120,10 @@ pub fn pick_directory() -> Result<String, ApiError> {
     let dir = rfd::FileDialog::new()
         .set_title("Select cache directory")
         .pick_folder()
-        .ok_or_else(|| ApiError::invalid("каталог не выбран"))?;
+        .ok_or_else(|| ApiError::coded("error.path.dir_not_chosen", "directory not chosen"))?;
     let path = dir
         .to_str()
-        .ok_or_else(|| ApiError::invalid("недопустимый путь"))?
+        .ok_or_else(|| ApiError::coded("error.path.invalid", "invalid path"))?
         .to_string();
     validate_absolute_dir_path(&path)?;
     Ok(path)
@@ -147,7 +147,7 @@ pub fn clear(app: &AppHandle, shared: &Shared) -> Result<(), ApiError> {
             canon_existing_or_create(&config_dir),
         ) {
             if resolved_c == config_c {
-                return Err(ApiError::invalid("очистка каталога настроек запрещена"));
+                return Err(ApiError::coded("error.cache.clear_settings_forbidden", "clearing the settings directory is not allowed"));
             }
         }
     }

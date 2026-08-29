@@ -10,6 +10,7 @@ pub mod chatterino1_import;
 pub mod chatterino_badges;
 pub mod chatters;
 pub mod cheers;
+pub mod clearchat_text;
 pub mod commands;
 pub mod complete;
 pub mod constants;

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -82,20 +83,27 @@ pub struct DeviceStart {
 pub struct AuthFail {
     pub code: String,
     pub message: String,
+    pub params: BTreeMap<String, String>,
 }
 
 impl AuthFail {
-    fn config(message: impl Into<String>) -> Self {
+    pub fn coded(code: impl Into<String>, message_en: impl Into<String>) -> Self {
         Self {
-            code: "config".into(),
-            message: message.into(),
+            code: code.into(),
+            message: message_en.into(),
+            params: BTreeMap::new(),
         }
     }
 
-    fn invalid(message: impl Into<String>) -> Self {
+    pub fn coded_params(
+        code: impl Into<String>,
+        message_en: impl Into<String>,
+        params: BTreeMap<String, String>,
+    ) -> Self {
         Self {
-            code: "invalid_input".into(),
-            message: message.into(),
+            code: code.into(),
+            message: message_en.into(),
+            params,
         }
     }
 
@@ -103,6 +111,7 @@ impl AuthFail {
         Self {
             code: "internal".into(),
             message: message.into(),
+            params: BTreeMap::new(),
         }
     }
 }
@@ -350,32 +359,50 @@ fn oauth_client_id() -> String {
     env_secret("TWITCH_CLIENT_ID").unwrap_or_else(|| CHATTERINO_CLIENT_ID.to_string())
 }
 
-pub fn allowed_oauth_url(raw: &str) -> Result<String, String> {
-    let parsed = Url::parse(raw.trim()).map_err(|_| "некорректный URL входа".to_string())?;
+pub fn allowed_oauth_url(raw: &str) -> Result<String, AuthFail> {
+    let parsed = Url::parse(raw.trim())
+        .map_err(|_| AuthFail::coded("error.auth.url.invalid", "invalid login URL"))?;
     if parsed.scheme() != "https" {
-        return Err("URL входа только https".into());
+        return Err(AuthFail::coded(
+            "error.auth.url.https_only",
+            "login URL must be https",
+        ));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("URL входа с userinfo запрещён".into());
+        return Err(AuthFail::coded(
+            "error.auth.url.userinfo",
+            "login URL must not include userinfo",
+        ));
     }
     let host = parsed.host_str().unwrap_or("");
     if host == "chatterino.com" || host == "www.chatterino.com" {
         if parsed.path() != "/client_login" {
-            return Err("URL входа Chatterino только /client_login".into());
+            return Err(AuthFail::coded(
+                "error.auth.url.chatterino_path",
+                "Chatterino login URL path must be /client_login",
+            ));
         }
         return Ok(CHATTERINO_LOGIN.to_string());
     }
     if !OAUTH_HOSTS.iter().any(|h| *h == host) {
-        return Err("хост URL входа не из списка Twitch".into());
+        return Err(AuthFail::coded(
+            "error.auth.url.host",
+            "login URL host is not an allowed Twitch host",
+        ));
     }
     Ok(parsed.as_str().to_string())
 }
 
+fn auth_env_locked() -> AuthFail {
+    AuthFail::coded(
+        "error.auth.config.env",
+        "login is set via TWITCH_LOGIN and TWITCH_OAUTH_TOKEN",
+    )
+}
+
 pub async fn start_login(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
     if env_login_token().is_some() {
-        return Err(AuthFail::config(
-            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
-        ));
+        return Err(auth_env_locked());
     }
     if oauth_client_id() == CHATTERINO_CLIENT_ID {
         start_chatterino_page(app, shared).await
@@ -385,7 +412,7 @@ pub async fn start_login(app: AppHandle, shared: Shared) -> Result<DeviceStart, 
 }
 
 async fn start_chatterino_page(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
-    let uri = allowed_oauth_url(CHATTERINO_LOGIN).map_err(AuthFail::invalid)?;
+    let uri = allowed_oauth_url(CHATTERINO_LOGIN)?;
     {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         inner.poll_gen = inner.poll_gen.wrapping_add(1);
@@ -396,7 +423,7 @@ async fn start_chatterino_page(app: AppHandle, shared: Shared) -> Result<DeviceS
     emit(&app, &shared);
     if tauri_plugin_opener::open_url(&uri, None::<&str>).is_err() {
         if let Ok(mut inner) = shared.auth.lock() {
-            inner.last_message = Some(format!("откройте вручную {CHATTERINO_LOGIN}"));
+            inner.last_message = Some(format!("open manually {CHATTERINO_LOGIN}"));
         }
         emit(&app, &shared);
     }
@@ -410,15 +437,14 @@ async fn start_chatterino_page(app: AppHandle, shared: Shared) -> Result<DeviceS
 
 pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
-        return Err(AuthFail::config(
-            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
-        ));
+        return Err(auth_env_locked());
     }
     let parsed = parse_chatterino_blob(&blob)?;
     let expected = oauth_client_id();
     if parsed.client_id != expected {
-        return Err(AuthFail::invalid(
-            "client_id в коде не совпадает с Chatterino",
+        return Err(AuthFail::coded(
+            "error.auth.blob.client_id",
+            "client_id in login code does not match Chatterino",
         ));
     }
     let gen = shared
@@ -430,7 +456,10 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
         .await
         .map_err(AuthFail::internal)?;
     if !still_current(&shared, gen) {
-        return Err(AuthFail::internal("вход отменён"));
+        return Err(AuthFail::coded(
+            "error.auth.cancelled",
+            "login cancelled",
+        ));
     }
     if !persist_and_relogin(
         &app,
@@ -443,7 +472,10 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
     )
     .await
     {
-        return Err(AuthFail::internal("не удалось сохранить вход"));
+        return Err(AuthFail::coded(
+            "error.auth.persist_failed",
+            "failed to save login",
+        ));
     }
     Ok(())
 }
@@ -456,12 +488,16 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
 fn parse_chatterino_blob(raw: &str) -> Result<ParsedLogin, AuthFail> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err(AuthFail::invalid(
-            "вставьте код со страницы входа Chatterino",
+        return Err(AuthFail::coded(
+            "error.auth.blob.empty",
+            "paste the code from the Chatterino login page",
         ));
     }
     if raw.len() > MAX_LOGIN_BLOB {
-        return Err(AuthFail::invalid("код входа слишком длинный"));
+        return Err(AuthFail::coded(
+            "error.auth.blob.too_long",
+            "login code is too long",
+        ));
     }
     let mut oauth_token = String::new();
     let mut username = String::new();
@@ -485,16 +521,28 @@ fn parse_chatterino_blob(raw: &str) -> Result<ParsedLogin, AuthFail> {
     let token = oauth_token.trim_start_matches("oauth:").to_string();
     let login = username.trim().to_lowercase();
     if token.is_empty() || token == "YOUR_API_KEY_HERE" {
-        return Err(AuthFail::invalid("в коде нет oauth_token"));
+        return Err(AuthFail::coded(
+            "error.auth.blob.missing_token",
+            "login code has no oauth_token",
+        ));
     }
     if !valid_login(&login) {
-        return Err(AuthFail::invalid("в коде нет корректного username"));
+        return Err(AuthFail::coded(
+            "error.auth.blob.bad_username",
+            "login code has no valid username",
+        ));
     }
     if user_id.is_empty() || !user_id.chars().all(|c| c.is_ascii_digit()) {
-        return Err(AuthFail::invalid("в коде нет корректного user_id"));
+        return Err(AuthFail::coded(
+            "error.auth.blob.bad_user_id",
+            "login code has no valid user_id",
+        ));
     }
     if client_id.is_empty() || client_id == "YOUR_API_KEY_HERE" {
-        return Err(AuthFail::invalid("в коде нет client_id"));
+        return Err(AuthFail::coded(
+            "error.auth.blob.missing_client_id",
+            "login code has no client_id",
+        ));
     }
     Ok(ParsedLogin {
         token,
@@ -512,8 +560,9 @@ struct ParsedLogin {
 pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart, AuthFail> {
     let client_id = oauth_client_id();
     if client_id == CHATTERINO_CLIENT_ID {
-        return Err(AuthFail::config(
-            "для Chatterino используется страница входа, не device code",
+        return Err(AuthFail::coded(
+            "error.auth.device.use_page",
+            "Chatterino uses the login page, not device code",
         ));
     }
     let gen = {
@@ -527,11 +576,14 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
     emit(&app, &shared);
 
     let device = request_device(&client_id).await?;
-    let uri = allowed_oauth_url(&device.verification_uri).map_err(AuthFail::invalid)?;
+    let uri = allowed_oauth_url(&device.verification_uri)?;
     {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         if inner.poll_gen != gen {
-            return Err(AuthFail::internal("вход отменён"));
+            return Err(AuthFail::coded(
+                "error.auth.cancelled",
+                "login cancelled",
+            ));
         }
         inner.pending_user_code = Some(device.user_code.clone());
         inner.pending_paste = false;
@@ -565,9 +617,7 @@ pub async fn start_device(app: AppHandle, shared: Shared) -> Result<DeviceStart,
 
 pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
-        return Err(AuthFail::config(
-            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
-        ));
+        return Err(auth_env_locked());
     }
     let (cancel_only, current) = {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
@@ -595,18 +645,22 @@ pub async fn logout(app: AppHandle, shared: Shared) -> Result<(), AuthFail> {
 
 pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
-        return Err(AuthFail::config(
-            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
-        ));
+        return Err(auth_env_locked());
     }
     let login = login.trim().to_lowercase();
     if !valid_login(&login) {
-        return Err(AuthFail::invalid("некорректный login"));
+        return Err(AuthFail::coded(
+            "error.auth.login.invalid",
+            "invalid login",
+        ));
     }
     {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
         if !inner.accounts.iter().any(|c| c.login == login) {
-            return Err(AuthFail::invalid("аккаунт не найден"));
+            return Err(AuthFail::coded(
+                "error.auth.account.not_found",
+                "account not found",
+            ));
         }
         if inner.current_login.as_deref() == Some(login.as_str()) {
             return Ok(());
@@ -639,13 +693,14 @@ pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Re
 
 pub async fn remove_account(app: AppHandle, shared: Shared, login: String) -> Result<(), AuthFail> {
     if env_login_token().is_some() {
-        return Err(AuthFail::config(
-            "вход задан через TWITCH_LOGIN и TWITCH_OAUTH_TOKEN",
-        ));
+        return Err(auth_env_locked());
     }
     let login = login.trim().to_lowercase();
     if !valid_login(&login) {
-        return Err(AuthFail::invalid("некорректный login"));
+        return Err(AuthFail::coded(
+            "error.auth.login.invalid",
+            "invalid login",
+        ));
     }
     let was_current = {
         let mut inner = shared.auth.lock().map_err(|_| AuthFail::internal("lock"))?;
@@ -653,7 +708,9 @@ pub async fn remove_account(app: AppHandle, shared: Shared, login: String) -> Re
             .accounts
             .iter()
             .position(|c| c.login == login)
-            .ok_or_else(|| AuthFail::invalid("аккаунт не найден"))?;
+            .ok_or_else(|| {
+                AuthFail::coded("error.auth.account.not_found", "account not found")
+            })?;
         let was_current = inner.current_login.as_deref() == Some(login.as_str());
         let prev = AuthStore {
             accounts: inner.accounts.clone(),
@@ -741,7 +798,7 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
     let client = http_client();
     loop {
         if Instant::now() >= job.deadline {
-            finish_pending(&app, &shared, job.gen, Some("код входа истёк"));
+            finish_pending(&app, &shared, job.gen, Some("login code expired"));
             return;
         }
         if !still_current(&shared, job.gen) {
@@ -753,11 +810,11 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
                 job.interval = (job.interval + 5).min(30);
             }
             TokenPoll::Denied => {
-                finish_pending(&app, &shared, job.gen, Some("вход отклонён"));
+                finish_pending(&app, &shared, job.gen, Some("login denied"));
                 return;
             }
             TokenPoll::Expired => {
-                finish_pending(&app, &shared, job.gen, Some("код входа истёк"));
+                finish_pending(&app, &shared, job.gen, Some("login code expired"));
                 return;
             }
             TokenPoll::Fail(msg) => {
@@ -803,7 +860,7 @@ async fn persist_and_relogin(
     user_id: Option<String>,
 ) -> bool {
     if env_login_token().is_some() {
-        finish_pending(app, shared, gen, Some("вход задан через env"));
+        finish_pending(app, shared, gen, Some("login is set via env"));
         return false;
     }
     let save_err = {
@@ -869,7 +926,7 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
                 && current_creds(&inner).is_some_and(|c| c.login == login && c.token == token)
         });
         if still {
-            reject_session(app, shared, "сохранённый вход недействителен").await;
+            reject_session(app, shared, "saved login is invalid").await;
         }
     }
 }
@@ -911,7 +968,7 @@ async fn request_device(client_id: &str) -> Result<DeviceJson, AuthFail> {
         .append_pair("scopes", DEVICE_SCOPES)
         .finish();
     let mut delay = Duration::from_millis(200);
-    let mut last = String::from("нет ответа");
+    let mut last = String::from("no response");
     for attempt in 0..HTTP_ATTEMPTS {
         match client
             .post(DEVICE_URL)
@@ -925,14 +982,15 @@ async fn request_device(client_id: &str) -> Result<DeviceJson, AuthFail> {
                 let status = resp.status();
                 match resp.json::<serde_json::Value>().await {
                     Ok(v) if status.is_success() => {
-                        return serde_json::from_value::<DeviceJson>(v)
-                            .map_err(|_| AuthFail::internal("некорректный ответ device code"));
+                        return serde_json::from_value::<DeviceJson>(v).map_err(|_| {
+                            AuthFail::internal("invalid device code response")
+                        });
                     }
                     Ok(v) => {
                         last = v
                             .get("message")
                             .and_then(serde_json::Value::as_str)
-                            .unwrap_or("ошибка device code")
+                            .unwrap_or("device code error")
                             .to_string();
                     }
                     Err(e) => last = e.to_string(),
@@ -983,7 +1041,7 @@ async fn request_token(client: &reqwest::Client, client_id: &str, device_code: &
                         return TokenPoll::Ok(token.to_string());
                     }
                 }
-                return TokenPoll::Fail("токен пустой".into());
+                return TokenPoll::Fail("empty token".into());
             }
             let kind = v
                 .get("message")
@@ -1018,7 +1076,7 @@ struct ValidatedToken {
 
 async fn validate_token(client: &reqwest::Client, token: &str) -> Result<ValidatedToken, String> {
     let mut delay = Duration::from_millis(200);
-    let mut last = String::from("нет ответа");
+    let mut last = String::from("no response");
     for attempt in 0..HTTP_ATTEMPTS {
         match client
             .get(VALIDATE_URL)
@@ -1038,7 +1096,7 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                             .trim()
                             .to_lowercase();
                         if !valid_login(&login) {
-                            return Err("validate: некорректный login".into());
+                            return Err("validate: invalid login".into());
                         }
                         let user_id = v
                             .get("user_id")
@@ -1051,7 +1109,7 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                         last = v
                             .get("message")
                             .and_then(serde_json::Value::as_str)
-                            .unwrap_or("ошибка validate")
+                            .unwrap_or("validate error")
                             .to_string();
                     }
                     Err(e) => last = e.to_string(),
@@ -1169,9 +1227,7 @@ fn remove_auth_file(path: &Path) -> Result<(), AuthFail> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AuthFail::internal(format!(
-            "не удалось удалить сессию: {e}"
-        ))),
+        Err(e) => Err(AuthFail::internal(format!("failed to remove session: {e}"))),
     }
 }
 
@@ -1185,7 +1241,7 @@ fn persist_store_or_remove(path: &Path, store: &AuthStore) -> Result<(), AuthFai
 
 fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
     if path.as_os_str().is_empty() {
-        return Err("каталог конфигурации не задан".into());
+        return Err("config directory is not set".into());
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;

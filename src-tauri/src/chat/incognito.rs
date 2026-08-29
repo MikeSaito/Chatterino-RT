@@ -28,13 +28,13 @@ pub fn supports_incognito() -> bool {
 
 /// Spawn the default browser in private mode. `url` must already be validated.
 pub fn open_incognito(url: &str) -> Result<(), String> {
-    let exe = default_browser_exe().ok_or_else(|| "нет браузера по умолчанию".to_string())?;
+    let exe = default_browser_exe().ok_or_else(|| "no default browser".to_string())?;
     // Absolute paths must exist; relative Exec= names resolve via PATH (Linux).
     if exe.is_absolute() && !exe.is_file() {
-        return Err("браузер по умолчанию не найден".into());
+        return Err("default browser not found".into());
     }
     let switch =
-        private_switch(&exe).ok_or_else(|| "private mode не поддерживается".to_string())?;
+        private_switch(&exe).ok_or_else(|| "private mode is not supported".to_string())?;
     let mut cmd = Command::new(&exe);
     cmd.arg(switch)
         .arg(url)

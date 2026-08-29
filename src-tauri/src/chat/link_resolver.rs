@@ -221,10 +221,7 @@ pub async fn resolve_link_info(url: String) -> Result<LinkInfoResponse, ApiError
         for tx in waiters {
             let msg = match &result {
                 Ok(v) => Ok(v.clone()),
-                Err(e) => Err(ApiError {
-                    code: e.code.clone(),
-                    message: e.message.clone(),
-                }),
+                Err(e) => Err(e.clone()),
             };
             let _ = tx.send(msg);
         }
