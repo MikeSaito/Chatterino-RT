@@ -1422,6 +1422,23 @@ async function boot(): Promise<void> {
     (login) => {
       void leaveChannel(login);
     },
+    (openOrder) => {
+      void invoke("session_reorder_open", { open: openOrder })
+        .then(async () => undefined)
+        .catch(async (err) => {
+          setStatus(formatError(err));
+          try {
+            const session = await invoke<{
+              open?: string[];
+              lastChannel?: string | null;
+            }>("session_get");
+            const open = Array.isArray(session.open) ? session.open : [];
+            channels.syncOpen(open, ipc.active());
+          } catch {
+            /* keep local order */
+          }
+        });
+    },
   );
 
   const refreshLocaleChrome = (): void => {
@@ -1926,7 +1943,9 @@ async function boot(): Promise<void> {
       streamByChannel.delete(ev.payload.dropped.toLowerCase());
       avatarUrlByLogin.delete(ev.payload.dropped.toLowerCase());
     }
-    channels.syncOpen(open, focus);
+    if (!channels.isReordering()) {
+      channels.syncOpen(open, focus);
+    }
     channelQueue.push({ kind: "sync", name: focus });
     if (!channelBusy) {
       drainChannelQueue();

@@ -239,6 +239,7 @@ export const en = {
   "error.channel.no_history": "no history for {channel}",
   "error.channel.none_active": "no active channel",
   "error.channel.not_joined": "channel is not connected yet",
+  "error.channel.reorder": "could not reorder channel tabs",
   "error.command.empty_trigger": "empty command trigger",
   "error.command.menu_unavailable": "command is not available from the message menu",
   "error.command.not_found": "command not found",

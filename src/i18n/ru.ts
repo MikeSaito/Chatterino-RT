@@ -241,6 +241,7 @@ export const ru: Record<MessageKey, string> = {
   "error.channel.no_history": "нет истории для {channel}",
   "error.channel.none_active": "нет активного канала",
   "error.channel.not_joined": "канал ещё не подключён",
+  "error.channel.reorder": "не удалось изменить порядок вкладок",
   "error.command.empty_trigger": "пустой trigger команды",
   "error.command.menu_unavailable": "команда недоступна из меню сообщения",
   "error.command.not_found": "команда не найдена",

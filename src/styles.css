@@ -315,6 +315,23 @@ body,
   margin-top: 0;
 }
 
+#channel-list.is-reordering {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.channel-row {
+  touch-action: none;
+}
+
+.channel-row.is-dragging {
+  opacity: 0.75;
+}
+
+.channel-row.is-dragging .channel-item {
+  background: var(--c-surface-3);
+}
+
 .filters-check {
   display: flex;
   align-items: center;

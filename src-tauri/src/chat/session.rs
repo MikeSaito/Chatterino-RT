@@ -87,8 +87,8 @@ pub fn preferred_focus(shared: &Shared) -> Option<String> {
     hub.channels().into_iter().next()
 }
 
-/// `bump_mru`: move channel to front of `open` / update `last_channel`.
-/// Background joins pass `false` so restore order stays intact.
+/// Update recents / last_channel. Open tab order is stable: new channels append;
+/// focusing an already-open tab does not move it (drag-reorder owns order).
 pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<Session, ApiError> {
     ensure_can_open(shared, &normalized)?;
     let (path, data) = {
@@ -104,17 +104,59 @@ pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<S
         list.truncate(MAX_RECENTS);
         let open = &mut inner.data.open;
         let already = open.iter().any(|c| c == &normalized);
-        if bump_mru {
-            if let Some(pos) = open.iter().position(|c| c == &normalized) {
-                open.remove(pos);
-            }
-            open.insert(0, normalized.clone());
-        } else if !already {
+        if !already {
             open.push(normalized.clone());
         }
         debug_assert!(open.len() <= MAX_OPEN);
         if bump_mru {
             inner.data.last_channel = Some(normalized);
+        }
+        (inner.path.clone(), inner.data.clone())
+    };
+    save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
+    Ok(data)
+}
+
+/// Replace open-tab order after UI drag-reorder. Must be a permutation of current open set.
+pub fn reorder_open(shared: &Shared, next: Vec<String>) -> Result<Session, ApiError> {
+    let (path, data) = {
+        let mut inner = shared
+            .session
+            .lock()
+            .map_err(|_| ApiError::internal("lock"))?;
+        let current = &inner.data.open;
+        if next.len() != current.len() {
+            return Err(ApiError::coded(
+                "error.channel.reorder",
+                "open channel order length mismatch",
+            ));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(next.len());
+        for login in &next {
+            if !valid_login(login) {
+                return Err(ApiError::coded(
+                    "error.channel.name",
+                    "channel name: 1-25 characters [a-z0-9_]",
+                ));
+            }
+            if !current.iter().any(|c| c == login) {
+                return Err(ApiError::coded(
+                    "error.channel.reorder",
+                    "open channel order must match current tabs",
+                ));
+            }
+            if !seen.insert(login.clone()) {
+                return Err(ApiError::coded(
+                    "error.channel.reorder",
+                    "duplicate channel in open order",
+                ));
+            }
+        }
+        inner.data.open = next;
+        if let Some(last) = inner.data.last_channel.clone() {
+            if !inner.data.open.iter().any(|c| c == &last) {
+                inner.data.last_channel = inner.data.open.first().cloned();
+            }
         }
         (inner.path.clone(), inner.data.clone())
     };
@@ -243,7 +285,9 @@ mod tests {
         assert_eq!(snap.recents[0], "u0");
         assert_eq!(snap.last_channel.as_deref(), Some("u0"));
         assert_eq!(snap.open.len(), MAX_OPEN);
+        // Focus does not reshuffle open tabs.
         assert_eq!(snap.open[0], "u0");
+        assert_eq!(snap.open[1], "u1");
         forget_open(&shared, "u0").unwrap();
         let snap2 = snapshot(&shared).unwrap();
         assert!(!snap2.open.contains(&"u0".to_string()));
@@ -254,7 +298,14 @@ mod tests {
             .open
             .contains(&"overflow".to_string()));
         remember(&shared, "u1".into(), false).unwrap();
-        assert_ne!(snapshot(&shared).unwrap().open[0], "u1");
+        // Focus/bump no longer moves open tabs; after forget(u0) open starts with u1.
+        assert_eq!(snapshot(&shared).unwrap().open[0], "u1");
+        let open = snapshot(&shared).unwrap().open;
+        let mut reversed = open.clone();
+        reversed.reverse();
+        reorder_open(&shared, reversed.clone()).unwrap();
+        assert_eq!(snapshot(&shared).unwrap().open, reversed);
+        assert!(reorder_open(&shared, vec!["missing".into()]).is_err());
         let _ = fs::remove_file(&shared.session.lock().unwrap().path);
     }
 }

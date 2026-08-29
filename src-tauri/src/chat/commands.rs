@@ -694,6 +694,18 @@ pub fn session_get(state: tauri::State<'_, Shared>) -> Result<super::session::Se
 }
 
 #[tauri::command]
+pub fn session_reorder_open(
+    state: tauri::State<'_, Shared>,
+    open: Vec<String>,
+) -> Result<super::session::Session, ApiError> {
+    let normalized: Result<Vec<String>, ApiError> = open
+        .into_iter()
+        .map(|c| normalize_channel(&c))
+        .collect();
+    super::session::reorder_open(&state, normalized?)
+}
+
+#[tauri::command]
 pub async fn auth_start(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
