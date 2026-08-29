@@ -171,6 +171,8 @@ type Slot = {
   linkSpans: LinkSpan[];
   mentionSpans: MentionSpan[];
   wrapLines: WrapLine[];
+  /** false until paintClip finishes metrics for current bodyRaw. */
+  wrapReady: boolean;
   lineCount: number;
   /** Pixel origin of first body wrap line (ceil-aligned to char grid). */
   bodyIndent: number;
@@ -308,6 +310,9 @@ export class MessageRing {
   private resizeDebounce: TrailingDebounce | null = null;
   private perfLogAt = 0;
   private readonly perfOn: boolean;
+  /** Next layout() without paintOnly must repaint every live slot (font/width/theme). */
+  private layoutFullPaint = false;
+  private viewportPaintRaf = 0;
   private readonly onRendererResize = (): void => {
     this.resizeDebounce?.schedule();
   };
@@ -419,6 +424,7 @@ export class MessageRing {
     }
     this.moderationMode = on;
     if (this.ready) {
+      this.markLayoutFullPaint();
       this.layout();
     }
   }
@@ -438,6 +444,7 @@ export class MessageRing {
     }
     this.modActions = next;
     if (this.ready) {
+      this.markLayoutFullPaint();
       this.layout();
     }
   }
@@ -449,6 +456,7 @@ export class MessageRing {
     }
     this.selfLogin = next;
     if (this.ready && this.moderationMode) {
+      this.markLayoutFullPaint();
       this.layout();
     }
   }
@@ -486,6 +494,7 @@ export class MessageRing {
         this.loadBadgeSprites(slot);
       }
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -506,6 +515,7 @@ export class MessageRing {
         slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
       }
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -519,6 +529,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -864,6 +875,7 @@ export class MessageRing {
     }
     this.refreshFontMetrics();
     this.repaintNickChrome();
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -877,6 +889,7 @@ export class MessageRing {
       return;
     }
     this.repaintNickChrome();
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -932,6 +945,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -944,6 +958,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1000,6 +1015,7 @@ export class MessageRing {
         slot.leadLen = whisperP.length;
       }
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1157,6 +1173,7 @@ export class MessageRing {
       dirtyBitmapText(slot.body);
       dirtyBitmapText(slot.bodyCont);
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1291,6 +1308,7 @@ export class MessageRing {
       }
       this.reloadVisibleEmotes();
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1716,6 +1734,7 @@ export class MessageRing {
         linkSpans: [],
         mentionSpans: [],
         wrapLines: [{ start: 0, end: 0 }],
+        wrapReady: false,
         lineCount: 1,
         bodyIndent: 0,
         bodyContIndent: 0,
@@ -1777,6 +1796,7 @@ export class MessageRing {
     }
     this.ready = true;
     this.resizeDebounce = trailingDebounce(() => {
+      this.markLayoutFullPaint();
       this.layout();
     }, 100);
     this.app.renderer.on("resize", this.onRendererResize);
@@ -1786,6 +1806,7 @@ export class MessageRing {
     this.liveMsgIds.clear();
     this.channelLive = false;
     this.resetSlots();
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1797,6 +1818,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
+    this.markLayoutFullPaint();
     this.layout();
   }
 
@@ -1827,6 +1849,10 @@ export class MessageRing {
     if (this.scrollRaf !== 0) {
       cancelAnimationFrame(this.scrollRaf);
       this.scrollRaf = 0;
+    }
+    if (this.viewportPaintRaf !== 0) {
+      cancelAnimationFrame(this.viewportPaintRaf);
+      this.viewportPaintRaf = 0;
     }
     this.mediaRepaintSlots.clear();
     this.clearSlots();
@@ -1862,6 +1888,7 @@ export class MessageRing {
       }
     }
     if (needFull) {
+      this.markLayoutFullPaint();
       this.layout(anchor);
       return;
     }
@@ -1886,6 +1913,10 @@ export class MessageRing {
     if (this.mediaRepaintRaf !== 0) {
       cancelAnimationFrame(this.mediaRepaintRaf);
       this.mediaRepaintRaf = 0;
+    }
+    if (this.viewportPaintRaf !== 0) {
+      cancelAnimationFrame(this.viewportPaintRaf);
+      this.viewportPaintRaf = 0;
     }
     this.mediaRepaintSlots.clear();
     for (const slot of this.slots) {
@@ -2047,6 +2078,7 @@ export class MessageRing {
     slot.linkSpans = [];
     slot.mentionSpans = [];
     slot.wrapLines = [{ start: 0, end: 0 }];
+    slot.wrapReady = false;
     slot.lineCount = 1;
     slot.bodyIndent = 0;
     slot.bodyContIndent = 0;
@@ -2164,6 +2196,10 @@ export class MessageRing {
     slot.copyText = drawn.copyText;
     slot.linkSpans = drawn.links;
     slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+    // Recycled slots keep stale wrapLines; cull must see them as dirty.
+    slot.wrapLines = [{ start: 0, end: 0 }];
+    slot.wrapReady = false;
+    slot.lineCount = 1;
     slot.leadLen = drawn.leadLen;
     if (event.kind === "privmsg") {
       slot.replyToId = event.replyToId ?? "";
@@ -2536,6 +2572,7 @@ export class MessageRing {
     slot.root.cursor =
       collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     slot.wrapLines = lines;
+    slot.wrapReady = true;
     slot.lineCount = replyRows + lines.length;
     slot.bodyIndent = firstOriginX;
     slot.bodyContIndent = contOriginX;
@@ -2875,6 +2912,41 @@ export class MessageRing {
     });
   }
 
+  private markLayoutFullPaint(): void {
+    this.layoutFullPaint = true;
+  }
+
+  /** Wrap metrics present so paintClip can be skipped until width/font/theme change. */
+  private slotWrapValid(slot: Slot): boolean {
+    return slot.wrapReady;
+  }
+
+  private slotYIntersects(slot: Slot, top: number, bottom: number): boolean {
+    const y0 = slot.root.y;
+    const y1 = y0 + Math.max(1, slot.lineCount) * this.lineHeight;
+    return y1 >= top && y0 <= bottom;
+  }
+
+  /**
+   * Stage-space Y band for paintClip. When pinned to bottom, use the end of the
+   * current content stack so snapshot/layout paints the visible foot first.
+   */
+  private viewportPaintBand(contentHeightPx: number): {
+    top: number;
+    bottom: number;
+  } {
+    const viewH = this.app.screen.height;
+    const bandPad = this.lineHeight * 20;
+    let stageY = this.scroll.stageY(this.lineHeight);
+    if (this.scroll.atBottom && contentHeightPx > viewH) {
+      stageY = -(contentHeightPx - viewH);
+    }
+    return {
+      top: -stageY - bandPad,
+      bottom: -stageY + viewH + bandPad,
+    };
+  }
+
   private layoutInner(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
     const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
@@ -2889,22 +2961,74 @@ export class MessageRing {
       }
     }
     const gapPx = this.messageGapPx();
-    let y = 0;
-    for (let i = 0; i < visible.length; i += 1) {
-      const slot = visible[i];
-      slot.startRow = i;
-      slot.root.y = y;
-      if (!paintOnly || paintOnly.has(slot)) {
+    const fullPaint = !paintOnly && this.layoutFullPaint;
+    if (fullPaint) {
+      this.layoutFullPaint = false;
+    }
+
+    const placeY = (): number => {
+      let y = 0;
+      for (let i = 0; i < visible.length; i += 1) {
+        const slot = visible[i];
+        slot.startRow = i;
+        slot.root.y = y;
+        y += slot.lineCount * this.lineHeight;
+        if (i + 1 < visible.length) {
+          y += gapPx;
+        }
+      }
+      return y;
+    };
+
+    let totalY = placeY();
+
+    if (paintOnly) {
+      let heightsChanged = false;
+      for (const slot of visible) {
+        if (!paintOnly.has(slot)) {
+          continue;
+        }
+        const prev = slot.lineCount;
+        this.paintClip(slot);
+        if (slot.lineCount !== prev) {
+          heightsChanged = true;
+        }
+      }
+      if (heightsChanged) {
+        totalY = placeY();
+      }
+    } else if (fullPaint) {
+      for (const slot of visible) {
         this.paintClip(slot);
       }
-      y += slot.lineCount * this.lineHeight;
-      if (i + 1 < visible.length) {
-        y += gapPx;
+      totalY = placeY();
+    } else {
+      for (let iter = 0; iter < 4; iter += 1) {
+        const band = this.viewportPaintBand(totalY);
+        let heightsChanged = false;
+        for (const slot of visible) {
+          if (this.slotWrapValid(slot)) {
+            continue;
+          }
+          if (!this.slotYIntersects(slot, band.top, band.bottom)) {
+            continue;
+          }
+          const prev = slot.lineCount;
+          this.paintClip(slot);
+          if (slot.lineCount !== prev) {
+            heightsChanged = true;
+          }
+        }
+        totalY = placeY();
+        if (!heightsChanged) {
+          break;
+        }
       }
     }
+
     const viewRows = this.app.screen.height / this.lineHeight;
     this.scroll.applyLayout(
-      this.lineHeight > 0 ? y / this.lineHeight : 0,
+      this.lineHeight > 0 ? totalY / this.lineHeight : 0,
       viewRows,
       this.laidSlots(),
       resolved,
@@ -2941,6 +3065,62 @@ export class MessageRing {
     this.applyStageY();
     this.notifyScroll();
     this.ensureScrollTick();
+    this.scheduleViewportPaint();
+  }
+
+  private scheduleViewportPaint(): void {
+    if (!this.ready || this.viewportPaintRaf !== 0) {
+      return;
+    }
+    this.viewportPaintRaf = requestAnimationFrame(() => {
+      this.viewportPaintRaf = 0;
+      this.paintSlotsEnteringViewport();
+    });
+  }
+
+  /** Lazy paintClip for scrollback rows that enter the viewport unpainted. */
+  private paintSlotsEnteringViewport(): void {
+    if (!this.ready || this.occupied === 0) {
+      return;
+    }
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    const gapPx = this.messageGapPx();
+    let contentH = 0;
+    let shown = 0;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.root.visible) {
+        continue;
+      }
+      if (shown > 0) {
+        contentH += gapPx;
+      }
+      contentH += slot.lineCount * this.lineHeight;
+      shown += 1;
+    }
+    const band = this.viewportPaintBand(contentH);
+    const anchor = this.scroll.captureAnchor(this.laidSlots());
+    let heightsChanged = false;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.msgId || !slot.root.visible) {
+        continue;
+      }
+      if (this.slotWrapValid(slot)) {
+        continue;
+      }
+      if (!this.slotYIntersects(slot, band.top, band.bottom)) {
+        continue;
+      }
+      const prev = slot.lineCount;
+      this.paintClip(slot);
+      if (slot.lineCount !== prev) {
+        heightsChanged = true;
+      }
+    }
+    if (heightsChanged) {
+      this.layout(anchor, new Set());
+    }
   }
 
   private ensureScrollTick(): void {
@@ -2963,10 +3143,12 @@ export class MessageRing {
         const cont = this.scroll.tick(now);
         this.applyStageY();
         this.notifyScroll();
+        this.paintSlotsEnteringViewport();
         if (cont && this.ready) {
           this.scrollRaf = requestAnimationFrame(step);
         } else {
           this.scrollRaf = 0;
+          this.scheduleViewportPaint();
         }
       });
     };
@@ -3287,6 +3469,20 @@ export class MessageRing {
       family,
       weight,
     );
+    if (
+      key === slot.nickPaintKey &&
+      slot.nickPaintSpr.visible &&
+      slot.nickPaintSpr.texture !== Texture.EMPTY
+    ) {
+      this.touchNickPaintLru(key);
+      const pad =
+        (slot.nickPaintSpr.texture as Texture & { __crtPad?: number })
+          .__crtPad ?? 1;
+      slot.nickPaintSpr.x = slot.nick.x - pad;
+      slot.nickPaintSpr.y = contentY - pad;
+      slot.nick.visible = false;
+      return baseW;
+    }
     let tex = this.nickPaintTextures.get(key);
     let pad = 1;
     if (!tex) {
@@ -3310,11 +3506,7 @@ export class MessageRing {
       this.evictNickPaintTextures();
     } else {
       pad = (tex as Texture & { __crtPad?: number }).__crtPad ?? 1;
-      const at = this.nickPaintTextureOrder.indexOf(key);
-      if (at >= 0) {
-        this.nickPaintTextureOrder.splice(at, 1);
-        this.nickPaintTextureOrder.push(key);
-      }
+      this.touchNickPaintLru(key);
     }
     slot.nickPaintKey = key;
     slot.nickPaintSpr.texture = tex;
@@ -3325,8 +3517,21 @@ export class MessageRing {
     return baseW;
   }
 
+  private touchNickPaintLru(key: string): void {
+    const at = this.nickPaintTextureOrder.indexOf(key);
+    if (at >= 0) {
+      this.nickPaintTextureOrder.splice(at, 1);
+    }
+    this.nickPaintTextureOrder.push(key);
+  }
+
   private evictNickPaintTextures(): void {
-    while (this.nickPaintTextureOrder.length > MessageRing.NICK_PAINT_LRU) {
+    let guard = this.nickPaintTextureOrder.length;
+    while (
+      this.nickPaintTextureOrder.length > MessageRing.NICK_PAINT_LRU &&
+      guard > 0
+    ) {
+      guard -= 1;
       const old = this.nickPaintTextureOrder.shift();
       if (!old) {
         break;
@@ -3340,7 +3545,7 @@ export class MessageRing {
       }
       if (inUse) {
         this.nickPaintTextureOrder.push(old);
-        break;
+        continue;
       }
       const doomed = this.nickPaintTextures.get(old);
       this.nickPaintTextures.delete(old);
