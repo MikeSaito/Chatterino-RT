@@ -93,25 +93,50 @@ pub async fn load_globals(
         cat.bump_global_load()
     };
     let client = http_client();
+    let bttv_f = flags.bttv_global;
+    let ffz_f = flags.ffz_global;
+    let stv_f = flags.seventv_global;
+    let show_unlisted = flags.show_unlisted_7tv;
+    let (bttv_v, ffz_v, stv_v) = tokio::join!(
+        async {
+            if bttv_f {
+                get_json(&client, "https://api.betterttv.net/3/cached/emotes/global")
+                    .await
+                    .ok()
+            } else {
+                None
+            }
+        },
+        async {
+            if ffz_f {
+                get_json(&client, "https://api.frankerfacez.com/v1/set/global")
+                    .await
+                    .ok()
+            } else {
+                None
+            }
+        },
+        async {
+            if stv_f {
+                get_json(&client, "https://7tv.io/v3/emote-sets/global")
+                    .await
+                    .ok()
+            } else {
+                None
+            }
+        },
+    );
     let mut map = std::collections::HashMap::new();
-    if flags.bttv_global {
-        if let Ok(list) =
-            get_json(&client, "https://api.betterttv.net/3/cached/emotes/global").await
-        {
-            collect_bttv(&list, &mut map);
-        }
+    if let Some(list) = bttv_v {
+        collect_bttv(&list, &mut map);
     }
-    if flags.ffz_global {
-        if let Ok(v) = get_json(&client, "https://api.frankerfacez.com/v1/set/global").await {
-            collect_ffz_sets(&v, &mut map);
-        }
+    if let Some(v) = ffz_v {
+        collect_ffz_sets(&v, &mut map);
     }
     let mut global_set_id = None;
-    if flags.seventv_global {
-        if let Ok(v) = get_json(&client, "https://7tv.io/v3/emote-sets/global").await {
-            global_set_id = object_id(v.get("id"));
-            collect_7tv_set(&v, &mut map, flags.show_unlisted_7tv);
-        }
+    if let Some(v) = stv_v {
+        global_set_id = object_id(v.get("id"));
+        collect_7tv_set(&v, &mut map, show_unlisted);
     }
     let Ok(mut cat) = catalog.lock() else {
         return Err(());
@@ -158,37 +183,58 @@ pub async fn load_channel(
         cat.bump_load()
     };
     let client = http_client();
+    let bttv_f = flags.bttv_channel;
+    let ffz_f = flags.ffz_channel;
+    let stv_f = flags.seventv_channel;
+    let show_unlisted = flags.show_unlisted_7tv;
+    let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
+    let ffz_url = format!("https://api.frankerfacez.com/v1/room/{login}");
+    let stv_url = format!("https://7tv.io/v3/users/twitch/{room_id}");
+    let (bttv_v, ffz_v, stv_v) = tokio::join!(
+        async {
+            if bttv_f {
+                get_json(&client, &bttv_url).await.ok()
+            } else {
+                None
+            }
+        },
+        async {
+            if ffz_f {
+                get_json(&client, &ffz_url).await.ok()
+            } else {
+                None
+            }
+        },
+        async {
+            if stv_f {
+                get_json(&client, &stv_url).await.ok()
+            } else {
+                None
+            }
+        },
+    );
     let mut map = std::collections::HashMap::new();
-    if flags.bttv_channel {
-        let bttv_url = format!("https://api.betterttv.net/3/cached/users/twitch/{room_id}");
-        if let Ok(v) = get_json(&client, &bttv_url).await {
-            if let Some(arr) = v.get("channelEmotes") {
-                collect_bttv(arr, &mut map);
-            }
-            if let Some(arr) = v.get("sharedEmotes") {
-                collect_bttv(arr, &mut map);
-            }
+    if let Some(v) = bttv_v {
+        if let Some(arr) = v.get("channelEmotes") {
+            collect_bttv(arr, &mut map);
+        }
+        if let Some(arr) = v.get("sharedEmotes") {
+            collect_bttv(arr, &mut map);
         }
     }
     let mut ffz_extras = None;
-    if flags.ffz_channel {
-        let ffz_url = format!("https://api.frankerfacez.com/v1/room/{login}");
-        if let Ok(v) = get_json(&client, &ffz_url).await {
-            collect_ffz_sets(&v, &mut map);
-            ffz_extras = Some(parse_ffz_room_extras(&v));
-        }
+    if let Some(v) = ffz_v {
+        collect_ffz_sets(&v, &mut map);
+        ffz_extras = Some(parse_ffz_room_extras(&v));
     }
     let mut seventv = None;
-    if flags.seventv_channel {
-        let stv_url = format!("https://7tv.io/v3/users/twitch/{room_id}");
-        if let Ok(v) = get_json(&client, &stv_url).await {
-            let user_id = object_id(v.get("id"));
-            if let Some(set) = v.get("emote_set") {
-                let set_id = object_id(set.get("id"));
-                collect_7tv_set(set, &mut map, flags.show_unlisted_7tv);
-                if let (Some(set_id), Some(user_id)) = (set_id, user_id) {
-                    seventv = Some((set_id, user_id));
-                }
+    if let Some(v) = stv_v {
+        let user_id = object_id(v.get("id"));
+        if let Some(set) = v.get("emote_set") {
+            let set_id = object_id(set.get("id"));
+            collect_7tv_set(set, &mut map, show_unlisted);
+            if let (Some(set_id), Some(user_id)) = (set_id, user_id) {
+                seventv = Some((set_id, user_id));
             }
         }
     }

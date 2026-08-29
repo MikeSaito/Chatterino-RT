@@ -41,22 +41,29 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
     if let Ok(mut cat) = shared.badges.lock() {
         super::badge_fallback::seed_global(&mut cat);
     }
-    let flags = fetch::EmoteProviderFlags::from_shared(&shared);
-    let (globals_result, _, _) = tokio::join!(
-        fetch::load_globals(&shared.catalog, flags),
-        super::ffz_badges::load(&shared.ffz_badges),
-        super::chatterino_badges::load(&shared.chatterino_badges),
-    );
-    if let Ok(set_id) = globals_result {
-        if flags.seventv_global {
-            if let Some(set_id) = set_id {
-                shared.notify_event(EventCmd::SetGlobal { set_id });
+    // Emote/badge HTTP must not block IRC — slow BTTV/FFZ/7TV (retries×12s) left chat
+    // empty for minutes while Join sat in the mpsc queue.
+    {
+        let shared_bg = shared.clone();
+        tauri::async_runtime::spawn(async move {
+            let flags = fetch::EmoteProviderFlags::from_shared(&shared_bg);
+            let (globals_result, _, _) = tokio::join!(
+                fetch::load_globals(&shared_bg.catalog, flags),
+                super::ffz_badges::load(&shared_bg.ffz_badges),
+                super::chatterino_badges::load(&shared_bg.chatterino_badges),
+            );
+            if let Ok(set_id) = globals_result {
+                if flags.seventv_global {
+                    if let Some(set_id) = set_id {
+                        shared_bg.notify_event(EventCmd::SetGlobal { set_id });
+                    }
+                } else {
+                    shared_bg.notify_event(EventCmd::ClearGlobal);
+                }
             }
-        } else {
-            shared.notify_event(EventCmd::ClearGlobal);
-        }
+            super::twitch_blocks::spawn_load_if_enabled(&shared_bg);
+        });
     }
-    super::twitch_blocks::spawn_load_if_enabled(&shared);
     let mut wanted: HashSet<String> = HashSet::new();
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
@@ -1307,6 +1314,8 @@ fn spawn_channel_assets(app: &AppHandle, shared: &Shared, login: String, room_id
     let room_for_bttv = room_id.clone();
     let flags = fetch::EmoteProviderFlags::from_shared(shared);
     tauri::async_runtime::spawn(async move {
+        // History must not wait on BTTV/FFZ/7TV/Helix (can take minutes when APIs hang).
+        super::recent_messages::spawn_recent_messages(app.clone(), events.clone(), login.clone());
         let stv = fetch::load_channel(
             &cat,
             &badges,
@@ -1349,7 +1358,6 @@ fn spawn_channel_assets(app: &AppHandle, shared: &Shared, login: String, room_id
             login: login.clone(),
             room_id: room_for_bttv,
         });
-        super::recent_messages::spawn_recent_messages(app, events, login);
     });
 }
 
