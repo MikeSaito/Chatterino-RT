@@ -10,6 +10,12 @@ import {
   t,
 } from "../src/i18n/index.ts";
 import { tKnobLabel, tPageNav } from "../src/i18n/settingsT.ts";
+import {
+  clearchatText,
+  deletionNoticeText,
+  formatReplyHeader,
+  whisperPrefix,
+} from "../src/chat/chatSystemText.ts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -82,5 +88,34 @@ applyLocale("ru");
 assert(getLocale() === "ru", "applyLocale ru");
 applyLocale("en");
 assert(getLocale() === "en", "applyLocale en");
+
+setLocale("en");
+assert(clearchatText(undefined, undefined) === "Chat cleared", "clearchat room en");
+assert(
+  clearchatText("bob", 30, 3) === "bob timed out for 30s (3 times)",
+  "clearchat timeout stack en",
+);
+assert(clearchatText("bob", undefined) === "bob was banned", "clearchat ban en");
+assert(
+  deletionNoticeText("bob", "hello world", 50) ===
+    "A message from bob was deleted: hello world",
+  "clearmsg en",
+);
+assert(whisperPrefix() === "Whisper: ", "whisper en");
+assert(
+  formatReplyHeader("bob", "hi there") === "Replying to @bob: hi there",
+  "reply en",
+);
+
+setLocale("ru");
+assert(clearchatText(undefined, undefined) === "чат очищен", "clearchat room ru");
+assert(
+  clearchatText("bob", 30, 3) === "bob тайм-аут 30с (3 раз)",
+  "clearchat timeout stack ru",
+);
+assert(clearchatText("bob", undefined) === "bob забанен", "clearchat ban ru");
+assert(whisperPrefix() === "Шёпот: ", "whisper ru");
+assert(formatReplyHeader("bob", "") === "Ответ @bob", "reply empty ru");
+setLocale("en");
 
 console.log("i18n tests ok");

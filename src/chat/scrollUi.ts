@@ -1,5 +1,6 @@
 import type { MessageRing } from "./ring";
 import type { ScrollSnapshot } from "./scroll";
+import { t } from "../i18n/index.ts";
 
 export function bindScrollChrome(opts: {
   ring: MessageRing;
@@ -10,6 +11,7 @@ export function bindScrollChrome(opts: {
   onScroll?: (state: ScrollSnapshot) => void;
 }): {
   setHideHighlights: (hide: boolean) => void;
+  refreshLocale: () => void;
 } {
   const { ring, host, track, thumb, jump, onScroll } = opts;
   const marksLayer = track.querySelector<HTMLElement>("#chat-scroll-marks");
@@ -32,8 +34,10 @@ export function bindScrollChrome(opts: {
       jump.setAttribute("aria-hidden", "false");
       const label =
         pending > 0
-          ? `Вниз, ${pending > 99 ? "99+" : pending} новых`
-          : "Вниз";
+          ? pending > 99
+            ? t("chat.jumpBottom.pendingMax")
+            : t("chat.jumpBottom.pending", { count: pending })
+          : t("chat.jumpBottom");
       jump.setAttribute("aria-label", label);
       jump.title = label;
       if (!jumpWasVisible) {
@@ -289,7 +293,12 @@ export function bindScrollChrome(opts: {
     }
   });
 
-  return { setHideHighlights };
+  return {
+    setHideHighlights,
+    refreshLocale: () => {
+      paintJump(ring.scrollSnapshot());
+    },
+  };
 }
 
 /** Accept same #RRGGBB / #RRGGBBAA as ring row highlights. */

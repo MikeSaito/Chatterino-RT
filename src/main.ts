@@ -1438,6 +1438,8 @@ async function boot(): Promise<void> {
     replyThreadCtl?.relabelChrome();
     chatFindCtl.relabel();
     emotePopup.relabel();
+    ring.relocalizeSystemStrings();
+    scrollChrome.refreshLocale();
   };
 
   onLocaleChange(() => {

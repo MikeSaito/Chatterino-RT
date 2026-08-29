@@ -3,6 +3,7 @@ import {
   modActionLabel,
   parseModActions,
 } from "../src/shell/modActions.ts";
+import { setLocale } from "../src/i18n/index.ts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -10,6 +11,7 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
+setLocale("en");
 assert(modActionLabel("/timeout {user.name} 30") === "30s", "30s");
 assert(modActionLabel("/timeout {user.name} 300") === "5m", "5m");
 assert(modActionLabel("/timeout {user.name} 5m") === "5m", "5m unit");
@@ -19,6 +21,11 @@ assert(modActionLabel("/timeout {user.name} 1w") === "1w", "1w");
 assert(modActionLabel("/ban {user.name}") === "Ban", "ban");
 assert(modActionLabel("/delete {msg.id}") === "Del", "del");
 assert(modActionLabel("/w {user.name} hi") === "wuse", "custom");
+
+setLocale("ru");
+assert(modActionLabel("/ban {user.name}") === "Бан", "ban ru");
+assert(modActionLabel("/delete {msg.id}") === "Удал.", "del ru");
+setLocale("en");
 
 const parsed = parseModActions([
   { action: "/timeout {user.name} 300", icon: "" },

@@ -21,7 +21,15 @@ import {
   MOD_ACTION_SLOTS_PER_ROW,
 } from "../constants";
 import type { ModActionBtn } from "../shell/modActions";
+import { modActionLabel } from "../shell/modActions";
 import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
+import {
+  clearchatText,
+  deletionNoticeText,
+  formatReplyHeader,
+  whisperPrefix,
+} from "./chatSystemText";
+import { t } from "../i18n/index.ts";
 import { resolveEmojiUrl } from "./emoteUrl";
 import { trailingDebounce, type TrailingDebounce } from "./debounce";
 import {
@@ -185,6 +193,12 @@ type Slot = {
   isWhisper: boolean;
   /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
   leadLen: number;
+  /** Rebuild CLEARCHAT/CLEARMSG body on locale change. */
+  systemTextKind: "" | "clearchat" | "clearmsg";
+  clearLogin: string;
+  clearDurationSec: number | undefined;
+  clearStackCount: number;
+  clearmsgBody: string;
 };
 
 type Drawn = {
@@ -401,7 +415,15 @@ export class MessageRing {
   }
 
   setModActions(actions: ModActionBtn[]): void {
-    this.modActions = actions.slice(0, MOD_ACTION_SLOTS_PER_ROW);
+    const next = actions.slice(0, MOD_ACTION_SLOTS_PER_ROW);
+    if (
+      next.length === this.modActions.length &&
+      next.every((a, i) => a.action === this.modActions[i]!.action)
+    ) {
+      this.modActions = next;
+      return;
+    }
+    this.modActions = next;
     if (this.ready) {
       this.layout();
     }
@@ -907,6 +929,62 @@ export class MessageRing {
     this.hideReplyContext = hide;
     if (!this.ready) {
       return;
+    }
+    this.layout();
+  }
+
+  /**
+   * Rebuild CLEARCHAT/CLEARMSG/Whisper bodies for the current locale.
+   * Reply headers refresh via paintClip → formatReplyHeader.
+   */
+  relocalizeSystemStrings(): void {
+    if (!this.ready) {
+      return;
+    }
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.msgId) {
+        continue;
+      }
+      if (slot.systemTextKind === "clearchat") {
+        const text = clearchatText(
+          slot.clearLogin || undefined,
+          slot.clearDurationSec,
+          slot.clearStackCount > 0 ? slot.clearStackCount : undefined,
+        );
+        slot.bodySource = text;
+        slot.copyText = text;
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+        slot.leadLen = 0;
+      } else if (slot.systemTextKind === "clearmsg") {
+        const text = deletionNoticeText(
+          slot.clearLogin || t("chat.reply.unknown"),
+          slot.clearmsgBody,
+          this.deletedMessageLengthLimit,
+        );
+        slot.bodySource = text;
+        slot.copyText = text;
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+        slot.leadLen = 0;
+      } else if (slot.isWhisper) {
+        const oldPrefixLen = Math.max(
+          0,
+          slot.bodySource.length - slot.copyText.length,
+        );
+        const whisperP = whisperPrefix();
+        const actionP = slot.isAction ? "* " : "";
+        const prefix = `${whisperP}${actionP}`;
+        const shiftDelta = prefix.length - oldPrefixLen;
+        if (shiftDelta !== 0) {
+          slot.spansRaw = shiftSpans(slot.spansRaw, shiftDelta);
+          slot.linkSpans = shiftSpans(slot.linkSpans, shiftDelta);
+          slot.mentionSpans = shiftSpans(slot.mentionSpans, shiftDelta);
+        }
+        slot.bodySource = `${prefix}${slot.copyText}`;
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+        slot.leadLen = whisperP.length;
+      }
     }
     this.layout();
   }
@@ -1638,6 +1716,11 @@ export class MessageRing {
         isAction: false,
         isWhisper: false,
         leadLen: 0,
+        systemTextKind: "",
+        clearLogin: "",
+        clearDurationSec: undefined,
+        clearStackCount: 0,
+        clearmsgBody: "",
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -1803,19 +1886,25 @@ export class MessageRing {
       if (this.hideDeletionActions || this.hideModerationActions) {
         return { needFullLayout: true };
       }
-      const login = target.nickLogin || target.login || "unknown";
+      const login = target.nickLogin || target.login || "";
+      const deletedBody = target.copyText;
       const notice: ChatEvent = {
         kind: "notice",
         id: `${event.id}:del`,
         timestampMs: event.timestampMs,
         text: deletionNoticeText(
-          login,
-          target.copyText,
+          login || t("chat.reply.unknown"),
+          deletedBody,
           this.deletedMessageLengthLimit,
         ),
       };
       const slot = this.slots[this.head];
       this.write(slot, notice);
+      slot.systemTextKind = "clearmsg";
+      slot.clearLogin = login;
+      slot.clearmsgBody = deletedBody;
+      slot.clearDurationSec = undefined;
+      slot.clearStackCount = 0;
       this.head = (this.head + 1) % this.poolSize;
       if (this.occupied < this.poolSize) {
         this.occupied += 1;
@@ -1957,6 +2046,11 @@ export class MessageRing {
     slot.isAction = false;
     slot.isWhisper = false;
     slot.leadLen = 0;
+    slot.systemTextKind = "";
+    slot.clearLogin = "";
+    slot.clearDurationSec = undefined;
+    slot.clearStackCount = 0;
+    slot.clearmsgBody = "";
     slot.replyHeader.visible = false;
     slot.replyHeader.text = "";
     slot.highlight.clear();
@@ -2063,6 +2157,17 @@ export class MessageRing {
     slot.mentionSpans = drawn.mentions;
     slot.badgesRaw = drawn.badges;
     slot.highlightColor = drawn.highlightColor;
+    slot.systemTextKind = "";
+    slot.clearLogin = "";
+    slot.clearDurationSec = undefined;
+    slot.clearStackCount = 0;
+    slot.clearmsgBody = "";
+    if (event.kind === "clearchat") {
+      slot.systemTextKind = "clearchat";
+      slot.clearLogin = event.targetLogin ?? "";
+      slot.clearDurationSec = event.durationSec;
+      slot.clearStackCount = event.stackCount ?? 1;
+    }
     const msgId = slot.msgId;
     for (const spr of slot.emotes) {
       spr.visible = false;
@@ -2127,7 +2232,7 @@ export class MessageRing {
         let prefix = "";
         let leadLen = 0;
         if (event.whisper) {
-          prefix += "Whisper: ";
+          prefix += whisperPrefix();
           leadLen = prefix.length;
         }
         if (event.action) {
@@ -3126,15 +3231,16 @@ export class MessageRing {
         mt.text = "";
         continue;
       }
-      mt.text = action.label;
+      mt.text = modActionLabel(action.action);
       mt.visible = true;
       mt.x = x + padX;
       mt.y = 0;
+      const label = modActionLabel(action.action);
       const labelW = measureTextWidth(
         this.chatFontFamily,
         qtWeightToCss(this.chatFontWeight),
         this.fontSize,
-        action.label,
+        label,
       );
       const btnW = labelW + padX * 2;
       slot.modBtnHits.push({
@@ -3815,36 +3921,6 @@ function normalizeEmojiSet(raw: string): string {
   return "Twitter";
 }
 
-function clearchatText(
-  login: string | undefined,
-  durationSec: number | undefined,
-  stackCount?: number,
-): string {
-  let text: string;
-  if (!login) {
-    text = "чат очищен";
-  } else if (durationSec !== undefined) {
-    text = `${login} тайм-аут ${durationSec}с`;
-  } else {
-    text = `${login} забанен`;
-  }
-  if (stackCount !== undefined && stackCount > 1) {
-    text += ` (${stackCount} раз)`;
-  }
-  return text;
-}
-
-function deletionNoticeText(login: string, body: string, limit: number): string {
-  return `A message from ${login} was deleted: ${truncateDeletedBody(body, limit)}`;
-}
-
-function truncateDeletedBody(body: string, limit: number): string {
-  if (limit <= 0 || body.length <= limit) {
-    return body;
-  }
-  return `${body.slice(0, limit)}…`;
-}
-
 function shiftSpans<T extends { start: number; end: number }>(spans: T[], shift: number): T[] {
   if (shift === 0) {
     return spans;
@@ -3909,19 +3985,6 @@ function badgeTooltipText(set: string): string {
     .filter((part) => part.length > 0)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
-}
-
-/** Stock/Twitch-style reply chrome above the message (ChatMediumSmall). */
-function formatReplyHeader(login: string, text: string): string {
-  const name = login.trim() || "unknown";
-  const body = text.replace(/\s+/g, " ").trim();
-  const chars = Array.from(body);
-  const snip =
-    chars.length > 48 ? `${chars.slice(0, 48).join("").trimEnd()}...` : body;
-  if (!snip) {
-    return `Replying to @${name}`;
-  }
-  return `Replying to @${name}: ${snip}`;
 }
 
 function clipReplyHeaderToWidth(

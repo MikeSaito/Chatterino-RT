@@ -1,5 +1,7 @@
 /** Stock Chatterino ModerationAction patterns for message-row buttons. */
 
+import { t } from "../i18n/index.ts";
+
 export type ModActionBtn = {
   action: string;
   label: string;
@@ -56,10 +58,10 @@ export function modActionLabel(action: string): string {
   }
   const lower = trimmed.toLowerCase();
   if (lower.startsWith("/ban ") || lower === "/ban") {
-    return "Ban";
+    return t("chat.mod.ban");
   }
   if (lower.startsWith("/delete ") || lower === "/delete") {
-    return "Del";
+    return t("chat.mod.delete");
   }
   const alnum = trimmed.replace(/[!/.]/g, "").replace(/[^a-zA-Z0-9]/g, "");
   const chunk = alnum.slice(0, 4);
