@@ -1,4 +1,4 @@
-/** Shared helpers for WebView2 CDP release probes (node cdp-probe*.mjs). */
+/** Shared helpers for WebView2 CDP release probes (`node scripts/cdp/probe.mjs <channel>`). */
 
 export const CDP_PORT = 9223;
 export const MAIN_URL = "https://tauri.localhost/";

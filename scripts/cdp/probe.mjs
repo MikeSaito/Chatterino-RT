@@ -1,5 +1,13 @@
-// CDP verify: echo of own message + link spans + context menu + quick actions.
+/**
+ * WebView2 CDP release smoke: join channel, echo own message, link spans,
+ * context menu, quick actions.
+ *
+ * Requires a release/dev build with remote debugging on port 9223.
+ * Usage: node scripts/cdp/probe.mjs <channel>
+ */
 import { writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   connectCdp,
   ensureCrtDebug,
@@ -7,13 +15,22 @@ import {
   privmsgsWithText,
   snapshotPrivmsgs,
   submitComposer,
-} from "./scripts/cdp/lib.mjs";
+} from "./lib.mjs";
+
+const channel = (process.argv[2] ?? "").trim().toLowerCase();
+if (!channel) {
+  console.error("Usage: node scripts/cdp/probe.mjs <channel>");
+  process.exit(1);
+}
+
+const outDir = dirname(fileURLToPath(import.meta.url));
+const shotPath = join(outDir, "probe-shot.png");
 
 let cdp = await connectCdp();
 cdp = await ensureCrtDebug(cdp);
 const { send, evalJs, sleep, close } = cdp;
 
-await joinChannel(evalJs, "mike_saito");
+await joinChannel(evalJs, channel);
 await sleep(5000);
 
 const marker = `echotest https://example.com/page ${Date.now() % 100000}`;
@@ -24,7 +41,6 @@ let echoed = false;
 let linkSpans = null;
 for (let i = 0; i < 10; i += 1) {
   await sleep(1500);
-  const channel = "mike_saito";
   const snap = await snapshotPrivmsgs(evalJs, channel);
   const mine = privmsgsWithText(snap, needle);
   const ringMine = await evalJs(`(() => {
@@ -48,8 +64,8 @@ console.log("LINK SPANS:", JSON.stringify(linkSpans));
 
 await sleep(1500);
 const shot = await send("Page.captureScreenshot", { format: "png" });
-writeFileSync("cdp-verify1.png", Buffer.from(shot.data, "base64"));
-console.log("shot saved");
+writeFileSync(shotPath, Buffer.from(shot.data, "base64"));
+console.log("shot saved:", shotPath);
 
 const geo = await evalJs(`(() => {
   const ring = window.__crt?.ring;

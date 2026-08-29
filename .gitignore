@@ -26,8 +26,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# CDP probe artifacts (screenshots from scripts/cdp)
-cdp-shot*.png
-cdp-verify1.png
-cdp-probe*.mjs
-cdp-verify*.mjs
+# CDP probe artifacts (screenshots); one-off root probes must stay untracked
+/cdp-*.mjs
+/cdp-*.png
+scripts/cdp/*.png
