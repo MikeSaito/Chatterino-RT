@@ -303,6 +303,7 @@ body,
 }
 
 .channel-item {
+  position: relative;
   flex: 0 0 auto;
   min-width: 0;
   text-align: left;
@@ -315,11 +316,24 @@ body,
   height: 32px;
   line-height: 30px;
   color: var(--c-muted);
-  border-bottom: 2px solid transparent;
   transition:
     background-color var(--transition-fast),
-    border-color var(--transition-fast),
     color var(--transition-fast);
+}
+
+.channel-item::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c-accent);
+  transform: scaleX(0);
+  transform-origin: center bottom;
+  transition: transform var(--transition-fast) ease;
+  pointer-events: none;
 }
 
 .channel-item:hover:not(:disabled) {
@@ -329,9 +343,12 @@ body,
 
 .channel-item.is-active {
   background: var(--c-split-bg);
-  border-bottom-color: var(--c-accent);
   color: var(--c-window-text);
   font-weight: 600;
+}
+
+.channel-item.is-active::after {
+  transform: scaleX(1);
 }
 
 .channel-item.is-active:hover:not(:disabled) {
@@ -497,6 +514,7 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   margin: 0;
   padding: 2px 8px;
   font-size: var(--font-xs);
@@ -507,6 +525,36 @@ body,
   background: var(--c-danger);
   border-radius: 999px;
   line-height: 1.2;
+}
+
+#header-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #header-live::before {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 #header-live[hidden] {
@@ -531,6 +579,27 @@ body,
   flex-direction: column;
   gap: 2px;
   box-shadow: var(--shadow-2);
+  transform-origin: top right;
+  animation: menu-pop-in 100ms ease both;
+}
+
+@keyframes menu-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #header-menu,
+  #auth-menu,
+  #join-popover {
+    animation: none;
+  }
 }
 
 #header-menu[hidden] {
@@ -577,7 +646,7 @@ body,
   line-height: 1.3;
   pointer-events: none;
   box-shadow: var(--shadow-2);
-  animation: ui-tooltip-in 250ms ease both;
+  animation: ui-tooltip-in 120ms ease both;
   animation-delay: 250ms;
 }
 
@@ -775,6 +844,41 @@ body,
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
+  }
+}
+
+#search-modal.is-closing #search-dialog,
+#notes-modal.is-closing #notes-dialog,
+#usercard-modal.is-closing #usercard-dialog,
+#replythread-modal.is-closing #replythread-dialog,
+#emotepopup-modal.is-closing #emotepopup-dialog {
+  animation: none;
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity var(--transition-fast) ease,
+    transform var(--transition-fast) ease;
+}
+
+#search-modal.is-closing #search-backdrop,
+#notes-modal.is-closing #notes-backdrop,
+#replythread-modal.is-closing #replythread-backdrop,
+#emotepopup-modal.is-closing #emotepopup-backdrop {
+  opacity: 0;
+  transition: opacity var(--transition-fast) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #search-modal.is-closing #search-dialog,
+  #notes-modal.is-closing #notes-dialog,
+  #usercard-modal.is-closing #usercard-dialog,
+  #replythread-modal.is-closing #replythread-dialog,
+  #emotepopup-modal.is-closing #emotepopup-dialog,
+  #search-modal.is-closing #search-backdrop,
+  #notes-modal.is-closing #notes-backdrop,
+  #replythread-modal.is-closing #replythread-backdrop,
+  #emotepopup-modal.is-closing #emotepopup-backdrop {
+    transition: none;
   }
 }
 
@@ -1962,25 +2066,27 @@ button:disabled {
 
 #chat-scroll-thumb {
   position: absolute;
-  left: 2px;
-  width: 6px;
+  left: 0;
+  width: 10px;
   border-radius: 3px;
   background: var(--c-scroll-thumb);
   pointer-events: none;
   z-index: 1;
-  transition: width 120ms ease, left 120ms ease;
+  transform-origin: right center;
+  scale: 0.6 1;
+  transition: scale 120ms ease;
 }
 
 #chat-scroll:hover #chat-scroll-thumb,
 #chat-scroll:focus-visible #chat-scroll-thumb,
 #chat-scroll.is-dragging #chat-scroll-thumb {
-  width: 10px;
-  left: 0;
+  scale: 1 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
   #chat-scroll-thumb {
     transition: none;
+    scale: 1 1;
   }
 }
 
@@ -3339,6 +3445,8 @@ button:disabled {
   flex-direction: column;
   gap: 2px;
   box-shadow: var(--shadow-2);
+  transform-origin: top right;
+  animation: menu-pop-in 100ms ease both;
 }
 
 #auth-menu[hidden] {
@@ -3384,6 +3492,8 @@ button:disabled {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-2);
   min-width: 200px;
+  transform-origin: top left;
+  animation: menu-pop-in 100ms ease both;
 }
 
 #join-popover[hidden] {
@@ -3586,6 +3696,7 @@ button:disabled {
 }
 
 #app[data-ui-layout="classic"] .channel-item {
+  position: relative;
   border: 0;
   border-radius: 6px 6px 0 0;
   background: transparent;
@@ -3595,10 +3706,8 @@ button:disabled {
   height: 32px;
   line-height: 30px;
   color: var(--c-muted);
-  border-bottom: 2px solid transparent;
   transition:
     background-color var(--transition-fast),
-    border-color var(--transition-fast),
     color var(--transition-fast);
 }
 
@@ -3609,7 +3718,6 @@ button:disabled {
 
 #app[data-ui-layout="classic"] .channel-item.is-active {
   background: var(--c-split-bg);
-  border-bottom-color: var(--c-accent);
   color: var(--c-window-text);
   font-weight: 600;
 }

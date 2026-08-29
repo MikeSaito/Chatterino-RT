@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent, ViewerRole } from "../chat/types";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import {
+  closeModal,
+  closeModalImmediate,
+  prepareModalOpen,
+} from "./modalClose";
+import {
   moderationSlashCommand,
   type ModerationCommandKind,
   type TimeoutButton,
@@ -268,14 +273,14 @@ export function bindUserCard(opts: {
     if (notesBusy) {
       return;
     }
-    notesModal.hidden = true;
     if (notesEditor) {
       notesEditor.value = "";
     }
+    void closeModal(notesModal);
   };
 
   const forceCloseNotesDialog = (): void => {
-    notesModal.hidden = true;
+    closeModalImmediate(notesModal);
     if (notesEditor) {
       notesEditor.value = "";
     }
@@ -306,7 +311,7 @@ export function bindUserCard(opts: {
     notesTitle.textContent = `Editing notes for ${nameEl.textContent?.trim() || currentLogin || "user"}`;
     notesEditor.value = cachedNotes;
     paintNotesCounter();
-    notesModal.hidden = false;
+    prepareModalOpen(notesModal);
     notesEditor.focus();
   };
 
@@ -781,7 +786,7 @@ export function bindUserCard(opts: {
   };
 
   const close = (): void => {
-    modal.hidden = true;
+    void closeModal(modal);
     currentLogin = "";
     currentUserId = "";
     pinned = false;
@@ -820,7 +825,7 @@ export function bindUserCard(opts: {
   };
 
   const placeNear = (clientX: number, clientY: number): void => {
-    modal.hidden = false;
+    prepareModalOpen(modal);
     const pad = 8;
     const w = dialog.offsetWidth || 360;
     const h = dialog.offsetHeight || 420;

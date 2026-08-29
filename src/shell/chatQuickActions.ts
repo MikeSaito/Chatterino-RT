@@ -36,6 +36,8 @@ export function bindChatQuickActions(opts: {
   setButtonIcon(copyBtn, "copy", { size: 14, label: "Копировать" });
   setButtonIcon(moreBtn, "more", { size: 14, label: "Ещё" });
 
+  let hideTimer = 0;
+
   const hide = (): void => {
     if (hoverRaf !== 0) {
       cancelAnimationFrame(hoverRaf);
@@ -45,8 +47,21 @@ export function bindChatQuickActions(opts: {
       return;
     }
     hover = null;
-    bar.hidden = true;
     bar.classList.remove("is-visible");
+    window.clearTimeout(hideTimer);
+    const reduced =
+      typeof matchMedia === "function" &&
+      matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      bar.hidden = true;
+      return;
+    }
+    hideTimer = window.setTimeout(() => {
+      hideTimer = 0;
+      if (!bar.classList.contains("is-visible")) {
+        bar.hidden = true;
+      }
+    }, 100);
   };
 
   const paint = (clientX: number, clientY: number): void => {
@@ -68,6 +83,8 @@ export function bindChatQuickActions(opts: {
     };
     replyBtn.hidden = !anchor.canReply;
     const hostRect = host.getBoundingClientRect();
+    window.clearTimeout(hideTimer);
+    hideTimer = 0;
     bar.hidden = false;
     bar.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
     bar.style.right = "28px";
@@ -162,6 +179,8 @@ export function bindChatQuickActions(opts: {
 
   return {
     hide: () => {
+      window.clearTimeout(hideTimer);
+      hideTimer = 0;
       pinned = false;
       overBar = false;
       hover = null;

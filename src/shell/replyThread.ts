@@ -3,6 +3,7 @@ import type { ChatEvent } from "../chat/types";
 import { formatTime } from "../chat/ring";
 import { collectReplyThread, isInReplyThread } from "./replyRoot";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
+import { closeModal, prepareModalOpen } from "./modalClose";
 
 type Priv = Extract<ChatEvent, { kind: "privmsg" }>;
 
@@ -222,7 +223,7 @@ export function bindReplyThread(opts: {
   };
 
   const close = (): void => {
-    modal.hidden = true;
+    void closeModal(modal);
     current = null;
     openChannel = "";
     replyTarget = null;
@@ -269,7 +270,7 @@ export function bindReplyThread(opts: {
     }
     paintHeader(info, channel);
     input.value = "";
-    modal.hidden = false;
+    prepareModalOpen(modal);
     syncComposer();
     syncPinVisibility();
   };

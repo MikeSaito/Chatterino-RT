@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { iconEl } from "./icons";
 import type { MessageRing } from "../chat/ring";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
+import { closeModal, prepareModalOpen } from "./modalClose";
 
 /** Hit row for SearchPopup-like list (Chatterino ChannelView filter). */
 export type SearchHit = {
@@ -200,8 +201,6 @@ export function bindSearchPopup(opts: {
   const close = (): void => {
     window.clearTimeout(timer);
     seq += 1;
-    modal.hidden = true;
-    setAppInert(false);
     hits = [];
     activeId = "";
     hasQuery = false;
@@ -212,9 +211,16 @@ export function bindSearchPopup(opts: {
     ring.clearFindHit();
     const focusBack = restoreFocus;
     restoreFocus = null;
-    if (focusBack && document.contains(focusBack)) {
-      focusBack.focus();
-    }
+    const closeToken = seq;
+    void closeModal(modal).then(() => {
+      if (closeToken !== seq || !modal.hidden) {
+        return;
+      }
+      setAppInert(false);
+      if (focusBack && document.contains(focusBack)) {
+        focusBack.focus();
+      }
+    });
   };
 
   const open = (): void => {
@@ -222,7 +228,7 @@ export function bindSearchPopup(opts: {
       return;
     }
     onOpen?.();
-    if (!modal.hidden) {
+    if (!modal.hidden && !modal.classList.contains("is-closing")) {
       input.focus();
       input.select();
       return;
@@ -231,7 +237,7 @@ export function bindSearchPopup(opts: {
     restoreFocus =
       active instanceof HTMLElement && active !== document.body ? active : null;
     paintTitle();
-    modal.hidden = false;
+    prepareModalOpen(modal);
     setAppInert(true);
     syncClear();
     input.focus();

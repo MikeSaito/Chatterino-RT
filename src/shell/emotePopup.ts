@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
+import { closeModal, prepareModalOpen } from "./modalClose";
 
 type EmotePopupTab = "favourite" | "subs" | "channel" | "global" | "emojis";
 
@@ -90,7 +91,7 @@ export function bindEmotePopup(opts: {
   const close = (): void => {
     window.clearTimeout(timer);
     seq += 1;
-    modal.hidden = true;
+    void closeModal(modal);
     anchor.setAttribute("aria-expanded", "false");
     search.value = "";
     view.replaceChildren();
@@ -102,7 +103,7 @@ export function bindEmotePopup(opts: {
     }
     const channel = activeChannel()?.trim() || "";
     title.textContent = channel ? `Emotes in #${channel}` : "Emotes";
-    modal.hidden = false;
+    prepareModalOpen(modal);
     anchor.setAttribute("aria-expanded", "true");
     positionNearAnchor();
     search.focus();
@@ -114,7 +115,7 @@ export function bindEmotePopup(opts: {
   };
 
   const toggle = (): void => {
-    if (modal.hidden) {
+    if (modal.hidden || modal.classList.contains("is-closing")) {
       open();
     } else {
       close();
