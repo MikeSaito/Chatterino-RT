@@ -2571,6 +2571,7 @@ mod tests {
             system_text: system.into(),
             login: Some(login.into()),
             msg_id: None,
+            params: None,
             privmsg: None,
             highlight_color: None,
             highlight_sound: false,

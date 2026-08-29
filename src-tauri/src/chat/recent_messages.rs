@@ -257,6 +257,8 @@ fn history_notice(text: &str) -> ChatEvent {
         id: format!("hist-{ts}-{seq}"),
         timestamp_ms: ts,
         text: text.to_string(),
+        msg_id: None,
+        timeout_remaining_sec: None,
     }
 }
 

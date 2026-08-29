@@ -25,6 +25,33 @@ export type MentionSpan = {
   login: string;
 };
 
+/** Parsed USERNOTICE msg-param-* (from Rust). */
+export type UsernoticeParams = {
+  displayName?: string;
+  login?: string;
+  userId?: string;
+  color?: string;
+  plan?: string;
+  months?: number;
+  cumulativeMonths?: number;
+  multimonthDuration?: number;
+  multimonthTenure?: number;
+  giftMonths?: number;
+  senderCount?: number;
+  massGiftCount?: number;
+  recipientLogin?: string;
+  recipientDisplayName?: string;
+  recipientId?: string;
+  viewerCount?: number;
+  raidLogin?: string;
+  raidDisplayName?: string;
+  bitsThreshold?: number;
+  ritualName?: string;
+  category?: string;
+  value?: number;
+  anon?: boolean;
+};
+
 export type NickPaintStop = {
   at: number;
   color: number;
@@ -108,6 +135,7 @@ export type ChatEvent =
       systemText: string;
       login?: string;
       msgId?: string;
+      params?: UsernoticeParams;
       privmsg?: ChatEvent;
       highlightColor?: string;
       highlightSound?: boolean;
@@ -135,6 +163,8 @@ export type ChatEvent =
       id: string;
       timestampMs: number;
       text: string;
+      msgId?: string;
+      timeoutRemainingSec?: number;
     };
 
 export type ChatBatch = {

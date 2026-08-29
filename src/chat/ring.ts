@@ -22,16 +22,26 @@ import {
 } from "../constants";
 import type { ModActionBtn } from "../shell/modActions";
 import { modActionLabel } from "../shell/modActions";
-import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan, NickPaint } from "./types";
+import type {
+  Badge,
+  ChatEvent,
+  EmoteSpan,
+  LinkSpan,
+  MentionSpan,
+  NickPaint,
+  UsernoticeParams,
+} from "./types";
 import {
   paintCacheKey,
   paintRepresentativeRgb,
   rasterizeNickPaint,
 } from "./nickPaint";
 import {
-  clearchatText,
+  clearchatFormatted,
   deletionNoticeText,
   formatReplyHeader,
+  noticeFormatted,
+  usernoticeFormatted,
   whisperPrefix,
 } from "./chatSystemText";
 import { t } from "../i18n/index.ts";
@@ -204,12 +214,21 @@ type Slot = {
   isWhisper: boolean;
   /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
   leadLen: number;
-  /** Rebuild CLEARCHAT/CLEARMSG body on locale change. */
-  systemTextKind: "" | "clearchat" | "clearmsg";
+  /** Rebuild CLEARCHAT/CLEARMSG/USERNOTICE/NOTICE body on locale change. */
+  systemTextKind: "" | "clearchat" | "clearmsg" | "usernotice" | "notice";
   clearLogin: string;
   clearDurationSec: number | undefined;
   clearStackCount: number;
   clearmsgBody: string;
+  usernoticeMsgId: string;
+  usernoticeSystemText: string;
+  usernoticeLogin: string;
+  usernoticeParams: UsernoticeParams | null;
+  /** Attached USERNOTICE privmsg body (action prefix included); survives locale switch. */
+  usernoticeInnerBody: string;
+  noticeMsgId: string;
+  noticeFallback: string;
+  noticeTimeoutSec: number | undefined;
 };
 
 type Drawn = {
@@ -975,13 +994,14 @@ export class MessageRing {
         continue;
       }
       if (slot.systemTextKind === "clearchat") {
-        const text = clearchatText(
+        const fmt = clearchatFormatted(
           slot.clearLogin || undefined,
           slot.clearDurationSec,
           slot.clearStackCount > 0 ? slot.clearStackCount : undefined,
         );
-        slot.bodySource = text;
-        slot.copyText = text;
+        slot.bodySource = fmt.text;
+        slot.copyText = fmt.text;
+        slot.mentionSpans = fmt.mentions;
         slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
         slot.leadLen = 0;
       } else if (slot.systemTextKind === "clearmsg") {
@@ -992,6 +1012,44 @@ export class MessageRing {
         );
         slot.bodySource = text;
         slot.copyText = text;
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+        slot.leadLen = 0;
+      } else if (slot.systemTextKind === "usernotice") {
+        const fmt = usernoticeFormatted({
+          systemText: slot.usernoticeSystemText,
+          login: slot.usernoticeLogin || undefined,
+          msgId: slot.usernoticeMsgId || undefined,
+          params: slot.usernoticeParams ?? undefined,
+        });
+        const oldLead = slot.leadLen;
+        const inner = slot.usernoticeInnerBody;
+        const sep = fmt.text.length > 0 && inner.length > 0 ? " " : "";
+        const newLead = fmt.text.length + (inner.length > 0 ? sep.length : 0);
+        const shift = newLead - oldLead;
+        const innerMentions = slot.mentionSpans.filter((m) => m.start >= oldLead);
+        slot.bodySource = `${fmt.text}${sep}${inner}`;
+        if (inner.length === 0) {
+          slot.copyText = fmt.text;
+        }
+        if (shift !== 0) {
+          slot.spansRaw = shiftSpans(slot.spansRaw, shift);
+          slot.linkSpans = shiftSpans(slot.linkSpans, shift);
+        }
+        slot.mentionSpans = [
+          ...fmt.mentions,
+          ...shiftSpans(innerMentions, shift),
+        ];
+        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+        slot.leadLen = newLead;
+      } else if (slot.systemTextKind === "notice") {
+        const fmt = noticeFormatted({
+          text: slot.noticeFallback,
+          msgId: slot.noticeMsgId || undefined,
+          timeoutRemainingSec: slot.noticeTimeoutSec,
+        });
+        slot.bodySource = fmt.text;
+        slot.copyText = fmt.text;
+        slot.mentionSpans = fmt.mentions;
         slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
         slot.leadLen = 0;
       } else if (slot.isWhisper) {
@@ -1760,6 +1818,14 @@ export class MessageRing {
         clearDurationSec: undefined,
         clearStackCount: 0,
         clearmsgBody: "",
+        usernoticeMsgId: "",
+        usernoticeSystemText: "",
+        usernoticeLogin: "",
+        usernoticeParams: null,
+        usernoticeInnerBody: "",
+        noticeMsgId: "",
+        noticeFallback: "",
+        noticeTimeoutSec: undefined,
       };
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
@@ -2117,6 +2183,14 @@ export class MessageRing {
     slot.clearDurationSec = undefined;
     slot.clearStackCount = 0;
     slot.clearmsgBody = "";
+    slot.usernoticeMsgId = "";
+    slot.usernoticeSystemText = "";
+    slot.usernoticeLogin = "";
+    slot.usernoticeParams = null;
+    slot.usernoticeInnerBody = "";
+    slot.noticeMsgId = "";
+    slot.noticeFallback = "";
+    slot.noticeTimeoutSec = undefined;
     slot.replyHeader.visible = false;
     slot.replyHeader.text = "";
     slot.highlight.clear();
@@ -2240,11 +2314,34 @@ export class MessageRing {
     slot.clearDurationSec = undefined;
     slot.clearStackCount = 0;
     slot.clearmsgBody = "";
+    slot.usernoticeMsgId = "";
+    slot.usernoticeSystemText = "";
+    slot.usernoticeLogin = "";
+    slot.usernoticeParams = null;
+    slot.usernoticeInnerBody = "";
+    slot.noticeMsgId = "";
+    slot.noticeFallback = "";
+    slot.noticeTimeoutSec = undefined;
     if (event.kind === "clearchat") {
       slot.systemTextKind = "clearchat";
       slot.clearLogin = event.targetLogin ?? "";
       slot.clearDurationSec = event.durationSec;
       slot.clearStackCount = event.stackCount ?? 1;
+    } else if (event.kind === "usernotice") {
+      slot.systemTextKind = "usernotice";
+      slot.usernoticeMsgId = event.msgId ?? "";
+      slot.usernoticeSystemText = event.systemText;
+      slot.usernoticeLogin = event.login ?? "";
+      slot.usernoticeParams = event.params ?? null;
+      if (event.privmsg && event.privmsg.kind === "privmsg") {
+        const actionP = event.privmsg.action ? "* " : "";
+        slot.usernoticeInnerBody = `${actionP}${event.privmsg.text}`;
+      }
+    } else if (event.kind === "notice") {
+      slot.systemTextKind = "notice";
+      slot.noticeMsgId = event.msgId ?? "";
+      slot.noticeFallback = event.text;
+      slot.noticeTimeoutSec = event.timeoutRemainingSec;
     }
     const msgId = slot.msgId;
     for (const spr of slot.emotes) {
@@ -2340,13 +2437,19 @@ export class MessageRing {
         };
       }
       case "usernotice": {
-        let body = event.systemText;
+        const sys = usernoticeFormatted({
+          systemText: event.systemText,
+          login: event.login,
+          msgId: event.msgId,
+          params: event.params,
+        });
+        let body = sys.text;
         let spans: EmoteSpan[] = [];
         let links: LinkSpan[] = [];
-        let mentions: MentionSpan[] = [];
+        let mentions: MentionSpan[] = sys.mentions.slice();
         let badges: Badge[] = [];
         let highlightColor = "";
-        let copyText = event.systemText;
+        let copyText = sys.text;
         let leadLen = 0;
         if (event.privmsg && event.privmsg.kind === "privmsg") {
           const inner = event.privmsg;
@@ -2361,7 +2464,10 @@ export class MessageRing {
           copyText = inner.text;
           spans = shiftSpans(inner.emoteSpans ?? [], shift);
           links = shiftSpans(inner.linkSpans ?? [], shift);
-          mentions = shiftSpans(inner.mentionSpans ?? [], shift);
+          mentions = [
+            ...mentions,
+            ...shiftSpans(inner.mentionSpans ?? [], shift),
+          ];
           badges = badgesWithUrl(inner.badges ?? []);
           highlightColor = inner.highlightColor ?? event.highlightColor ?? "";
         } else {
@@ -2381,20 +2487,26 @@ export class MessageRing {
           highlightColor,
         };
       }
-      case "clearchat":
+      case "clearchat": {
+        const fmt = clearchatFormatted(
+          event.targetLogin,
+          event.durationSec,
+          event.stackCount,
+        );
         return {
           time,
           nick: "*",
           nickColor: this.themeFills.nickFallback,
-          body: clearchatText(event.targetLogin, event.durationSec, event.stackCount),
-          copyText: clearchatText(event.targetLogin, event.durationSec, event.stackCount),
+          body: fmt.text,
+          copyText: fmt.text,
           leadLen: 0,
           spans: [],
           links: [],
-          mentions: [],
+          mentions: fmt.mentions,
           badges: [],
           highlightColor: "",
         };
+      }
       case "roomstate":
       case "userstate":
         return {
@@ -2410,20 +2522,26 @@ export class MessageRing {
           badges: [],
           highlightColor: "",
         };
-      case "notice":
+      case "notice": {
+        const fmt = noticeFormatted({
+          text: event.text,
+          msgId: event.msgId,
+          timeoutRemainingSec: event.timeoutRemainingSec,
+        });
         return {
           time,
           nick: "*",
           nickColor: this.themeFills.nickFallback,
-          body: event.text,
-          copyText: event.text,
+          body: fmt.text,
+          copyText: fmt.text,
           leadLen: 0,
           spans: [],
           links: [],
-          mentions: [],
+          mentions: fmt.mentions,
           badges: [],
           highlightColor: "",
         };
+      }
       default:
         return {
           time,

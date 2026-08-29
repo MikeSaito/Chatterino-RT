@@ -219,6 +219,10 @@ mod tests {
             id: id.to_string(),
             timestamp_ms: 1,
             text: text.to_string(),
+
+        msg_id: None,
+
+        timeout_remaining_sec: None,
         }
     }
 
@@ -227,6 +231,10 @@ mod tests {
             id: id.to_string(),
             timestamp_ms: ts,
             text: id.to_string(),
+
+        msg_id: None,
+
+        timeout_remaining_sec: None,
         }
     }
 
@@ -453,6 +461,7 @@ mod tests {
                 system_text: "ann subscribed".into(),
                 login: Some("ann".into()),
                 msg_id: None,
+                params: None,
                 privmsg: Some(Box::new(privmsg("inner-body", "ann", "hello sub"))),
                 highlight_color: None,
                 highlight_sound: false,

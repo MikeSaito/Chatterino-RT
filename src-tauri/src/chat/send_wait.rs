@@ -177,8 +177,16 @@ pub fn apply_event(
                 }
             }
         }
-        ChatEvent::Notice { id, text, .. } => {
-            if let Some(secs) = seconds_from_notice(id, text) {
+        ChatEvent::Notice {
+            msg_id,
+            text,
+            timeout_remaining_sec,
+            ..
+        } => {
+            let secs = timeout_remaining_sec.or_else(|| {
+                seconds_from_notice(msg_id.as_deref().unwrap_or(""), text)
+            });
+            if let Some(secs) = secs {
                 if secs > 0 {
                     wait.set(secs);
                 }

@@ -57,11 +57,27 @@ export const ru: Record<MessageKey, string> = {
   "chat.jumpBottom.pending": "Вниз, {count} новых",
   "chat.jumpBottom.pendingMax": "Вниз, 99+ новых",
   "chat.clearchat.room": "чат очищен",
-  "chat.clearchat.timeout": "{login} тайм-аут {seconds}с",
+  "chat.clearchat.timeout": "{login} тайм-аут {duration}",
   "chat.clearchat.ban": "{login} забанен",
   "chat.clearchat.stack": " ({count} раз)",
   "chat.clearmsg.deleted": "Сообщение от {login} удалено: {body}",
   "chat.whisper.prefix": "Шёпот: ",
+  "chat.notice.timedOut": "Ваш тайм-аут: {duration}.",
+  "chat.usernotice.announcement": "Объявление",
+  "chat.usernotice.anonymousGifter": "Анонимный пользователь",
+  "chat.usernotice.bitsBadge": "{name} получил новый значок Bits {threshold}!",
+  "chat.usernotice.subMultimonth":
+    "{name} оформил подписку Tier {tier} на {months} мес. вперёд!",
+  "chat.usernotice.resubMultimonth":
+    "{name} оформил подписку Tier {tier} на {months} мес. вперёд, всего {cumulative} мес.!",
+  "chat.usernotice.subgiftMonths":
+    "{gifter} подарил {months} мес. подписки Tier {tier} пользователю {recipient}!",
+  "chat.usernotice.subgiftSenderTotal":
+    " Всего подарено {count} мес. на канале.",
+  "chat.usernotice.submystery":
+    "{gifter} дарит сообществу {count} подписок Tier {tier}!",
+  "chat.usernotice.raid":
+    "{name} устраивает рейд с {viewers} зрителями!",
   "chat.reply.header": "Ответ @{name}: {snip}",
   "chat.reply.headerEmpty": "Ответ @{name}",
   "chat.reply.unknown": "неизвестно",

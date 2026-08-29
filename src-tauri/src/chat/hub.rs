@@ -365,6 +365,10 @@ mod tests {
             id: id.to_string(),
             timestamp_ms: 1,
             text: id.to_string(),
+
+        msg_id: None,
+
+        timeout_remaining_sec: None,
         }
     }
 

@@ -523,6 +523,7 @@ mod tests {
             system_text: "alice subscribed".into(),
             login: Some("alice".into()),
             msg_id: Some("resub".into()),
+            params: None,
             privmsg: Some(Box::new(privmsg("alice", "hello world!", 2))),
             highlight_color: None,
             highlight_sound: true,

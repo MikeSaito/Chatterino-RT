@@ -62,6 +62,7 @@ pub mod state;
 pub mod streamer_mode;
 pub mod streamlink;
 pub mod timeout_stack;
+pub mod usernotice;
 pub mod toast_shortcut;
 pub mod twitch_blocks;
 pub mod types;

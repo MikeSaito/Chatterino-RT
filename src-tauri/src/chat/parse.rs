@@ -224,8 +224,18 @@ fn parse_usernotice(
     now_ms: u64,
 ) -> ParsedLine {
     let channel = channel_from_params(params);
-    let system_text = tags.get("system-msg").unwrap_or_default();
+    let raw_system = tags.get("system-msg").unwrap_or_default();
     let login = tags.get("login");
+    let msg_id = tags.get("msg-id").filter(|s| !s.is_empty());
+    let notice_params = {
+        let get = |k: &str| tags.get(k);
+        super::usernotice::parse_usernotice_params(&get, msg_id.as_deref())
+    };
+    let system_text = super::usernotice::format_usernotice_system_en(
+        msg_id.as_deref(),
+        notice_params.as_ref(),
+        &raw_system,
+    );
     let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
         let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
         let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
@@ -280,7 +290,8 @@ fn parse_usernotice(
             timestamp_ms: tags.timestamp(now_ms),
             system_text,
             login,
-            msg_id: tags.get("msg-id").filter(|s| !s.is_empty()),
+            msg_id,
+            params: notice_params,
             privmsg: attached,
             highlight_color: None,
             highlight_sound: false,
@@ -363,15 +374,30 @@ fn parse_membership(part: bool, prefix: Option<&str>, params: &[String]) -> Pars
 
 fn parse_notice(tags: &Tags, params: &[String], trailing: Option<&str>, now_ms: u64) -> ParsedLine {
     let channel = channel_from_params(params);
-    let text = trailing.unwrap_or("").to_string();
+    let raw_text = trailing.unwrap_or("").to_string();
+    let msg_id = tags.get("msg-id").filter(|s| !s.is_empty());
+    let timeout_remaining_sec = msg_id
+        .as_deref()
+        .filter(|id| id.eq_ignore_ascii_case("msg_timedout"))
+        .and_then(|_| super::usernotice::parse_notice_timeout_remaining(&raw_text));
+    let text = if let Some(sec) = timeout_remaining_sec {
+        format!(
+            "You are timed out for {}.",
+            super::usernotice::format_duration_en(u64::from(sec), 4)
+        )
+    } else {
+        raw_text
+    };
     ParsedLine::Event {
         room_id: None,
         event: ChatEvent::Notice {
             id: tags
-                .get("msg-id")
+                .get("id")
                 .unwrap_or_else(|| synthetic_id("n", now_ms, &text)),
             timestamp_ms: now_ms,
             text,
+            msg_id,
+            timeout_remaining_sec,
         },
         channel,
     }
@@ -1039,6 +1065,49 @@ mod tests {
                 ..
             } => {
                 assert_eq!(msg_id.as_deref(), Some("resub"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_usernotice_subgift_params() {
+        let line = "@badge-info=;badges=;color=#FFF;display-name=Gifter;emotes=;id=u2;login=gifter;msg-id=subgift;msg-param-gift-months=3;msg-param-months=3;msg-param-recipient-display-name=Bob;msg-param-recipient-id=2;msg-param-recipient-user-name=bob;msg-param-sender-count=10;msg-param-sub-plan=1000;room-id=1;subscriber=1;system-msg=Gifter\\sgifted;tmi-sent-ts=10;user-id=1;user-type= :tmi.twitch.tv USERNOTICE #xqc";
+        match parse_line(line, 3) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Usernotice {
+                        msg_id,
+                        params: Some(p),
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(msg_id.as_deref(), Some("subgift"));
+                assert_eq!(p.gift_months, Some(3));
+                assert_eq!(p.recipient_login.as_deref(), Some("bob"));
+                assert_eq!(p.plan.as_deref(), Some("1000"));
+                assert!(!p.anon);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_notice_msg_timedout() {
+        let line = "@msg-id=msg_timedout :tmi.twitch.tv NOTICE #xqc :You are timed out for 600 more seconds.";
+        match parse_line(line, 4) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Notice {
+                        msg_id,
+                        timeout_remaining_sec,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(msg_id.as_deref(), Some("msg_timedout"));
+                assert_eq!(timeout_remaining_sec, Some(600));
             }
             other => panic!("{other:?}"),
         }

@@ -712,15 +712,16 @@ fn dispatch_line(
                 }
             }
             let mut failed: Option<String> = None;
-            if let ChatEvent::Notice { id, text, .. } = &event {
-                if is_login_failure(&channel, id, text) {
+            if let ChatEvent::Notice { msg_id, text, .. } = &event {
+                let mid = msg_id.as_deref().unwrap_or("");
+                if is_login_failure(&channel, mid, text) {
                     let app2 = app.clone();
                     let shared2 = shared.clone();
                     tauri::async_runtime::spawn(async move {
                         auth::reject_session(app2, shared2, "IRC login rejected").await;
                     });
                 }
-                if wanted.contains(&channel) && is_join_failure(id) {
+                if wanted.contains(&channel) && is_join_failure(mid) {
                     emit_status(app, ChatConnState::Error, Some(&channel), Some(text));
                     if let Ok(mut hub) = shared.hub.lock() {
                         hub.set_joined(&channel, false);

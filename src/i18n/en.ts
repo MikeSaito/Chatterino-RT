@@ -55,11 +55,27 @@ export const en = {
   "chat.jumpBottom.pending": "Bottom, {count} new",
   "chat.jumpBottom.pendingMax": "Bottom, 99+ new",
   "chat.clearchat.room": "Chat cleared",
-  "chat.clearchat.timeout": "{login} timed out for {seconds}s",
+  "chat.clearchat.timeout": "{login} timed out for {duration}",
   "chat.clearchat.ban": "{login} was banned",
   "chat.clearchat.stack": " ({count} times)",
   "chat.clearmsg.deleted": "A message from {login} was deleted: {body}",
   "chat.whisper.prefix": "Whisper: ",
+  "chat.notice.timedOut": "You are timed out for {duration}.",
+  "chat.usernotice.announcement": "Announcement",
+  "chat.usernotice.anonymousGifter": "An anonymous user",
+  "chat.usernotice.bitsBadge": "{name} just earned a new {threshold} Bits badge!",
+  "chat.usernotice.subMultimonth":
+    "{name} subscribed at Tier {tier} for {months} months in advance!",
+  "chat.usernotice.resubMultimonth":
+    "{name} subscribed at Tier {tier} for {months} months in advance, reaching {cumulative} months cumulatively so far!",
+  "chat.usernotice.subgiftMonths":
+    "{gifter} gifted {months} months of a Tier {tier} sub to {recipient}!",
+  "chat.usernotice.subgiftSenderTotal":
+    " They've gifted {count} months in the channel.",
+  "chat.usernotice.submystery":
+    "{gifter} is gifting {count} Tier {tier} Subs to the community!",
+  "chat.usernotice.raid":
+    "{name} is raiding with a party of {viewers}!",
   "chat.reply.header": "Replying to @{name}: {snip}",
   "chat.reply.headerEmpty": "Replying to @{name}",
   "chat.reply.unknown": "unknown",

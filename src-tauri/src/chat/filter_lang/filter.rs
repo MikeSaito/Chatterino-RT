@@ -165,6 +165,7 @@ mod tests {
             system_text: "subscribed".into(),
             login: Some("streamer".into()),
             msg_id: Some("sub".into()),
+            params: None,
             privmsg: None,
             highlight_color: None,
             highlight_sound: false,

@@ -720,7 +720,7 @@ mod tests {
             stack_count: 1,
         };
         let line = format_log_line(&ev, &cfg).unwrap();
-        assert_eq!(line, "bob timed out for 60s");
+        assert_eq!(line, "bob timed out for 1m");
     }
 
     #[test]

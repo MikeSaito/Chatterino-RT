@@ -156,6 +156,57 @@ pub struct NickPaint {
     pub shadow: Option<NickPaintShadow>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsernoticeParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub months: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cumulative_months: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multimonth_duration: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multimonth_tenure: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gift_months: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_gift_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_login: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_login: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits_threshold: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ritual_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anon: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChatEvent {
@@ -249,6 +300,9 @@ pub enum ChatEvent {
         /// IRC `msg-id` (sub / resub / subgift / …).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         msg_id: Option<String>,
+        /// Parsed `msg-param-*` for localized system lines.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<UsernoticeParams>,
         #[serde(skip_serializing_if = "Option::is_none")]
         privmsg: Option<Box<ChatEvent>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -295,6 +349,12 @@ pub enum ChatEvent {
         id: String,
         timestamp_ms: u64,
         text: String,
+        /// IRC `msg-id` (e.g. `msg_timedout`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        msg_id: Option<String>,
+        /// Remaining timeout seconds when `msg_id` is `msg_timedout`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_remaining_sec: Option<u32>,
     },
 }
 

@@ -452,6 +452,8 @@ impl Shared {
             id: format!("mb-{ts}-{seq}-{}", text.len()),
             timestamp_ms: ts,
             text,
+            msg_id: None,
+            timeout_remaining_sec: None,
         };
         let self_login = auth::resolved_login_token(self).map(|(l, _)| l);
         let sim = super::similarity::cfg_from_shared(self);

@@ -79,6 +79,10 @@ mod tests {
                     id: "n".into(),
                     timestamp_ms: 12,
                     text: "ok".into(),
+
+                msg_id: None,
+
+                timeout_remaining_sec: None,
                 },
             ],
         }

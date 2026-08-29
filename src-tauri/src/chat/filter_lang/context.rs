@@ -42,8 +42,8 @@ pub fn resolve_identifier(name: &str, ctx: &RunContext<'_>) -> FilterValue {
         "flags.monitored" => FilterValue::Bool(false),
         "flags.shared" => FilterValue::Bool(flag_shared(ctx.event)),
         "flags.similar" => FilterValue::Bool(flag_similar(ctx.event)),
-        "flags.watch_streak" => FilterValue::Bool(false),
-        "flags.announcement" => FilterValue::Bool(false),
+        "flags.watch_streak" => FilterValue::Bool(flag_watch_streak(ctx.event)),
+        "flags.announcement" => FilterValue::Bool(flag_announcement(ctx.event)),
         "message.content" => FilterValue::String(message_content(ctx.event)),
         "message.length" => FilterValue::Int(message_length(ctx.event)),
         "reward.cost" => FilterValue::Int(-1),
@@ -192,6 +192,24 @@ fn flag_sub_message(event: &ChatEvent) -> bool {
                 || id.eq_ignore_ascii_case("resub")
                 || id.eq_ignore_ascii_case("subgift")
                 || id.eq_ignore_ascii_case("anonsubgift")
+        }),
+        _ => false,
+    }
+}
+
+fn flag_announcement(event: &ChatEvent) -> bool {
+    match event {
+        ChatEvent::Usernotice { msg_id, .. } => msg_id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case("announcement")),
+        _ => false,
+    }
+}
+
+fn flag_watch_streak(event: &ChatEvent) -> bool {
+    match event {
+        ChatEvent::Usernotice { msg_id, .. } => msg_id.as_deref().is_some_and(|id| {
+            id.eq_ignore_ascii_case("viewermilestone") || id.eq_ignore_ascii_case("modiversary")
         }),
         _ => false,
     }

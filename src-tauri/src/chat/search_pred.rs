@@ -486,9 +486,7 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
             f.subscription = is_subscription_msg_id(msg_id.as_deref());
             f.highlighted = highlight_color.is_some() || *highlight_sound || *highlight_flash;
             if let Some(id) = msg_id.as_deref() {
-                if id.eq_ignore_ascii_case("announcement")
-                    || id.to_ascii_lowercase().starts_with("announcement")
-                {
+                if id.eq_ignore_ascii_case("announcement") {
                     f.announcement = true;
                 }
             }
@@ -780,6 +778,10 @@ mod tests {
             id: "n".into(),
             timestamp_ms: 1,
             text: "room".into(),
+
+        msg_id: None,
+
+        timeout_remaining_sec: None,
         };
         assert!(applies_all(
             &parse_predicates("is:system"),
@@ -817,6 +819,7 @@ mod tests {
             system_text: "ann subscribed".into(),
             login: Some("ann".into()),
             msg_id: Some("sub".into()),
+            params: None,
             privmsg: None,
             highlight_color: None,
             highlight_sound: false,
@@ -829,6 +832,7 @@ mod tests {
             system_text: "raid".into(),
             login: Some("ann".into()),
             msg_id: Some("raid".into()),
+            params: None,
             privmsg: None,
             highlight_color: None,
             highlight_sound: false,
@@ -876,6 +880,7 @@ mod tests {
             system_text: "streak".into(),
             login: Some("ann".into()),
             msg_id: Some("modiversary".into()),
+            params: None,
             privmsg: None,
             highlight_color: None,
             highlight_sound: false,
