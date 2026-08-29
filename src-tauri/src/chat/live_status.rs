@@ -31,10 +31,6 @@ async fn run_poller(app: AppHandle, shared: Shared) {
         if LIVE_SHUTDOWN.load(Ordering::SeqCst) {
             break;
         }
-        tokio::time::sleep(ACTIVE_TICK).await;
-        if LIVE_SHUTDOWN.load(Ordering::SeqCst) {
-            break;
-        }
         let active = shared.hub.lock().ok().and_then(|hub| hub.active.clone());
         let changed = active != last_active;
         if changed {
@@ -42,14 +38,18 @@ async fn run_poller(app: AppHandle, shared: Shared) {
             ticks = 0;
         }
         ticks = ticks.saturating_add(1);
+        // Poll on channel switch / first tick immediately — sleep is after the request
+        // so the player UI is not blocked ~1s waiting for Helix before live hint.
         let should_poll = changed || ticks == 1 || ticks % 30 == 0;
-        if !should_poll {
-            continue;
+        if should_poll {
+            if let Some(channel) = active {
+                poll_channel(&app, &shared, &channel).await;
+            }
         }
-        let Some(channel) = active else {
-            continue;
-        };
-        poll_channel(&app, &shared, &channel).await;
+        if LIVE_SHUTDOWN.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(ACTIVE_TICK).await;
     }
 }
 
@@ -118,9 +118,9 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
         status.stream_title.as_deref(),
     );
     let payload = channel_live_payload(channel, &status);
-    if status.live || live_changed {
-        let _ = app.emit("chat:channel_live", payload);
-    }
+    // Always push status so UI can tear down embed on first offline poll
+    // (set_channel_live(false) is a no-op when the buffer already defaults to offline).
+    let _ = app.emit("chat:channel_live", payload);
 }
 
 fn show_title_in_live_message(shared: &Shared) -> bool {

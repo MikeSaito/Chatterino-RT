@@ -1969,7 +1969,6 @@ button:disabled {
   color: var(--c-muted);
   text-align: center;
   opacity: 1;
-  transition: opacity 200ms ease;
   pointer-events: auto;
 }
 
@@ -1980,12 +1979,6 @@ button:disabled {
 
 #player-placeholder.is-error {
   pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #player-placeholder {
-    transition: none;
-  }
 }
 
 #player-placeholder-icon {

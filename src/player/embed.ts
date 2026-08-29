@@ -107,13 +107,9 @@ function ensurePlaceholder(host: HTMLElement): HTMLElement {
   return ph;
 }
 
-function hidePlaceholder(host: HTMLElement): void {
-  const ph = host.querySelector<HTMLElement>("#player-placeholder");
-  if (!ph) {
-    return;
-  }
-  ph.hidden = true;
-  ph.setAttribute("aria-hidden", "true");
+/** Drop placeholder entirely so it cannot occlude the Twitch iframe. */
+function detachPlaceholder(host: HTMLElement): void {
+  host.querySelector("#player-placeholder")?.remove();
 }
 
 function removeFrame(): void {
@@ -129,6 +125,13 @@ function paintOverlay(): void {
   if (!activeHost) {
     return;
   }
+  // Never recreate #player-placeholder while the iframe is up: ensurePlaceholder
+  // would append an opaque z-index:2 layer and fail Twitch autoplay (style visibility).
+  if (frameEl?.isConnected && (overlayMode === "ready" || overlayMode === "loading")) {
+    detachPlaceholder(activeHost);
+    return;
+  }
+
   const ph = ensurePlaceholder(activeHost);
   const label = ph.querySelector<HTMLElement>("#player-placeholder-label");
   const action = ph.querySelector<HTMLButtonElement>("#player-placeholder-action");
@@ -138,19 +141,11 @@ function paintOverlay(): void {
   ph.classList.remove("is-ready", "is-error");
   ph.removeAttribute("aria-hidden");
   action.hidden = true;
-
-  // Opaque placeholder over a live iframe fails Twitch autoplay (style visibility).
-  // Offline/error: frame is already removed (or about to be); overlay is fine.
-  if (frameEl?.isConnected && (overlayMode === "ready" || overlayMode === "loading")) {
-    hidePlaceholder(activeHost);
-    return;
-  }
-
   ph.hidden = false;
 
   if (overlayMode === "ready") {
     label.textContent = "";
-    hidePlaceholder(activeHost);
+    detachPlaceholder(activeHost);
     return;
   }
   if (overlayMode === "error") {
@@ -179,11 +174,16 @@ function armLoadTimeout(isLive: () => boolean): void {
   }, LOAD_TIMEOUT_MS);
 }
 
+/** Insert unless channel is known offline (Helix). Do not wait for live=true. */
+function canInsertEmbed(): boolean {
+  return liveKnown !== false;
+}
+
 function scheduleInsert(isLive: () => boolean): void {
   if (!activeHost || !insertEmbed) {
     return;
   }
-  if (liveKnown !== true) {
+  if (!canInsertEmbed()) {
     return;
   }
   if (frameEl?.isConnected) {
@@ -209,14 +209,19 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
     return;
   }
   if (liveKnown === null) {
-    // Unknown: do not tear down a healthy iframe (avoids remount listener storms).
     if (frameEl?.isConnected && iframeLoaded) {
       overlayMode = "ready";
       paintOverlay();
       return;
     }
+    if (frameEl?.isConnected) {
+      overlayMode = "loading";
+      paintOverlay();
+      return;
+    }
     overlayMode = "loading";
     paintOverlay();
+    scheduleInsert(isLive);
     return;
   }
   // liveKnown === true
@@ -302,7 +307,7 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
     if (!isLive() || frameEl?.isConnected) {
       return;
     }
-    if (liveKnown !== true) {
+    if (!canInsertEmbed()) {
       return;
     }
     if (!isEmbedSurfaceVisible(host)) {
@@ -323,16 +328,18 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
       }
       iframeLoaded = true;
       clearLoadTimer();
-      if (liveKnown === true) {
-        overlayMode = "ready";
+      if (liveKnown === false) {
+        removeFrame();
+        overlayMode = "offline";
         paintOverlay();
-      } else {
-        syncOverlayAfterLive(isLive);
+        return;
       }
+      overlayMode = "ready";
+      paintOverlay();
     });
     frameEl = frame;
-    // Hide overlay before iframe joins so autoplay sees an unobscured player.
-    hidePlaceholder(host);
+    // Detach before append: hidden placeholder still flashes if recreated later.
+    detachPlaceholder(host);
     // Canon: insert with src already set (compensation.md).
     frame.src = buildTwitchPlayerSrc(channel);
     host.appendChild(frame);
@@ -340,9 +347,8 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
   };
 
   insertEmbed = insert;
-  if (liveKnown === true) {
-    scheduleInsert(isLive);
-  }
+  // Start embed immediately; Helix live hint only tears down on offline.
+  scheduleInsert(isLive);
 }
 
 export function unmountPlayer(host: HTMLElement): void {
@@ -403,7 +409,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
       cleanup();
       return;
     }
-    if (liveKnown !== true) {
+    if (!canInsertEmbed()) {
       return;
     }
     if (!isEmbedSurfaceVisible(host)) {
@@ -416,7 +422,6 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     done = true;
     observer.disconnect();
     document.removeEventListener("visibilitychange", onVisibility);
-    // Keep slotWaitCleanup as cancelRafs until double-rAF finishes / unmount.
     const pendingPaintCleanup = () => {
       cancelRafs();
       if (slotWaitCleanup === pendingPaintCleanup) {
@@ -424,7 +429,6 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
       }
     };
     slotWaitCleanup = pendingPaintCleanup;
-    // Two frames: layout + paint before Twitch's visibility probe.
     raf = requestAnimationFrame(() => {
       raf = 0;
       nestedRaf = requestAnimationFrame(() => {
@@ -432,7 +436,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
         if (slotWaitCleanup === pendingPaintCleanup) {
           slotWaitCleanup = null;
         }
-        if (!isLive() || liveKnown !== true) {
+        if (!isLive() || !canInsertEmbed()) {
           return;
         }
         if (isEmbedSurfaceVisible(host)) {
