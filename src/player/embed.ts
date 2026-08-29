@@ -10,9 +10,12 @@ let liveKnown: boolean | null = null;
 let overlayMode: "loading" | "offline" | "error" | "ready" = "loading";
 let frameEl: HTMLIFrameElement | null = null;
 let openTwitchBound = false;
-let pendingInsert: (() => void) | null = null;
+/** Insert closure for the current mount epoch; kept across offline→online. */
+let insertEmbed: (() => void) | null = null;
 
 const LOAD_TIMEOUT_MS = 12_000;
+const MIN_PLAYER_W = 400;
+const MIN_PLAYER_H = 300;
 
 export type PlayerLiveHint = boolean | null;
 
@@ -49,6 +52,32 @@ function clearLoadTimer(): void {
   }
 }
 
+/** Twitch autoplay walks ancestors for visibility / display / opacity. */
+function isEmbedSurfaceVisible(el: HTMLElement): boolean {
+  if (document.visibilityState !== "visible") {
+    return false;
+  }
+  let node: HTMLElement | null = el;
+  while (node) {
+    const style = getComputedStyle(node);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number.parseFloat(style.opacity || "1") === 0
+    ) {
+      return false;
+    }
+    node = node.parentElement;
+  }
+  return true;
+}
+
+function slotSize(host: HTMLElement): { w: number; h: number } {
+  const w = Math.floor(host.clientWidth || host.getBoundingClientRect().width);
+  const h = Math.floor(host.clientHeight || host.getBoundingClientRect().height);
+  return { w, h };
+}
+
 function ensurePlaceholder(host: HTMLElement): HTMLElement {
   let ph = host.querySelector<HTMLElement>("#player-placeholder");
   if (ph) {
@@ -78,6 +107,24 @@ function ensurePlaceholder(host: HTMLElement): HTMLElement {
   return ph;
 }
 
+function hidePlaceholder(host: HTMLElement): void {
+  const ph = host.querySelector<HTMLElement>("#player-placeholder");
+  if (!ph) {
+    return;
+  }
+  ph.hidden = true;
+  ph.setAttribute("aria-hidden", "true");
+}
+
+function removeFrame(): void {
+  if (frameEl) {
+    frameEl.remove();
+    frameEl = null;
+  }
+  iframeLoaded = false;
+  clearLoadTimer();
+}
+
 function paintOverlay(): void {
   if (!activeHost) {
     return;
@@ -92,10 +139,10 @@ function paintOverlay(): void {
   ph.removeAttribute("aria-hidden");
   action.hidden = true;
 
-  // Twitch autoplay checks style visibility / occlusion: never cover a live iframe.
-  if (frameEl?.isConnected) {
-    ph.hidden = true;
-    ph.setAttribute("aria-hidden", "true");
+  // Opaque placeholder over a live iframe fails Twitch autoplay (style visibility).
+  // Offline/error: frame is already removed (or about to be); overlay is fine.
+  if (frameEl?.isConnected && (overlayMode === "ready" || overlayMode === "loading")) {
+    hidePlaceholder(activeHost);
     return;
   }
 
@@ -103,8 +150,7 @@ function paintOverlay(): void {
 
   if (overlayMode === "ready") {
     label.textContent = "";
-    ph.hidden = true;
-    ph.setAttribute("aria-hidden", "true");
+    hidePlaceholder(activeHost);
     return;
   }
   if (overlayMode === "error") {
@@ -120,25 +166,30 @@ function paintOverlay(): void {
   label.textContent = "Загрузка…";
 }
 
-function removeFrame(): void {
-  if (frameEl) {
-    frameEl.remove();
-    frameEl = null;
-  }
-  iframeLoaded = false;
-  clearLoadTimer();
-}
-
 function armLoadTimeout(isLive: () => boolean): void {
   clearLoadTimer();
   loadTimer = setTimeout(() => {
     loadTimer = null;
-    if (!isLive() || iframeLoaded || overlayMode === "offline") {
+    if (!isLive() || iframeLoaded || liveKnown !== true) {
       return;
     }
+    removeFrame();
     overlayMode = "error";
     paintOverlay();
   }, LOAD_TIMEOUT_MS);
+}
+
+function scheduleInsert(isLive: () => boolean): void {
+  if (!activeHost || !insertEmbed) {
+    return;
+  }
+  if (liveKnown !== true) {
+    return;
+  }
+  if (frameEl?.isConnected) {
+    return;
+  }
+  whenSlotReady(activeHost, isLive, insertEmbed);
 }
 
 function syncOverlayAfterLive(isLive: () => boolean): void {
@@ -150,21 +201,26 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
     return;
   }
   if (liveKnown === false) {
-    overlayMode = "offline";
-    removeFrame();
     slotWaitCleanup?.();
     slotWaitCleanup = null;
-    pendingInsert = null;
+    removeFrame();
+    overlayMode = "offline";
     paintOverlay();
     return;
   }
   if (liveKnown === null) {
+    // Unknown: do not tear down a healthy iframe (avoids remount listener storms).
+    if (frameEl?.isConnected && iframeLoaded) {
+      overlayMode = "ready";
+      paintOverlay();
+      return;
+    }
     overlayMode = "loading";
     paintOverlay();
     return;
   }
   // liveKnown === true
-  if (iframeLoaded) {
+  if (iframeLoaded && frameEl?.isConnected) {
     overlayMode = "ready";
     paintOverlay();
     return;
@@ -173,10 +229,10 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
     overlayMode = "loading";
   }
   paintOverlay();
-  if (pendingInsert) {
-    const run = pendingInsert;
-    whenSlotReady(activeHost!, isLive, run);
+  if (frameEl?.isConnected && !iframeLoaded) {
+    armLoadTimeout(isLive);
   }
+  scheduleInsert(isLive);
 }
 
 export function setPlayerLiveHint(live: PlayerLiveHint): void {
@@ -214,18 +270,7 @@ export function bindPlayerOpenTwitch(
   });
 }
 
-export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameElement {
-  unmountPlayer(host);
-  const epoch = ++playerEpoch;
-  activeHost = host;
-  activeChannel = channel.trim().toLowerCase();
-  iframeLoaded = false;
-  liveKnown = null;
-  overlayMode = "loading";
-  frameEl = null;
-  ensurePlaceholder(host);
-  paintOverlay();
-
+function createPlayerFrame(): HTMLIFrameElement {
   const frame = document.createElement("iframe");
   frame.title = "Twitch player";
   frame.allow =
@@ -235,57 +280,69 @@ export function mountPlayer(host: HTMLElement, channel: string): HTMLIFrameEleme
   frame.style.visibility = "visible";
   frame.style.opacity = "1";
   frame.style.display = "block";
+  return frame;
+}
+
+export function mountPlayer(host: HTMLElement, channel: string): void {
+  unmountPlayer(host);
+  const epoch = ++playerEpoch;
+  activeHost = host;
+  activeChannel = channel.trim().toLowerCase();
+  iframeLoaded = false;
+  liveKnown = null;
+  overlayMode = "loading";
+  frameEl = null;
+  insertEmbed = null;
+  ensurePlaceholder(host);
+  paintOverlay();
 
   const isLive = () => epoch === playerEpoch;
 
-  frame.addEventListener("load", () => {
-    if (!isLive() || frameEl !== frame) {
-      return;
-    }
-    iframeLoaded = true;
-    clearLoadTimer();
-    if (liveKnown === true) {
-      overlayMode = "ready";
-      paintOverlay();
-    } else {
-      syncOverlayAfterLive(isLive);
-    }
-  });
-
   const insert = () => {
-    if (!isLive() || frame.isConnected || frame.getAttribute("src")) {
+    if (!isLive() || frameEl?.isConnected) {
       return;
     }
     if (liveKnown !== true) {
-      pendingInsert = insert;
       return;
     }
-    const box = host.getBoundingClientRect();
-    if (box.width < 400 || box.height < 300) {
+    if (!isEmbedSurfaceVisible(host)) {
       whenSlotReady(host, isLive, insert);
       return;
     }
-    pendingInsert = null;
-    frame.width = String(Math.floor(box.width));
-    frame.height = String(Math.floor(box.height));
+    const { w, h } = slotSize(host);
+    if (w < MIN_PLAYER_W || h < MIN_PLAYER_H) {
+      whenSlotReady(host, isLive, insert);
+      return;
+    }
+    const frame = createPlayerFrame();
+    frame.width = String(w);
+    frame.height = String(h);
+    frame.addEventListener("load", () => {
+      if (!isLive() || frameEl !== frame) {
+        return;
+      }
+      iframeLoaded = true;
+      clearLoadTimer();
+      if (liveKnown === true) {
+        overlayMode = "ready";
+        paintOverlay();
+      } else {
+        syncOverlayAfterLive(isLive);
+      }
+    });
     frameEl = frame;
     // Hide overlay before iframe joins so autoplay sees an unobscured player.
-    const ph = host.querySelector<HTMLElement>("#player-placeholder");
-    if (ph) {
-      ph.hidden = true;
-      ph.setAttribute("aria-hidden", "true");
-    }
-    host.appendChild(frame);
-    // Set src only after the frame is in-tree and unobscured (Twitch visibility checks).
+    hidePlaceholder(host);
+    // Canon: insert with src already set (compensation.md).
     frame.src = buildTwitchPlayerSrc(channel);
+    host.appendChild(frame);
     armLoadTimeout(isLive);
   };
 
-  pendingInsert = insert;
+  insertEmbed = insert;
   if (liveKnown === true) {
-    whenSlotReady(host, isLive, insert);
+    scheduleInsert(isLive);
   }
-  return frame;
 }
 
 export function unmountPlayer(host: HTMLElement): void {
@@ -293,7 +350,7 @@ export function unmountPlayer(host: HTMLElement): void {
   slotWaitCleanup?.();
   slotWaitCleanup = null;
   clearLoadTimer();
-  pendingInsert = null;
+  insertEmbed = null;
   frameEl = null;
   if (activeHost === host) {
     activeHost = null;
@@ -309,6 +366,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
   slotWaitCleanup?.();
   let done = false;
   let raf = 0;
+  let nestedRaf = 0;
   const observer = new ResizeObserver(() => {
     kick();
   });
@@ -316,13 +374,21 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     kick();
   };
 
-  const cleanup = () => {
-    observer.disconnect();
-    document.removeEventListener("visibilitychange", onVisibility);
+  const cancelRafs = () => {
     if (raf !== 0) {
       cancelAnimationFrame(raf);
       raf = 0;
     }
+    if (nestedRaf !== 0) {
+      cancelAnimationFrame(nestedRaf);
+      nestedRaf = 0;
+    }
+  };
+
+  const cleanup = () => {
+    observer.disconnect();
+    document.removeEventListener("visibilitychange", onVisibility);
+    cancelRafs();
     if (slotWaitCleanup === cleanup) {
       slotWaitCleanup = null;
     }
@@ -340,20 +406,44 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     if (liveKnown !== true) {
       return;
     }
-    // Twitch embed отключает autoplay, если в момент инициализации документ скрыт.
-    if (document.visibilityState !== "visible") {
+    if (!isEmbedSurfaceVisible(host)) {
       return;
     }
-    const box = host.getBoundingClientRect();
-    if (box.width < 400 || box.height < 300) {
+    const { w, h } = slotSize(host);
+    if (w < MIN_PLAYER_W || h < MIN_PLAYER_H) {
       return;
     }
     done = true;
-    cleanup();
-    requestAnimationFrame(() => {
-      if (isLive()) {
-        run();
+    observer.disconnect();
+    document.removeEventListener("visibilitychange", onVisibility);
+    // Keep slotWaitCleanup as cancelRafs until double-rAF finishes / unmount.
+    const pendingPaintCleanup = () => {
+      cancelRafs();
+      if (slotWaitCleanup === pendingPaintCleanup) {
+        slotWaitCleanup = null;
       }
+    };
+    slotWaitCleanup = pendingPaintCleanup;
+    // Two frames: layout + paint before Twitch's visibility probe.
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      nestedRaf = requestAnimationFrame(() => {
+        nestedRaf = 0;
+        if (slotWaitCleanup === pendingPaintCleanup) {
+          slotWaitCleanup = null;
+        }
+        if (!isLive() || liveKnown !== true) {
+          return;
+        }
+        if (isEmbedSurfaceVisible(host)) {
+          const size = slotSize(host);
+          if (size.w >= MIN_PLAYER_W && size.h >= MIN_PLAYER_H) {
+            run();
+            return;
+          }
+        }
+        whenSlotReady(host, isLive, run);
+      });
     });
   };
 
