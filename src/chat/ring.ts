@@ -310,8 +310,6 @@ export class MessageRing {
   private resizeDebounce: TrailingDebounce | null = null;
   private perfLogAt = 0;
   private readonly perfOn: boolean;
-  /** Next layout() without paintOnly must repaint every live slot (font/width/theme). */
-  private layoutFullPaint = false;
   private viewportPaintRaf = 0;
   private readonly onRendererResize = (): void => {
     this.resizeDebounce?.schedule();
@@ -1814,11 +1812,14 @@ export class MessageRing {
     if (this.channelLive === live) {
       return;
     }
+    const prevTs = this.timestampsVisible();
     this.channelLive = live;
     if (!this.ready) {
       return;
     }
-    this.markLayoutFullPaint();
+    if (this.timestampsVisible() !== prevTs) {
+      this.invalidateAllWraps();
+    }
     this.layout();
   }
 
@@ -1888,8 +1889,13 @@ export class MessageRing {
       }
     }
     if (needFull) {
-      this.markLayoutFullPaint();
-      this.layout(anchor);
+      // Visibility / stacking changed — reposition all, paint only new/updated rows.
+      if (paintSlots.size > 0) {
+        this.layout(anchor, paintSlots);
+      } else {
+        this.layout(anchor);
+      }
+      this.repaintHighlights();
       return;
     }
     if (paintSlots.size === 0) {
@@ -2913,7 +2919,17 @@ export class MessageRing {
   }
 
   private markLayoutFullPaint(): void {
-    this.layoutFullPaint = true;
+    this.invalidateAllWraps();
+  }
+
+  private invalidateAllWraps(): void {
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (slot.msgId) {
+        slot.wrapReady = false;
+      }
+    }
   }
 
   /** Wrap metrics present so paintClip can be skipped until width/font/theme change. */
@@ -2936,7 +2952,7 @@ export class MessageRing {
     bottom: number;
   } {
     const viewH = this.app.screen.height;
-    const bandPad = this.lineHeight * 20;
+    const bandPad = this.lineHeight * 8;
     let stageY = this.scroll.stageY(this.lineHeight);
     if (this.scroll.atBottom && contentHeightPx > viewH) {
       stageY = -(contentHeightPx - viewH);
@@ -2961,10 +2977,6 @@ export class MessageRing {
       }
     }
     const gapPx = this.messageGapPx();
-    const fullPaint = !paintOnly && this.layoutFullPaint;
-    if (fullPaint) {
-      this.layoutFullPaint = false;
-    }
 
     const placeY = (): number => {
       let y = 0;
@@ -2997,12 +3009,10 @@ export class MessageRing {
       if (heightsChanged) {
         totalY = placeY();
       }
-    } else if (fullPaint) {
-      for (const slot of visible) {
-        this.paintClip(slot);
-      }
-      totalY = placeY();
     } else {
+      const paintBudgetMs = 10;
+      const paintStarted = performance.now();
+      let budgetHit = false;
       for (let iter = 0; iter < 4; iter += 1) {
         const band = this.viewportPaintBand(totalY);
         let heightsChanged = false;
@@ -3013,6 +3023,10 @@ export class MessageRing {
           if (!this.slotYIntersects(slot, band.top, band.bottom)) {
             continue;
           }
+          if (performance.now() - paintStarted > paintBudgetMs) {
+            budgetHit = true;
+            break;
+          }
           const prev = slot.lineCount;
           this.paintClip(slot);
           if (slot.lineCount !== prev) {
@@ -3020,9 +3034,12 @@ export class MessageRing {
           }
         }
         totalY = placeY();
-        if (!heightsChanged) {
+        if (budgetHit || !heightsChanged) {
           break;
         }
+      }
+      if (budgetHit) {
+        this.scheduleViewportPaint();
       }
     }
 
@@ -3100,7 +3117,10 @@ export class MessageRing {
     }
     const band = this.viewportPaintBand(contentH);
     const anchor = this.scroll.captureAnchor(this.laidSlots());
+    const paintStarted = performance.now();
+    const paintBudgetMs = 8;
     let heightsChanged = false;
+    let unfinished = false;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       if (!slot.msgId || !slot.root.visible) {
@@ -3112,6 +3132,10 @@ export class MessageRing {
       if (!this.slotYIntersects(slot, band.top, band.bottom)) {
         continue;
       }
+      if (performance.now() - paintStarted > paintBudgetMs) {
+        unfinished = true;
+        break;
+      }
       const prev = slot.lineCount;
       this.paintClip(slot);
       if (slot.lineCount !== prev) {
@@ -3120,6 +3144,9 @@ export class MessageRing {
     }
     if (heightsChanged) {
       this.layout(anchor, new Set());
+    }
+    if (unfinished) {
+      this.scheduleViewportPaint();
     }
   }
 
