@@ -124,6 +124,39 @@ pub struct Badge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NickPaintStop {
+    /// Position along gradient, 0..=10000 maps to 0.0..=1.0.
+    pub at: u16,
+    /// ARGB packed (7TV / Chatterino7).
+    pub color: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NickPaintShadow {
+    pub x_tenths: i32,
+    pub y_tenths: i32,
+    pub radius_tenths: i32,
+    pub color: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NickPaint {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub angle: i32,
+    pub repeat: bool,
+    pub stops: Vec<NickPaintStop>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<NickPaintShadow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChatEvent {
     #[serde(rename = "privmsg", rename_all = "camelCase")]
@@ -181,6 +214,9 @@ pub enum ChatEvent {
         /// IRC `source-badges` tag (shared chat authority badges from source channel).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         source_badges: Vec<Badge>,
+        /// 7TV username paint (EventAPI); absent when none / disabled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        paint: Option<NickPaint>,
     },
     #[serde(rename = "clearchat", rename_all = "camelCase")]
     Clearchat {
@@ -596,6 +632,7 @@ mod tests {
             disabled: false,
             source_room_id: None,
             source_badges: vec![],
+            paint: None,
         };
         let v = serde_json::to_value(&event).unwrap();
         assert_eq!(v["kind"], "privmsg");

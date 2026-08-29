@@ -25,6 +25,7 @@ use super::membership_batch::MembershipBatcher;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
+use super::seventv_paints::SeventvPaintCatalog;
 use super::shared_chat::SharedChatState;
 use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
@@ -141,6 +142,7 @@ pub struct Shared {
     pub chatterino_badges: Arc<Mutex<ChatterinoBadgeCatalog>>,
     pub bttv_badges: Arc<Mutex<BttvBadgeCatalog>>,
     pub seventv_badges: Arc<Mutex<SeventvBadgeCatalog>>,
+    pub seventv_paints: Arc<Mutex<SeventvPaintCatalog>>,
     pub cheers: Arc<Mutex<CheerCatalog>>,
     pub irc_tx: Arc<Mutex<Option<mpsc::Sender<IrcCmd>>>>,
     pub event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<EventCmd>>>>,
@@ -206,6 +208,7 @@ impl Shared {
             chatterino_badges: Arc::new(Mutex::new(ChatterinoBadgeCatalog::default())),
             bttv_badges: Arc::new(Mutex::new(BttvBadgeCatalog::default())),
             seventv_badges: Arc::new(Mutex::new(SeventvBadgeCatalog::default())),
+            seventv_paints: Arc::new(Mutex::new(SeventvPaintCatalog::default())),
             cheers: Arc::new(Mutex::new(CheerCatalog::default())),
             irc_tx: Arc::new(Mutex::new(None)),
             event_tx: Arc::new(Mutex::new(None)),

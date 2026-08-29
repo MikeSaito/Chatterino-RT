@@ -153,11 +153,17 @@ pub fn validate_log_path(raw: &str) -> Result<(), ApiError> {
     }
     let p = Path::new(s);
     if !p.is_absolute() {
-        return Err(ApiError::coded("error.log.path_absolute", "log path must be absolute"));
+        return Err(ApiError::coded(
+            "error.log.path_absolute",
+            "log path must be absolute",
+        ));
     }
     for c in p.components() {
         if matches!(c, std::path::Component::ParentDir) {
-            return Err(ApiError::coded("error.log.path_invalid", "invalid log path"));
+            return Err(ApiError::coded(
+                "error.log.path_invalid",
+                "invalid log path",
+            ));
         }
     }
     Ok(())
@@ -616,7 +622,10 @@ pub fn pick_directory(_shared: &Shared) -> Result<String, ApiError> {
     }
     let p = Path::new(&path);
     if !p.is_absolute() {
-        return Err(ApiError::coded("error.path.absolute", "absolute path required"));
+        return Err(ApiError::coded(
+            "error.path.absolute",
+            "absolute path required",
+        ));
     }
     for c in p.components() {
         if matches!(c, std::path::Component::ParentDir) {
@@ -674,6 +683,7 @@ mod tests {
             disabled: false,
             source_room_id: None,
             source_badges: vec![],
+            paint: None,
         }
     }
 

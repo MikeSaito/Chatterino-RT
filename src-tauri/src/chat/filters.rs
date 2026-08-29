@@ -1658,7 +1658,9 @@ fn sanitize_phrases(items: Vec<String>, label: &str) -> Result<Vec<String>, Stri
             continue;
         }
         if phrase.chars().count() > MAX_PATTERN {
-            return Err(format!("{label}: phrase longer than {MAX_PATTERN} characters"));
+            return Err(format!(
+                "{label}: phrase longer than {MAX_PATTERN} characters"
+            ));
         }
         if phrase.chars().any(|c| c.is_control()) {
             return Err(format!("{label}: phrase contains forbidden characters"));
@@ -1767,6 +1769,7 @@ mod tests {
             disabled: false,
             source_room_id: None,
             source_badges: vec![],
+            paint: None,
         }
     }
 

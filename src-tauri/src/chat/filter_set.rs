@@ -167,6 +167,7 @@ mod tests {
             disabled: false,
             source_room_id: None,
             source_badges: vec![],
+            paint: None,
         };
         assert!(!expression_filter_passes(
             &set,

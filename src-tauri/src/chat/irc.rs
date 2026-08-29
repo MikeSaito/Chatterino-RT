@@ -1016,6 +1016,7 @@ pub(crate) fn echo_own_privmsg(
         disabled: false,
         source_room_id: None,
         source_badges: Vec::new(),
+        paint: None,
     };
     if super::filters::gate_event(shared, channel, &mut event) {
         return;
@@ -1088,6 +1089,7 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             reply_to_display_name,
             source_room_id,
             source_badges,
+            paint,
             ..
         } => {
             maybe_strip_reply_mention(
@@ -1183,6 +1185,24 @@ pub(crate) fn decorate_event(event: &mut ChatEvent, shared: &Shared, channel: &s
             }
             if let Ok(stv) = shared.seventv_badges.lock() {
                 stv.append_for_user(badges, user_id);
+            }
+            *paint = None;
+            let show_paints = shared
+                .settings
+                .lock()
+                .ok()
+                .and_then(|inner| {
+                    inner
+                        .data
+                        .knobs
+                        .get("appearance.showSevenTvPaints")
+                        .and_then(|v| v.as_bool())
+                })
+                .unwrap_or(true);
+            if show_paints {
+                if let Ok(stv) = shared.seventv_paints.lock() {
+                    *paint = stv.paint_for_user(user_id);
+                }
             }
             super::shared_chat::apply_badges(
                 shared,

@@ -21,6 +21,7 @@ export const settingsRu: Record<SettingsMessageKey, string> = {
   "settings.knob.auto-sub-threads": "Автоматически подписываться на ветки ответов, в которых вы участвовали",
   "settings.knob.autorun": "Запускать вместе с Windows",
   "settings.knob.badge-7tv": "7TV",
+  "settings.knob.seventv-paints": "7TV paints ников",
   "settings.knob.badge-authority": "Полномочия",
   "settings.knob.badge-bttv": "BetterTTV",
   "settings.knob.badge-channel": "Канал",

@@ -617,6 +617,7 @@ mod tests {
             disabled: false,
             source_room_id: None,
             source_badges: vec![],
+            paint: None,
         }
     }
 
@@ -680,6 +681,7 @@ mod tests {
                 disabled,
                 source_room_id,
                 source_badges,
+                paint: None,
             },
             other => other,
         }

@@ -175,6 +175,7 @@ fn build_privmsg(
         disabled: false,
         source_room_id: tags.get("source-room-id").filter(|s| !s.is_empty()),
         source_badges: parse_badges(tags.get("source-badges").as_deref()),
+        paint: None,
     }
 }
 
@@ -267,6 +268,7 @@ fn parse_usernotice(
             disabled: false,
             source_room_id: tags.get("source-room-id").filter(|s| !s.is_empty()),
             source_badges: parse_badges(tags.get("source-badges").as_deref()),
+            paint: None,
         })
     });
     ParsedLine::Event {

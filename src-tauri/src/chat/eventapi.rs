@@ -51,7 +51,11 @@ pub fn seventv_event_channel_needed_from_knobs(
         .get("appearance.showBadgesSevenTV")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
-    flags.seventv_channel || show_badges
+    let show_paints = knobs
+        .get("appearance.showSevenTvPaints")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    flags.seventv_channel || show_badges || show_paints
 }
 
 pub fn seventv_event_channel_needed(shared: &Shared) -> bool {
@@ -409,17 +413,26 @@ fn handle_dispatch(shared: &Shared, data: &Value) -> bool {
             if let Ok(mut cat) = shared.seventv_badges.lock() {
                 apply_cosmetic_create(&mut cat, data);
             }
+            if let Ok(mut cat) = shared.seventv_paints.lock() {
+                super::seventv_paints::apply_cosmetic_create(&mut cat, data);
+            }
             false
         }
         "entitlement.create" => {
             if let Ok(mut cat) = shared.seventv_badges.lock() {
                 apply_entitlement_create(&mut cat, data);
             }
+            if let Ok(mut cat) = shared.seventv_paints.lock() {
+                super::seventv_paints::apply_entitlement_create(&mut cat, data);
+            }
             false
         }
         "entitlement.delete" => {
             if let Ok(mut cat) = shared.seventv_badges.lock() {
                 apply_entitlement_delete(&mut cat, data);
+            }
+            if let Ok(mut cat) = shared.seventv_paints.lock() {
+                super::seventv_paints::apply_entitlement_delete(&mut cat, data);
             }
             false
         }
@@ -1102,6 +1115,9 @@ mod tests {
         knobs.insert("appearance.showBadgesSevenTV".into(), Value::Bool(true));
         assert!(seventv_event_channel_needed_from_knobs(&knobs));
         knobs.insert("appearance.showBadgesSevenTV".into(), Value::Bool(false));
+        knobs.insert("appearance.showSevenTvPaints".into(), Value::Bool(false));
         assert!(!seventv_event_channel_needed_from_knobs(&knobs));
+        knobs.insert("appearance.showSevenTvPaints".into(), Value::Bool(true));
+        assert!(seventv_event_channel_needed_from_knobs(&knobs));
     }
 }

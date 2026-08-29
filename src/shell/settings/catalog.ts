@@ -1413,6 +1413,13 @@ const GENERAL_SECTIONS: SectionDef[] = [
         true,
         "seventv",
       ),
+      cb(
+        "seventv-paints",
+        "appearance.showSevenTvPaints",
+        "7TV username paints",
+        true,
+        "gradient nick paints from 7TV EventAPI",
+      ),
       cb("badge-bttv", "appearance.showBadgesBttv", "BetterTTV", true, "bttv"),
       cb(
         "badge-ffz-mod",

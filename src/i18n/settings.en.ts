@@ -20,6 +20,7 @@ export const settingsEn = {
   "settings.knob.auto-sub-threads": "Automatically subscribe to participated reply threads",
   "settings.knob.autorun": "Start with Windows",
   "settings.knob.badge-7tv": "7TV",
+  "settings.knob.seventv-paints": "7TV username paints",
   "settings.knob.badge-authority": "Authority",
   "settings.knob.badge-bttv": "BetterTTV",
   "settings.knob.badge-channel": "Channel",

@@ -25,6 +25,28 @@ export type MentionSpan = {
   login: string;
 };
 
+export type NickPaintStop = {
+  at: number;
+  color: number;
+};
+
+export type NickPaintShadow = {
+  xTenths: number;
+  yTenths: number;
+  radiusTenths: number;
+  color: number;
+};
+
+export type NickPaint = {
+  id: string;
+  name?: string;
+  angle: number;
+  repeat: boolean;
+  stops: NickPaintStop[];
+  color?: number;
+  shadow?: NickPaintShadow;
+};
+
 export type Badge = {
   set: string;
   version: string;
@@ -62,6 +84,8 @@ export type ChatEvent =
       whisper?: boolean;
       /** Soft-disabled (similar / R9K). */
       disabled?: boolean;
+      /** 7TV username paint. */
+      paint?: NickPaint;
     }
   | {
       kind: "clearchat";

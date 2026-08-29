@@ -65,6 +65,7 @@ mod tests {
                     disabled: false,
                     source_room_id: None,
                     source_badges: vec![],
+                    paint: None,
                 },
                 ChatEvent::Roomstate {
                     id: "r".into(),

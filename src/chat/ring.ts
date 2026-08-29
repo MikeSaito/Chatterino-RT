@@ -22,7 +22,12 @@ import {
 } from "../constants";
 import type { ModActionBtn } from "../shell/modActions";
 import { modActionLabel } from "../shell/modActions";
-import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
+import type { Badge, ChatEvent, EmoteSpan, LinkSpan, MentionSpan, NickPaint } from "./types";
+import {
+  paintCacheKey,
+  paintRepresentativeRgb,
+  rasterizeNickPaint,
+} from "./nickPaint";
 import {
   clearchatText,
   deletionNoticeText,
@@ -134,6 +139,10 @@ type Slot = {
   disabledGfx: Graphics;
   time: BitmapText;
   nick: BitmapText;
+  /** Gradient nick overlay (7TV paint); BitmapText hidden when visible. */
+  nickPaintSpr: Sprite;
+  nickPaint: NickPaint | null;
+  nickPaintKey: string;
   /** First wrap line (x after nick). */
   body: BitmapText;
   /** Wrap lines 2+ (x under timestamp); empty when single-line. */
@@ -282,6 +291,10 @@ export class MessageRing {
   private boldUsernames = true;
   private colorUsernames = true;
   private readonly nickColorCache = new NickColorCache(500);
+  /** Canvas textures for 7TV nick paints (key → Texture). */
+  private readonly nickPaintTextures = new Map<string, Texture>();
+  private readonly nickPaintTextureOrder: string[] = [];
+  private static readonly NICK_PAINT_LRU = 64;
   private hideReplyContext = false;
   private badgeVisibility: BadgeVisibilityFlags = { ...DEFAULT_BADGE_VISIBILITY };
   private pauseMouse = false;
@@ -846,6 +859,7 @@ export class MessageRing {
       return;
     }
     if (boldChanged || this.nickAtlasDesignSize === 0) {
+      this.clearNickPaintTextures();
       this.reinstallNickFont();
     }
     this.refreshFontMetrics();
@@ -1164,6 +1178,7 @@ export class MessageRing {
     if (!changed && this.atlasDesignSize > 0) {
       return;
     }
+    this.clearNickPaintTextures();
     this.reinstallChatFont();
     this.refreshFontMetrics();
     if (!this.ready) {
@@ -1559,6 +1574,9 @@ export class MessageRing {
           fill: 0xffffff,
         },
       });
+      const nickPaintSpr = new Sprite(Texture.EMPTY);
+      nickPaintSpr.visible = false;
+      nickPaintSpr.eventMode = "none";
       const body = new BitmapText({
         text: "",
         style: {
@@ -1657,6 +1675,7 @@ export class MessageRing {
         body,
         bodyCont,
         nick,
+        nickPaintSpr,
         ...mentionTexts,
         bitsLabel,
         ...badges,
@@ -1670,6 +1689,9 @@ export class MessageRing {
         disabledGfx,
         time,
         nick,
+        nickPaintSpr,
+        nickPaint: null,
+        nickPaintKey: "",
         body,
         bodyCont,
         replyHeader,
@@ -1792,6 +1814,7 @@ export class MessageRing {
     window.clearTimeout(this.hoverPauseTimer);
     this.hoverPauseTimer = 0;
     this.pauseMouse = false;
+    this.clearNickPaintTextures();
     this.emoteTicker.destroy();
     if (this.lastReadFadeRaf !== 0) {
       cancelAnimationFrame(this.lastReadFadeRaf);
@@ -2041,6 +2064,11 @@ export class MessageRing {
     slot.nickLogin = "";
     slot.nickDisplay = "";
     slot.useNickStyle = false;
+    slot.nickPaint = null;
+    slot.nickPaintKey = "";
+    slot.nickPaintSpr.visible = false;
+    slot.nickPaintSpr.texture = Texture.EMPTY;
+    slot.nick.visible = true;
     slot.replyToLogin = "";
     slot.replyToText = "";
     slot.isAction = false;
@@ -2116,13 +2144,21 @@ export class MessageRing {
       slot.nickColorRaw = event.color;
       slot.nickLogin = event.login;
       slot.nickDisplay = event.displayName || event.login;
-      this.nickColorCache.set(event.login, drawn.nickColor);
+      slot.nickPaint = event.paint ?? null;
+      const cacheColor = event.paint
+        ? paintRepresentativeRgb(event.paint)
+        : drawn.nickColor;
+      this.nickColorCache.set(event.login, cacheColor);
+      if (!event.paint) {
+        slot.nick.tint = drawn.nickColor;
+      }
     } else {
       slot.useNickStyle = false;
       slot.nickUserId = "";
       slot.nickColorRaw = "";
       slot.nickLogin = "";
       slot.nickDisplay = "";
+      slot.nickPaint = null;
     }
     slot.bodySource = drawn.body;
     slot.copyText = drawn.copyText;
@@ -2454,10 +2490,7 @@ export class MessageRing {
       slot.nick.text = nickForWidth;
     }
     dirtyBitmapText(slot.nick);
-    const nickW = Math.max(
-      this.measureBitmapTextWidth("ChatNickFont", slot.nick.text),
-      8,
-    );
+    const nickW = this.applyNickPaintChrome(slot, contentY);
     const firstOriginX = gutterW + timeW + badgeBand + nickW + gap;
     const contOriginX = gutterW;
     // Split body: first wrap line after nick; lines 2+ under timestamp (no space-pad).
@@ -3229,6 +3262,116 @@ export class MessageRing {
       local.y >= y0 &&
       local.y < y0 + this.lineHeight
     );
+  }
+
+  /** Show gradient Sprite or keep BitmapText; returns nick column width (BitmapText). */
+  private applyNickPaintChrome(slot: Slot, contentY: number): number {
+    const text = slot.nick.text;
+    const baseW = Math.max(
+      this.measureBitmapTextWidth("ChatNickFont", text),
+      8,
+    );
+    if (!slot.nickPaint || !text) {
+      slot.nick.visible = true;
+      slot.nickPaintSpr.visible = false;
+      slot.nickPaintSpr.texture = Texture.EMPTY;
+      slot.nickPaintKey = "";
+      return baseW;
+    }
+    const family = this.chatFontFamily || "Segoe UI";
+    const weight = qtWeightToCss(this.nickBoldScale);
+    const key = paintCacheKey(
+      slot.nickPaint,
+      text,
+      this.fontSize,
+      family,
+      weight,
+    );
+    let tex = this.nickPaintTextures.get(key);
+    let pad = 1;
+    if (!tex) {
+      const raster = rasterizeNickPaint({
+        paint: slot.nickPaint,
+        text,
+        fontSize: this.fontSize,
+        fontFamily: family,
+        fontWeight: weight,
+      });
+      if (!raster) {
+        slot.nick.visible = true;
+        slot.nickPaintSpr.visible = false;
+        return baseW;
+      }
+      pad = raster.pad;
+      tex = Texture.from(raster.canvas);
+      (tex as Texture & { __crtPad?: number }).__crtPad = pad;
+      this.nickPaintTextures.set(key, tex);
+      this.nickPaintTextureOrder.push(key);
+      this.evictNickPaintTextures();
+    } else {
+      pad = (tex as Texture & { __crtPad?: number }).__crtPad ?? 1;
+      const at = this.nickPaintTextureOrder.indexOf(key);
+      if (at >= 0) {
+        this.nickPaintTextureOrder.splice(at, 1);
+        this.nickPaintTextureOrder.push(key);
+      }
+    }
+    slot.nickPaintKey = key;
+    slot.nickPaintSpr.texture = tex;
+    slot.nickPaintSpr.x = slot.nick.x - pad;
+    slot.nickPaintSpr.y = contentY - pad;
+    slot.nickPaintSpr.visible = true;
+    slot.nick.visible = false;
+    return baseW;
+  }
+
+  private evictNickPaintTextures(): void {
+    while (this.nickPaintTextureOrder.length > MessageRing.NICK_PAINT_LRU) {
+      const old = this.nickPaintTextureOrder.shift();
+      if (!old) {
+        break;
+      }
+      let inUse = false;
+      for (const slot of this.slots) {
+        if (slot.nickPaintKey === old && slot.nickPaintSpr.visible) {
+          inUse = true;
+          break;
+        }
+      }
+      if (inUse) {
+        this.nickPaintTextureOrder.push(old);
+        break;
+      }
+      const doomed = this.nickPaintTextures.get(old);
+      this.nickPaintTextures.delete(old);
+      if (doomed && doomed !== Texture.EMPTY) {
+        try {
+          doomed.destroy(true);
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  }
+
+  private clearNickPaintTextures(): void {
+    for (const slot of this.slots) {
+      slot.nickPaintKey = "";
+      slot.nickPaintSpr.visible = false;
+      slot.nickPaintSpr.texture = Texture.EMPTY;
+      slot.nick.visible = true;
+    }
+    for (const tex of this.nickPaintTextures.values()) {
+      if (tex !== Texture.EMPTY) {
+        try {
+          tex.destroy(true);
+        } catch {
+          /* */
+        }
+      }
+    }
+    this.nickPaintTextures.clear();
+    this.nickPaintTextureOrder.length = 0;
   }
 
   /** Map pointer in slot-local coords to a UTF-16 index in bodyRaw. */
