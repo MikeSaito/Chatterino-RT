@@ -1,5 +1,7 @@
 /** Built-in Chatterino-like themes (values from stock theme JSON; not copied assets). */
 
+import { hexToPixi } from "./themeContrast.ts";
+
 export type ThemePresetName = "White" | "Light" | "Dark" | "Black";
 
 export type ThemeCssTokens = {
@@ -45,8 +47,39 @@ export type ThemeTokens = ThemeCssTokens & {
   pixi: ThemePixiFills;
 };
 
+type CssOnly = ThemeCssTokens & {
+  hoverAlpha: number;
+  alternateAlpha?: number;
+  disabledAlpha?: number;
+};
+
+function buildTokens(css: CssOnly): ThemeTokens {
+  const {
+    hoverAlpha,
+    alternateAlpha = 1,
+    disabledAlpha = 0x99 / 255,
+    ...rest
+  } = css;
+  return {
+    ...rest,
+    pixi: {
+      canvasBg: hexToPixi(rest.splitBg),
+      body: hexToPixi(rest.windowText),
+      timestamp: hexToPixi(rest.muted),
+      nickFallback: hexToPixi(rest.muted),
+      alternate: hexToPixi(rest.surface1),
+      alternateAlpha,
+      hover: hexToPixi(rest.surface2),
+      hoverAlpha,
+      separator: hexToPixi(rest.border),
+      disabled: hexToPixi(rest.splitBg),
+      disabledAlpha,
+    },
+  };
+}
+
 const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
-  Dark: {
+  Dark: buildTokens({
     windowBg: "#0f0f0f",
     windowText: "#efeff1",
     splitBg: "#161616",
@@ -68,21 +101,9 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
     danger: "#e05555",
     warning: "#efad4e",
     focusRing: "#9147ff",
-    pixi: {
-      canvasBg: 0x161616,
-      body: 0xefeff1,
-      timestamp: 0x9a9a9a,
-      nickFallback: 0x9a9a9a,
-      alternate: 0x1c1c1c,
-      alternateAlpha: 1,
-      hover: 0x222222,
-      hoverAlpha: 0.35,
-      separator: 0x2e2e2e,
-      disabled: 0x161616,
-      disabledAlpha: 0x99 / 255,
-    },
-  },
-  Black: {
+    hoverAlpha: 0.35,
+  }),
+  Black: buildTokens({
     windowBg: "#000000",
     windowText: "#efeff1",
     splitBg: "#050505",
@@ -104,21 +125,9 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
     danger: "#e05555",
     warning: "#efad4e",
     focusRing: "#9147ff",
-    pixi: {
-      canvasBg: 0x000000,
-      body: 0xefeff1,
-      timestamp: 0x8a8a8a,
-      nickFallback: 0x8a8a8a,
-      alternate: 0x0a0a0a,
-      alternateAlpha: 1,
-      hover: 0x121212,
-      hoverAlpha: 0.35,
-      separator: 0x1a1a1a,
-      disabled: 0x000000,
-      disabledAlpha: 0x99 / 255,
-    },
-  },
-  Light: {
+    hoverAlpha: 0.35,
+  }),
+  Light: buildTokens({
     windowBg: "#f5f5f5",
     windowText: "#1a1a1a",
     splitBg: "#e8e8e8",
@@ -138,23 +147,12 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
     accentText: "#ffffff",
     success: "#2e8b3a",
     danger: "#c93a3a",
-    warning: "#c98a2e",
+    /** Darkened for WCAG AA UI 3:1 on light surfaces (was #c98a2e). */
+    warning: "#a87022",
     focusRing: "#9147ff",
-    pixi: {
-      canvasBg: 0xe8e8e8,
-      body: 0x1a1a1a,
-      timestamp: 0x5a5a5a,
-      nickFallback: 0x5a5a5a,
-      alternate: 0xdfdfdf,
-      alternateAlpha: 1,
-      hover: 0xd8d8d8,
-      hoverAlpha: 0.45,
-      separator: 0xb0b0b0,
-      disabled: 0xe8e8e8,
-      disabledAlpha: 0x99 / 255,
-    },
-  },
-  White: {
+    hoverAlpha: 0.45,
+  }),
+  White: buildTokens({
     windowBg: "#ffffff",
     windowText: "#1a1a1a",
     splitBg: "#ffffff",
@@ -174,22 +172,10 @@ const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
     accentText: "#ffffff",
     success: "#2e8b3a",
     danger: "#c93a3a",
-    warning: "#c98a2e",
+    warning: "#a87022",
     focusRing: "#9147ff",
-    pixi: {
-      canvasBg: 0xffffff,
-      body: 0x1a1a1a,
-      timestamp: 0x5a5a5a,
-      nickFallback: 0x5a5a5a,
-      alternate: 0xf5f5f5,
-      alternateAlpha: 1,
-      hover: 0xf0f0f0,
-      hoverAlpha: 0.5,
-      separator: 0xb0b0b0,
-      disabled: 0xffffff,
-      disabledAlpha: 0x99 / 255,
-    },
-  },
+    hoverAlpha: 0.5,
+  }),
 };
 
 const PRESET_SET = new Set<string>(["White", "Light", "Dark", "Black"]);
@@ -238,6 +224,10 @@ export function resolveThemePreset(opts: {
 
 export function themeTokens(preset: ThemePresetName): ThemeTokens {
   return BUILTIN[preset];
+}
+
+export function listThemePresets(): ThemePresetName[] {
+  return ["Dark", "Black", "Light", "White"];
 }
 
 export function applyThemeCss(tokens: ThemeTokens, root: HTMLElement = document.documentElement): void {
