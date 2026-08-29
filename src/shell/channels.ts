@@ -55,7 +55,7 @@ export function bindChannelList(
   const unbindDragWindow = (): void => {
     window.removeEventListener("pointermove", onWindowPointerMove);
     window.removeEventListener("pointerup", onWindowPointerUp);
-    window.removeEventListener("pointercancel", onWindowPointerUp);
+    window.removeEventListener("pointercancel", onWindowPointerCancel);
   };
 
   const clearDrag = (): void => {
@@ -63,6 +63,7 @@ export function bindChannelList(
       clearDragChrome();
       return;
     }
+    drag.row.removeEventListener("lostpointercapture", onLostPointerCapture);
     try {
       if (drag.row.hasPointerCapture(drag.pointerId)) {
         drag.row.releasePointerCapture(drag.pointerId);
@@ -75,14 +76,27 @@ export function bindChannelList(
     drag = null;
   };
 
-  const finishPointer = (): void => {
+  /** Abort gesture before paint/hydrate; persist live reorder if any. */
+  const abortDragForPaint = (): void => {
+    if (drag?.armed && drag.fromIndex !== drag.startIndex) {
+      onReorder?.([...open]);
+    }
+    clearDrag();
+  };
+
+  /**
+   * Own activation on pointerup: capture / is-dragging break the synthetic click.
+   * activate=false for cancel / lost capture (no accidental join).
+   * Armed drag that returned to startIndex is not a select.
+   */
+  const finishPointer = (activate: boolean): void => {
     if (!drag) {
       return;
     }
     const login = drag.login;
     const reordered = drag.armed && drag.fromIndex !== drag.startIndex;
+    const wasArmed = drag.armed;
     clearDrag();
-    // Always own activation here: setPointerCapture / is-dragging break the synthetic click.
     suppressNextClick = true;
     window.setTimeout(() => {
       suppressNextClick = false;
@@ -91,7 +105,9 @@ export function bindChannelList(
       onReorder?.([...open]);
       return;
     }
-    onSelect(login);
+    if (activate && !wasArmed) {
+      onSelect(login);
+    }
   };
 
   const readTabBoxes = (): { left: number; width: number }[] => {
@@ -175,6 +191,7 @@ export function bindChannelList(
       } catch {
         /* optional */
       }
+      drag.row.addEventListener("lostpointercapture", onLostPointerCapture);
       ev.preventDefault();
     }
     autoScroll(ev.clientX);
@@ -190,7 +207,21 @@ export function bindChannelList(
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
-    finishPointer();
+    finishPointer(true);
+  };
+
+  const onWindowPointerCancel = (ev: PointerEvent): void => {
+    if (!drag || ev.pointerId !== drag.pointerId) {
+      return;
+    }
+    finishPointer(false);
+  };
+
+  const onLostPointerCapture = (ev: PointerEvent): void => {
+    if (!drag || ev.pointerId !== drag.pointerId) {
+      return;
+    }
+    finishPointer(false);
   };
 
   const onTabPointerDown = (
@@ -221,11 +252,11 @@ export function bindChannelList(
     // Do not capture yet — capture + pointer-events:none kill the click path.
     window.addEventListener("pointermove", onWindowPointerMove);
     window.addEventListener("pointerup", onWindowPointerUp);
-    window.addEventListener("pointercancel", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerCancel);
   };
 
   const paint = (active: string): void => {
-    clearDrag();
+    abortDragForPaint();
     activeLogin = active;
     list.setAttribute("aria-label", t("sidebar.channels.aria"));
     list.replaceChildren();
@@ -269,6 +300,10 @@ export function bindChannelList(
         });
         leave.addEventListener("click", (ev) => {
           ev.stopPropagation();
+          if (suppressNextClick) {
+            ev.preventDefault();
+            return;
+          }
           onLeave(login);
         });
         leave.addEventListener("pointerdown", (ev) => {
@@ -360,7 +395,7 @@ export function bindChannelList(
       showRecents = show;
       paint(activeLogin);
     },
-    isReordering: () => drag != null,
+    isReordering: () => drag?.armed === true,
     reorderOpen(fromIndex, toIndex) {
       const next = moveOpenTab(open, fromIndex, toIndex);
       if (!next) {
