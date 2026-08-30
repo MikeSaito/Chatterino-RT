@@ -5223,7 +5223,6 @@ div.points-empty {
 #app[data-ui-layout="classic"] #composer {
   padding: 4px 6px;
   gap: 4px;
-  align-items: center;
 }
 
 #app[data-ui-layout="classic"] #composer-input {
