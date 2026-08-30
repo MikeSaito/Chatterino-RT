@@ -271,6 +271,25 @@ function assert(cond: boolean, msg: string): void {
 }
 
 {
+  // followSmooth=false: stick-to-bottom growth must snap even when newMessages is on
+  // (snapshot / geometry settle must not tween the viewport).
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: true });
+  m.applyLayout(20, 4, slots([["a", 20]]), undefined);
+  assert(m.atBottom && !m.isAnimating(), "setup at bottom");
+  m.applyLayout(28, 4, slots([["a", 28]]), undefined, false, undefined, false, false);
+  assert(!m.isAnimating(), "followSmooth false snaps");
+  assert(Math.abs(m.current - m.desired) < 1e-3, "current glued after snap");
+  assert(Math.abs(m.desired - 24) < 1e-3, `bottom 24, got ${m.desired}`);
+
+  m.applyLayout(36, 4, slots([["a", 36]]), undefined, false, undefined, false, true);
+  assert(m.isAnimating(), "followSmooth true animates new-message growth");
+  m.tick(0);
+  m.tick(SMOOTH_SCROLL_MS);
+  assert(!m.isAnimating() && Math.abs(m.current - m.desired) < 1e-3, "growth tween settles");
+}
+
+{
   // Smooth scroll up: row growth above the visible frame must shift current, not only desired.
   const m = new ScrollModel();
   m.configureSmooth({ enabled: true, newMessages: false });

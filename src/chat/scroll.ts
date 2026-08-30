@@ -201,6 +201,8 @@ export class ScrollModel {
    *   Omit to leave current alone except desired-delta compensation while animating.
    *   Pass explicitly (including `undefined` via `glueVisual=true`) from ring sealed pairs.
    * @param glueVisual - when true, apply `visualAnchor` (or desired-delta if unresolved).
+   * @param followSmooth - when false, stick-to-bottom growth snaps (snapshot / geometry /
+   *   channel-open settle). Live appends pass true so smooth-new-messages still works.
    */
   applyLayout(
     contentRows: number,
@@ -210,6 +212,7 @@ export class ScrollModel {
     paused = false,
     visualAnchor?: ScrollAnchor,
     glueVisual = false,
+    followSmooth = true,
   ): void {
     const prevBottom = this.bottom();
     const prevContent = this.contentRows;
@@ -269,6 +272,7 @@ export class ScrollModel {
     this.finish(true);
     this.clampCurrent();
     const grewWhileFollowing =
+      followSmooth &&
       wasFollowing &&
       this.atBottom &&
       this.smoothNewMessages &&

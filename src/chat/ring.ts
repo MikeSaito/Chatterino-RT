@@ -328,6 +328,17 @@ export class MessageRing {
   private hideTimestampsWhenLive = false;
   private channelLive = false;
   private loadingSnapshot = false;
+  /**
+   * After snapshot/history rewrite: snap stick-to-bottom growth (no smooth-new-message
+   * tweens) until lazy paints + brief catch-up quiet, then one final snap if still pinned.
+   */
+  private layoutSettling = false;
+  private layoutSettleGen = 0;
+  private layoutSettlePinned = false;
+  private layoutSettleStartedAt = 0;
+  private layoutSettleQuietUntil = 0;
+  private static readonly LAYOUT_SETTLE_MAX_MS = 600;
+  private static readonly LAYOUT_SETTLE_QUIET_MS = 64;
   private mediaRepaintSlots = new Set<Slot>();
   private mediaRepaintRaf = 0;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
@@ -915,6 +926,7 @@ export class MessageRing {
       this.isPaused(),
       anchors.visual,
       true,
+      false,
     );
     this.afterScrollChange();
   }
@@ -2163,11 +2175,12 @@ export class MessageRing {
   }
 
   reset(): void {
+    this.cancelLayoutSettle();
     this.liveMsgIds.clear();
     this.channelLive = false;
     this.resetSlots();
     this.markLayoutFullPaint();
-    this.layout();
+    this.layout(undefined, undefined, false);
   }
 
   setChannelLive(live: boolean): void {
@@ -2193,6 +2206,7 @@ export class MessageRing {
 
   destroy(): void {
     this.ready = false;
+    this.cancelLayoutSettle();
     this.resizeDebounce?.cancel();
     this.resizeDebounce = null;
     this.app.renderer.off("resize", this.onRendererResize);
@@ -2224,6 +2238,7 @@ export class MessageRing {
   applySnapshot(events: ChatEvent[]): void {
     const follow = this.scroll.atBottom;
     const anchors = follow ? undefined : this.captureScrollAnchors();
+    this.beginLayoutSettle(follow);
     this.clearSlots();
     const start = Math.max(0, events.length - this.poolSize);
     this.loadingSnapshot = true;
@@ -2234,7 +2249,8 @@ export class MessageRing {
     } finally {
       this.loadingSnapshot = false;
     }
-    this.layout(follow ? undefined : anchors);
+    // Snapshot + deferred paints must snap; smooth follow would thrash the viewport.
+    this.layout(follow ? undefined : anchors, undefined, false);
   }
 
   pushMany(events: ChatEvent[]): void {
@@ -2249,6 +2265,9 @@ export class MessageRing {
       if (result.slot) {
         paintSlots.add(result.slot);
       }
+    }
+    if (this.layoutSettling) {
+      this.noteLayoutSettleActivity();
     }
     if (needFull) {
       // Visibility / stacking changed — reposition all, paint only new/updated rows.
@@ -3902,15 +3921,17 @@ export class MessageRing {
           sealed: true;
         },
     paintOnly?: Set<Slot>,
+    followSmooth?: boolean,
   ): void {
     if (!this.ready) {
       return;
     }
+    const smooth = followSmooth ?? !this.layoutSettling;
     const anchors = this.isAnchorPair(arg)
       ? arg
       : this.captureScrollAnchors(arg);
     this.withPerfMeasure("crt-layout", () => {
-      this.layoutInner(anchors, paintOnly);
+      this.layoutInner(anchors, paintOnly, smooth);
     });
   }
 
@@ -3966,6 +3987,7 @@ export class MessageRing {
       sealed: true;
     },
     paintOnly?: Set<Slot>,
+    followSmooth = true,
   ): void {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     const visible: Slot[] = [];
@@ -4054,6 +4076,7 @@ export class MessageRing {
       this.isPaused(),
       anchors.visual,
       true,
+      followSmooth,
     );
     this.afterScrollChange();
   }
@@ -4088,6 +4111,82 @@ export class MessageRing {
     this.syncClipCardAnchors();
     this.ensureScrollTick();
     this.scheduleViewportPaint();
+  }
+
+  private cancelLayoutSettle(): void {
+    this.layoutSettleGen += 1;
+    this.layoutSettling = false;
+    this.layoutSettlePinned = false;
+    this.layoutSettleQuietUntil = 0;
+  }
+
+  private noteLayoutSettleActivity(): void {
+    if (!this.layoutSettling) {
+      return;
+    }
+    this.layoutSettleQuietUntil =
+      performance.now() + MessageRing.LAYOUT_SETTLE_QUIET_MS;
+  }
+
+  /**
+   * After snapshot / history rewrite: snap follow growth while lazy paints and a short
+   * live catch-up run, then one final bottom snap if the channel opened pinned.
+   */
+  private beginLayoutSettle(pinned: boolean): void {
+    this.layoutSettling = true;
+    this.layoutSettlePinned = pinned;
+    const gen = ++this.layoutSettleGen;
+    this.layoutSettleStartedAt = performance.now();
+    this.noteLayoutSettleActivity();
+    const tryFinish = (): void => {
+      if (gen !== this.layoutSettleGen || !this.ready) {
+        return;
+      }
+      const now = performance.now();
+      const timedOut =
+        now - this.layoutSettleStartedAt >= MessageRing.LAYOUT_SETTLE_MAX_MS;
+      const paintsBusy =
+        this.viewportPaintRaf !== 0 || this.mediaRepaintRaf !== 0;
+      const quietBusy = now < this.layoutSettleQuietUntil;
+      if (!timedOut && (paintsBusy || quietBusy)) {
+        requestAnimationFrame(tryFinish);
+        return;
+      }
+      requestAnimationFrame(() => {
+        if (gen !== this.layoutSettleGen || !this.ready) {
+          return;
+        }
+        const again = performance.now();
+        const stillTimedOut =
+          again - this.layoutSettleStartedAt >= MessageRing.LAYOUT_SETTLE_MAX_MS;
+        if (
+          !stillTimedOut &&
+          (this.viewportPaintRaf !== 0 ||
+            this.mediaRepaintRaf !== 0 ||
+            again < this.layoutSettleQuietUntil)
+        ) {
+          requestAnimationFrame(tryFinish);
+          return;
+        }
+        this.endLayoutSettle();
+      });
+    };
+    requestAnimationFrame(tryFinish);
+  }
+
+  private endLayoutSettle(): void {
+    const pinned = this.layoutSettlePinned;
+    this.layoutSettling = false;
+    this.layoutSettlePinned = false;
+    this.layoutSettleQuietUntil = 0;
+    if (!this.ready) {
+      return;
+    }
+    // Only snap follow if we still own the pin; never kill a user mid-scroll tween.
+    if (pinned && this.scroll.atBottom && !this.isPaused()) {
+      this.scroll.goToBottom(false);
+    }
+    this.afterScrollChange();
   }
 
   private syncClipCardAnchors(): void {
