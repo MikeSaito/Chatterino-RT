@@ -45,6 +45,7 @@ fn shutdown_background(app: &AppHandle) {
         state.notify_polls(chat::polls::PollsCmd::Shutdown);
         state.notify_low_trust(chat::low_trust::LowTrustCmd::Shutdown);
         state.notify_pins(chat::pins::PinsCmd::Shutdown);
+        state.notify_shared_bans(chat::shared_bans::SharedBansCmd::Shutdown);
         chat::automod::shutdown();
         chat::live_status::shutdown();
         chat::live_notifications::shutdown();
@@ -88,6 +89,7 @@ pub fn run() {
             chat::live_status::start(app.handle().clone(), shared.clone());
             chat::live_notifications::start(app.handle().clone(), shared.clone());
             chat::shared_chat::start(shared.clone());
+            chat::shared_bans::start(app.handle().clone(), shared.clone())?;
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())

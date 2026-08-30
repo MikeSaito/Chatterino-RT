@@ -70,6 +70,29 @@ pub fn push_clearchat(
     };
 
     if style == TimeoutStackStyle::DontStack {
+        // Still enrich IRC CLEARCHAT with shared-ban EventSub metadata (no stack bump).
+        if incoming_source.is_some() || incoming_mod.is_some() {
+            let min_ts = incoming_ts.saturating_sub(WINDOW_MS);
+            let len = items.len();
+            let start = len.saturating_sub(WINDOW_MSGS);
+            for i in (start..len).rev() {
+                let existing = &items[i];
+                if existing.timestamp_ms() < min_ts {
+                    break;
+                }
+                if let Some(updated) = try_stack_pair(
+                    existing,
+                    incoming_target.as_deref(),
+                    *incoming_duration,
+                    *incoming_ts,
+                    incoming_source.as_deref(),
+                    incoming_mod.as_deref(),
+                ) {
+                    items[i] = updated.clone();
+                    return PushOutcome::Replaced(updated);
+                }
+            }
+        }
         push_back(items, incoming.clone(), limit);
         return PushOutcome::Added(incoming);
     }

@@ -130,6 +130,9 @@ pub async fn chat_join(
         state.notify_polls(super::polls::PollsCmd::SetChannel(normalized.clone()));
         state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(normalized.clone()));
         state.notify_pins(super::pins::PinsCmd::SetChannel(normalized.clone()));
+        state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(
+            normalized.clone(),
+        ));
     }
     Ok(normalized)
 }
@@ -152,6 +155,7 @@ pub async fn chat_leave(
         state.notify_polls(super::polls::PollsCmd::ClearChannel);
         state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
         state.notify_pins(super::pins::PinsCmd::ClearChannel);
+        state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
     }
     if let Ok(mut cat) = state.catalog.lock() {
         cat.drop_channel(&normalized);
@@ -195,11 +199,13 @@ pub async fn chat_leave(
             state.notify_polls(super::polls::PollsCmd::SetChannel(ch.clone()));
             state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(ch.clone()));
             state.notify_pins(super::pins::PinsCmd::SetChannel(ch.clone()));
+            state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(ch.clone()));
         } else {
             let _ = super::session::clear_last(&state);
             state.notify_polls(super::polls::PollsCmd::ClearChannel);
             state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
             state.notify_pins(super::pins::PinsCmd::ClearChannel);
+            state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
         }
     }
     auth::emit(&app, &state);
@@ -214,6 +220,7 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     state.notify_polls(super::polls::PollsCmd::ClearChannel);
     state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
     state.notify_pins(super::pins::PinsCmd::ClearChannel);
+    state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.clear_all();

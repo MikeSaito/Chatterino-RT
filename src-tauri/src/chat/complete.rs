@@ -366,6 +366,7 @@ mod tests {
                 "/me ".to_string(),
                 "/mods ".to_string(),
                 "/mod ".to_string(),
+                "/monitor ".to_string(),
                 "/marker ".to_string()
             ]
         );

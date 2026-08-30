@@ -61,6 +61,7 @@ pub mod session;
 pub mod settings;
 pub mod seventv_badges;
 pub mod seventv_paints;
+pub mod shared_bans;
 pub mod shared_chat;
 pub mod similarity;
 pub mod spans;

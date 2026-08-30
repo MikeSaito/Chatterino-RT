@@ -29,6 +29,7 @@ use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::seventv_paints::SeventvPaintCatalog;
+use super::shared_bans::SharedBansCmd;
 use super::shared_chat::SharedChatState;
 use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
@@ -164,6 +165,8 @@ pub struct Shared {
     pub low_trust_shutdown: Arc<AtomicBool>,
     pub pins_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PinsCmd>>>>,
     pub pins_shutdown: Arc<AtomicBool>,
+    pub shared_bans_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SharedBansCmd>>>>,
+    pub shared_bans_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
@@ -241,6 +244,8 @@ impl Shared {
             low_trust_shutdown: Arc::new(AtomicBool::new(false)),
             pins_tx: Arc::new(Mutex::new(None)),
             pins_shutdown: Arc::new(AtomicBool::new(false)),
+            shared_bans_tx: Arc::new(Mutex::new(None)),
+            shared_bans_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
@@ -501,6 +506,18 @@ impl Shared {
             self.pins_shutdown.store(true, Ordering::SeqCst);
         }
         if let Ok(guard) = self.pins_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
+    pub fn notify_shared_bans(&self, cmd: SharedBansCmd) {
+        if matches!(cmd, SharedBansCmd::Shutdown) {
+            self.shared_bans_shutdown.store(true, Ordering::SeqCst);
+            super::shared_bans::shutdown();
+        }
+        if let Ok(guard) = self.shared_bans_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }
