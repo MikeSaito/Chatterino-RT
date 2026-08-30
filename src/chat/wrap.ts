@@ -67,6 +67,11 @@ export type WrapOptions = {
   /** Диапазоны mention: в renderWrapped заменить пробелами (overlay BitmapText). */
   maskMentions?: readonly WrapRange[];
   /**
+   * Advance overlay @mention text (bold ChatNickFont).
+   * Default: measureAdvance (body ChatFont) — too narrow when bold overlays.
+   */
+  measureMentionAdvance?: MeasureAdvance;
+  /**
    * Ширина первой строки (после time/badges/nick).
    * Последующие — maxWidthPx (Twitch / Chatterino flow wrap).
    */
@@ -83,6 +88,7 @@ export type WrapOptions = {
 type WrapCtx = {
   emoteMinPx: number;
   measureAdvance: MeasureAdvance;
+  measureMentionAdvance: MeasureAdvance | null;
   maskEmotes: boolean;
   enableZeroWidth: boolean;
   removeSpacesBetweenEmotes: boolean;
@@ -123,6 +129,7 @@ function ctxFrom(opts?: WrapOptions): WrapCtx {
   return {
     emoteMinPx: Math.max(0, Math.floor(opts?.emoteMinPx ?? 0)),
     measureAdvance: opts?.measureAdvance ?? defaultAdvance,
+    measureMentionAdvance: opts?.measureMentionAdvance ?? null,
     maskEmotes: opts?.maskEmotes !== false,
     maskMentions: opts?.maskMentions ?? [],
     enableZeroWidth: opts?.enableZeroWidth !== false,
@@ -303,6 +310,7 @@ function trimLineVisualEnd(
   const opts: WrapOptions = {
     emoteMinPx: ctx.emoteMinPx,
     measureAdvance: ctx.measureAdvance,
+    measureMentionAdvance: ctx.measureMentionAdvance ?? undefined,
     maskEmotes: ctx.maskEmotes,
     enableZeroWidth: ctx.enableZeroWidth,
     removeSpacesBetweenEmotes: ctx.removeSpacesBetweenEmotes,
@@ -460,6 +468,59 @@ function spacesForPx(px: number, ctx: WrapCtx): string {
   return " ".repeat(Math.max(1, n));
 }
 
+/** Mask spaces whose advance is never below the ideal (mention holes). */
+function spacesForPxAtLeast(px: number, ctx: WrapCtx): string {
+  let spaces = spacesForPx(px, ctx);
+  const target = Math.max(1, px);
+  const sw = ctx.measureAdvance(" ");
+  if (!(sw > 0)) {
+    return spaces;
+  }
+  while (ctx.measureAdvance(spaces) + 1e-6 < target) {
+    spaces += " ";
+  }
+  return spaces;
+}
+
+/**
+ * Layout width of a masked @mention overlay (bold nick font when provided).
+ * Matches emoteIdealPx: hole sized to painted chrome, not body ChatFont.
+ */
+export function mentionIdealPx(
+  text: string,
+  start: number,
+  end: number,
+  opts?: WrapOptions,
+): number {
+  return mentionIdealPxCtx(text, start, end, ctxFrom(opts));
+}
+
+function mentionIdealPxCtx(
+  text: string,
+  start: number,
+  end: number,
+  ctx: WrapCtx,
+): number {
+  const slice = text.slice(start, end);
+  if (!slice) {
+    return 1;
+  }
+  if (ctx.measureMentionAdvance) {
+    return Math.max(1, ctx.measureMentionAdvance(slice));
+  }
+  return Math.max(1, ctx.measureAdvance(slice));
+}
+
+function mentionWidth(
+  text: string,
+  start: number,
+  end: number,
+  ctx: WrapCtx,
+): number {
+  const ideal = mentionIdealPxCtx(text, start, end, ctx);
+  return ctx.measureAdvance(spacesForPxAtLeast(ideal, ctx));
+}
+
 /**
  * Ideal emote hole; layout width = measured mask spaces.
  * Images on: sprite display width only (Chatterino EmoteElement image size).
@@ -511,11 +572,9 @@ function maskSlice(
       if (mention) {
         const to = Math.min(mention.end, end);
         if (i < to) {
-          const px = visualWidth(text, i, to, emotes, {
-            ...ctx,
-            maskMentions: [],
-          });
-          kept.push(spacesForPx(px, ctx));
+          kept.push(
+            spacesForPxAtLeast(mentionIdealPxCtx(text, i, to, ctx), ctx),
+          );
         }
         i = to;
         continue;
@@ -634,13 +693,9 @@ function advanceUnit(
         return { next: Math.min(limit, mention.end), width: 0 };
       }
       const to = Math.min(mention.end, limit);
-      const ideal = visualWidth(text, mention.start, to, emotes, {
-        ...ctx,
-        maskMentions: [],
-      });
       return {
         next: to,
-        width: ctx.measureAdvance(spacesForPx(ideal, ctx)),
+        width: mentionWidth(text, mention.start, to, ctx),
       };
     }
   }

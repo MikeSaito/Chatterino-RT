@@ -3791,6 +3791,7 @@ export class MessageRing {
         mt.text = slot.bodyRaw.slice(a, b);
         mt.style.fontFamily = fontFamily;
         mt.style.fontSize = this.fontSize;
+        mt.style.lineHeight = this.lineHeight;
         mt.style.fill = 0xffffff;
         const cached = this.nickColorCache.get(span.login);
         mt.tint =
@@ -3799,6 +3800,8 @@ export class MessageRing {
             : this.themeFills.body;
         mt.x =
           wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
+        // Same row top as body. Explicit lineHeight so Pixi V-centers ChatNickFont
+        // glyphs like ChatFont (unset lineHeight sat mentions above body).
         mt.y = contentY + pos.line * this.lineHeight;
         mt.visible = true;
         dirtyBitmapText(mt);
@@ -5243,9 +5246,25 @@ export class MessageRing {
       cache.set(slice, w);
       return w;
     };
+    const nickCache = new Map<string, number>();
+    const measureMentionAdvance = this.boldUsernames
+      ? (slice: string): number => {
+          if (!slice) {
+            return 0;
+          }
+          const hit = nickCache.get(slice);
+          if (hit !== undefined) {
+            return hit;
+          }
+          const w = this.measureBitmapTextWidth("ChatNickFont", slice);
+          nickCache.set(slice, w);
+          return w;
+        }
+      : undefined;
     return {
       emoteMinPx,
       measureAdvance,
+      measureMentionAdvance,
       maskEmotes: images,
       enableZeroWidth: images && this.enableZeroWidthEmotes,
       removeSpacesBetweenEmotes: images && this.removeSpacesBetweenEmotes,

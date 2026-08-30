@@ -4,6 +4,7 @@ import {
   emoteDisplaySize,
   indexToLineCol,
   lineColToIndex,
+  mentionIdealPx,
   renderWrapped,
   withCollapsedEllipsis,
   wrapBody,
@@ -216,6 +217,99 @@ const mentionMaskUnits = mentionMask.replace(/\n/g, "").length;
 if (mentionMaskUnits !== mentionVisual) {
   throw new Error(
     `maskMentions lines must match source slices (${mentionVisual}), got ${mentionMaskUnits}`,
+  );
+}
+
+// Bold overlay wider than body ChatFont: hole must use measureMentionAdvance.
+const boldMention = "hi @bob!";
+const boldSpan = { start: 3, end: 7 }; // "@bob"
+const bodyAdv = (s: string) => s.length;
+const nickAdv = (s: string) => s.length * 2;
+const boldOpts = {
+  measureAdvance: bodyAdv,
+  measureMentionAdvance: nickAdv,
+  maskMentions: [boldSpan],
+};
+const boldIdeal = mentionIdealPx(boldMention, boldSpan.start, boldSpan.end, boldOpts);
+if (boldIdeal !== 8) {
+  throw new Error(`mentionIdealPx bold must be 8, got ${boldIdeal}`);
+}
+const boldLines = wrapBody(boldMention, 80, [], boldOpts);
+const afterMention = indexToLineCol(
+  boldMention,
+  boldLines,
+  boldSpan.end,
+  [],
+  boldOpts,
+);
+const expectedAfter = bodyAdv("hi ") + boldIdeal;
+if (!afterMention || afterMention.col !== expectedAfter) {
+  throw new Error(
+    `text after bold mention must start at ${expectedAfter}, got ${JSON.stringify(afterMention)}`,
+  );
+}
+const boldMask = renderWrapped(boldMention, boldLines, [], boldOpts);
+const afterHi = boldMask.slice(3);
+const holeEnd = afterHi.indexOf("!");
+if (holeEnd < boldIdeal) {
+  throw new Error(
+    `mask must pad bold mention to >= ${boldIdeal} spaces before next glyph, got ${holeEnd}`,
+  );
+}
+if (bodyAdv(afterHi.slice(0, holeEnd)) < boldIdeal) {
+  throw new Error(`bold mention hole advance too small: ${holeEnd}`);
+}
+
+// Narrow wrap: bold hole wider than remaining first-line budget → mention on next line.
+const boldNarrow = wrapBody(boldMention, 10, [], {
+  ...boldOpts,
+  firstLineMaxWidthPx: bodyAdv("hi ") + 4,
+});
+if (boldNarrow.length < 2 || boldNarrow[0].end > boldSpan.start) {
+  throw new Error(
+    `narrow wrap must break before bold mention, got ${JSON.stringify(boldNarrow)}`,
+  );
+}
+
+// Collapse: budget between body-width and bold-width of the line must not
+// fall back to 1 char (trim must pass measureMentionAdvance).
+const longBold = "hi @verylongnickandmore text";
+const longSpan = { start: 3, end: 22 };
+const longOpts = {
+  measureAdvance: bodyAdv,
+  measureMentionAdvance: nickAdv,
+  maskMentions: [longSpan],
+};
+const collapseBoldLines = [
+  { start: 0, end: longBold.length },
+  { start: 0, end: 0 },
+];
+const bodyLineW =
+  bodyAdv("hi ") + bodyAdv(longBold.slice(longSpan.start, longSpan.end)) + bodyAdv(" text");
+const boldLineW =
+  bodyAdv("hi ") +
+  nickAdv(longBold.slice(longSpan.start, longSpan.end)) +
+  bodyAdv(" text");
+const collapseBudget = bodyLineW + 3; // > body total, < bold total
+if (!(collapseBudget > bodyLineW && collapseBudget < boldLineW)) {
+  throw new Error(
+    `test setup: need body ${bodyLineW} < budget < bold ${boldLineW}`,
+  );
+}
+const collapsedBold = collapseWrapLines(
+  collapseBoldLines,
+  1,
+  longBold,
+  collapseBudget + bodyAdv("..."),
+  [],
+  longOpts,
+);
+if (!collapsedBold.collapsed) {
+  throw new Error("expected collapsed wrap");
+}
+if (collapsedBold.lines[0].end <= collapsedBold.lines[0].start + 1) {
+  throw new Error(
+    `collapse with bold mention must not fall back to 1 char, got ${JSON.stringify(collapsedBold.lines)}`,
   );
 }
 
