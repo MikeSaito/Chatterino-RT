@@ -136,6 +136,10 @@ impl LiveNotifyState {
     pub fn rebuild_cfg(&mut self, data: &AppSettings) {
         self.cfg = NotifyCfg::from_settings(data);
     }
+
+    pub fn cached_live(&self, channel: &str) -> Option<bool> {
+        self.live.get(channel).copied()
+    }
 }
 
 /// Decide effects for offline→live. Returns None when suppressed or no effects.
@@ -256,6 +260,10 @@ pub fn shutdown() {
 async fn run_poller(app: AppHandle, shared: Shared) {
     let mut ticks: u32 = 0;
     let mut last_fingerprint = String::new();
+    let mut last_open: HashSet<String> = HashSet::new();
+    // Session-open logins that got Helix before the hub buffer existed.
+    let mut awaiting_buffer: HashSet<String> = HashSet::new();
+    let mut fresh_backoff_ticks: u32 = 0;
     // First pass after a short delay so settings are loaded.
     loop {
         if NOTIFY_SHUTDOWN.load(Ordering::SeqCst) {
@@ -266,64 +274,264 @@ async fn run_poller(app: AppHandle, shared: Shared) {
             break;
         }
         ticks = ticks.saturating_add(1);
-        let channels = channels_to_poll(&shared);
+        if fresh_backoff_ticks > 0 {
+            fresh_backoff_ticks = fresh_backoff_ticks.saturating_sub(1);
+        }
+
+        let session_open = session_open_logins(&shared);
+        let session_open_set: HashSet<String> = session_open.iter().cloned().collect();
+        awaiting_buffer.retain(|ch| session_open_set.contains(ch));
+
+        // Apply cached Helix live to tabs whose buffers appeared after the last poll.
+        flush_awaiting_buffers(&app, &shared, &mut awaiting_buffer);
+
+        let freshly_open = freshly_opened(&last_open, &session_open);
+        let channels = channels_to_poll(&shared, &session_open);
         let fingerprint = channels.join("\0");
         let set_changed = fingerprint != last_fingerprint;
-        if set_changed {
-            last_fingerprint = fingerprint;
-        }
-        if ticks != 1 && ticks % POLL_EVERY_TICKS != 0 && !set_changed {
+        let interval = ticks == 1 || ticks % POLL_EVERY_TICKS == 0;
+        let force_fresh = !freshly_open.is_empty() && fresh_backoff_ticks == 0;
+        if !interval && !set_changed && !force_fresh {
             continue;
         }
-        poll_once(&app, &shared, &channels).await;
-        mark_initial_pass_done(&shared);
+
+        match poll_once(&app, &shared, &channels, &session_open, &freshly_open).await {
+            PollOutcome::Empty => {
+                last_fingerprint = fingerprint;
+                last_open = session_open_set;
+                fresh_backoff_ticks = 0;
+                mark_initial_pass_done(&shared);
+            }
+            PollOutcome::Failed => {
+                // Advance fingerprint so permanent Auth fail does not force-poll every
+                // few seconds; keep last_open so brand-new tabs still retry with backoff.
+                last_fingerprint = fingerprint;
+                if !freshly_open.is_empty() {
+                    fresh_backoff_ticks = 5;
+                }
+            }
+            PollOutcome::Ok { missing_buffers } => {
+                last_fingerprint = fingerprint;
+                last_open = session_open_set;
+                fresh_backoff_ticks = 0;
+                for ch in missing_buffers {
+                    awaiting_buffer.insert(ch);
+                }
+                mark_initial_pass_done(&shared);
+            }
+        }
     }
 }
 
-fn channels_to_poll(shared: &Shared) -> Vec<String> {
+fn normalize_login(raw: &str) -> Option<String> {
+    let ch = raw.trim().trim_start_matches('#').to_ascii_lowercase();
+    if ch.is_empty() {
+        None
+    } else {
+        Some(ch)
+    }
+}
+
+/// Logins in `current` that were absent from `previous` (new open tabs).
+pub fn freshly_opened(previous: &HashSet<String>, current: &[String]) -> HashSet<String> {
+    current
+        .iter()
+        .filter(|ch| !previous.contains(*ch))
+        .cloned()
+        .collect()
+}
+
+/// Whether `chat:channel_live` should fire for tab chrome after a Helix observation.
+/// Active channel chrome is owned by `live_status` (always-emit + system notices).
+pub fn should_emit_open_tab_live(
+    is_open_tab: bool,
+    has_channel: bool,
+    is_active: bool,
+    hub_live_changed: bool,
+    freshly_open: bool,
+) -> bool {
+    if !is_open_tab || !has_channel || is_active {
+        return false;
+    }
+    hub_live_changed || freshly_open
+}
+
+/// Session open-tab logins (UI source of truth for tab chrome), not IRC `joined`.
+fn session_open_logins(shared: &Shared) -> Vec<String> {
+    let mut set = HashSet::new();
+    if let Ok(session) = shared.session.lock() {
+        for ch in &session.data.open {
+            if let Some(n) = normalize_login(ch) {
+                set.insert(n);
+            }
+        }
+    }
+    let mut out: Vec<String> = set.into_iter().collect();
+    out.sort();
+    out
+}
+
+fn channels_to_poll(shared: &Shared, session_open: &[String]) -> Vec<String> {
     let mut set = HashSet::new();
     if let Ok(state) = shared.live_notify.lock() {
         for ch in &state.cfg.selected {
-            set.insert(ch.clone());
+            if let Some(n) = normalize_login(ch) {
+                set.insert(n);
+            }
         }
     }
+    for ch in session_open {
+        set.insert(ch.clone());
+    }
+    // Hub buffers cover join races before session.open is rewritten.
     if let Ok(hub) = shared.hub.lock() {
-        for ch in hub.joined_channels() {
-            set.insert(ch.to_ascii_lowercase());
+        for ch in hub.channels() {
+            if let Some(n) = normalize_login(&ch) {
+                set.insert(n);
+            }
         }
-        // Active channel is refreshed by live_status; still include for consistency
-        // when it is the only joined channel — observe_live dedupes by cache.
     }
     let mut out: Vec<String> = set.into_iter().filter(|s| !s.is_empty()).collect();
     out.sort();
     out
 }
 
-async fn poll_once(app: &AppHandle, shared: &Shared, channels: &[String]) {
-    if channels.is_empty() {
+fn show_title_in_live_message(shared: &Shared) -> bool {
+    shared
+        .settings
+        .lock()
+        .ok()
+        .and_then(|inner| {
+            inner
+                .data
+                .knobs
+                .get("misc.showTitleInLiveMessage")
+                .and_then(|v| v.as_bool())
+        })
+        .unwrap_or(false)
+}
+
+enum PollOutcome {
+    Empty,
+    Failed,
+    Ok { missing_buffers: Vec<String> },
+}
+
+/// When Helix ran before `hub.buffer` existed, apply cached live once the buffer appears.
+fn flush_awaiting_buffers(app: &AppHandle, shared: &Shared, awaiting: &mut HashSet<String>) {
+    if awaiting.is_empty() {
         return;
     }
+    let show_title = show_title_in_live_message(shared);
+    let ready: Vec<String> = {
+        let Ok(hub) = shared.hub.lock() else {
+            return;
+        };
+        awaiting
+            .iter()
+            .filter(|ch| hub.has_channel(ch))
+            .cloned()
+            .collect()
+    };
+    if ready.is_empty() {
+        return;
+    }
+    for ch in ready {
+        awaiting.remove(&ch);
+        let live = shared
+            .live_notify
+            .lock()
+            .ok()
+            .and_then(|state| state.cached_live(&ch))
+            .unwrap_or(false);
+        let mut emit_tab_live = false;
+        let mut close_stream_log = false;
+        let mut notice: Option<String> = None;
+        if let Ok(mut hub) = shared.hub.lock() {
+            let is_active = hub
+                .active
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&ch));
+            if is_active || !hub.has_channel(&ch) {
+                continue;
+            }
+            let changed = hub.set_channel_live(&ch, live);
+            if changed {
+                notice = Some(super::live_status::stream_status_notice_text(
+                    &ch, live, None, show_title,
+                ));
+                if !live {
+                    close_stream_log = true;
+                }
+            }
+            emit_tab_live = should_emit_open_tab_live(true, true, false, changed, true);
+        }
+        if close_stream_log {
+            super::logging::close_stream_file(shared, &ch);
+        }
+        if let Some(text) = notice {
+            shared.post_channel_notice(app, &ch, text);
+        }
+        if emit_tab_live {
+            let payload = super::live_status::channel_live_payload(
+                &ch,
+                &if live {
+                    helix::StreamStatus {
+                        live: true,
+                        ..helix::StreamStatus::offline()
+                    }
+                } else {
+                    helix::StreamStatus::offline()
+                },
+            );
+            let _ = app.emit("chat:channel_live", payload);
+        }
+    }
+}
+
+async fn poll_once(
+    app: &AppHandle,
+    shared: &Shared,
+    channels: &[String],
+    session_open: &[String],
+    freshly_open: &HashSet<String>,
+) -> PollOutcome {
+    if channels.is_empty() {
+        return PollOutcome::Empty;
+    }
+    let open_set: HashSet<&str> = session_open.iter().map(String::as_str).collect();
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
     let Some(live_map) =
         helix::fetch_streams_by_logins(channels, token.as_deref(), &client_id).await
     else {
-        return;
+        return PollOutcome::Failed;
     };
+    let show_title = show_title_in_live_message(shared);
+    let mut missing_buffers = Vec::new();
     for ch in channels {
         let status = live_map.get(ch);
         let live = status.is_some_and(|s| s.live);
         let title = status.and_then(|s| s.stream_title.as_deref());
-        // Hub live for the active channel is owned by live_status (system notices).
-        // Re-check active inside the same lock as the mutation to avoid races.
-        // Emit chat:channel_live only when the live flag changes (tab chrome).
+        let is_open_tab = open_set.contains(ch.as_str());
+        // Active hub + system notices: live_status. Inactive open tabs: update hub,
+        // post the same live/offline notice into that channel's scrollback, emit tab chrome
+        // on change or when the tab just opened (live may already be known from notify lists).
         let mut emit_tab_live = false;
+        let mut close_stream_log = false;
+        let mut notice: Option<String> = None;
+        let mut saw_open_without_buffer = false;
         if let Ok(mut hub) = shared.hub.lock() {
             let is_active = hub
                 .active
                 .as_deref()
                 .is_some_and(|a| a.eq_ignore_ascii_case(ch));
-            if !is_active && hub.has_channel(ch) {
+            let has_channel = hub.has_channel(ch);
+            if is_open_tab && !has_channel {
+                saw_open_without_buffer = true;
+            }
+            let mut hub_live_changed = false;
+            if is_open_tab && has_channel && !is_active {
                 if live {
                     hub.set_stream_meta(
                         ch,
@@ -331,13 +539,33 @@ async fn poll_once(app: &AppHandle, shared: &Shared, channels: &[String]) {
                         status.and_then(|s| s.stream_title.clone()),
                         status.and_then(|s| s.stream_id.clone()),
                     );
-                    emit_tab_live = hub.set_channel_live(ch, true);
-                } else if hub.channel_live(ch) {
-                    emit_tab_live = hub.set_channel_live(ch, false);
-                    drop(hub);
-                    super::logging::close_stream_file(shared, ch);
+                }
+                hub_live_changed = hub.set_channel_live(ch, live);
+                if hub_live_changed {
+                    notice = Some(super::live_status::stream_status_notice_text(
+                        ch, live, title, show_title,
+                    ));
+                    if !live {
+                        close_stream_log = true;
+                    }
                 }
             }
+            emit_tab_live = should_emit_open_tab_live(
+                is_open_tab,
+                has_channel,
+                is_active,
+                hub_live_changed,
+                freshly_open.contains(ch),
+            );
+        }
+        if saw_open_without_buffer {
+            missing_buffers.push(ch.clone());
+        }
+        if close_stream_log {
+            super::logging::close_stream_file(shared, ch);
+        }
+        if let Some(text) = notice {
+            shared.post_channel_notice(app, ch, text);
         }
         if emit_tab_live {
             let resolved = status.cloned().unwrap_or_else(helix::StreamStatus::offline);
@@ -346,6 +574,7 @@ async fn poll_once(app: &AppHandle, shared: &Shared, channels: &[String]) {
         }
         observe_live(shared, app, ch, live, title);
     }
+    PollOutcome::Ok { missing_buffers }
 }
 
 /// Called from active-channel live_status poller on status fetch.
@@ -425,5 +654,34 @@ mod tests {
     fn no_effects_when_all_off() {
         let cfg = NotifyCfg::default();
         assert!(build_live_notify("xqc", None, &cfg, false, false).is_none());
+    }
+
+    #[test]
+    fn normalize_login_strips_hash_and_case() {
+        assert_eq!(normalize_login(" #XQC ").as_deref(), Some("xqc"));
+        assert!(normalize_login("  ").is_none());
+        assert!(normalize_login("#").is_none());
+    }
+
+    #[test]
+    fn tab_live_emit_gates() {
+        assert!(!should_emit_open_tab_live(false, true, false, true, false));
+        assert!(!should_emit_open_tab_live(true, false, false, true, false));
+        assert!(should_emit_open_tab_live(true, true, false, true, false));
+        assert!(should_emit_open_tab_live(true, true, false, false, true));
+        assert!(!should_emit_open_tab_live(true, true, false, false, false));
+        // Active chrome is live_status-only (no duplicate emit).
+        assert!(!should_emit_open_tab_live(true, true, true, false, true));
+        assert!(!should_emit_open_tab_live(true, true, true, true, false));
+    }
+
+    #[test]
+    fn freshly_opened_detects_new_tabs_only() {
+        let prev = HashSet::from(["xqc".to_string()]);
+        let cur = vec!["xqc".into(), "lirik".into()];
+        let fresh = freshly_opened(&prev, &cur);
+        assert!(fresh.contains("lirik"));
+        assert!(!fresh.contains("xqc"));
+        assert!(freshly_opened(&prev, &["xqc".into()]).is_empty());
     }
 }
