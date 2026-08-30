@@ -72,13 +72,24 @@ import {
   streamerModeState,
 } from "./shell/streamerMode";
 import { startLiveNotifyListener } from "./shell/liveNotify";
+import { bindMentionToast } from "./shell/mentionToast";
+import { bindChannelPoints } from "./shell/channelPoints";
+import { bindRaidToast } from "./shell/raidToast";
+import { bindGiftToast } from "./shell/giftToast";
+import { bindClipCardLayer } from "./shell/clipCards";
+import { bindLinkEnrichment } from "./chat/linkEnrichment";
+import { bindPollPanel } from "./shell/polls";
+import { bindPinnedBanner } from "./shell/pinnedMessage";
+import { bindOutgoingRaidBanner } from "./shell/outgoingRaidBanner";
 import { bindUserCard } from "./shell/userCard";
 import { parseTimeoutButtons } from "./shell/timeoutButtons";
 import {
   expandModAction,
+  MOD_GUTTER_TIMEOUT_ACTION,
   parseModActions,
   type ModActionBtn,
 } from "./shell/modActions";
+import { bindModTimeoutPopup } from "./shell/modTimeoutPopup";
 import {
   bindImageUpload,
   parseImageUploadKnobs,
@@ -100,8 +111,8 @@ import {
   type TooltipPreviewMode,
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
-import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus, ViewerRole } from "./chat/types";
+import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, CHAT_TYPING_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
+import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus, ChatTyping, ViewerRole } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
 import { paintChatModes, type ChannelRoomState } from "./shell/chatModes";
 
@@ -155,6 +166,7 @@ async function boot(): Promise<void> {
   }
   const canvas = document.querySelector<HTMLCanvasElement>("#chat-canvas");
   const pane = document.querySelector<HTMLElement>("#chat-pane");
+  const chatColumn = document.querySelector<HTMLElement>("#chat-column");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
   const scrollTrack = document.querySelector<HTMLElement>("#chat-scroll");
   const scrollThumb = document.querySelector<HTMLElement>("#chat-scroll-thumb");
@@ -184,7 +196,15 @@ async function boot(): Promise<void> {
   const stage = document.querySelector<HTMLElement>("#stage");
   const stageSplit = document.querySelector<HTMLElement>("#stage-split");
   const status = document.querySelector<HTMLElement>("#status");
+  const typingStatus = document.querySelector<HTMLElement>("#typing-status");
   const composer = document.querySelector<HTMLFormElement>("#composer");
+  const outgoingRaidBanner = document.querySelector<HTMLElement>("#outgoing-raid-banner");
+  const outgoingRaidAvatar = document.querySelector<HTMLImageElement>("#outgoing-raid-avatar");
+  const outgoingRaidLetter = document.querySelector<HTMLElement>("#outgoing-raid-letter");
+  const outgoingRaidLabel = document.querySelector<HTMLElement>("#outgoing-raid-label");
+  const outgoingRaidTimer = document.querySelector<HTMLElement>("#outgoing-raid-timer");
+  const outgoingRaidProgress = document.querySelector<HTMLElement>("#outgoing-raid-progress");
+  const outgoingRaidDismiss = document.querySelector<HTMLButtonElement>("#outgoing-raid-dismiss");
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
   const composerSend = document.querySelector<HTMLButtonElement>("#composer-send");
   const composerLength = document.querySelector<HTMLElement>("#composer-length");
@@ -193,11 +213,14 @@ async function boot(): Promise<void> {
   const replyLabel = document.querySelector<HTMLElement>("#reply-label");
   const replyCancel = document.querySelector<HTMLButtonElement>("#reply-cancel");
   const contextMenu = document.querySelector<HTMLMenuElement>("#chat-context");
+  const modTimeoutPopupEl = document.querySelector<HTMLElement>("#mod-timeout-popup");
   const chatQuickBar = document.querySelector<HTMLElement>("#chat-quick-actions");
   const chatQaReply = document.querySelector<HTMLButtonElement>("#chat-qa-reply");
   const chatQaCopy = document.querySelector<HTMLButtonElement>("#chat-qa-copy");
   const chatQaMore = document.querySelector<HTMLButtonElement>("#chat-qa-more");
   const chatEmpty = document.querySelector<HTMLElement>("#chat-empty");
+  const pinnedMessageHost = document.querySelector<HTMLElement>("#pinned-message-host");
+  const pollPanelHost = document.querySelector<HTMLElement>("#poll-panel-host");
   const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
   const authChipAvatar = document.querySelector<HTMLImageElement>("#auth-chip-avatar");
   const authChipLetter = document.querySelector<HTMLElement>("#auth-chip-letter");
@@ -215,11 +238,15 @@ async function boot(): Promise<void> {
   const usercardModal = document.querySelector<HTMLElement>("#usercard-modal");
   const replythreadModal = document.querySelector<HTMLElement>("#replythread-modal");
   const emotepopupModal = document.querySelector<HTMLElement>("#emotepopup-modal");
+  const pointsModal = document.querySelector<HTMLElement>("#points-modal");
+  const channelPointsBtn = document.querySelector<HTMLButtonElement>("#channel-points-btn");
+  const channelPointsLabel = document.querySelector<HTMLElement>("#channel-points-label");
   const emoteOpen = document.querySelector<HTMLButtonElement>("#emote-open");
   const appRoot = document.querySelector<HTMLElement>("#app");
   if (
     !canvas ||
     !pane ||
+    !chatColumn ||
     !canvasHost ||
     !scrollTrack ||
     !scrollThumb ||
@@ -246,7 +273,15 @@ async function boot(): Promise<void> {
     !stage ||
     !stageSplit ||
     !status ||
+    !typingStatus ||
     !composer ||
+    !outgoingRaidBanner ||
+    !outgoingRaidAvatar ||
+    !outgoingRaidLetter ||
+    !outgoingRaidLabel ||
+    !outgoingRaidTimer ||
+    !outgoingRaidProgress ||
+    !outgoingRaidDismiss ||
     !composerInput ||
     !composerSend ||
     !composerLength ||
@@ -255,11 +290,14 @@ async function boot(): Promise<void> {
     !replyLabel ||
     !replyCancel ||
     !contextMenu ||
+    !modTimeoutPopupEl ||
     !chatQuickBar ||
     !chatQaReply ||
     !chatQaCopy ||
     !chatQaMore ||
     !chatEmpty ||
+    !pinnedMessageHost ||
+    !pollPanelHost ||
     !authChip ||
     !authChipAvatar ||
     !authChipLetter ||
@@ -277,6 +315,9 @@ async function boot(): Promise<void> {
     !usercardModal ||
     !replythreadModal ||
     !emotepopupModal ||
+    !pointsModal ||
+    !channelPointsBtn ||
+    !channelPointsLabel ||
     !emoteOpen ||
     !appRoot
   ) {
@@ -303,6 +344,7 @@ async function boot(): Promise<void> {
   const stageEl = stage;
   const stageSplitEl = stageSplit;
   const statusEl = status;
+  const typingStatusEl = typingStatus;
   const statusTextEl =
     status.querySelector<HTMLElement>("#status-text") ??
     (() => {
@@ -319,6 +361,115 @@ async function boot(): Promise<void> {
     if (statusSpinnerEl) {
       statusSpinnerEl.hidden = !spin;
     }
+  };
+  const TYPING_TIMEOUT_MS = 6500;
+  const TYPING_SEND_INTERVAL_MS = 4000;
+  type TypingEntry = { displayName: string; expiresAt: number };
+  const typingByChannel = new Map<string, Map<string, TypingEntry>>();
+  let typingPaintTimer: number | undefined;
+  let selfTypingChannel = "";
+  let selfTypingActive = false;
+  let selfTypingLastSentAt = 0;
+
+  const typingName = (payload: ChatTyping): string => {
+    const name = (payload.displayName || payload.login || "").trim();
+    return Array.from(name).slice(0, 32).join("");
+  };
+  const clearTypingPaintTimer = (): void => {
+    if (typingPaintTimer !== undefined) {
+      window.clearTimeout(typingPaintTimer);
+      typingPaintTimer = undefined;
+    }
+  };
+  const paintTypingStatus = (): void => {
+    clearTypingPaintTimer();
+    const channel = ipc.active().trim().toLowerCase();
+    const now = Date.now();
+    const entries = channel ? typingByChannel.get(channel) : undefined;
+    if (!entries) {
+      typingStatusEl.hidden = true;
+      typingStatusEl.textContent = "";
+      return;
+    }
+    for (const [login, entry] of entries) {
+      if (entry.expiresAt <= now) {
+        entries.delete(login);
+      }
+    }
+    if (entries.size === 0) {
+      typingByChannel.delete(channel);
+      typingStatusEl.hidden = true;
+      typingStatusEl.textContent = "";
+      return;
+    }
+    const names = Array.from(entries.values())
+      .sort((a, b) => a.expiresAt - b.expiresAt)
+      .slice(0, 2)
+      .map((entry) => entry.displayName);
+    typingStatusEl.textContent =
+      names.length === 1
+        ? t("typing.one", { name: names[0] })
+        : t("typing.many", { names: names.join(", ") });
+    typingStatusEl.hidden = false;
+    const nextExpiresAt = Math.min(...Array.from(entries.values()).map((entry) => entry.expiresAt));
+    typingPaintTimer = window.setTimeout(
+      paintTypingStatus,
+      Math.max(250, nextExpiresAt - now),
+    );
+  };
+  const applyTypingEvent = (payload: ChatTyping): void => {
+    const channel = payload.channel?.trim().toLowerCase() ?? "";
+    const login = payload.login?.trim().toLowerCase() ?? "";
+    if (!channel || !login) {
+      return;
+    }
+    const entries = typingByChannel.get(channel) ?? new Map<string, TypingEntry>();
+    if (payload.active) {
+      const displayName = typingName(payload);
+      if (displayName) {
+        entries.set(login, {
+          displayName,
+          expiresAt: Date.now() + TYPING_TIMEOUT_MS,
+        });
+        typingByChannel.set(channel, entries);
+      }
+    } else {
+      entries.delete(login);
+      if (entries.size === 0) {
+        typingByChannel.delete(channel);
+      }
+    }
+    if (channel === ipc.active().trim().toLowerCase()) {
+      paintTypingStatus();
+    }
+  };
+  const sendSelfTyping = (active: boolean, force = false): void => {
+    const channel = ipc.active().trim().toLowerCase();
+    const now = Date.now();
+    if (!channel || !lastAuth.canSend) {
+      selfTypingActive = false;
+      selfTypingChannel = "";
+      return;
+    }
+    if (active) {
+      if (!messageInput.value.trim()) {
+        return;
+      }
+      if (
+        !force &&
+        selfTypingActive &&
+        selfTypingChannel === channel &&
+        now - selfTypingLastSentAt < TYPING_SEND_INTERVAL_MS
+      ) {
+        return;
+      }
+    } else if (!force && (!selfTypingActive || selfTypingChannel !== channel)) {
+      return;
+    }
+    selfTypingActive = active;
+    selfTypingChannel = active ? channel : "";
+    selfTypingLastSentAt = now;
+    void invoke("chat_typing", { active }).catch(() => undefined);
   };
   const toastHostEl = document.querySelector<HTMLElement>("#toast-host");
   if (!toastHostEl) {
@@ -341,11 +492,13 @@ async function boot(): Promise<void> {
     syncToastLift();
   });
   toastLiftRo.observe(composer);
+  toastLiftRo.observe(outgoingRaidBanner);
   toastLiftRo.observe(replyBar);
   toastLiftRo.observe(completeList);
   const replyBarAttrObs = new MutationObserver(() => {
     syncToastLift();
   });
+  replyBarAttrObs.observe(outgoingRaidBanner, { attributes: true, attributeFilter: ["hidden"] });
   replyBarAttrObs.observe(replyBar, { attributes: true, attributeFilter: ["hidden"] });
   replyBarAttrObs.observe(completeList, { attributes: true, attributeFilter: ["hidden"] });
   const composerInner = document.querySelector<HTMLElement>("#composer-inner");
@@ -695,6 +848,21 @@ async function boot(): Promise<void> {
     throw err;
   }
   ring.setModActions(modActionBtns);
+  const clipCardLayerEl = document.querySelector<HTMLElement>("#clip-card-layer");
+  if (!clipCardLayerEl) {
+    throw new Error("clip-card-layer missing");
+  }
+  const clipCards = bindClipCardLayer(clipCardLayerEl);
+  ring.setOnClipCards((anchors) => {
+    clipCards.sync(anchors);
+  });
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      clipCards.stop();
+      priorTeardown?.();
+    };
+  }
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
     document.querySelector<HTMLImageElement>("#emote-tooltip-img");
@@ -857,6 +1025,12 @@ async function boot(): Promise<void> {
   } catch {
     supportsIncognito = false;
   }
+  let alwaysShowPinnedMessage = false;
+  let pinnedBannerApi: {
+    sync: () => void;
+    setAlwaysShow: (value: boolean) => void;
+    stop: () => void;
+  } | null = null;
   let uiLayout: UiLayout = "Extended";
   let playerChatSplit = parsePlayerChatSplit(undefined);
   let mountedChannel = "";
@@ -909,6 +1083,9 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
+      alwaysShowPinnedMessage =
+        data.knobs["behaviour.alwaysShowPinnedMessage"] === true;
+      pinnedBannerApi?.setAlwaysShow(alwaysShowPinnedMessage);
       showTimestamps = data.showTimestamps;
       timestampFormat = data.timestampFormat || "hh:mm";
       hideTimestampsWhenLive =
@@ -1027,12 +1204,43 @@ async function boot(): Promise<void> {
       void settingsCtl.patchKnobs({ "appearance.playerChatSplit": ratio });
     },
   });
+  const linkEnrichment = bindLinkEnrichment(ring);
   const ipc = bindChatIpc(ring, {
     afterBatch: (events) => {
       replyThreadLive?.(events);
+      linkEnrichment.afterBatch(events);
     },
   });
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      linkEnrichment.stop();
+      priorTeardown?.();
+    };
+  }
   readActiveChannel = () => ipc.active().trim();
+  const pollPanel = bindPollPanel({
+    host: pollPanelHost,
+    chatColumn,
+    activeChannel: () => ipc.active(),
+  });
+  const pinnedBanner = bindPinnedBanner({
+    host: pinnedMessageHost,
+    chatColumn,
+    activeChannel: () => ipc.active(),
+    alwaysShow: () => alwaysShowPinnedMessage,
+  });
+  pinnedBannerApi = pinnedBanner;
+  pinnedBanner.setAlwaysShow(alwaysShowPinnedMessage);
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      pinnedBannerApi = null;
+      pinnedBanner.stop();
+      pollPanel.stop();
+      priorTeardown?.();
+    };
+  }
   unbindImageUpload = bindImageUpload({
     input: messageInput,
     dragHost: composer,
@@ -1085,9 +1293,6 @@ async function boot(): Promise<void> {
       moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
       moderationModeBtn.classList.toggle("is-active", next);
       syncModerationModeBtn();
-      if (next && modActionBtns.length === 0) {
-        void requestOpenSettingsWindow();
-      }
     });
   }
 
@@ -1409,6 +1614,26 @@ async function boot(): Promise<void> {
   emoteOpen.addEventListener("click", () => {
     emotePopup.toggle();
   });
+  const channelPoints = bindChannelPoints({
+    button: channelPointsBtn,
+    label: channelPointsLabel,
+    modal: pointsModal,
+    activeChannel: () => ipc.active(),
+    getAuth: () => lastAuth,
+    startLogin: () => {
+      void startLogin();
+    },
+    onStatus: (message) => {
+      setStatus(message);
+    },
+  });
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      channelPoints.stop();
+      priorTeardown?.();
+    };
+  }
   function dispatchHotkey(action: HotkeyAction): boolean {
     switch (action) {
       case "showSearch":
@@ -1507,9 +1732,11 @@ async function boot(): Promise<void> {
     replyThreadCtl?.relabelChrome();
     chatFindCtl.relabel();
     emotePopup.relabel();
+    channelPoints.relabel();
     ring.relocalizeSystemStrings();
     scrollChrome.refreshLocale();
     repaintChannelTitle();
+    paintTypingStatus();
   };
 
   onLocaleChange(() => {
@@ -1602,9 +1829,44 @@ async function boot(): Promise<void> {
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
   });
+  const sendModCommand = (text: string): void => {
+    if (modSendBusy) {
+      return;
+    }
+    modSendBusy = true;
+    void (async () => {
+      try {
+        await invoke("chat_send", { text, replyToId: null });
+      } catch (err) {
+        setStatus(formatError(err));
+      } finally {
+        modSendBusy = false;
+      }
+    })();
+  };
+  const modTimeoutPopup = bindModTimeoutPopup({
+    host: modTimeoutPopupEl,
+    getTimeoutButtons: () => parseTimeoutButtons(timeoutKnobs),
+    getModActions: () => modActionBtns,
+    onAction: (action) => {
+      if (action.kind === "settings") {
+        void requestOpenSettingsWindow();
+        return;
+      }
+      sendModCommand(action.text);
+    },
+  });
   ring.setOnModAction((action, ctx) => {
     hideContextMenu();
-    if (modSendBusy) {
+    modTimeoutPopup.hide();
+    if (action === MOD_GUTTER_TIMEOUT_ACTION) {
+      modTimeoutPopup.open({
+        login: ctx.login,
+        msgId: ctx.msgId,
+        channel: ipc.active() || "",
+        clientX: ctx.clientX,
+        clientY: ctx.clientY,
+      });
       return;
     }
     const text = expandModAction(action, {
@@ -1616,10 +1878,21 @@ async function boot(): Promise<void> {
       setStatus(t("status.modBuildFailed"));
       return;
     }
+    sendModCommand(text);
+  });
+  ring.setOnAutomodAction((action, messageId) => {
+    hideContextMenu();
+    modTimeoutPopup.hide();
+    if (modSendBusy) {
+      return;
+    }
     modSendBusy = true;
     void (async () => {
       try {
-        await invoke("chat_send", { text, replyToId: null });
+        await invoke("chat_automod_manage", {
+          msgId: messageId,
+          action,
+        });
       } catch (err) {
         setStatus(formatError(err));
       } finally {
@@ -1633,6 +1906,7 @@ async function boot(): Promise<void> {
   });
   ring.setOnNickClick((ctx) => {
     hideContextMenu();
+    modTimeoutPopup.hide();
     userCard.open({
       login: ctx.login,
       nick: ctx.nick || ctx.login,
@@ -1942,6 +2216,108 @@ async function boot(): Promise<void> {
 
   await startLiveNotifyListener();
 
+  const resolveProfileAvatar = async (login: string): Promise<string | null> => {
+    const key = login.trim().toLowerCase();
+    const hit = avatarUrlByLogin.get(key);
+    if (hit) {
+      return hit;
+    }
+    try {
+      const res = await invoke<{ login: string; url: string | null }>(
+        "chat_profile_image",
+        { login: key },
+      );
+      if (res.url) {
+        avatarUrlByLogin.set(res.login, res.url);
+        return res.url;
+      }
+    } catch {
+      // Non-fatal.
+    }
+    return null;
+  };
+
+  const raidHost = document.querySelector<HTMLElement>("#raid-toast-host");
+  if (!raidHost) {
+    throw new Error("raid-toast-host missing");
+  }
+  const giftHost = document.querySelector<HTMLElement>("#gift-toast-host");
+  if (!giftHost) {
+    throw new Error("gift-toast-host missing");
+  }
+  const outgoingRaidCtl = bindOutgoingRaidBanner(
+    {
+      root: outgoingRaidBanner,
+      avatar: outgoingRaidAvatar,
+      letter: outgoingRaidLetter,
+      label: outgoingRaidLabel,
+      timer: outgoingRaidTimer,
+      progress: outgoingRaidProgress,
+      close: outgoingRaidDismiss,
+    },
+    {
+      activeChannel: () => ipc.active(),
+      resolveAvatar: resolveProfileAvatar,
+      onVisibilityChange: syncToastLift,
+    },
+  );
+  const raidToastCtl = bindRaidToast(raidHost, {
+    onFocusChannel: async (channel) => {
+      await joinChannel(channel, true);
+    },
+    resolveAvatar: resolveProfileAvatar,
+  });
+  const giftToastCtl = bindGiftToast(giftHost, {
+    onFocusChannel: async (channel) => {
+      await joinChannel(channel, true);
+    },
+  });
+  onLocaleChange(() => {
+    outgoingRaidCtl.relabel();
+  });
+  outgoingRaidCtl.relabel();
+
+  const mentionHost = document.querySelector<HTMLElement>("#mention-toast-host");
+  if (!mentionHost) {
+    throw new Error("mention-toast-host missing");
+  }
+  const mentionToastCtl = bindMentionToast(mentionHost, {
+    onReply: async (payload) => {
+      const target = payload.channel.trim().replace(/^#/, "").toLowerCase();
+      if (!target) {
+        return;
+      }
+      if (ipc.active().toLowerCase() !== target) {
+        await joinChannel(payload.channel, true);
+      }
+      const deadline = Date.now() + 5000;
+      while (ipc.active().toLowerCase() !== target && Date.now() < deadline) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 40);
+        });
+      }
+      if (ipc.active().toLowerCase() !== target) {
+        return;
+      }
+      setReply(payload.msgId, payload.login, payload.text);
+      messageInput.focus();
+    },
+    resolveAvatar: resolveProfileAvatar,
+  });
+  {
+    const priorTeardown = teardownChat;
+    teardownChat = () => {
+      sendSelfTyping(false, true);
+      clearTypingPaintTimer();
+      typingByChannel.clear();
+      raidToastCtl.stop();
+      giftToastCtl.stop();
+      mentionToastCtl.stop();
+      outgoingRaidCtl.stop();
+      priorTeardown?.();
+    };
+  }
+
   await listen<ChatStatus>(CHAT_STATUS_EVENT, (ev) => {
     if (holdStatus) {
       return;
@@ -1949,6 +2325,10 @@ async function boot(): Promise<void> {
     const spin =
       ev.payload.state === "connecting" || ev.payload.state === "reconnecting";
     setStatus(formatStatus(ev.payload), { spin });
+  });
+
+  await listen<ChatTyping>(CHAT_TYPING_EVENT, (ev) => {
+    applyTypingEvent(ev.payload);
   });
 
   await listen<ChannelLive>(CHAT_CHANNEL_LIVE_EVENT, (ev) => {
@@ -2016,7 +2396,9 @@ async function boot(): Promise<void> {
       sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
       streamByChannel.delete(ev.payload.dropped.toLowerCase());
       roomByChannel.delete(ev.payload.dropped.toLowerCase());
+      typingByChannel.delete(ev.payload.dropped.toLowerCase());
       avatarUrlByLogin.delete(ev.payload.dropped.toLowerCase());
+      paintTypingStatus();
     }
     if (!channels.isReordering()) {
       channels.syncOpen(open, focus);
@@ -2084,6 +2466,7 @@ async function boot(): Promise<void> {
       clearComplete();
     }
     composerChrome.sync();
+    sendSelfTyping(messageInput.value.trim().length > 0);
   });
 
   document.addEventListener("selectionchange", () => {
@@ -2126,9 +2509,11 @@ async function boot(): Promise<void> {
     composer.hidden = false;
     messageInput.focus();
     composerChrome.sync();
+    sendSelfTyping(true, true);
   });
 
   messageInput.addEventListener("blur", () => {
+    sendSelfTyping(false, true);
     window.setTimeout(() => {
       if (document.activeElement !== completeBox && document.activeElement !== messageInput) {
         clearComplete();
@@ -2446,6 +2831,7 @@ async function boot(): Promise<void> {
       deviceEl.textContent = "";
     }
     syncComposer();
+    channelPoints.syncAuth();
   }
 
   async function paintAuthFromServer(message?: string): Promise<void> {
@@ -2759,6 +3145,7 @@ async function boot(): Promise<void> {
       messageInput.setSelectionRange(pos, pos);
       complete.popup = null;
       paintComplete();
+      sendSelfTyping(messageInput.value.trim().length > 0);
     } finally {
       applyingComplete = false;
     }
@@ -2807,6 +3194,7 @@ async function boot(): Promise<void> {
     sending = true;
     syncComposer();
     try {
+      outgoingRaidCtl.noteMessage(ipc.active(), text);
       await invoke("chat_send", {
         text,
         replyToId: replyTarget?.id ?? null,
@@ -2815,6 +3203,7 @@ async function boot(): Promise<void> {
       clearComplete();
       clearReply();
       composerChrome.pulse();
+      sendSelfTyping(false, true);
     } catch (err) {
       setStatus(formatError(err));
     } finally {
@@ -2833,12 +3222,17 @@ async function boot(): Promise<void> {
     syncPlayerForLayout(joined);
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
-      userCard?.syncMod();
-      syncModerationModeBtn();
-      userCard?.syncSubage();
+    channelPoints.onChannelChanged();
+    pollPanel.sync();
+    pinnedBanner.sync();
+    paintTypingStatus();
+    userCard?.syncMod();
+    syncModerationModeBtn();
+    userCard?.syncSubage();
     quickActionsCtl?.hide();
     ring.clearHover();
     syncChatEmpty();
+    outgoingRaidCtl.syncActiveChannel();
   }
 
   function drainChannelQueue(): void {
@@ -2874,6 +3268,9 @@ async function boot(): Promise<void> {
         syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
+        channelPoints.onChannelChanged();
+        pollPanel.sync();
+        pinnedBanner.sync();
       }
     } catch (err) {
       holdStatus = true;
@@ -2896,6 +3293,7 @@ async function boot(): Promise<void> {
     }
     channelBusy = true;
     joinControl.disabled = true;
+    sendSelfTyping(false, true);
     clearComplete();
     clearReply();
     hideContextMenu();
@@ -2906,15 +3304,21 @@ async function boot(): Promise<void> {
       sendWaitByChannel.delete(name.toLowerCase());
       streamByChannel.delete(name.toLowerCase());
       roomByChannel.delete(name.toLowerCase());
+      typingByChannel.delete(name.toLowerCase());
       if (!next) {
         repaintChannelTitle();
         channelInput.value = "";
         syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
+        channelPoints.onChannelChanged();
+        pollPanel.sync();
+        pinnedBanner.sync();
+        paintTypingStatus();
         quickActionsCtl?.hide();
         ring.clearHover();
         syncChatEmpty();
+        outgoingRaidCtl.syncActiveChannel();
         return;
       }
       if (leftActive) {
@@ -2922,6 +3326,8 @@ async function boot(): Promise<void> {
       } else {
         channels.paint(ipc.active());
         applySendWaitForActive();
+        pollPanel.sync();
+        pinnedBanner.sync();
       }
     } catch (err) {
       holdStatus = true;
@@ -2946,6 +3352,7 @@ async function boot(): Promise<void> {
     }
     channelBusy = true;
     joinControl.disabled = true;
+    sendSelfTyping(false, true);
     holdStatus = false;
     clearComplete();
     clearReply();

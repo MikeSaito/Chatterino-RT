@@ -170,9 +170,7 @@ pub fn format_usernotice_system_en(
             );
             if let Some(count) = p.sender_count {
                 if count > gift_months {
-                    text.push_str(&format!(
-                        " They've gifted {count} months in the channel."
-                    ));
+                    text.push_str(&format!(" They've gifted {count} months in the channel."));
                 }
             }
             text
@@ -330,8 +328,10 @@ mod tests {
 
     #[test]
     fn anon_gifter_id() {
-        let map: HashMap<&str, &str> =
-            HashMap::from([("user-id", ANONYMOUS_GIFTER_ID), ("display-name", "AnAnonymousGifter")]);
+        let map: HashMap<&str, &str> = HashMap::from([
+            ("user-id", ANONYMOUS_GIFTER_ID),
+            ("display-name", "AnAnonymousGifter"),
+        ]);
         let get = |k: &str| map.get(k).map(|s| (*s).to_string());
         let p = parse_usernotice_params(&get, Some("subgift")).expect("params");
         assert!(p.anon);

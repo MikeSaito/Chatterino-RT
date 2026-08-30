@@ -83,8 +83,12 @@ export function notifyHighlightSounds(
 
 async function playHighlightSoundBatch(
   hits: ReadonlyArray<{ highlightSoundPath?: string }>,
+  opts?: { ignoreFocus?: boolean },
 ): Promise<boolean> {
-  if (!highlightSoundMayPlay(documentIsFocused())) {
+  if (muted) {
+    return false;
+  }
+  if (!opts?.ignoreFocus && !highlightSoundMayPlay(documentIsFocused())) {
     return false;
   }
   for (const hit of hits) {
@@ -111,10 +115,11 @@ async function playHighlightSoundBatch(
 }
 
 /** Returns false when muted / focus-suppressed (playback not attempted). */
-export async function playHighlightSound(overridePath?: string): Promise<boolean> {
-  return playHighlightSoundBatch([
-    { highlightSoundPath: overridePath },
-  ]);
+export async function playHighlightSound(
+  overridePath?: string,
+  opts?: { ignoreFocus?: boolean },
+): Promise<boolean> {
+  return playHighlightSoundBatch([{ highlightSoundPath: overridePath }], opts);
 }
 
 /** Live notifications: always play when Rust gated the event (ignore focus / mention mute). */

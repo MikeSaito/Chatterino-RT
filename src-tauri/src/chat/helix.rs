@@ -1078,6 +1078,167 @@ fn users_by_id_url(ids: &[String]) -> String {
     url.to_string()
 }
 
+/// Result of Helix start/cancel raid (POST/DELETE /raids).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelixRaidOutcome {
+    Ok,
+    Failed(String),
+}
+
+fn helix_body_message(body: &Value) -> String {
+    body.get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("(empty message)")
+        .to_string()
+}
+
+pub fn map_start_raid_http_error(status: u16, body: &Value) -> String {
+    let message = helix_body_message(body);
+    let lower = message.to_ascii_lowercase();
+    let detail = match status {
+        400 if lower.contains("cannot raid yourself") || lower.contains("to yourself") => {
+            "A channel cannot raid itself.".into()
+        }
+        400 => format!("Failed to start a raid - {message}"),
+        401 if lower.starts_with("missing scope")
+            || lower.starts_with("user access token requires") =>
+        {
+            "Missing required scope. Re-login with your account and try again.".into()
+        }
+        401 if lower.contains("must match the user id") => {
+            "You must be the broadcaster to start a raid.".into()
+        }
+        401 | 403 => "You must be the broadcaster to start a raid.".into(),
+        429 => "You are being ratelimited by Twitch. Try again in a few seconds.".into(),
+        _ => format!("Failed to start a raid - {message}"),
+    };
+    detail
+}
+
+pub fn map_cancel_raid_http_error(status: u16, body: &Value) -> String {
+    let message = helix_body_message(body);
+    let lower = message.to_ascii_lowercase();
+    match status {
+        404 | 400 if lower.contains("no pending") || lower.contains("not currently raiding") => {
+            "You don't have an active raid.".into()
+        }
+        401 if lower.starts_with("missing scope")
+            || lower.starts_with("user access token requires") =>
+        {
+            "Missing required scope. Re-login with your account and try again.".into()
+        }
+        401 if lower.contains("must match the user id") => {
+            "You must be the broadcaster to cancel the raid.".into()
+        }
+        401 | 403 => "You must be the broadcaster to cancel the raid.".into(),
+        429 => "You are being ratelimited by Twitch. Try again in a few seconds.".into(),
+        _ => format!("Failed to cancel the raid - {message}"),
+    }
+}
+
+/// https://dev.twitch.tv/docs/api/reference#start-a-raid
+pub async fn start_raid(
+    from_broadcaster_id: &str,
+    to_broadcaster_id: &str,
+    token: &str,
+    client_id: &str,
+) -> HelixRaidOutcome {
+    let url = helix_query(
+        "/raids",
+        &[
+            ("from_broadcaster_id", from_broadcaster_id),
+            ("to_broadcaster_id", to_broadcaster_id),
+        ],
+    );
+    let client = http_client();
+    let mut delay = Duration::from_millis(200);
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
+        match client
+            .post(&url)
+            .header("Client-Id", client_id)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    return HelixRaidOutcome::Ok;
+                }
+                let code = status.as_u16();
+                match resp.json::<Value>().await {
+                    Ok(v) => {
+                        return HelixRaidOutcome::Failed(map_start_raid_http_error(code, &v));
+                    }
+                    Err(e) => {
+                        last = format!("http {code}; json: {e}");
+                        if (400..500).contains(&code) {
+                            return HelixRaidOutcome::Failed(format!(
+                                "Failed to start a raid - {last}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => last = e.to_string(),
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    HelixRaidOutcome::Failed(format!("Failed to start a raid - {last}"))
+}
+
+/// https://dev.twitch.tv/docs/api/reference#cancel-a-raid
+pub async fn cancel_raid(broadcaster_id: &str, token: &str, client_id: &str) -> HelixRaidOutcome {
+    let url = helix_query("/raids", &[("broadcaster_id", broadcaster_id)]);
+    let client = http_client();
+    let mut delay = Duration::from_millis(200);
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
+        match client
+            .delete(&url)
+            .header("Client-Id", client_id)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() || status.as_u16() == 204 {
+                    return HelixRaidOutcome::Ok;
+                }
+                let code = status.as_u16();
+                match resp.json::<Value>().await {
+                    Ok(v) => {
+                        return HelixRaidOutcome::Failed(map_cancel_raid_http_error(code, &v));
+                    }
+                    Err(e) => {
+                        last = format!("http {code}; json: {e}");
+                        if (400..500).contains(&code) {
+                            return HelixRaidOutcome::Failed(format!(
+                                "Failed to cancel the raid - {last}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => last = e.to_string(),
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    HelixRaidOutcome::Failed(format!("Failed to cancel the raid - {last}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1479,6 +1640,31 @@ mod tests {
         assert_eq!(
             map_send_chat_http_error(422, &serde_json::json!({})),
             "Your message was too long."
+        );
+    }
+
+    #[test]
+    fn map_raid_http_errors() {
+        assert_eq!(
+            map_start_raid_http_error(
+                400,
+                &serde_json::json!({ "message": "The broadcaster cannot raid yourself." })
+            ),
+            "A channel cannot raid itself."
+        );
+        assert_eq!(
+            map_start_raid_http_error(
+                401,
+                &serde_json::json!({ "message": "Missing scope: channel:manage:raids" })
+            ),
+            "Missing required scope. Re-login with your account and try again."
+        );
+        assert_eq!(
+            map_cancel_raid_http_error(
+                404,
+                &serde_json::json!({ "message": "The channel is not currently raiding anyone." })
+            ),
+            "You don't have an active raid."
         );
     }
 }

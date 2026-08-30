@@ -18,7 +18,7 @@ use super::parse::{
 };
 use super::spans::{decorate_text_spans_ex, FindMentions};
 use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
-use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatSendWait, ChatStatus};
+use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatSendWait, ChatStatus, ChatTyping};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
 const CLIENT_PING: Duration = Duration::from_secs(30);
@@ -129,6 +129,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                             }) => {
                                 enqueue_pending_out(&mut pending_out, channel, text, reply_to);
                             }
+                            Some(IrcCmd::Typing { .. }) => {}
                             Some(IrcCmd::Relogin) => {
                                 backoff = Duration::from_secs(1);
                             }
@@ -310,6 +311,14 @@ async fn connect_session(
                                 for (ch, txt, reply) in sent {
                                     echo_own_privmsg(app, shared, &ch, txt, reply);
                                 }
+                            }
+                        }
+                    }
+                    Some(IrcCmd::Typing { channel, active }) => {
+                        if wanted.contains(&channel) && in_rooms.contains(&channel) {
+                            let marker = if active { "1" } else { "0" };
+                            if send_line(&mut write, &format!("TYPING #{channel} :{marker}")).await.is_err() {
+                                return SessionEnd::Reconnect { wait: true };
                             }
                         }
                     }
@@ -680,6 +689,30 @@ fn dispatch_line(
             emit_send_waits(app, shared);
             LineAction::None
         }
+        ParsedLine::Typing {
+            channel,
+            login,
+            display_name,
+            user_id,
+            badges,
+            is_mod_tag,
+            active,
+        } => {
+            emit_typing_if_visible(
+                app,
+                shared,
+                TypingCandidate {
+                    channel: &channel,
+                    login: &login,
+                    display_name: &display_name,
+                    user_id: &user_id,
+                    badges: &badges,
+                    is_mod_tag,
+                    active,
+                },
+            );
+            LineAction::None
+        }
         ParsedLine::Event {
             channel,
             mut event,
@@ -772,6 +805,7 @@ fn dispatch_line(
             decorate_event(&mut event, shared, &channel);
             let was_roomstate = matches!(&event, ChatEvent::Roomstate { .. });
             if matches!(&event, ChatEvent::Privmsg { .. }) {
+                emit_typing_clear_for_message(app, shared, &channel, &event);
                 if let Some(rid) = shared
                     .hub
                     .lock()
@@ -801,6 +835,12 @@ fn dispatch_line(
             });
             for ev in &logged {
                 super::logging::try_log(shared, &log_channel, ev, &stream_id);
+                maybe_emit_raid_toast(app, &log_channel, ev);
+                maybe_emit_outgoing_raid_end(app, &log_channel, ev);
+                maybe_emit_gift_toast(app, &log_channel, ev);
+                // Gate is hub.active inside; do not use Option<ChatBatch> as inactive proxy
+                // (active channel often returns None while messages sit in pending).
+                maybe_emit_cross_mention(app, shared, &channel, ev);
             }
             if let Some(batch) = batch {
                 deliver_batch(app, shared, &batch);
@@ -902,6 +942,344 @@ fn emit_send_waits(app: &AppHandle, shared: &Shared) {
     for (channel_id, text) in updates {
         let _ = app.emit("chat:send-wait", ChatSendWait { channel_id, text });
     }
+}
+
+struct TypingCandidate<'a> {
+    channel: &'a str,
+    login: &'a str,
+    display_name: &'a str,
+    user_id: &'a str,
+    badges: &'a [super::types::Badge],
+    is_mod_tag: bool,
+    active: bool,
+}
+
+fn emit_typing_if_visible(app: &AppHandle, shared: &Shared, typing: TypingCandidate<'_>) {
+    if typing.channel.is_empty() || typing.login.is_empty() {
+        return;
+    }
+    let Some(self_login) = auth::resolved_login_token(shared).map(|(login, _)| login) else {
+        return;
+    };
+    if typing.login.eq_ignore_ascii_case(&self_login) {
+        return;
+    }
+    let self_user_id = auth::resolved_twitch_user_id(shared);
+    let (viewer_role, room_id) = shared
+        .hub
+        .lock()
+        .ok()
+        .map(|hub| {
+            (
+                hub.viewer_role(typing.channel, self_user_id.as_deref()),
+                hub.room_id(typing.channel).map(str::to_string),
+            )
+        })
+        .unwrap_or_default();
+    if !(viewer_role.is_mod || viewer_role.is_broadcaster) {
+        return;
+    }
+    if !is_moderator_or_broadcaster(
+        typing.badges,
+        typing.is_mod_tag,
+        typing.user_id,
+        room_id.as_deref(),
+    ) {
+        return;
+    }
+    let _ = app.emit(
+        "chat:typing",
+        ChatTyping {
+            channel: typing.channel.to_string(),
+            login: typing.login.to_string(),
+            display_name: if typing.display_name.is_empty() {
+                typing.login.to_string()
+            } else {
+                typing.display_name.to_string()
+            },
+            active: typing.active,
+        },
+    );
+}
+
+fn emit_typing_clear_for_message(
+    app: &AppHandle,
+    shared: &Shared,
+    channel: &str,
+    event: &ChatEvent,
+) {
+    let ChatEvent::Privmsg {
+        login,
+        display_name,
+        user_id,
+        badges,
+        ..
+    } = event
+    else {
+        return;
+    };
+    emit_typing_if_visible(
+        app,
+        shared,
+        TypingCandidate {
+            channel,
+            login,
+            display_name,
+            user_id,
+            badges,
+            is_mod_tag: false,
+            active: false,
+        },
+    );
+}
+
+fn is_moderator_or_broadcaster(
+    badges: &[super::types::Badge],
+    is_mod_tag: bool,
+    user_id: &str,
+    room_id: Option<&str>,
+) -> bool {
+    is_mod_tag
+        || super::send_wait::is_mod_badges(badges)
+        || super::send_wait::is_broadcaster_badges(badges)
+        || (!user_id.is_empty() && room_id.is_some_and(|room| room == user_id))
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CrossMentionPayload {
+    channel: String,
+    msg_id: String,
+    login: String,
+    display_name: String,
+    color: String,
+    text: String,
+    self_login: String,
+    highlight_sound: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlight_sound_path: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RaidToastPayload {
+    channel: String,
+    msg_id: String,
+    login: String,
+    display_name: String,
+    viewer_count: u32,
+}
+
+/// Живой входящий raid USERNOTICE для отдельного UI-стека поверх чата.
+fn maybe_emit_raid_toast(app: &AppHandle, channel: &str, event: &ChatEvent) {
+    let ChatEvent::Usernotice {
+        id,
+        msg_id,
+        params: Some(params),
+        ..
+    } = event
+    else {
+        return;
+    };
+    if !msg_id
+        .as_deref()
+        .is_some_and(|id| id.eq_ignore_ascii_case("raid"))
+    {
+        return;
+    }
+    let Some(viewer_count) = params.viewer_count.filter(|&n| n >= 1) else {
+        return;
+    };
+    let login = params
+        .raid_login
+        .as_deref()
+        .or(params.login.as_deref())
+        .unwrap_or("")
+        .trim();
+    if login.is_empty() {
+        return;
+    }
+    let display_name = params
+        .raid_display_name
+        .as_deref()
+        .or(params.display_name.as_deref())
+        .unwrap_or(login)
+        .trim();
+    let _ = app.emit(
+        "chat:raid",
+        RaidToastPayload {
+            channel: channel.to_string(),
+            msg_id: id.clone(),
+            login: login.to_string(),
+            display_name: display_name.to_string(),
+            viewer_count,
+        },
+    );
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutgoingRaidEndPayload {
+    channel: String,
+    active: bool,
+}
+
+/// USERNOTICE unraid: снять исходящий баннер countdown.
+fn maybe_emit_outgoing_raid_end(app: &AppHandle, channel: &str, event: &ChatEvent) {
+    let ChatEvent::Usernotice { msg_id, .. } = event else {
+        return;
+    };
+    if !msg_id
+        .as_deref()
+        .is_some_and(|id| id.eq_ignore_ascii_case("unraid"))
+    {
+        return;
+    }
+    let _ = app.emit(
+        "chat:outgoing_raid",
+        OutgoingRaidEndPayload {
+            channel: channel.to_string(),
+            active: false,
+        },
+    );
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GiftToastPayload {
+    channel: String,
+    msg_id: String,
+    login: String,
+    display_name: String,
+    count: u32,
+    anon: bool,
+}
+
+/// Mass gift USERNOTICE (`submysterygift` / `anonsubmysterygift`) for corner toast.
+fn maybe_emit_gift_toast(app: &AppHandle, channel: &str, event: &ChatEvent) {
+    let ChatEvent::Usernotice {
+        id,
+        msg_id,
+        params: Some(params),
+        ..
+    } = event
+    else {
+        return;
+    };
+    let kind = msg_id.as_deref().unwrap_or("").to_ascii_lowercase();
+    if kind != "submysterygift" && kind != "anonsubmysterygift" {
+        return;
+    }
+    let Some(count) = params.mass_gift_count.filter(|n| *n >= 1) else {
+        return;
+    };
+    let anon = params.anon || kind == "anonsubmysterygift";
+    let login = if anon {
+        "ananonymousgifter"
+    } else {
+        params.login.as_deref().unwrap_or("").trim()
+    };
+    if login.is_empty() {
+        return;
+    }
+    let display_name = if anon {
+        "Anonymous"
+    } else {
+        params.display_name.as_deref().unwrap_or(login).trim()
+    };
+    if display_name.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "chat:gift_toast",
+        GiftToastPayload {
+            channel: channel.to_string(),
+            msg_id: id.clone(),
+            login: login.to_string(),
+            display_name: display_name.to_string(),
+            count,
+            anon,
+        },
+    );
+}
+
+/// Inactive joined channel: in-app toast when someone highlights your login.
+fn maybe_emit_cross_mention(
+    app: &AppHandle,
+    shared: &Shared,
+    channel: &str,
+    event: &ChatEvent,
+) {
+    let enable_self = shared
+        .filters
+        .lock()
+        .ok()
+        .map(|f| f.data.enable_self_highlight)
+        .unwrap_or(true);
+    if !enable_self {
+        return;
+    }
+    let Some((self_login, _)) = auth::resolved_login_token(shared) else {
+        return;
+    };
+    let Ok(hub) = shared.hub.lock() else {
+        return;
+    };
+    let active_is_this = hub
+        .active
+        .as_deref()
+        .is_some_and(|a| a.eq_ignore_ascii_case(channel));
+    let joined = hub.is_joined(channel) || hub.has_channel(channel);
+    drop(hub);
+    if active_is_this || !joined {
+        return;
+    }
+    if let Some(login) = match event {
+        ChatEvent::Privmsg { login, .. } => Some(login.as_str()),
+        _ => None,
+    } {
+        let blacklisted = shared
+            .highlight_blacklist
+            .lock()
+            .ok()
+            .is_some_and(|rules| super::filters::login_is_blacklisted(login, &rules));
+        if blacklisted {
+            return;
+        }
+    }
+    if !super::filters::is_self_username_mention(event, Some(self_login.as_str())) {
+        return;
+    }
+    let ChatEvent::Privmsg {
+        id,
+        login,
+        display_name,
+        color,
+        text,
+        highlight_sound,
+        highlight_sound_path,
+        ..
+    } = event
+    else {
+        return;
+    };
+    if id.is_empty() || login.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "chat:cross_mention",
+        CrossMentionPayload {
+            channel: channel.to_string(),
+            msg_id: id.clone(),
+            login: login.clone(),
+            display_name: display_name.clone(),
+            color: color.clone(),
+            text: text.clone(),
+            self_login,
+            highlight_sound: *highlight_sound,
+            highlight_sound_path: highlight_sound_path.clone(),
+        },
+    );
 }
 
 fn flush_emit(app: &AppHandle, shared: &Shared) {

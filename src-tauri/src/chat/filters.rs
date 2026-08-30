@@ -1531,6 +1531,30 @@ pub(crate) fn phrase_matches(text: &str, pattern: &str) -> bool {
     phrase_matches_boundary(text, pattern, false)
 }
 
+/// Live PRIVMSG that highlights the signed-in login (self-mention / username hit).
+pub fn is_self_username_mention(event: &ChatEvent, self_login: Option<&str>) -> bool {
+    let Some(me) = self_login.filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let ChatEvent::Privmsg {
+        login,
+        text,
+        whisper,
+        disabled,
+        ..
+    } = event
+    else {
+        return false;
+    };
+    if *whisper || *disabled {
+        return false;
+    }
+    if is_self(login, Some(me)) {
+        return false;
+    }
+    phrase_matches(text, me)
+}
+
 fn phrase_matches_ex(text: &str, rule: &PhraseRule) -> bool {
     if rule.pattern.is_empty() {
         return false;
@@ -1860,6 +1884,30 @@ mod tests {
             &[],
             &privmsg("x", "buyfollowers"),
             Some("me")
+        ));
+    }
+
+    #[test]
+    fn is_self_username_mention_detects_hits() {
+        assert!(is_self_username_mention(
+            &privmsg("xqc", "hey @mike what"),
+            Some("mike")
+        ));
+        assert!(is_self_username_mention(
+            &privmsg("xqc", "mike check this"),
+            Some("mike")
+        ));
+        assert!(!is_self_username_mention(
+            &privmsg("mike", "mike talking"),
+            Some("mike")
+        ));
+        assert!(!is_self_username_mention(
+            &privmsg("xqc", "hello world"),
+            Some("mike")
+        ));
+        assert!(!is_self_username_mention(
+            &privmsg("xqc", "hey @mike"),
+            None
         ));
     }
 

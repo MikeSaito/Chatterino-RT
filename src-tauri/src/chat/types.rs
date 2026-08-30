@@ -78,6 +78,15 @@ pub struct ChatSendWait {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatTyping {
+    pub channel: String,
+    pub login: String,
+    pub display_name: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRooms {
     pub active: Option<String>,
     pub open: Vec<String>,
@@ -121,6 +130,13 @@ pub struct MentionSpan {
     pub start: u32,
     pub end: u32,
     pub login: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomodRange {
+    pub start: u32,
+    pub end: u32,
 }
 
 fn default_badge_source() -> String {
@@ -373,6 +389,29 @@ pub enum ChatEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_remaining_sec: Option<u32>,
     },
+    #[serde(rename = "automodHeld", rename_all = "camelCase")]
+    AutomodHeld {
+        id: String,
+        timestamp_ms: u64,
+        message_id: String,
+        channel_id: String,
+        author_user_id: String,
+        author_login: String,
+        author_display_name: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        caught_ranges: Vec<AutomodRange>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        status: String,
+    },
+    #[serde(rename = "automodStatus", rename_all = "camelCase")]
+    AutomodStatus {
+        id: String,
+        timestamp_ms: u64,
+        target_id: String,
+        status: String,
+    },
 }
 
 fn default_stack_count() -> u32 {
@@ -392,7 +431,9 @@ impl ChatEvent {
             | ChatEvent::Usernotice { id, .. }
             | ChatEvent::Roomstate { id, .. }
             | ChatEvent::Userstate { id, .. }
-            | ChatEvent::Notice { id, .. } => id,
+            | ChatEvent::Notice { id, .. }
+            | ChatEvent::AutomodHeld { id, .. }
+            | ChatEvent::AutomodStatus { id, .. } => id,
         }
     }
 
@@ -404,7 +445,9 @@ impl ChatEvent {
             | ChatEvent::Usernotice { timestamp_ms, .. }
             | ChatEvent::Roomstate { timestamp_ms, .. }
             | ChatEvent::Userstate { timestamp_ms, .. }
-            | ChatEvent::Notice { timestamp_ms, .. } => *timestamp_ms,
+            | ChatEvent::Notice { timestamp_ms, .. }
+            | ChatEvent::AutomodHeld { timestamp_ms, .. }
+            | ChatEvent::AutomodStatus { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -461,6 +504,22 @@ impl ChatEvent {
                         .is_some_and(|inner| inner.matches_substring(needle_lower))
             }
             ChatEvent::Notice { text, .. } => contains_ci(text, needle_lower),
+            ChatEvent::AutomodHeld {
+                author_login,
+                author_display_name,
+                text,
+                reason,
+                status,
+                ..
+            } => {
+                contains_ci(author_login, needle_lower)
+                    || contains_ci(author_display_name, needle_lower)
+                    || contains_ci(text, needle_lower)
+                    || reason
+                        .as_deref()
+                        .is_some_and(|v| contains_ci(v, needle_lower))
+                    || contains_ci(status, needle_lower)
+            }
             ChatEvent::Clearchat { target_login, .. } => target_login
                 .as_deref()
                 .is_some_and(|v| contains_ci(v, needle_lower)),
@@ -476,6 +535,7 @@ impl ChatEvent {
             ),
             ChatEvent::Clearmsg { .. } => false,
             ChatEvent::Userstate { .. } => false,
+            ChatEvent::AutomodStatus { .. } => false,
         }
     }
 }
@@ -589,6 +649,23 @@ impl ChatEvent {
                 clear_duration_sec: None,
                 clear_stack_count: None,
             },
+            ChatEvent::AutomodHeld {
+                timestamp_ms,
+                author_login,
+                author_display_name,
+                text,
+                ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: author_display_name.clone(),
+                login: author_login.clone(),
+                text: text.clone(),
+                color: "#00ad33".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
+            },
             ChatEvent::Clearchat {
                 timestamp_ms,
                 target_login,
@@ -643,6 +720,17 @@ impl ChatEvent {
                 clear_stack_count: None,
             },
             ChatEvent::Userstate { timestamp_ms, .. } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: "*".into(),
+                login: String::new(),
+                text: String::new(),
+                color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
+            },
+            ChatEvent::AutomodStatus { timestamp_ms, .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
                 timestamp_ms: *timestamp_ms,
                 nick: "*".into(),

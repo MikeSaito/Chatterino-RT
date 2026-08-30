@@ -82,6 +82,11 @@ export type Badge = {
   tooltip?: string;
 };
 
+export type AutomodRange = {
+  start: number;
+  end: number;
+};
+
 export type ChatEvent =
   | {
       kind: "privmsg";
@@ -165,6 +170,27 @@ export type ChatEvent =
       text: string;
       msgId?: string;
       timeoutRemainingSec?: number;
+    }
+  | {
+      kind: "automodHeld";
+      id: string;
+      timestampMs: number;
+      messageId: string;
+      channelId: string;
+      authorUserId: string;
+      authorLogin: string;
+      authorDisplayName: string;
+      text: string;
+      caughtRanges?: AutomodRange[];
+      reason?: string;
+      status: string;
+    }
+  | {
+      kind: "automodStatus";
+      id: string;
+      timestampMs: number;
+      targetId: string;
+      status: string;
     };
 
 export type ChatBatch = {
@@ -178,6 +204,13 @@ export type ChatStatus = {
   state: "connecting" | "connected" | "reconnecting" | "error";
   channel?: string;
   message?: string;
+};
+
+export type ChatTyping = {
+  channel: string;
+  login: string;
+  displayName: string;
+  active: boolean;
 };
 
 export type ViewerRole = {

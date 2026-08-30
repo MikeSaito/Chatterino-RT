@@ -31,13 +31,16 @@ export type IconName =
   | "clock"
   | "heart"
   | "star"
+  | "points"
   | "user"
   | "bell"
   | "filter"
   | "keyboard"
   | "shield"
   | "info"
-  | "slash";
+  | "slash"
+  | "ban"
+  | "gift";
 
 const PATHS: Record<IconName, string> = {
   settings:
@@ -82,6 +85,8 @@ const PATHS: Record<IconName, string> = {
     '<path d="M12 21s-7-4.5-9.5-9A5.2 5.2 0 0 1 12 6.2 5.2 5.2 0 0 1 21.5 12C19 16.5 12 21 12 21z"/>',
   star:
     '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.3L12 15.8 6.2 17.8l.9-5.3L3.2 8.7l5.4-.8L12 3z"/>',
+  points:
+    '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   user:
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   bell:
@@ -93,6 +98,8 @@ const PATHS: Record<IconName, string> = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   slash: '<circle cx="12" cy="12" r="9"/><path d="M5 5l14 14"/>',
+  ban: '<circle cx="12" cy="12" r="9"/><path d="M5 5l14 14"/>',
+  gift: '<rect x="3" y="8" width="18" height="13" rx="1.5"/><path d="M12 8v13M3 12h18M12 8c-2.2 0-4-1.3-4-3s2.2-2.2 4-.7c1.8-1.5 4-.7 4 .7s-1.8 3-4 3z"/>',
 };
 
 export function iconSvg(name: IconName, size = 16): string {

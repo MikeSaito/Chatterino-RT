@@ -1,6 +1,8 @@
 import {
-  lowercaseHostInLinkText,
-  lowercaseLinkHosts,
+  applyLinkTitlesToBody,
+  hostLabelFromUrl,
+  isTwitchClipUrl,
+  titleFromLinkTooltip,
 } from "../src/chat/linkDisplay.ts";
 
 function assert(cond: boolean, msg: string): void {
@@ -9,31 +11,44 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
+assert(hostLabelFromUrl("https://www.Example.COM/a") === "example.com", "host");
+assert(isTwitchClipUrl("https://clips.twitch.tv/Cool-Clip_1"), "clip host");
 assert(
-  lowercaseHostInLinkText("https://Example.COM/Path?Q=1") ===
-    "https://example.com/Path?Q=1",
-  "https host",
+  isTwitchClipUrl("https://www.twitch.tv/xqc/clip/CoolClip"),
+  "channel clip",
 );
-assert(
-  lowercaseHostInLinkText("HTTP://Example.COM/x") === "HTTP://example.com/x",
-  "proto case kept",
-);
-assert(lowercaseHostInLinkText("https://example.com/a") === null, "already lower");
-assert(
-  lowercaseHostInLinkText("https://Ex.com:8443/a") === "https://ex.com:8443/a",
-  "port",
-);
-assert(lowercaseHostInLinkText("Example.COM/foo") === "example.com/foo", "bare");
-assert(lowercaseHostInLinkText("not a link") === null, "no host");
-assert(lowercaseHostInLinkText("") === null, "empty");
+assert(!isTwitchClipUrl("https://twitch.tv/xqc"), "channel not clip");
 
-const body = "see HTTPS://Foo.Bar/Baz and done";
-const spans = [{ start: 4, end: 24 }]; // HTTPS://Foo.Bar/Baz
-const out = lowercaseLinkHosts(body, spans);
-assert(out === "see HTTPS://foo.bar/Baz and done", `got ${out}`);
-assert(out.length === body.length, "utf16 len");
+assert(
+  titleFromLinkTooltip("Невероятный камбэк\nhttps://x", "clip.twitch.tv") ===
+    "Невероятный камбэк",
+  "tooltip title",
+);
+assert(
+  titleFromLinkTooltip("https://clips.twitch.tv/x", "clip.twitch.tv") === null,
+  "url tooltip ignored",
+);
 
-const noop = lowercaseLinkHosts("hi", [{ start: 0, end: 2 }]);
-assert(noop === "hi", "non-link span");
+const applied = applyLinkTitlesToBody(
+  "see https://clips.twitch.tv/Abc now",
+  [{ start: 4, end: 31, url: "https://clips.twitch.tv/Abc" }],
+  [
+    {
+      url: "https://clips.twitch.tv/Abc",
+      title: "Title",
+      host: "clip.twitch.tv",
+    },
+  ],
+  [],
+);
+assert(applied.body === "see Title (clip.twitch.tv) now", "body rewrite");
+assert(applied.links.length === 1, "one link");
+assert(applied.links[0].start === 4 && applied.links[0].end === 9, "title span");
+assert(applied.hosts.length === 1, "host span");
+assert(
+  applied.body.slice(applied.hosts[0].start, applied.hosts[0].end) ===
+    " (clip.twitch.tv)",
+  "host text",
+);
 
 console.log("linkDisplay.test.ts: ok");

@@ -12,8 +12,13 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
+// Channel Points balance/redeem use Twitch GQL as a signed-in viewer; Helix
+// channel:read/manage:redemptions scopes are broadcaster-only and are not needed.
+// If GQL returns 401/403, UI shows error.points.relogin (re-auth required).
+// moderator:read:chat_messages — Helix GET /chat/pins (pinned channel message banner).
+// Existing sessions need re-login after this scope is added.
 const DEVICE_SCOPES: &str =
-    "chat:read chat:write user:read:blocked_users user:manage:blocked_users";
+    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids moderator:read:chat_messages moderator:manage:automod";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";
@@ -289,6 +294,27 @@ pub fn resolved_login_token(shared: &Shared) -> Option<(String, String)> {
 
 pub fn oauth_token(shared: &Shared) -> Option<String> {
     resolved_login_token(shared).map(|(_, token)| token)
+}
+
+/// Client-Id paired with the active user token (preferred for GQL with that token).
+pub fn oauth_graph_creds(shared: &Shared) -> Option<(String, String)> {
+    if let Some((_, token)) = env_login_token() {
+        let client_id = env_secret("TWITCH_CLIENT_ID")
+            .filter(|id| !id.is_empty() && id != "YOUR_API_KEY_HERE")
+            .unwrap_or_else(|| CHATTERINO_CLIENT_ID.to_string());
+        return Some((client_id, token));
+    }
+    let inner = shared.auth.lock().ok()?;
+    let creds = current_creds(&inner)?;
+    let client_id = creds.client_id.trim();
+    if client_id.is_empty() || client_id == "YOUR_API_KEY_HERE" {
+        return None;
+    }
+    let token = creds.token.trim();
+    if token.is_empty() || token == "YOUR_API_KEY_HERE" {
+        return None;
+    }
+    Some((client_id.to_string(), token.to_string()))
 }
 
 fn valid_twitch_user_id(raw: &str) -> bool {

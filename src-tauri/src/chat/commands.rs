@@ -77,6 +77,16 @@ impl From<AuthFail> for ApiError {
     }
 }
 
+impl From<super::channel_points::ChannelPointsError> for ApiError {
+    fn from(e: super::channel_points::ChannelPointsError) -> Self {
+        Self {
+            code: e.code,
+            message: e.message,
+            params: e.params,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn chat_join(
     app: AppHandle,
@@ -117,6 +127,8 @@ pub async fn chat_join(
     auth::emit(&app, &state);
     if do_focus {
         super::session::emit_roomstate(&app, &state, &normalized);
+        state.notify_polls(super::polls::PollsCmd::SetChannel(normalized.clone()));
+        state.notify_pins(super::pins::PinsCmd::SetChannel(normalized.clone()));
     }
     Ok(normalized)
 }
@@ -136,6 +148,8 @@ pub async fn chat_leave(
     if left_was_active {
         state.notify_event(EventCmd::ClearChannel);
         state.notify_bttv(BttvCmd::ClearChannel);
+        state.notify_polls(super::polls::PollsCmd::ClearChannel);
+        state.notify_pins(super::pins::PinsCmd::ClearChannel);
     }
     if let Ok(mut cat) = state.catalog.lock() {
         cat.drop_channel(&normalized);
@@ -176,8 +190,12 @@ pub async fn chat_leave(
             let _ = super::session::remember(&state, ch.clone(), true);
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
             super::session::emit_roomstate(&app, &state, ch);
+            state.notify_polls(super::polls::PollsCmd::SetChannel(ch.clone()));
+            state.notify_pins(super::pins::PinsCmd::SetChannel(ch.clone()));
         } else {
             let _ = super::session::clear_last(&state);
+            state.notify_polls(super::polls::PollsCmd::ClearChannel);
+            state.notify_pins(super::pins::PinsCmd::ClearChannel);
         }
     }
     auth::emit(&app, &state);
@@ -189,6 +207,8 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     send_cmd(&state, IrcCmd::Part).await?;
     state.notify_event(EventCmd::ClearChannel);
     state.notify_bttv(BttvCmd::ClearChannel);
+    state.notify_polls(super::polls::PollsCmd::ClearChannel);
+    state.notify_pins(super::pins::PinsCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         hub.clear_all();
@@ -261,6 +281,31 @@ pub async fn chat_send(
     ensure_can_send(&state)?;
     let text = prepare_outgoing_text(&state, &channel, &text, None)?;
     dispatch_chat_send(&app, &state, &channel, text, reply_to).await
+}
+
+#[tauri::command]
+pub async fn chat_typing(state: tauri::State<'_, Shared>, active: bool) -> Result<(), ApiError> {
+    let channel = active_send_channel(&state)?;
+    ensure_can_send(&state)?;
+    let allowed = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        let role = hub.viewer_role(&channel, auth::resolved_twitch_user_id(&state).as_deref());
+        role.is_mod || role.is_broadcaster
+    };
+    if !allowed {
+        return Ok(());
+    }
+    send_cmd(&state, IrcCmd::Typing { channel, active }).await
+}
+
+#[tauri::command]
+pub async fn chat_automod_manage(
+    app: AppHandle,
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)] msgId: String,
+    action: String,
+) -> Result<(), ApiError> {
+    super::automod::manage_message(app, state.inner().clone(), msgId, action).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -472,6 +517,9 @@ async fn dispatch_chat_send(
     text: String,
     reply_to: Option<String>,
 ) -> Result<(), ApiError> {
+    if let Some(raid) = parse_raid_slash(text.trim()) {
+        return handle_raid_slash(app, state, channel, raid).await;
+    }
     if should_send_helix(state) {
         return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;
     }
@@ -512,6 +560,202 @@ async fn dispatch_chat_send(
 
 fn custom_command_triggers(state: &Shared) -> Vec<String> {
     load_custom_commands(state).triggers().to_vec()
+}
+
+const OUTGOING_RAID_DURATION_MS: u64 = 90_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RaidSlash {
+    Start { target: String },
+    Cancel,
+    UsageStart,
+    UsageCancel,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutgoingRaidPayload {
+    channel: String,
+    active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_login: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<u64>,
+}
+
+fn parse_raid_slash(text: &str) -> Option<RaidSlash> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let first = t.chars().next()?;
+    if first != '/' && first != '.' {
+        return None;
+    }
+    let rest = t[first.len_utf8()..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    let mut parts = rest.split_whitespace();
+    let cmd = parts.next()?.to_ascii_lowercase();
+    match cmd.as_str() {
+        "raid" => {
+            let Some(raw_target) = parts.next() else {
+                return Some(RaidSlash::UsageStart);
+            };
+            if parts.next().is_some() {
+                return Some(RaidSlash::UsageStart);
+            }
+            let target = raw_target.trim().trim_start_matches(['#', '@']);
+            if target.is_empty()
+                || target.len() > 25
+                || !target
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Some(RaidSlash::UsageStart);
+            }
+            Some(RaidSlash::Start {
+                target: target.to_ascii_lowercase(),
+            })
+        }
+        "unraid" => {
+            if parts.next().is_some() {
+                return Some(RaidSlash::UsageCancel);
+            }
+            Some(RaidSlash::Cancel)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_send_room_id(state: &Shared, channel: &str) -> Option<String> {
+    state
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.room_id(channel).map(str::to_string))
+        .or_else(|| {
+            state
+                .snapshot_bttv_wanted()
+                .channel
+                .filter(|c| c.login == channel)
+                .map(|c| c.room_id)
+        })
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn emit_outgoing_raid(app: &AppHandle, payload: OutgoingRaidPayload) {
+    let _ = app.emit("chat:outgoing_raid", payload);
+}
+
+async fn handle_raid_slash(
+    app: &AppHandle,
+    state: &Shared,
+    channel: &str,
+    cmd: RaidSlash,
+) -> Result<(), ApiError> {
+    match &cmd {
+        RaidSlash::UsageStart => {
+            state.post_channel_notice(
+                app,
+                channel,
+                "Usage: \"/raid <username>\" - Raid a user. Only the broadcaster can start a raid."
+                    .into(),
+            );
+            return Ok(());
+        }
+        RaidSlash::UsageCancel => {
+            state.post_channel_notice(
+                app,
+                channel,
+                "Usage: \"/unraid\" - Cancel the current raid. Only the broadcaster can cancel the raid."
+                    .into(),
+            );
+            return Ok(());
+        }
+        RaidSlash::Start { .. } | RaidSlash::Cancel => {}
+    }
+
+    let Some(room_id) = resolve_send_room_id(state, channel) else {
+        state.post_channel_notice(
+            app,
+            channel,
+            "Sending messages in this channel isn't possible.".into(),
+        );
+        return Ok(());
+    };
+    let Some(token) = auth::oauth_token(state) else {
+        let msg = match &cmd {
+            RaidSlash::Start { .. } => "You must be logged in to start a raid!",
+            RaidSlash::Cancel => "You must be logged in to cancel the raid!",
+            RaidSlash::UsageStart | RaidSlash::UsageCancel => unreachable!(),
+        };
+        state.post_channel_notice(app, channel, msg.into());
+        return Ok(());
+    };
+    let client_id = auth::resolved_client_id(state);
+
+    match cmd {
+        RaidSlash::Start { target } => {
+            let Some(profile) =
+                super::helix::fetch_user_profile(&target, Some(&token), &client_id).await
+            else {
+                state.post_channel_notice(app, channel, format!("Invalid username: {target}"));
+                return Ok(());
+            };
+            match super::helix::start_raid(&room_id, &profile.id, &token, &client_id).await {
+                super::helix::HelixRaidOutcome::Ok => {
+                    emit_outgoing_raid(
+                        app,
+                        OutgoingRaidPayload {
+                            channel: channel.to_string(),
+                            active: true,
+                            target_login: Some(profile.login.clone()),
+                            target_display_name: Some(profile.display_name.clone()),
+                            started_at_ms: Some(unix_ms_now()),
+                            duration_ms: Some(OUTGOING_RAID_DURATION_MS),
+                        },
+                    );
+                }
+                super::helix::HelixRaidOutcome::Failed(msg) => {
+                    state.post_channel_notice(app, channel, msg);
+                }
+            }
+        }
+        RaidSlash::Cancel => {
+            match super::helix::cancel_raid(&room_id, &token, &client_id).await {
+                super::helix::HelixRaidOutcome::Ok => {
+                    emit_outgoing_raid(
+                        app,
+                        OutgoingRaidPayload {
+                            channel: channel.to_string(),
+                            active: false,
+                            target_login: None,
+                            target_display_name: None,
+                            started_at_ms: None,
+                            duration_ms: None,
+                        },
+                    );
+                }
+                super::helix::HelixRaidOutcome::Failed(msg) => {
+                    state.post_channel_notice(app, channel, msg);
+                }
+            }
+        }
+        RaidSlash::UsageStart | RaidSlash::UsageCancel => unreachable!(),
+    }
+    Ok(())
 }
 
 async fn send_via_helix(
@@ -721,7 +965,12 @@ pub async fn auth_import(
     state: tauri::State<'_, Shared>,
     blob: String,
 ) -> Result<(), ApiError> {
-    Ok(auth::import_blob(app, state.inner().clone(), blob).await?)
+    let out = auth::import_blob(app, state.inner().clone(), blob).await;
+    if out.is_ok() {
+        state.notify_polls(super::polls::PollsCmd::Relogin);
+        state.notify_pins(super::pins::PinsCmd::Relogin);
+    }
+    Ok(out?)
 }
 
 #[tauri::command]
@@ -731,7 +980,12 @@ pub fn auth_status(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<Au
 
 #[tauri::command]
 pub async fn auth_logout(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
-    Ok(auth::logout(app, state.inner().clone()).await?)
+    let out = auth::logout(app, state.inner().clone()).await;
+    if out.is_ok() {
+        state.notify_polls(super::polls::PollsCmd::Relogin);
+        state.notify_pins(super::pins::PinsCmd::Relogin);
+    }
+    Ok(out?)
 }
 
 #[tauri::command]
@@ -740,7 +994,12 @@ pub async fn auth_select(
     state: tauri::State<'_, Shared>,
     login: String,
 ) -> Result<(), ApiError> {
-    Ok(auth::select_account(app, state.inner().clone(), login).await?)
+    let out = auth::select_account(app, state.inner().clone(), login).await;
+    if out.is_ok() {
+        state.notify_polls(super::polls::PollsCmd::Relogin);
+        state.notify_pins(super::pins::PinsCmd::Relogin);
+    }
+    Ok(out?)
 }
 
 #[tauri::command]
@@ -749,7 +1008,39 @@ pub async fn auth_remove(
     state: tauri::State<'_, Shared>,
     login: String,
 ) -> Result<(), ApiError> {
-    Ok(auth::remove_account(app, state.inner().clone(), login).await?)
+    let out = auth::remove_account(app, state.inner().clone(), login).await;
+    if out.is_ok() {
+        state.notify_polls(super::polls::PollsCmd::Relogin);
+        state.notify_pins(super::pins::PinsCmd::Relogin);
+    }
+    Ok(out?)
+}
+
+#[tauri::command]
+pub async fn channel_points_status(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<super::channel_points::ChannelPointsSnapshot, ApiError> {
+    Ok(super::channel_points::snapshot(&state, &channel).await?)
+}
+
+#[tauri::command]
+pub async fn channel_points_redeem(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    #[allow(non_snake_case)] rewardId: String,
+    #[allow(non_snake_case)] textInput: Option<String>,
+) -> Result<super::channel_points::ChannelPointsRedeemResult, ApiError> {
+    Ok(super::channel_points::redeem(&state, &channel, &rewardId, textInput.as_deref()).await?)
+}
+
+#[tauri::command]
+pub async fn channel_points_claim(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    #[allow(non_snake_case)] claimId: String,
+) -> Result<super::channel_points::ChannelPointsClaimResult, ApiError> {
+    Ok(super::channel_points::claim(&state, &channel, &claimId).await?)
 }
 
 #[tauri::command]
@@ -1734,6 +2025,34 @@ mod tests {
             prepare_duplicate_message(".timeout user 1s"),
             ".timeout user  1s"
         );
+    }
+
+    #[test]
+    fn parse_raid_slash_commands() {
+        assert_eq!(
+            parse_raid_slash("/raid Foobar"),
+            Some(RaidSlash::Start {
+                target: "foobar".into()
+            })
+        );
+        assert_eq!(
+            parse_raid_slash(".raid @Foo_Bar"),
+            Some(RaidSlash::Start {
+                target: "foo_bar".into()
+            })
+        );
+        assert_eq!(parse_raid_slash("/unraid"), Some(RaidSlash::Cancel));
+        assert_eq!(parse_raid_slash("/raid"), Some(RaidSlash::UsageStart));
+        assert_eq!(
+            parse_raid_slash("/raid a b"),
+            Some(RaidSlash::UsageStart)
+        );
+        assert_eq!(
+            parse_raid_slash("/unraid x"),
+            Some(RaidSlash::UsageCancel)
+        );
+        assert_eq!(parse_raid_slash("/me waves"), None);
+        assert_eq!(parse_raid_slash("raid foo"), None);
     }
 
     #[test]

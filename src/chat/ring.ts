@@ -21,8 +21,10 @@ import {
   MOD_ACTION_SLOTS_PER_ROW,
 } from "../constants";
 import type { ModActionBtn } from "../shell/modActions";
-import { modActionLabel } from "../shell/modActions";
+import { modGutterActions } from "../shell/modActions";
+import { modGutterIconTexture } from "../shell/modGutterIcons";
 import type {
+  AutomodRange,
   Badge,
   ChatEvent,
   EmoteSpan,
@@ -53,7 +55,9 @@ import {
   filterVisibleBadges,
   type BadgeVisibilityFlags,
 } from "./badgeVisibility";
-import { lowercaseLinkHosts } from "./linkDisplay";
+import { lowercaseLinkHosts, type HostSpanRange } from "./linkDisplay";
+import type { ClipCardInfo } from "./linkEnrichment";
+import { CLIP_CARD_HEIGHT_PX } from "../shell/clipCards";
 import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -115,6 +119,10 @@ const SYSTEM_CLOUD_PAD_X = 12;
 const SYSTEM_CLOUD_PAD_Y = 1;
 const SYSTEM_CLOUD_RADIUS = 8;
 const SYSTEM_CLOUD_MARGIN_X = 8;
+const MOD_GUTTER_ICON_COUNT = 2;
+/** Stock-ish green chrome for AutoMod held rows (#00ad33 @ ~50%). */
+const AUTOMOD_HIGHLIGHT = "#00ad3380";
+const AUTOMOD_CAUGHT_COLOR = 0xff3333;
 
 export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 
@@ -167,6 +175,7 @@ type Slot = {
   bodyCont: BitmapText;
   replyHeader: BitmapText;
   mentionTexts: BitmapText[];
+  hostTexts: BitmapText[];
   bitsLabel: BitmapText;
   emotes: Sprite[];
   emoteKeys: string[];
@@ -174,7 +183,13 @@ type Slot = {
   badgeKeys: string[];
   badgesRaw: Badge[];
   modBtns: BitmapText[];
+  modIcons: Sprite[];
   modBtnHits: Array<{ x0: number; x1: number; action: string }>;
+  automodBtnHits: Array<{ x0: number; x1: number; action: "allow" | "deny" }>;
+  automodMessageId: string;
+  automodStatus: string;
+  automodCaught: AutomodRange[];
+  caughtTexts: BitmapText[];
   msgId: string;
   login: string;
   /** Текст до host-display transform (whisper/action lead). */
@@ -187,7 +202,10 @@ type Slot = {
   timestampMs: number;
   spansRaw: EmoteSpan[];
   linkSpans: LinkSpan[];
+  hostSpans: HostSpanRange[];
   mentionSpans: MentionSpan[];
+  clipCard: ClipCardInfo | null;
+  clipCardRows: number;
   wrapLines: WrapLine[];
   /** false until paintClip finishes metrics for current bodyRaw. */
   wrapReady: boolean;
@@ -368,12 +386,24 @@ export class MessageRing {
   private lastReadFadeRaf = 0;
   private pendingBelow = 0;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
+  private onClipCards:
+    | ((anchors: Array<{
+        msgId: string;
+        top: number;
+        left: number;
+        width: number;
+        clip: ClipCardInfo;
+      }>) => void)
+    | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
   private onNickRightClick: ((ctx: SlotContext, ev: FederatedPointerEvent) => void) | undefined;
   private onOpenChatLink: ((url: string) => void) | undefined;
   private onModAction:
     | ((action: string, ctx: SlotContext) => void)
+    | undefined;
+  private onAutomodAction:
+    | ((action: "allow" | "deny", messageId: string, ctx: SlotContext) => void)
     | undefined;
   private onViewerRoleChange: (() => void) | undefined;
   private hoverGuard: (() => boolean) | undefined;
@@ -394,6 +424,66 @@ export class MessageRing {
 
   setOnScroll(cb: (state: ScrollSnapshot) => void): void {
     this.onScroll = cb;
+  }
+
+  setOnClipCards(
+    cb: (anchors: Array<{
+      msgId: string;
+      top: number;
+      left: number;
+      width: number;
+      clip: ClipCardInfo;
+    }>) => void,
+  ): void {
+    this.onClipCards = cb;
+  }
+
+  peekLinkEnrichment(msgId: string): {
+    bodySource: string;
+    links: LinkSpan[];
+    spans: EmoteSpan[];
+    mentions: MentionSpan[];
+  } | null {
+    const slot = this.findSlotByMsgId(msgId);
+    if (!slot || !slot.bodySource || slot.linkSpans.length === 0) {
+      return null;
+    }
+    return {
+      bodySource: slot.bodySource,
+      links: slot.linkSpans.map((l) => ({ ...l })),
+      spans: slot.spansRaw.map((s) => ({ ...s })),
+      mentions: slot.mentionSpans.map((m) => ({ ...m })),
+    };
+  }
+
+  applyLinkEnrichment(
+    msgId: string,
+    payload: {
+      body: string;
+      links: LinkSpan[];
+      hosts: HostSpanRange[];
+      spans: EmoteSpan[];
+      mentions: MentionSpan[];
+      clip: ClipCardInfo | null;
+    },
+  ): void {
+    const slot = this.findSlotByMsgId(msgId);
+    if (!slot || !this.ready) {
+      return;
+    }
+    slot.bodyRaw = payload.body;
+    slot.linkSpans = payload.links;
+    slot.hostSpans = payload.hosts;
+    slot.spansRaw = payload.spans;
+    slot.mentionSpans = payload.mentions;
+    slot.clipCard = payload.clip;
+    slot.clipCardRows =
+      payload.clip && this.lineHeight > 0
+        ? Math.max(1, Math.ceil(CLIP_CARD_HEIGHT_PX / this.lineHeight))
+        : 0;
+    slot.wrapReady = false;
+    this.markLayoutFullPaint();
+    this.layout();
   }
 
   /** Highlight colors in scrollback order (empty string = no mark). Stock 1:1 with messages. */
@@ -441,6 +531,12 @@ export class MessageRing {
 
   setOnModAction(cb: (action: string, ctx: SlotContext) => void): void {
     this.onModAction = cb;
+  }
+
+  setOnAutomodAction(
+    cb: (action: "allow" | "deny", messageId: string, ctx: SlotContext) => void,
+  ): void {
+    this.onAutomodAction = cb;
   }
 
   setOnViewerRoleChange(cb: () => void): void {
@@ -643,6 +739,11 @@ export class MessageRing {
     for (const mt of slot.modBtns) {
       if (mt.visible) {
         mt.y = contentY;
+      }
+    }
+    for (const spr of slot.modIcons) {
+      if (spr.visible) {
+        spr.y = this.lineMediaY(contentY, spr.height || this.fontSize);
       }
     }
     const badgeVisible = this.visibleBadges(slot);
@@ -1499,6 +1600,11 @@ export class MessageRing {
         mt.style.fontSize = this.fontSize;
         mt.style.lineHeight = this.lineHeight;
       }
+      for (const ht of slot.hostTexts) {
+        ht.style.fontSize = this.fontSize;
+        ht.style.lineHeight = this.lineHeight;
+        ht.style.fill = this.themeFills.timestamp;
+      }
       for (const mt of slot.modBtns) {
         mt.style.fontSize = this.fontSize;
         mt.style.lineHeight = this.lineHeight;
@@ -1513,6 +1619,9 @@ export class MessageRing {
         dirtyBitmapText(slot.replyHeader);
         for (const mt of slot.mentionTexts) {
           dirtyBitmapText(mt);
+        }
+        for (const ht of slot.hostTexts) {
+          dirtyBitmapText(ht);
         }
         for (const mt of slot.modBtns) {
           dirtyBitmapText(mt);
@@ -1736,6 +1845,21 @@ export class MessageRing {
         mt.eventMode = "none";
         mentionTexts.push(mt);
       }
+      const hostTexts: BitmapText[] = [];
+      for (let h = 0; h < MENTION_SLOTS_PER_ROW; h += 1) {
+        const ht = new BitmapText({
+          text: "",
+          style: {
+            fontFamily: "ChatFont",
+            fontSize: this.fontSize,
+            lineHeight: this.lineHeight,
+            fill: this.themeFills.timestamp,
+          },
+        });
+        ht.visible = false;
+        ht.eventMode = "none";
+        hostTexts.push(ht);
+      }
       const bitsLabel = new BitmapText({
         text: "",
         style: {
@@ -1770,12 +1894,35 @@ export class MessageRing {
         mt.eventMode = "none";
         modBtns.push(mt);
       }
+      const modIcons: Sprite[] = [];
+      for (let m = 0; m < MOD_GUTTER_ICON_COUNT; m += 1) {
+        const spr = new Sprite(Texture.EMPTY);
+        spr.visible = false;
+        spr.eventMode = "none";
+        modIcons.push(spr);
+      }
+      const caughtTexts: BitmapText[] = [];
+      for (let c = 0; c < MENTION_SLOTS_PER_ROW; c += 1) {
+        const ct = new BitmapText({
+          text: "",
+          style: {
+            fontFamily: "ChatFont",
+            fontSize: this.fontSize,
+            lineHeight: this.lineHeight,
+            fill: 0xffffff,
+          },
+        });
+        ct.visible = false;
+        ct.eventMode = "none";
+        caughtTexts.push(ct);
+      }
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
         systemCloud,
         hl,
         mentions,
         ...modBtns,
+        ...modIcons,
         replyHeader,
         time,
         body,
@@ -1783,6 +1930,8 @@ export class MessageRing {
         nick,
         nickPaintSpr,
         ...mentionTexts,
+        ...hostTexts,
+        ...caughtTexts,
         bitsLabel,
         ...badges,
         ...emotes,
@@ -1803,6 +1952,7 @@ export class MessageRing {
         bodyCont,
         replyHeader,
         mentionTexts,
+        hostTexts,
         bitsLabel,
         emotes,
         emoteKeys: [],
@@ -1810,7 +1960,13 @@ export class MessageRing {
         badgeKeys: [],
         badgesRaw: [],
         modBtns,
+        modIcons,
         modBtnHits: [],
+        automodBtnHits: [],
+        automodMessageId: "",
+        automodStatus: "",
+        automodCaught: [],
+        caughtTexts,
         msgId: "",
         login: "",
         bodySource: "",
@@ -1821,7 +1977,10 @@ export class MessageRing {
         timestampMs: 0,
         spansRaw: [],
         linkSpans: [],
+        hostSpans: [],
         mentionSpans: [],
+        clipCard: null,
+        clipCardRows: 0,
         wrapLines: [{ start: 0, end: 0 }],
         wrapReady: false,
         lineCount: 1,
@@ -2105,6 +2264,24 @@ export class MessageRing {
     } else if (event.kind === "roomstate") {
       // Legacy raw roomstate in old snapshots — skip; live path side-effects only.
       return { needFullLayout: false };
+    } else if (event.kind === "automodHeld") {
+      const existing = this.findSlotByMsgId(event.id);
+      if (existing) {
+        this.write(existing, event);
+        this.bumpHighlightMarks();
+        return { slot: existing, needFullLayout: true };
+      }
+    } else if (event.kind === "automodStatus") {
+      const existing = this.findSlotByMsgId(event.targetId);
+      if (existing && existing.automodMessageId) {
+        existing.automodStatus = event.status;
+        // Rebuild drawn body via a synthetic held update is handled by Rust
+        // Replaced AutomodHeld; status-only events update chrome in place.
+        this.paintClip(existing);
+        this.bumpHighlightMarks();
+        return { slot: existing, needFullLayout: true };
+      }
+      return { needFullLayout: false };
     }
     const slot = this.slots[this.head];
     this.write(slot, event);
@@ -2191,7 +2368,27 @@ export class MessageRing {
     slot.timestampMs = 0;
     slot.spansRaw = [];
     slot.linkSpans = [];
+    slot.hostSpans = [];
     slot.mentionSpans = [];
+    slot.clipCard = null;
+    slot.clipCardRows = 0;
+    slot.modBtnHits = [];
+    slot.automodBtnHits = [];
+    slot.automodMessageId = "";
+    slot.automodStatus = "";
+    slot.automodCaught = [];
+    for (const mt of slot.modBtns) {
+      mt.visible = false;
+      mt.text = "";
+    }
+    for (const spr of slot.modIcons) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    for (const ct of slot.caughtTexts) {
+      ct.visible = false;
+      ct.text = "";
+    }
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.wrapReady = false;
     slot.lineCount = 1;
@@ -2253,11 +2450,24 @@ export class MessageRing {
       mt.visible = false;
       mt.text = "";
     }
+    for (const ht of slot.hostTexts) {
+      ht.visible = false;
+      ht.text = "";
+    }
     for (const mt of slot.modBtns) {
       mt.visible = false;
       mt.text = "";
     }
+    for (const spr of slot.modIcons) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    for (const ct of slot.caughtTexts) {
+      ct.visible = false;
+      ct.text = "";
+    }
     slot.modBtnHits = [];
+    slot.automodBtnHits = [];
     slot.bitsLabel.visible = false;
     slot.bitsLabel.text = "";
   }
@@ -2273,7 +2483,7 @@ export class MessageRing {
     slot.expanded = false;
     slot.collapsed = false;
     // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
-    slot.system = event.kind !== "privmsg";
+    slot.system = event.kind !== "privmsg" && event.kind !== "automodHeld";
     slot.collapsible = event.kind === "privmsg";
     if (event.kind === "usernotice" && event.privmsg && event.privmsg.kind === "privmsg") {
       slot.msgId = event.privmsg.id;
@@ -2309,6 +2519,14 @@ export class MessageRing {
       if (!event.paint) {
         slot.nick.tint = drawn.nickColor;
       }
+    } else if (event.kind === "automodHeld") {
+      slot.useNickStyle = true;
+      slot.nickUserId = event.authorUserId;
+      slot.nickColorRaw = "";
+      slot.nickLogin = event.authorLogin;
+      slot.nickDisplay = event.authorDisplayName || event.authorLogin;
+      slot.nickPaint = null;
+      slot.login = event.authorLogin.toLowerCase();
     } else {
       slot.useNickStyle = false;
       slot.nickUserId = "";
@@ -2320,6 +2538,9 @@ export class MessageRing {
     slot.bodySource = drawn.body;
     slot.copyText = drawn.copyText;
     slot.linkSpans = drawn.links;
+    slot.hostSpans = [];
+    slot.clipCard = null;
+    slot.clipCardRows = 0;
     slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
     // Recycled slots keep stale wrapLines; cull must see them as dirty.
     slot.wrapLines = [{ start: 0, end: 0 }];
@@ -2367,6 +2588,31 @@ export class MessageRing {
     slot.noticeMsgId = "";
     slot.noticeFallback = "";
     slot.noticeTimeoutSec = undefined;
+    if (event.kind === "automodHeld") {
+      slot.automodMessageId = event.messageId;
+      slot.automodStatus = event.status;
+      const author = event.authorDisplayName || event.authorLogin;
+      const prefix = `${author}: `;
+      const reason = (event.reason ?? "").trim();
+      const status = event.status.toLowerCase();
+      const pending = status === "pending";
+      const head = pending
+        ? reason
+          ? t("chat.automod.heldReason", { reason })
+          : t("chat.automod.held")
+        : status === "allowed"
+          ? t("chat.automod.allowed")
+          : t("chat.automod.denied");
+      const shift = head.length + 1 + prefix.length;
+      slot.automodCaught = (event.caughtRanges ?? []).map((r) => ({
+        start: r.start + shift,
+        end: r.end + shift,
+      }));
+    } else {
+      slot.automodMessageId = "";
+      slot.automodStatus = "";
+      slot.automodCaught = [];
+    }
     if (event.kind === "clearchat") {
       slot.systemTextKind = "clearchat";
       slot.clearLogin = event.targetLogin ?? "";
@@ -2591,6 +2837,48 @@ export class MessageRing {
           highlightColor: "",
         };
       }
+      case "automodHeld": {
+        const author = event.authorDisplayName || event.authorLogin;
+        const prefix = `${author}: `;
+        const reason = (event.reason ?? "").trim();
+        const status = event.status.toLowerCase();
+        const pending = status === "pending";
+        const head = pending
+          ? reason
+            ? t("chat.automod.heldReason", { reason })
+            : t("chat.automod.held")
+          : status === "allowed"
+            ? t("chat.automod.allowed")
+            : t("chat.automod.denied");
+        const body = `${head}\n${prefix}${event.text}`;
+        return {
+          time,
+          nick: "AutoMod",
+          nickColor: 0x4488ff,
+          body,
+          copyText: `${author}: ${event.text}`,
+          leadLen: 0,
+          spans: [],
+          links: [],
+          mentions: [],
+          badges: [],
+          highlightColor: AUTOMOD_HIGHLIGHT,
+        };
+      }
+      case "automodStatus":
+        return {
+          time,
+          nick: "*",
+          nickColor: this.themeFills.nickFallback,
+          body: "",
+          copyText: "",
+          leadLen: 0,
+          spans: [],
+          links: [],
+          mentions: [],
+          badges: [],
+          highlightColor: "",
+        };
       default:
         return {
           time,
@@ -2662,7 +2950,15 @@ export class MessageRing {
       mt.visible = false;
       mt.text = "";
     }
+    for (const spr of slot.modIcons) {
+      spr.visible = false;
+    }
+    for (const ct of slot.caughtTexts) {
+      ct.visible = false;
+      ct.text = "";
+    }
     slot.modBtnHits = [];
+    slot.automodBtnHits = [];
     slot.bitsLabel.visible = false;
     slot.bitsLabel.text = "";
     slot.body.style.fill = SYSTEM_CLOUD_FG;
@@ -2754,6 +3050,10 @@ export class MessageRing {
     for (const mt of slot.mentionTexts) {
       mt.visible = false;
       mt.text = "";
+    }
+    for (const ht of slot.hostTexts) {
+      ht.visible = false;
+      ht.text = "";
     }
     this.paintLinks(
       slot,
@@ -2956,7 +3256,7 @@ export class MessageRing {
       collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     slot.wrapLines = lines;
     slot.wrapReady = true;
-    slot.lineCount = replyRows + lines.length;
+    slot.lineCount = replyRows + lines.length + slot.clipCardRows;
     slot.bodyIndent = firstOriginX;
     slot.bodyContIndent = contOriginX;
     slot.replyRows = replyRows;
@@ -2989,6 +3289,13 @@ export class MessageRing {
     this.paintHighlight(slot);
     slot.mentions.clear();
     this.paintLinks(slot, firstOriginX, contOriginX, contentY, layoutOpts);
+    this.paintHostTexts(
+      slot,
+      firstOriginX,
+      contOriginX,
+      contentY,
+      layoutOpts,
+    );
     this.paintMentionTexts(
       slot,
       firstOriginX,
@@ -2998,6 +3305,15 @@ export class MessageRing {
       renderOpts,
       overlayMentions,
     );
+    this.paintCaughtTexts(
+      slot,
+      firstOriginX,
+      contOriginX,
+      contentY,
+      lines,
+      renderOpts,
+    );
+    this.paintAutomodActions(slot, firstOriginX, contentY, lines);
     this.paintDisabled(slot);
     let prevX = 0;
     let prevY = 0;
@@ -3222,6 +3538,57 @@ export class MessageRing {
     }
   }
 
+  /** Dimmed `(host)` suffix after resolved link titles. */
+  private paintHostTexts(
+    slot: Slot,
+    firstOriginX: number,
+    contOriginX: number,
+    contentY: number,
+    wrapOpts: WrapOptions,
+  ): void {
+    for (const ht of slot.hostTexts) {
+      ht.visible = false;
+    }
+    if (slot.hostSpans.length === 0) {
+      return;
+    }
+    let used = 0;
+    for (const span of slot.hostSpans) {
+      for (const line of slot.wrapLines) {
+        if (used >= slot.hostTexts.length) {
+          return;
+        }
+        const a = Math.max(span.start, line.start);
+        const b = Math.min(span.end, line.end);
+        if (a >= b) {
+          continue;
+        }
+        const pos = indexToLineCol(
+          slot.bodyRaw,
+          slot.wrapLines,
+          a,
+          slot.spansRaw,
+          wrapOpts,
+        );
+        if (!pos) {
+          continue;
+        }
+        const ht = slot.hostTexts[used];
+        used += 1;
+        ht.text = slot.bodyRaw.slice(a, b);
+        ht.style.fontFamily = "ChatFont";
+        ht.style.fontSize = this.fontSize;
+        ht.style.lineHeight = this.lineHeight;
+        ht.style.fill = this.themeFills.timestamp;
+        ht.x =
+          wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
+        ht.y = contentY + pos.line * this.lineHeight;
+        ht.visible = true;
+        dirtyBitmapText(ht);
+      }
+    }
+  }
+
   private paintMentionTexts(
     slot: Slot,
     firstOriginX: number,
@@ -3276,6 +3643,115 @@ export class MessageRing {
         mt.visible = true;
         dirtyBitmapText(mt);
       }
+    }
+  }
+
+  private paintCaughtTexts(
+    slot: Slot,
+    firstOriginX: number,
+    contOriginX: number,
+    contentY: number,
+    lines: readonly WrapLine[],
+    wrapOpts: WrapOptions,
+  ): void {
+    for (const ct of slot.caughtTexts) {
+      ct.visible = false;
+      ct.text = "";
+    }
+    if (slot.automodCaught.length === 0) {
+      return;
+    }
+    let used = 0;
+    for (const span of slot.automodCaught) {
+      for (const line of lines) {
+        if (used >= slot.caughtTexts.length) {
+          return;
+        }
+        const a = Math.max(span.start, line.start);
+        const b = Math.min(span.end, line.end);
+        if (a >= b) {
+          continue;
+        }
+        const pos = indexToLineCol(
+          slot.bodyRaw,
+          lines,
+          a,
+          slot.spansRaw,
+          wrapOpts,
+        );
+        if (!pos) {
+          continue;
+        }
+        const ct = slot.caughtTexts[used]!;
+        used += 1;
+        ct.text = slot.bodyRaw.slice(a, b);
+        ct.style.fontFamily = "ChatFont";
+        ct.style.fontSize = this.fontSize;
+        ct.style.fill = 0xffffff;
+        ct.tint = AUTOMOD_CAUGHT_COLOR;
+        ct.x = wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
+        ct.y = contentY + pos.line * this.lineHeight;
+        ct.visible = true;
+        dirtyBitmapText(ct);
+      }
+    }
+  }
+
+  private paintAutomodActions(
+    slot: Slot,
+    firstOriginX: number,
+    contentY: number,
+    lines: readonly WrapLine[],
+  ): void {
+    slot.automodBtnHits = [];
+    if (
+      !slot.automodMessageId ||
+      slot.automodStatus.toLowerCase() !== "pending"
+    ) {
+      return;
+    }
+    const line0 = lines[0];
+    if (!line0) {
+      return;
+    }
+    const allowLabel = t("chat.automod.allow");
+    const denyLabel = t("chat.automod.deny");
+    const gap = Math.max(8, Math.round(8 * this.fontScale));
+    const headW = this.measureBitmapTextWidth(
+      "ChatFont",
+      slot.bodyRaw.slice(line0.start, line0.end),
+    );
+    let x = firstOriginX + headW + gap;
+    const y = contentY;
+    const btns: Array<{ label: string; action: "allow" | "deny"; color: number }> = [
+      { label: allowLabel, action: "allow", color: 0x33cc66 },
+      { label: denyLabel, action: "deny", color: 0xff5555 },
+    ];
+    for (let i = 0; i < btns.length; i += 1) {
+      const def = btns[i]!;
+      const mt = slot.modBtns[i];
+      if (!mt) {
+        break;
+      }
+      mt.text = def.label;
+      mt.visible = true;
+      mt.style.fill = 0xffffff;
+      mt.tint = def.color;
+      mt.x = x;
+      mt.y = y;
+      dirtyBitmapText(mt);
+      const w = measureTextWidth(
+        this.chatFontFamily,
+        qtWeightToCss(this.chatFontWeight),
+        this.fontSize,
+        def.label,
+      );
+      slot.automodBtnHits.push({
+        x0: x,
+        x1: x + w,
+        action: def.action,
+      });
+      x += w + gap;
     }
   }
 
@@ -3477,8 +3953,50 @@ export class MessageRing {
     }
     this.applyStageY();
     this.notifyScroll();
+    this.syncClipCardAnchors();
     this.ensureScrollTick();
     this.scheduleViewportPaint();
+  }
+
+  private syncClipCardAnchors(): void {
+    if (!this.onClipCards || !this.ready) {
+      return;
+    }
+    const stageY = this.app.stage.y;
+    const viewH = this.app.screen.height;
+    const pad = this.lineHeight;
+    const out: Array<{
+      msgId: string;
+      top: number;
+      left: number;
+      width: number;
+      clip: ClipCardInfo;
+    }> = [];
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.msgId || !slot.clipCard || !slot.root.visible) {
+        continue;
+      }
+      const bodyRows = Math.max(0, slot.lineCount - slot.clipCardRows);
+      const top = slot.root.y + stageY + bodyRows * this.lineHeight + 4;
+      if (top > viewH + pad || top + CLIP_CARD_HEIGHT_PX < -pad) {
+        continue;
+      }
+      const left = Math.max(8, slot.bodyContIndent || slot.bodyIndent || 8);
+      const width = Math.max(
+        160,
+        this.app.screen.width - left - 12,
+      );
+      out.push({
+        msgId: slot.msgId,
+        top,
+        left,
+        width: Math.min(420, width),
+        clip: slot.clipCard,
+      });
+    }
+    this.onClipCards(out);
   }
 
   private scheduleViewportPaint(): void {
@@ -3681,6 +4199,15 @@ export class MessageRing {
     if (ev.button !== 0) {
       return;
     }
+    const automodAction = this.automodActionAt(slot, ev);
+    if (automodAction && this.onAutomodAction && slot.automodMessageId) {
+      this.onAutomodAction(
+        automodAction,
+        slot.automodMessageId,
+        this.makeSlotContext(slot, ev),
+      );
+      return;
+    }
     const modAction = this.modActionAt(slot, ev);
     if (modAction && this.onModAction && slot.login) {
       this.onModAction(modAction, this.makeSlotContext(slot, ev));
@@ -3767,7 +4294,7 @@ export class MessageRing {
         this.clearHover();
       }
     }
-    if (this.modActionAt(slot, ev)) {
+    if (this.automodActionAt(slot, ev) || this.modActionAt(slot, ev)) {
       slot.root.cursor = "pointer";
       return;
     }
@@ -3787,10 +4314,13 @@ export class MessageRing {
   }
 
   private showModGutter(slot: Slot): boolean {
-    if (!this.moderationMode || this.modActions.length === 0) {
+    if (!this.moderationMode) {
       return false;
     }
     if (!slot.collapsible || !slot.login || slot.system) {
+      return false;
+    }
+    if (slot.automodMessageId) {
       return false;
     }
     if (this.selfLogin && slot.login === this.selfLogin) {
@@ -3802,36 +4332,37 @@ export class MessageRing {
   /** Left moderation buttons; returns gutter width in px. */
   private paintModGutter(slot: Slot): number {
     slot.modBtnHits = [];
+    for (const mt of slot.modBtns) {
+      mt.visible = false;
+      mt.text = "";
+    }
+    for (const spr of slot.modIcons) {
+      spr.visible = false;
+    }
     if (!this.showModGutter(slot)) {
-      for (const mt of slot.modBtns) {
-        mt.visible = false;
-        mt.text = "";
-      }
       return 0;
     }
-    const padX = Math.max(3, Math.round(3 * this.fontScale));
+    const actions = modGutterActions();
+    const iconSize = Math.max(14, Math.round(this.fontSize * 1.05));
+    const padX = Math.max(2, Math.round(2 * this.fontScale));
     const btnGap = Math.max(4, Math.round(4 * this.fontScale));
+    const color = "#ffaa88";
     let x = 0;
-    for (let i = 0; i < slot.modBtns.length; i += 1) {
-      const mt = slot.modBtns[i]!;
-      const action = this.modActions[i];
-      if (!action) {
-        mt.visible = false;
-        mt.text = "";
+    for (let i = 0; i < MOD_GUTTER_ICON_COUNT; i += 1) {
+      const action = actions[i];
+      const spr = slot.modIcons[i];
+      if (!action || !spr) {
         continue;
       }
-      mt.text = modActionLabel(action.action);
-      mt.visible = true;
-      mt.x = x + padX;
-      mt.y = 0;
-      const label = modActionLabel(action.action);
-      const labelW = measureTextWidth(
-        this.chatFontFamily,
-        qtWeightToCss(this.chatFontWeight),
-        this.fontSize,
-        label,
-      );
-      const btnW = labelW + padX * 2;
+      const kind = action.label === "clock" ? "clock" : "ban";
+      const tex = modGutterIconTexture(kind, iconSize, color);
+      spr.texture = tex;
+      spr.width = iconSize;
+      spr.height = iconSize;
+      spr.visible = true;
+      spr.x = x + padX;
+      spr.y = this.lineMediaY(0, iconSize);
+      const btnW = iconSize + padX * 2;
       slot.modBtnHits.push({
         x0: x,
         x1: x + btnW,
@@ -3852,6 +4383,28 @@ export class MessageRing {
       return null;
     }
     for (const hit of slot.modBtnHits) {
+      if (local.x >= hit.x0 && local.x < hit.x1) {
+        return hit.action;
+      }
+    }
+    return null;
+  }
+
+  private automodActionAt(
+    slot: Slot,
+    ev: FederatedPointerEvent,
+  ): "allow" | "deny" | null {
+    if (slot.automodBtnHits.length === 0) {
+      return null;
+    }
+    const local = ev.getLocalPosition(slot.root);
+    const y0 = slot.systemCloudBounds
+      ? slot.systemCloudBounds.y
+      : slot.replyRows * this.lineHeight;
+    if (local.y < y0 || local.y >= y0 + this.lineHeight) {
+      return null;
+    }
+    for (const hit of slot.automodBtnHits) {
       if (local.x >= hit.x0 && local.x < hit.x1) {
         return hit.action;
       }
@@ -4597,6 +5150,9 @@ function replaceBitmapFont(
 function eventLogin(event: ChatEvent): string {
   if (event.kind === "privmsg") {
     return event.login.toLowerCase();
+  }
+  if (event.kind === "automodHeld") {
+    return event.authorLogin.toLowerCase();
   }
   if (event.kind === "usernotice") {
     if (event.login) {

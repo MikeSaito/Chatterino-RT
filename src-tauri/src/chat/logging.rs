@@ -358,6 +358,23 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
         ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } | ChatEvent::Userstate { .. } => {
             None
         }
+        ChatEvent::AutomodHeld {
+            author_login,
+            author_display_name,
+            text,
+            status,
+            ..
+        } => {
+            let nick = if author_display_name.is_empty() {
+                author_login.clone()
+            } else {
+                author_display_name.clone()
+            };
+            Some(format!("AutoMod ({status}) {nick}: {text}"))
+        }
+        ChatEvent::AutomodStatus {
+            target_id, status, ..
+        } => Some(format!("AutoMod status {status} ({target_id})")),
     }
 }
 

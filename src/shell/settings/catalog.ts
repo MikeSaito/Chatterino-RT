@@ -1612,13 +1612,11 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Automatically close reply thread popup when it loses focus",
         false,
       ),
-      vx(
-        cb(
-          "always-show-pinned",
-          "behaviour.alwaysShowPinnedMessage",
-          "Always show pinned channel message",
-          false,
-        ),
+      cb(
+        "always-show-pinned",
+        "behaviour.alwaysShowPinnedMessage",
+        "Always show pinned channel message",
+        false,
       ),
       cb(
         "lowercase-domains",

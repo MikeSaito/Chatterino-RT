@@ -274,9 +274,9 @@ mod tests {
             timestamp_ms: 1,
             text: id.to_string(),
 
-        msg_id: None,
+            msg_id: None,
 
-        timeout_remaining_sec: None,
+            timeout_remaining_sec: None,
         }
     }
 

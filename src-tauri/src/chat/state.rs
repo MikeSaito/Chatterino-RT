@@ -22,6 +22,8 @@ use super::hub::Hub;
 use super::live_notifications::LiveNotifyState;
 use super::logging::Logging;
 use super::membership_batch::MembershipBatcher;
+use super::pins::PinsCmd;
+use super::polls::PollsCmd;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
@@ -39,6 +41,10 @@ pub enum IrcCmd {
         channel: String,
         text: String,
         reply_to: Option<String>,
+    },
+    Typing {
+        channel: String,
+        active: bool,
     },
     Relogin,
     Shutdown,
@@ -151,6 +157,10 @@ pub struct Shared {
     pub bttv_tx: Arc<Mutex<Option<mpsc::UnboundedSender<BttvCmd>>>>,
     pub bttv_wanted: Arc<Mutex<BttvWanted>>,
     pub bttv_shutdown: Arc<AtomicBool>,
+    pub polls_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PollsCmd>>>>,
+    pub polls_shutdown: Arc<AtomicBool>,
+    pub pins_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PinsCmd>>>>,
+    pub pins_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
@@ -220,6 +230,10 @@ impl Shared {
                 channel: None,
             })),
             bttv_shutdown: Arc::new(AtomicBool::new(false)),
+            polls_tx: Arc::new(Mutex::new(None)),
+            polls_shutdown: Arc::new(AtomicBool::new(false)),
+            pins_tx: Arc::new(Mutex::new(None)),
+            pins_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
@@ -427,6 +441,28 @@ impl Shared {
             self.apply_bttv_cmd(&cmd);
         }
         if let Ok(guard) = self.bttv_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
+    pub fn notify_polls(&self, cmd: PollsCmd) {
+        if matches!(cmd, PollsCmd::Shutdown) {
+            self.polls_shutdown.store(true, Ordering::SeqCst);
+        }
+        if let Ok(guard) = self.polls_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
+    pub fn notify_pins(&self, cmd: PinsCmd) {
+        if matches!(cmd, PinsCmd::Shutdown) {
+            self.pins_shutdown.store(true, Ordering::SeqCst);
+        }
+        if let Ok(guard) = self.pins_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }

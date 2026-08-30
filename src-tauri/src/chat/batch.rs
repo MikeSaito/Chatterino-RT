@@ -80,9 +80,9 @@ mod tests {
                     timestamp_ms: 12,
                     text: "ok".into(),
 
-                msg_id: None,
+                    msg_id: None,
 
-                timeout_remaining_sec: None,
+                    timeout_remaining_sec: None,
                 },
             ],
         }

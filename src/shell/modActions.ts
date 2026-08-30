@@ -2,10 +2,22 @@
 
 import { t } from "../i18n/index.ts";
 
+export const MOD_GUTTER_BAN_ACTION = "/ban {user}";
+export const MOD_GUTTER_DELETE_ACTION = "/delete {msg.id}";
+export const MOD_GUTTER_TIMEOUT_ACTION = "__chatterino_rt_timeout_popup__";
+
 export type ModActionBtn = {
   action: string;
   label: string;
 };
+
+/** Fixed ban + timeout-popup buttons for the message-row mod gutter. */
+export function modGutterActions(): ModActionBtn[] {
+  return [
+    { action: MOD_GUTTER_BAN_ACTION, label: "ban" },
+    { action: MOD_GUTTER_TIMEOUT_ACTION, label: "clock" },
+  ];
+}
 
 export type ModActionExpandCtx = {
   userName: string;

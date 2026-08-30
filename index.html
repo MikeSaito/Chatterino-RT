@@ -57,6 +57,7 @@
             <span id="status-spinner" class="status-spinner" hidden aria-hidden="true"></span>
             <span id="status-text"></span>
           </p>
+          <span id="typing-status" class="typing-status" aria-live="polite" hidden></span>
           <button type="button" id="header-more" class="btn-icon" data-i18n-title="header.more" data-i18n-aria-label="header.more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="header-menu"></button>
           <div id="stream-tooltip" class="ui-tooltip" hidden>
             <img id="stream-tooltip-img" alt="" />
@@ -76,9 +77,30 @@
             tabindex="0"
           ></div>
           <div id="chat-column">
+            <div
+              id="pinned-message-host"
+              hidden
+              class="is-collapsed"
+              aria-live="polite"
+              data-i18n-aria-label="pinned.host.aria"
+              aria-label="Pinned channel message"
+            ></div>
+            <div id="mention-toast-host" aria-live="polite"></div>
+            <div
+              id="poll-panel-host"
+              hidden
+              aria-live="polite"
+              data-i18n-aria-label="polls.host.aria"
+              aria-label="Channel polls and predictions"
+            ></div>
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>
+                <div id="event-toast-stack" aria-live="polite">
+                  <div id="raid-toast-host"></div>
+                  <div id="gift-toast-host"></div>
+                </div>
+                <div id="clip-card-layer" aria-hidden="true"></div>
                 <div id="emote-tooltip" class="ui-tooltip" hidden>
                   <img id="emote-tooltip-img" alt="" />
                   <span id="emote-tooltip-text"></span>
@@ -120,6 +142,19 @@
             </div>
             <form id="composer">
               <label class="sr-only" for="composer-input" data-i18n="composer.label">message</label>
+              <section id="outgoing-raid-banner" aria-live="polite" hidden>
+                <span class="outgoing-raid-accent" aria-hidden="true"></span>
+                <span class="outgoing-raid-avatar-wrap">
+                  <img id="outgoing-raid-avatar" class="outgoing-raid-avatar" alt="" width="32" height="32" hidden />
+                  <span id="outgoing-raid-letter" class="outgoing-raid-letter" aria-hidden="true"></span>
+                </span>
+                <span id="outgoing-raid-label" class="outgoing-raid-label"></span>
+                <span id="outgoing-raid-timer" class="outgoing-raid-timer">0:00</span>
+                <button type="button" id="outgoing-raid-dismiss" class="btn-icon outgoing-raid-dismiss" data-i18n-title="outgoingRaid.dismiss" data-i18n-aria-label="outgoingRaid.dismiss" title="Dismiss raid banner" aria-label="Dismiss raid banner"></button>
+                <span class="outgoing-raid-progress-track" aria-hidden="true">
+                  <span id="outgoing-raid-progress" class="outgoing-raid-progress"></span>
+                </span>
+              </section>
               <div id="composer-inner">
                 <p id="composer-drop-hint" class="composer-drop-hint" hidden aria-hidden="true" data-i18n="composer.dropHint">
                   Drop an image here
@@ -150,6 +185,11 @@
                   title="Twitch login required to send messages"
                   aria-label="Send"
                 ></button>
+              </div>
+              <div id="composer-footer">
+                <button type="button" id="channel-points-btn" class="channel-points-btn" hidden>
+                  <span id="channel-points-label">Channel Points</span>
+                </button>
               </div>
             </form>
           </div>
@@ -193,6 +233,7 @@
       <button type="button" role="menuitem" data-action="open-streamlink">Open in Streamlink</button>
       <button type="button" role="menuitem" data-action="open-custom-player">Open in custom player</button>
     </menu>
+    <div id="mod-timeout-popup" hidden role="menu" data-i18n-aria-label="chat.mod.timeout" aria-label="Timeout"></div>
     <div id="usercard-modal" hidden>
       <div
         id="usercard-dialog"
@@ -325,6 +366,23 @@
         </div>
         <input id="emotepopup-search" type="search" data-i18n-placeholder="emotes.search.placeholder" placeholder="Search emotes" autocomplete="off" spellcheck="false" />
         <div id="emotepopup-view" role="tabpanel"></div>
+      </div>
+    </div>
+    <div id="points-modal" hidden>
+      <div id="points-backdrop"></div>
+      <div id="points-dialog" role="dialog" aria-modal="true" aria-labelledby="points-title">
+        <header class="popup-head">
+          <div>
+            <h2 id="points-title">Channel Points</h2>
+            <p id="points-sub" class="popup-sub"></p>
+          </div>
+          <div class="popup-head-actions">
+            <button type="button" id="points-refresh" class="btn-icon" data-i18n-title="points.refresh" data-i18n-aria-label="points.refresh" title="Refresh" aria-label="Refresh"></button>
+            <button type="button" id="points-close" class="btn-icon" data-i18n-title="points.close" data-i18n-aria-label="points.close" title="Close" aria-label="Close"></button>
+          </div>
+        </header>
+        <div id="points-balance"></div>
+        <div id="points-view"></div>
       </div>
     </div>
     <div id="search-modal" hidden>

@@ -82,14 +82,55 @@ impl Scrollback {
             ChatEvent::Clearchat { .. } => {
                 timeout_stack::push_clearchat(&mut self.items, event, stack_style, self.limit)
             }
-            _ => {
-                if self.items.len() == self.limit {
-                    self.items.pop_front();
+            ChatEvent::AutomodHeld { id, .. } => {
+                if let Some(pos) = self.items.iter().position(|e| e.id() == id) {
+                    self.items[pos] = event.clone();
+                    PushOutcome::Replaced(event)
+                } else {
+                    self.push_back_added(event)
                 }
-                self.items.push_back(event.clone());
-                PushOutcome::Added(event)
             }
+            ChatEvent::AutomodStatus {
+                target_id, status, ..
+            } => match self.apply_automod_status(target_id, status) {
+                Some(updated) => PushOutcome::Replaced(updated),
+                None => PushOutcome::Added(event),
+            },
+            _ => self.push_back_added(event),
         }
+    }
+
+    fn push_back_added(&mut self, event: ChatEvent) -> PushOutcome {
+        if self.items.len() == self.limit {
+            self.items.pop_front();
+        }
+        self.items.push_back(event.clone());
+        PushOutcome::Added(event)
+    }
+
+    fn apply_automod_status(&mut self, target_id: &str, status: &str) -> Option<ChatEvent> {
+        if target_id.is_empty() {
+            return None;
+        }
+        for existing in &mut self.items {
+            let ChatEvent::AutomodHeld {
+                id,
+                status: old_status,
+                ..
+            } = existing
+            else {
+                continue;
+            };
+            if id != target_id {
+                continue;
+            }
+            if old_status == status {
+                return Some(existing.clone());
+            }
+            *old_status = status.to_string();
+            return Some(existing.clone());
+        }
+        None
     }
 
     /// Prepend oldest→newest without evicting the live tail (Chatterino pushFront).
@@ -220,9 +261,9 @@ mod tests {
             timestamp_ms: 1,
             text: text.to_string(),
 
-        msg_id: None,
+            msg_id: None,
 
-        timeout_remaining_sec: None,
+            timeout_remaining_sec: None,
         }
     }
 
@@ -232,9 +273,9 @@ mod tests {
             timestamp_ms: ts,
             text: id.to_string(),
 
-        msg_id: None,
+            msg_id: None,
 
-        timeout_remaining_sec: None,
+            timeout_remaining_sec: None,
         }
     }
 

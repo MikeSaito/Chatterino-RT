@@ -183,9 +183,8 @@ pub fn apply_event(
             timeout_remaining_sec,
             ..
         } => {
-            let secs = timeout_remaining_sec.or_else(|| {
-                seconds_from_notice(msg_id.as_deref().unwrap_or(""), text)
-            });
+            let secs = timeout_remaining_sec
+                .or_else(|| seconds_from_notice(msg_id.as_deref().unwrap_or(""), text));
             if let Some(secs) = secs {
                 if secs > 0 {
                     wait.set(secs);

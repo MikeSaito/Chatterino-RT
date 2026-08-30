@@ -24,6 +24,15 @@ pub enum ParsedLine {
         channel: String,
         logins: Vec<String>,
     },
+    Typing {
+        channel: String,
+        login: String,
+        display_name: String,
+        user_id: String,
+        badges: Vec<Badge>,
+        is_mod_tag: bool,
+        active: bool,
+    },
     Whisper {
         event: ChatEvent,
     },
@@ -69,6 +78,10 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "ROOMSTATE" => parse_roomstate(&tags, &params, now_ms),
         "USERSTATE" => parse_userstate(&tags, &params, now_ms),
         "NOTICE" => parse_notice(&tags, &params, trailing.as_deref(), now_ms),
+        "TYPING" => parse_typing(&tags, prefix.as_deref(), &params, trailing.as_deref()),
+        "TAGMSG" if is_typing_tagmsg(&tags) => {
+            parse_typing(&tags, prefix.as_deref(), &params, trailing.as_deref())
+        }
         "RECONNECT" => ParsedLine::Reconnect,
         "JOIN" => parse_membership(false, prefix.as_deref(), &params),
         "PART" => parse_membership(true, prefix.as_deref(), &params),
@@ -76,6 +89,60 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
         "366" | "CAP" | "GLOBALUSERSTATE" => ParsedLine::Ignore,
         _ => ParsedLine::Ignore,
     }
+}
+
+fn parse_typing(
+    tags: &Tags,
+    prefix: Option<&str>,
+    params: &[String],
+    trailing: Option<&str>,
+) -> ParsedLine {
+    let channel = channel_from_params(params);
+    if channel.is_empty() {
+        return ParsedLine::Ignore;
+    }
+    let login = tags
+        .get("login")
+        .or_else(|| tags.get("user-login"))
+        .or_else(|| prefix.and_then(login_from_prefix))
+        .unwrap_or_default();
+    if login.is_empty() {
+        return ParsedLine::Ignore;
+    }
+    let display_name = tags
+        .get("display-name")
+        .or_else(|| tags.get("user-name"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| login.clone());
+    let active = typing_active(tags, trailing);
+    ParsedLine::Typing {
+        channel,
+        login,
+        display_name,
+        user_id: tags.get("user-id").unwrap_or_default(),
+        badges: parse_badges(tags.get("badges").as_deref()),
+        is_mod_tag: tags.get("mod").as_deref() == Some("1"),
+        active,
+    }
+}
+
+fn is_typing_tagmsg(tags: &Tags) -> bool {
+    tags.get("msg-id")
+        .or_else(|| tags.get("event"))
+        .or_else(|| tags.get("type"))
+        .is_some_and(|v| v.eq_ignore_ascii_case("typing"))
+}
+
+fn typing_active(tags: &Tags, trailing: Option<&str>) -> bool {
+    let raw = tags
+        .get("typing")
+        .or_else(|| tags.get("active"))
+        .or_else(|| trailing.map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| "1".to_string());
+    !matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "stop" | "stopped" | "idle"
+    )
 }
 
 fn parse_privmsg(
@@ -721,6 +788,53 @@ mod tests {
     }
 
     #[test]
+    fn parses_typing_signal() {
+        let line = "@badges=moderator/1;display-name=Mod_User;login=mod_user;mod=1;user-id=42 :mod_user!mod_user@mod_user.tmi.twitch.tv TYPING #streamer";
+        match parse_line(line, 99) {
+            ParsedLine::Typing {
+                channel,
+                login,
+                display_name,
+                user_id,
+                badges,
+                is_mod_tag,
+                active,
+            } => {
+                assert_eq!(channel, "streamer");
+                assert_eq!(login, "mod_user");
+                assert_eq!(display_name, "Mod_User");
+                assert_eq!(user_id, "42");
+                assert_eq!(badges[0].set, "moderator");
+                assert!(is_mod_tag);
+                assert!(active);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_typing_stop_tagmsg() {
+        let line = "@badges=broadcaster/1;display-name=Streamer;login=streamer;msg-id=typing;typing=0;user-id=7 :streamer!streamer@streamer.tmi.twitch.tv TAGMSG #streamer";
+        match parse_line(line, 99) {
+            ParsedLine::Typing {
+                channel,
+                login,
+                display_name,
+                user_id,
+                active,
+                ..
+            } => {
+                assert_eq!(channel, "streamer");
+                assert_eq!(login, "streamer");
+                assert_eq!(display_name, "Streamer");
+                assert_eq!(user_id, "7");
+                assert!(!active);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_badge_set_and_version() {
         let line = "@badges=broadcaster/1,subscriber/12;id=abc;display-name=Test;user-id=1 :test!test@test.tmi.twitch.tv PRIVMSG #xqc :hi";
         match parse_line(line, 1) {
@@ -1088,6 +1202,32 @@ mod tests {
                 assert_eq!(p.recipient_login.as_deref(), Some("bob"));
                 assert_eq!(p.plan.as_deref(), Some("1000"));
                 assert!(!p.anon);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_usernotice_raid_params() {
+        let line = "@badge-info=;badges=;color=;display-name=IgnoredHost;emotes=;id=raid1;login=ignoredhost;msg-id=raid;msg-param-displayName=BusterBroid;msg-param-login=busterbroid;msg-param-viewerCount=428;room-id=1;system-msg=BusterBroid\\sis\\sraiding\\swith\\sa\\sparty\\sof\\s428!;tmi-sent-ts=10;user-id=9;user-type= :tmi.twitch.tv USERNOTICE #xqc";
+        match parse_line(line, 4) {
+            ParsedLine::Event {
+                channel,
+                event:
+                    ChatEvent::Usernotice {
+                        msg_id,
+                        system_text,
+                        params: Some(p),
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(channel, "xqc");
+                assert_eq!(msg_id.as_deref(), Some("raid"));
+                assert_eq!(p.raid_login.as_deref(), Some("busterbroid"));
+                assert_eq!(p.raid_display_name.as_deref(), Some("BusterBroid"));
+                assert_eq!(p.viewer_count, Some(428));
+                assert_eq!(system_text, "BusterBroid is raiding with a party of 428!");
             }
             other => panic!("{other:?}"),
         }

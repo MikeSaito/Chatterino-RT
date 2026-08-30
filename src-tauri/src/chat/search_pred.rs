@@ -426,6 +426,8 @@ fn event_message_text(event: &ChatEvent) -> String {
             "emote:{emote_only:?} subs:{subs_only:?} slow:{slow_sec:?} followers:{followers_only:?}"
         ),
         ChatEvent::Clearmsg { .. } | ChatEvent::Userstate { .. } => String::new(),
+        ChatEvent::AutomodHeld { text, .. } => text.clone(),
+        ChatEvent::AutomodStatus { status, .. } => status.clone(),
     }
 }
 
@@ -509,6 +511,9 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
             f.system = true;
         }
         ChatEvent::Clearmsg { .. } | ChatEvent::Userstate { .. } => {}
+        ChatEvent::AutomodHeld { .. } | ChatEvent::AutomodStatus { .. } => {
+            f.system = true;
+        }
     }
     f
 }
@@ -779,9 +784,9 @@ mod tests {
             timestamp_ms: 1,
             text: "room".into(),
 
-        msg_id: None,
+            msg_id: None,
 
-        timeout_remaining_sec: None,
+            timeout_remaining_sec: None,
         };
         assert!(applies_all(
             &parse_predicates("is:system"),
