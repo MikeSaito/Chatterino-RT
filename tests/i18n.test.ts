@@ -157,6 +157,28 @@ assert(
   }) === "ignore logins: не больше 200 записей",
   "formatInvokeError list_limit with params",
 );
+assert(
+  formatInvokeError({
+    code: "error.warn.scope",
+    message:
+      "Failed to warn user - Missing required scope. Re-login with your account and try again.",
+  }) === "Нет scope варна (moderator:manage:warnings) — войдите снова",
+  "formatInvokeError warn scope ru",
+);
 setLocale("en");
+assert(
+  formatInvokeError({
+    code: "warn.failed",
+    message: "Failed to warn user - conflict",
+  }) === "Failed to warn user - conflict",
+  "formatInvokeError warn.failed keeps Helix detail",
+);
+assert(
+  formatInvokeError({
+    code: "error.warn.scope",
+    message: "Failed to warn user - Missing required scope.",
+  }).includes("moderator:manage:warnings"),
+  "formatInvokeError warn scope en",
+);
 
 console.log("i18n tests ok");

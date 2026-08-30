@@ -272,12 +272,16 @@ pub fn chat_snapshot(
     Ok(batch)
 }
 
+/// Send chat text. Optional `channel` binds the send to a joined snapshot
+/// (mod gutter / UserCard / timeout popup) so a tab switch mid-flight cannot
+/// retarget hub.active. Composer omits `channel`.
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
     text: String,
     #[allow(non_snake_case)] replyToId: Option<String>,
+    channel: Option<String>,
 ) -> Result<(), ApiError> {
     let reply_to = match replyToId
         .as_deref()
@@ -287,7 +291,7 @@ pub async fn chat_send(
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
     };
-    let channel = active_send_channel(&state)?;
+    let channel = resolve_send_channel(&state, channel.as_deref())?;
     ensure_can_send(&state)?;
     let text = prepare_outgoing_text(&state, &channel, &text, None)?;
     dispatch_chat_send(&app, &state, &channel, text, reply_to).await
@@ -420,6 +424,42 @@ fn active_send_channel(state: &Shared) -> Result<String, ApiError> {
     hub.active
         .clone()
         .ok_or_else(|| ApiError::coded("error.channel.none_active", "no active channel"))
+}
+
+/// Resolve outbound channel: explicit joined snapshot, or current hub.active.
+fn resolve_send_channel(state: &Shared, requested: Option<&str>) -> Result<String, ApiError> {
+    let Some(raw) = requested.map(str::trim).filter(|s| !s.is_empty()) else {
+        return active_send_channel(state);
+    };
+    let normalized = normalize_channel(raw)?;
+    let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+    if !hub.is_joined(&normalized) {
+        return Err(ApiError::coded(
+            "error.channel.not_joined",
+            "channel is not connected yet",
+        ));
+    }
+    if !hub.has_channel(&normalized) {
+        return Err(ApiError::coded(
+            "error.channel.inactive",
+            "channel is not active",
+        ));
+    }
+    Ok(normalized)
+}
+
+fn warn_fail_api_error(msg: String) -> ApiError {
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("missing required scope") {
+        return ApiError::coded("error.warn.scope", msg);
+    }
+    // Keep Helix detail in `message`; avoid a catalog `error.*` key that would
+    // replace it with a generic string in formatInvokeError.
+    ApiError {
+        code: "warn.failed".into(),
+        message: msg,
+        params: BTreeMap::new(),
+    }
 }
 
 fn ensure_can_send(state: &Shared) -> Result<(), ApiError> {
@@ -908,6 +948,7 @@ async fn handle_warn_slash(
         out
     };
 
+    let mut last_fail: Option<String> = None;
     for broadcaster_id in broadcaster_ids {
         match super::helix::warn_user(
             &broadcaster_id,
@@ -933,9 +974,16 @@ async fn handle_warn_slash(
                 );
             }
             super::helix::HelixWarnOutcome::Failed(msg) => {
-                state.post_channel_notice(app, channel, msg);
+                // Notice for chat history; Err after the loop so UserCard/composer
+                // are not silent (esp. missing moderator:manage:warnings) and
+                // multi --channel still attempts every broadcaster.
+                state.post_channel_notice(app, channel, msg.clone());
+                last_fail = Some(msg);
             }
         }
+    }
+    if let Some(msg) = last_fail {
+        return Err(warn_fail_api_error(msg));
     }
     Ok(())
 }
@@ -2536,6 +2584,68 @@ mod tests {
                 .insert("misc.chatSendProtocol".into(), Value::String("IRC".into()));
         }
         assert!(!should_send_helix(&shared));
+    }
+
+    #[test]
+    fn resolve_send_channel_prefers_explicit_joined() {
+        let shared = Shared::new();
+        {
+            let mut hub = shared.hub.lock().unwrap();
+            let _ = hub.buffer("alpha");
+            hub.set_joined("alpha", true);
+            let _ = hub.buffer("beta");
+            hub.set_joined("beta", true);
+            hub.active = Some("beta".into());
+        }
+        assert_eq!(
+            resolve_send_channel(&shared, Some("alpha")).unwrap(),
+            "alpha"
+        );
+        assert_eq!(resolve_send_channel(&shared, None).unwrap(), "beta");
+        assert_eq!(
+            resolve_send_channel(&shared, Some("#Alpha")).unwrap(),
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn resolve_send_channel_rejects_unjoined_or_closed() {
+        let shared = Shared::new();
+        {
+            let mut hub = shared.hub.lock().unwrap();
+            let _ = hub.buffer("alpha");
+            hub.set_joined("alpha", true);
+            hub.active = Some("alpha".into());
+        }
+        assert_eq!(
+            resolve_send_channel(&shared, Some("ghost"))
+                .unwrap_err()
+                .code,
+            "error.channel.not_joined"
+        );
+        {
+            let mut hub = shared.hub.lock().unwrap();
+            let _ = hub.buffer("stale");
+            // buffer open but not IRC-joined
+        }
+        assert_eq!(
+            resolve_send_channel(&shared, Some("stale"))
+                .unwrap_err()
+                .code,
+            "error.channel.not_joined"
+        );
+    }
+
+    #[test]
+    fn warn_fail_api_error_codes_scope() {
+        let scope = warn_fail_api_error(
+            "Failed to warn user - Missing required scope. Re-login with your account and try again."
+                .into(),
+        );
+        assert_eq!(scope.code, "error.warn.scope");
+        let other = warn_fail_api_error("Failed to warn user - conflict".into());
+        assert_eq!(other.code, "warn.failed");
+        assert_eq!(other.message, "Failed to warn user - conflict");
     }
 
     #[test]

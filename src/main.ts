@@ -96,6 +96,7 @@ import {
   parseModActions,
   type ModActionBtn,
 } from "./shell/modActions";
+import { snapshotModChannel } from "./shell/modChannelBind";
 import { bindModTimeoutPopup } from "./shell/modTimeoutPopup";
 import {
   bindImageUpload,
@@ -1333,36 +1334,111 @@ async function boot(): Promise<void> {
   };
   if (moderationModeBtn) {
     moderationModeBtn.hidden = true;
+    let syncModRoleSeq = 0;
+    let modModeToggleBusy = false;
+    const paintModModeBtn = (on: boolean): void => {
+      moderationModeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      moderationModeBtn.classList.toggle("is-active", on);
+    };
     syncModerationModeBtn = (): void => {
       const channel = ipc.active().trim();
+      const seq = ++syncModRoleSeq;
       if (!channel) {
+        ring.setCanModerate(false);
+        if (ring.moderationModeOn()) {
+          ring.setModerationMode(false);
+          paintModModeBtn(false);
+        }
         moderationModeBtn.hidden = true;
         return;
       }
       const seqChannel = channel.toLowerCase();
       void invoke<ViewerRole>("chat_viewer_role", { channel })
         .then((role) => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
           if (ipc.active().trim().toLowerCase() !== seqChannel) {
             return;
           }
-          // Stock SplitHeader: show only with mod rights, or while mode already on.
-          const show =
-            role.isMod || role.isBroadcaster || ring.moderationModeOn();
-          moderationModeBtn.hidden = !show;
+          const canMod = role.isMod || role.isBroadcaster;
+          ring.setCanModerate(canMod);
+          if (!canMod && ring.moderationModeOn()) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+          }
+          moderationModeBtn.hidden = !canMod && !ring.moderationModeOn();
         })
         .catch(() => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
           if (ipc.active().trim().toLowerCase() !== seqChannel) {
             return;
           }
-          moderationModeBtn.hidden = !ring.moderationModeOn();
+          ring.setCanModerate(false);
+          if (ring.moderationModeOn()) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+          }
+          moderationModeBtn.hidden = true;
         });
     };
     moderationModeBtn.addEventListener("click", () => {
+      if (modModeToggleBusy) {
+        return;
+      }
       const next = !ring.moderationModeOn();
-      ring.setModerationMode(next);
-      moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
-      moderationModeBtn.classList.toggle("is-active", next);
-      syncModerationModeBtn();
+      if (!next) {
+        ring.setModerationMode(false);
+        paintModModeBtn(false);
+        syncModerationModeBtn();
+        return;
+      }
+      const channel = ipc.active().trim();
+      if (!channel) {
+        return;
+      }
+      const seqChannel = channel.toLowerCase();
+      const seq = ++syncModRoleSeq;
+      modModeToggleBusy = true;
+      moderationModeBtn.disabled = true;
+      void invoke<ViewerRole>("chat_viewer_role", { channel })
+        .then((role) => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          const canMod = role.isMod || role.isBroadcaster;
+          ring.setCanModerate(canMod);
+          if (!canMod) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+            moderationModeBtn.hidden = true;
+            return;
+          }
+          ring.setModerationMode(true);
+          paintModModeBtn(true);
+          moderationModeBtn.hidden = false;
+        })
+        .catch(() => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          ring.setCanModerate(false);
+          ring.setModerationMode(false);
+          paintModModeBtn(false);
+          moderationModeBtn.hidden = true;
+        })
+        .finally(() => {
+          modModeToggleBusy = false;
+          moderationModeBtn.disabled = false;
+        });
     });
   }
 
@@ -1956,14 +2032,15 @@ async function boot(): Promise<void> {
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
   });
-  const sendModCommand = (text: string): void => {
-    if (modSendBusy) {
+  const sendModCommand = (text: string, channelRaw: string): void => {
+    const channel = snapshotModChannel(channelRaw);
+    if (!channel || modSendBusy) {
       return;
     }
     modSendBusy = true;
     void (async () => {
       try {
-        await invoke("chat_send", { text, replyToId: null });
+        await invoke("chat_send", { text, replyToId: null, channel });
       } catch (err) {
         setStatus(formatError(err));
       } finally {
@@ -1980,21 +2057,22 @@ async function boot(): Promise<void> {
         void requestOpenSettingsWindow();
         return;
       }
-      const active = (ipc.active() || "").trim().toLowerCase();
-      if (action.channel && action.channel !== active) {
-        return;
-      }
-      sendModCommand(action.text);
+      // Channel snapshot from popup open — Rust sends to that join, not hub.active.
+      sendModCommand(action.text, action.channel);
     },
   });
   ring.setOnModAction((action, ctx) => {
     hideContextMenu();
     modTimeoutPopup.hide();
+    const channel = snapshotModChannel(ipc.active() || "");
+    if (!channel) {
+      return;
+    }
     if (action === MOD_GUTTER_TIMEOUT_ACTION) {
       modTimeoutPopup.open({
         login: ctx.login,
         msgId: ctx.msgId,
-        channel: ipc.active() || "",
+        channel,
         clientX: ctx.clientX,
         clientY: ctx.clientY,
       });
@@ -2003,13 +2081,13 @@ async function boot(): Promise<void> {
     const text = expandModAction(action, {
       userName: ctx.login,
       msgId: ctx.msgId,
-      channel: ipc.active() || "",
+      channel,
     });
     if (!text) {
       setStatus(t("status.modBuildFailed"));
       return;
     }
-    sendModCommand(text);
+    sendModCommand(text, channel);
   });
   ring.setOnAutomodAction((action, messageId) => {
     hideContextMenu();

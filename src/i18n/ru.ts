@@ -118,6 +118,8 @@ export const ru: Record<MessageKey, string> = {
   "error.automod.network": "Сетевая ошибка AutoMod",
   "error.automod.invalidMessage": "Некорректный id AutoMod",
   "error.automod.invalidAction": "Некорректное действие AutoMod",
+  "error.warn.scope":
+    "Нет scope варна (moderator:manage:warnings) — войдите снова",
   "chat.qa.reply": "Ответить",
   "chat.qa.copy": "Копировать",
   "chat.qa.more": "Ещё",

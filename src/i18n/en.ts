@@ -116,6 +116,8 @@ export const en = {
   "error.automod.network": "AutoMod network error",
   "error.automod.invalidMessage": "Invalid AutoMod message id",
   "error.automod.invalidAction": "Invalid AutoMod action",
+  "error.warn.scope":
+    "Missing warn scope (moderator:manage:warnings) — re-login with your account",
   "chat.qa.reply": "Reply",
   "chat.qa.copy": "Copy",
   "chat.qa.more": "More",

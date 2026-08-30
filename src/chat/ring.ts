@@ -359,6 +359,8 @@ export class MessageRing {
   private liveMsgIds = new Set<string>();
   private showReplyButton = true;
   private moderationMode = false;
+  /** IRC/Helix viewer is mod or broadcaster on the painted channel. */
+  private canModerate = false;
   private modActions: ModActionBtn[] = [];
   private selfLogin = "";
   private linksDoubleClickOnly = false;
@@ -571,6 +573,25 @@ export class MessageRing {
 
   moderationModeOn(): boolean {
     return this.moderationMode;
+  }
+
+  /**
+   * Whether gutter may paint for the active channel. Cleared when role is lost
+   * or the tab has no mod/BC rights (P1 moderation mode re-check).
+   */
+  setCanModerate(on: boolean): void {
+    if (this.canModerate === on) {
+      return;
+    }
+    this.canModerate = on;
+    if (this.ready && this.moderationMode) {
+      this.markLayoutFullPaint();
+      this.layout();
+    }
+  }
+
+  canModerateOn(): boolean {
+    return this.canModerate;
   }
 
   setModActions(actions: ModActionBtn[]): void {
@@ -4604,7 +4625,7 @@ export class MessageRing {
   }
 
   private showModGutter(slot: Slot): boolean {
-    if (!this.moderationMode) {
+    if (!this.moderationMode || !this.canModerate) {
       return false;
     }
     if (!slot.collapsible || !slot.login || slot.system) {
