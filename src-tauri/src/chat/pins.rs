@@ -295,12 +295,7 @@ fn clear_emitted(app: &AppHandle, channel: &str, last: &mut Option<PinnedMessage
     }
 }
 
-fn set_access(
-    app: &AppHandle,
-    channel: &str,
-    access: PinAccess,
-    last: &mut Option<PinAccess>,
-) {
+fn set_access(app: &AppHandle, channel: &str, access: PinAccess, last: &mut Option<PinAccess>) {
     if *last == Some(access) {
         return;
     }
