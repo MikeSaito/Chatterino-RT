@@ -3,7 +3,7 @@ import type { MessageKey } from "./en.ts";
 /** Russian UI strings. Must cover every MessageKey. */
 export const ru: Record<MessageKey, string> = {
   "sidebar.join.label": "канал",
-  "sidebar.join.submit": "Join",
+  "sidebar.join.submit": "Добавить",
   "sidebar.join.toggle": "Присоединиться к каналу",
   "sidebar.channels.aria": "Каналы",
   "sidebar.channel.leave": "Покинуть",
@@ -20,9 +20,9 @@ export const ru: Record<MessageKey, string> = {
   "auth.menu.aria": "Аккаунт",
   "settings.open": "Настройки",
 
-  "header.mod": "Mod",
+  "header.mod": "Мод",
   "header.mod.title": "Режим модерации",
-  "header.streamer": "Streamer Mode",
+  "header.streamer": "Режим стримера",
   "header.streamer.title": "Режим стримера",
   "header.more": "Ещё",
   "header.menu.aria": "Ещё",
@@ -46,7 +46,7 @@ export const ru: Record<MessageKey, string> = {
 
   "joinPopover.aria": "Присоединиться к каналу",
   "joinPopover.label": "канал",
-  "joinPopover.submit": "Join",
+  "joinPopover.submit": "Добавить",
 
   "composer.label": "сообщение",
   "composer.dropHint": "Перетащите изображение сюда",
@@ -150,7 +150,7 @@ export const ru: Record<MessageKey, string> = {
   "find.hit.go": "Перейти к сообщению",
   "find.hit.notInFeed": "Сообщение не в текущей ленте",
 
-  "usercard.name.fallback": "User",
+  "usercard.name.fallback": "Пользователь",
   "usercard.pin": "Закрепить",
   "usercard.unpin": "Открепить",
   "usercard.close": "Закрыть",
@@ -163,12 +163,12 @@ export const ru: Record<MessageKey, string> = {
   "usercard.ignoreHighlights.regexTitle": "Имя совпало с regex",
   "usercard.addNotes": "Заметки",
   "usercard.openTwitch": "Открыть на Twitch",
-  "usercard.mod": "Mod",
-  "usercard.unmod": "Unmod",
+  "usercard.mod": "Мод",
+  "usercard.unmod": "Снять мод",
   "usercard.vip": "VIP",
-  "usercard.unvip": "UnVIP",
-  "usercard.unban": "Unban",
-  "usercard.ban": "Ban",
+  "usercard.unvip": "Снять VIP",
+  "usercard.unban": "Разбан",
+  "usercard.ban": "Бан",
   "usercard.timeouts.aria": "Длительности таймаута",
   "usercard.timeout.title": "Таймаут {n}с",
   "usercard.recent.aria": "Недавние сообщения",
@@ -198,7 +198,7 @@ export const ru: Record<MessageKey, string> = {
   "usercard.status.highlightsRestored": "Хайлайты восстановлены для @{login}",
   "notes.title": "Редактирование заметок",
   "notes.close": "Закрыть",
-  "notes.ok": "Ok",
+  "notes.ok": "ОК",
   "notes.cancel": "Отмена",
 
   "thread.title": "Ветка",
@@ -220,7 +220,7 @@ export const ru: Record<MessageKey, string> = {
   "emotes.tab.subs": "Подписка",
   "emotes.tab.channel": "Канал",
   "emotes.tab.global": "Глобальные",
-  "emotes.tab.emojis": "Emoji",
+  "emotes.tab.emojis": "Эмодзи",
   "emotes.search.placeholder": "Поиск эмодзи",
   "emotes.empty.favourite":
     "Нет избранных эмодзи. Ctrl+клик по эмодзи добавляет в избранное.",
@@ -326,11 +326,18 @@ export const ru: Record<MessageKey, string> = {
   "polls.option.votes": "{count} · {percent}%",
   "polls.option.points": "{count} · {points} pts · {percent}%",
   "polls.option.winner": "Победитель",
+  "polls.viewerHint": "Только просмотр. Действия на Twitch",
 
   "pinned.host.aria": "Закреплённое сообщение канала",
   "pinned.label": "Закреплено:",
   "pinned.dismiss": "Скрыть закреп",
 
+
+  "player.loading": "Загрузка…",
+  "player.offline": "Канал оффлайн",
+  "player.error": "Не удалось загрузить плеер",
+  "player.openTwitch": "Открыть на Twitch",
+  "player.iframeTitle": "Плеер Twitch",
 
   "status.boot": "Загрузка чата…",
   "status.bootError": "ошибка загрузки",
@@ -475,7 +482,7 @@ export const ru: Record<MessageKey, string> = {
   "settings.search.clear.aria": "Очистить поиск",
   "settings.search.results": "{count} совпадений",
   "settings.tabs.aria": "Страницы настроек",
-  "settings.ok": "Ok",
+  "settings.ok": "ОК",
   "settings.cancel": "Отмена",
   "settings.language": "Язык",
   "settings.language.en": "English",

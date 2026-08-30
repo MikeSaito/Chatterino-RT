@@ -3004,7 +3004,7 @@ export class MessageRing {
     slot.body.style.fill = SYSTEM_CLOUD_FG;
     slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
-    const maxInner = Math.max(1, Math.floor(paneW - marginX - padX * 2));
+    const maxInner = Math.max(1, Math.floor(paneW - 2 * marginX - padX * 2));
     // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
     const layoutOpts = this.wrapOpts(slot, [], maxInner);
     const lines = wrapBody(
@@ -3028,11 +3028,11 @@ export class MessageRing {
     }
     const textRows = Math.max(1, lines.length);
     const textBlockW = Math.max(1, Math.ceil(maxLineW));
-    const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
+    const cloudW = Math.min(paneW - 2 * marginX, textBlockW + 2 * padX);
     // Hug text rows; vertical pad may slightly use message gap below.
     slot.lineCount = textRows;
     const allocatedH = slot.lineCount * this.lineHeight;
-    const cloudX = marginX;
+    const cloudX = Math.max(marginX, Math.floor((paneW - cloudW) / 2));
     const cloudY = 0;
     const cloudH = textRows * this.lineHeight + 2 * padY;
     const textOriginX = cloudX + padX;

@@ -1,6 +1,8 @@
+import { onLocaleChange, t } from "../i18n";
 import { iconEl } from "../shell/icons";
 
 let playerEpoch = 0;
+let localeUnsub: (() => void) | null = null;
 let slotWaitCleanup: (() => void) | null = null;
 let loadTimer: ReturnType<typeof setTimeout> | null = null;
 let activeHost: HTMLElement | null = null;
@@ -98,13 +100,13 @@ function ensurePlaceholder(host: HTMLElement): HTMLElement {
 
   const label = document.createElement("p");
   label.id = "player-placeholder-label";
-  label.textContent = "Загрузка…";
+  label.textContent = t("player.loading");
 
   const action = document.createElement("button");
   action.type = "button";
   action.id = "player-placeholder-action";
   action.className = "btn btn-primary";
-  action.textContent = "Открыть на Twitch";
+  action.textContent = t("player.openTwitch");
   action.hidden = true;
 
   ph.append(iconWrap, label, action);
@@ -169,17 +171,18 @@ function paintOverlay(): void {
     detachPlaceholder(activeHost);
     return;
   }
+  action.textContent = t("player.openTwitch");
   if (overlayMode === "error") {
-    label.textContent = "Не удалось загрузить плеер";
+    label.textContent = t("player.error");
     action.hidden = false;
     ph.classList.add("is-error");
     return;
   }
   if (overlayMode === "offline") {
-    label.textContent = "Канал оффлайн";
+    label.textContent = t("player.offline");
     return;
   }
-  label.textContent = "Загрузка…";
+  label.textContent = t("player.loading");
 }
 
 function armLoadTimeout(isLive: () => boolean): void {
@@ -298,7 +301,7 @@ export function bindPlayerOpenTwitch(
 
 function createPlayerFrame(): HTMLIFrameElement {
   const frame = document.createElement("iframe");
-  frame.title = "Twitch player";
+  frame.title = t("player.iframeTitle");
   frame.allow =
     "autoplay; encrypted-media; picture-in-picture; storage-access; accelerometer; gyroscope";
   frame.allowFullscreen = true;
@@ -309,8 +312,24 @@ function createPlayerFrame(): HTMLIFrameElement {
   return frame;
 }
 
+function ensureLocaleHook(): void {
+  if (localeUnsub) {
+    return;
+  }
+  localeUnsub = onLocaleChange(() => {
+    if (!activeHost) {
+      return;
+    }
+    if (frameEl?.isConnected) {
+      frameEl.title = t("player.iframeTitle");
+    }
+    paintOverlay();
+  });
+}
+
 export function mountPlayer(host: HTMLElement, channel: string): void {
   unmountPlayer(host);
+  ensureLocaleHook();
   const epoch = ++playerEpoch;
   activeHost = host;
   activeChannel = channel.trim().toLowerCase();

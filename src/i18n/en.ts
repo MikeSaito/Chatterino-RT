@@ -324,11 +324,18 @@ export const en = {
   "polls.option.votes": "{count} · {percent}%",
   "polls.option.points": "{count} · {points} pts · {percent}%",
   "polls.option.winner": "Winner",
+  "polls.viewerHint": "View only. Interact on Twitch",
 
   "pinned.host.aria": "Pinned channel message",
   "pinned.label": "Pinned:",
   "pinned.dismiss": "Hide pinned message",
 
+
+  "player.loading": "Loading…",
+  "player.offline": "Channel offline",
+  "player.error": "Could not load the player",
+  "player.openTwitch": "Open on Twitch",
+  "player.iframeTitle": "Twitch player",
 
   "status.boot": "Loading chat…",
   "status.bootError": "load error",
