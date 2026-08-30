@@ -96,6 +96,7 @@ export const en = {
   "chat.automod.heldReason": "Held a message for reason: {reason}. Allow will post it in chat.",
   "chat.automod.allowed": "Message allowed.",
   "chat.automod.denied": "Message denied.",
+  "chat.automod.expired": "AutoMod hold expired.",
   "chat.automod.allow": "Allow",
   "chat.automod.deny": "Deny",
   "error.automod.alreadyProcessed": "AutoMod message already processed",

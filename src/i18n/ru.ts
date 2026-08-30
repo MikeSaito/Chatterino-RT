@@ -98,6 +98,7 @@ export const ru: Record<MessageKey, string> = {
   "chat.automod.heldReason": "Сообщение задержано по причине: {reason}. Разрешить опубликует его в чат.",
   "chat.automod.allowed": "Сообщение разрешено.",
   "chat.automod.denied": "Сообщение отклонено.",
+  "chat.automod.expired": "Удержание AutoMod истекло.",
   "chat.automod.allow": "Разрешить",
   "chat.automod.deny": "Отклонить",
   "error.automod.alreadyProcessed": "Сообщение AutoMod уже обработано",

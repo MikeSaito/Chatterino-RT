@@ -20,7 +20,7 @@ export type ModTimeoutPopupTarget = {
 };
 
 export type ModTimeoutPopupAction =
-  | { kind: "command"; text: string }
+  | { kind: "command"; text: string; channel: string }
   | { kind: "settings" };
 
 export type ModTimeoutPopupOpts = {
@@ -57,8 +57,9 @@ export function bindModTimeoutPopup(opts: ModTimeoutPopupOpts): {
   };
 
   const fireCommand = (text: string): void => {
+    const channel = (target?.channel ?? "").trim().toLowerCase();
     hide();
-    onAction({ kind: "command", text });
+    onAction({ kind: "command", text, channel });
   };
 
   const paint = (): void => {

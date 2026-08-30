@@ -1853,6 +1853,10 @@ async function boot(): Promise<void> {
         void requestOpenSettingsWindow();
         return;
       }
+      const active = (ipc.active() || "").trim().toLowerCase();
+      if (action.channel && action.channel !== active) {
+        return;
+      }
       sendModCommand(action.text);
     },
   });
@@ -3230,6 +3234,7 @@ async function boot(): Promise<void> {
     syncModerationModeBtn();
     userCard?.syncSubage();
     quickActionsCtl?.hide();
+    modTimeoutPopup.hide();
     ring.clearHover();
     syncChatEmpty();
     outgoingRaidCtl.syncActiveChannel();

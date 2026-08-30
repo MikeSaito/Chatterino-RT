@@ -75,6 +75,12 @@ pub async fn manage_message(
 ) -> Result<(), ApiError> {
     let msg_id = validate_msg_id(&msg_id)?;
     let action = normalize_action(&action)?;
+    let channel = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|h| h.active.clone())
+        .ok_or_else(|| ApiError::coded("error.automod.failed", "no active channel"))?;
     let (token, client_id, user_id) = action_creds(&shared).await?;
     let outcome = post_manage_message(&token, &client_id, &user_id, &msg_id, &action).await;
     match outcome {
@@ -84,7 +90,7 @@ pub async fn manage_message(
             } else {
                 "denied"
             };
-            publish_status(&app, &shared, &msg_id, status);
+            publish_status(&app, &shared, &channel, &msg_id, status);
             Ok(())
         }
         Err(e) => Err(e),
@@ -247,8 +253,15 @@ async fn resolve_wanted(shared: &Shared, cache: &mut ScopeCache) -> Option<Autom
     }
     let token = super::auth::oauth_token(shared)?;
     if cache.token != token {
-        *cache = validate_automod_token(&token).await.unwrap_or_default();
-        cache.token = token.clone();
+        match validate_automod_token(&token).await {
+            Ok(next) => *cache = next,
+            Err(()) => {
+                // Keep previous scopes_ok only if token unchanged; on new token
+                // leave cache empty so the next poll retries validation.
+                *cache = ScopeCache::default();
+                return None;
+            }
+        }
         if let Some(user_id) = cache.user_id.clone() {
             super::auth::set_cached_twitch_user_id(shared, user_id);
         }
@@ -441,10 +454,11 @@ fn parse_pubsub_automod(raw: &str, channel_login: &str) -> Option<ParsedAutomod>
     let author_user_id = first_string(
         data,
         &[
-            "sender.id",
             "sender.user_id",
+            "sender.id",
             "user_id",
             "user.id",
+            "message.sender.user_id",
             "message.sender.id",
             "message.user_id",
         ],
@@ -513,6 +527,9 @@ fn automod_status(data: &Value, event_type: &str) -> Option<String> {
     if raw.contains("deny") || raw.contains("reject") || raw == "denied" {
         return Some("denied".into());
     }
+    if raw.contains("expir") {
+        return Some("expired".into());
+    }
     if raw.contains("hold") || raw.contains("caught") || raw.contains("pending") {
         return Some("pending".into());
     }
@@ -553,6 +570,21 @@ fn extract_ranges(data: &Value, text: &str) -> Vec<AutomodRange> {
     collect_terms(data.get("terms"), text, &mut ranges);
     collect_terms(
         data.pointer("/content_classification/terms"),
+        text,
+        &mut ranges,
+    );
+    collect_terms(
+        data.pointer("/caught_message_reason/blocked_term_failure/terms_found"),
+        text,
+        &mut ranges,
+    );
+    collect_terms(
+        data.pointer("/reason/blocked_term_failure/terms_found"),
+        text,
+        &mut ranges,
+    );
+    collect_terms(
+        data.pointer("/message/caught_message_reason/blocked_term_failure/terms_found"),
         text,
         &mut ranges,
     );
@@ -599,10 +631,12 @@ fn collect_terms(value: Option<&Value>, text: &str, out: &mut Vec<AutomodRange>)
     match value {
         Some(Value::Array(arr)) => {
             for item in arr {
-                if let Some(s) = item
-                    .as_str()
-                    .or_else(|| item.get("term").and_then(Value::as_str))
-                {
+                if let Some(s) = item.as_str().or_else(|| {
+                    item.get("term")
+                        .or_else(|| item.get("text"))
+                        .or_else(|| item.get("phrase"))
+                        .and_then(Value::as_str)
+                }) {
                     collect_term(s, text, out);
                 }
             }
@@ -747,7 +781,7 @@ fn normalize_action(raw: &str) -> Result<String, ApiError> {
     }
 }
 
-fn publish_status(app: &AppHandle, shared: &Shared, msg_id: &str, status: &str) {
+fn publish_status(app: &AppHandle, shared: &Shared, channel: &str, msg_id: &str, status: &str) {
     let id = format!(
         "automod_{msg_id}:{status}:{}",
         STATUS_SEQ.fetch_add(1, Ordering::Relaxed)
@@ -758,9 +792,8 @@ fn publish_status(app: &AppHandle, shared: &Shared, msg_id: &str, status: &str) 
         target_id: format!("automod_{msg_id}"),
         status: status.to_string(),
     };
-    let channel = shared.hub.lock().ok().and_then(|h| h.active.clone());
-    if let Some(channel) = channel {
-        ingest_event(app, shared, &channel, event);
+    if !channel.is_empty() {
+        ingest_event(app, shared, channel, event);
     }
 }
 
@@ -863,6 +896,42 @@ mod tests {
                 assert_eq!(status, "pending");
             }
             _ => panic!("expected automod held"),
+        }
+    }
+
+    #[test]
+    fn parses_blocked_term_ranges_and_expired() {
+        let raw = r#"{
+            "type":"automod_caught_message",
+            "data":{
+                "message_id":"bt-1",
+                "channel_id":"7",
+                "sender":{"login":"u","display_name":"u","user_id":"1"},
+                "message":{"text":"buy spam now"},
+                "caught_message_reason":{
+                    "blocked_term_failure":{
+                        "terms_found":[{"text":"spam"}]
+                    }
+                }
+            }
+        }"#;
+        let parsed = parse_pubsub_automod(raw, "channel").unwrap();
+        match parsed.event {
+            ChatEvent::AutomodHeld {
+                caught_ranges,
+                author_user_id,
+                ..
+            } => {
+                assert_eq!(author_user_id, "1");
+                assert_eq!(caught_ranges, vec![AutomodRange { start: 4, end: 8 }]);
+            }
+            _ => panic!("expected automod held"),
+        }
+        let expired = r#"{"type":"automod_message_update","data":{"message_id":"bt-1","status":"EXPIRED"}}"#;
+        let parsed = parse_pubsub_automod(expired, "channel").unwrap();
+        match parsed.event {
+            ChatEvent::AutomodStatus { status, .. } => assert_eq!(status, "expired"),
+            _ => panic!("expected status"),
         }
     }
 
