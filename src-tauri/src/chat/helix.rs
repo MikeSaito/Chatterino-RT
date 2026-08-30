@@ -334,10 +334,13 @@ pub struct StreamStatus {
     pub is_mature: bool,
 }
 
-impl StreamStatus {
-    /// Offline placeholder when Helix `/streams` omits the login.
-    pub fn offline() -> Self {
-        Self {
+pub fn parse_stream_status(value: &Value) -> StreamStatus {
+    let Some(item) = value
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|data| data.first())
+    else {
+        return StreamStatus {
             live: false,
             viewer_count: None,
             game_name: None,
@@ -347,17 +350,7 @@ impl StreamStatus {
             language: None,
             tags: Vec::new(),
             is_mature: false,
-        }
-    }
-}
-
-pub fn parse_stream_status(value: &Value) -> StreamStatus {
-    let Some(item) = value
-        .get("data")
-        .and_then(Value::as_array)
-        .and_then(|data| data.first())
-    else {
-        return StreamStatus::offline();
+        };
     };
     parse_stream_item(item)
 }

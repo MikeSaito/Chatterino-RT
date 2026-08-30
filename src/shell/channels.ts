@@ -1,7 +1,6 @@
 import { setButtonIcon } from "./icons";
 import { channelTabAttrs } from "./channelTabAria";
 import { indexAtContentX, moveOpenTab } from "./channelTabOrder";
-import { normalizeTabLive, tabAvatarLetter } from "./channelTabChrome";
 import { t } from "../i18n";
 
 export { moveOpenTab, indexAtContentX } from "./channelTabOrder";
@@ -20,80 +19,7 @@ export type ChannelList = {
   setShowRecents: (show: boolean) => void;
   isReordering: () => boolean;
   reorderOpen: (fromIndex: number, toIndex: number) => string[] | null;
-  /** Profile image URL for a tab avatar (CDN). Null clears to letter fallback. */
-  setAvatar: (login: string, url: string | null) => void;
-  /** Live ring on tab avatar (same chrome as header). */
-  setLive: (login: string, live: boolean) => void;
 };
-
-function paintTabAvatarHost(
-  host: HTMLElement,
-  login: string,
-  url: string | undefined,
-  live: boolean,
-): void {
-  const img = host.querySelector<HTMLImageElement>(".channel-tab-avatar-img");
-  const letter = host.querySelector<HTMLElement>(".channel-tab-avatar-letter");
-  if (!img || !letter) {
-    return;
-  }
-  if (url) {
-    letter.hidden = true;
-    letter.textContent = "";
-    img.hidden = false;
-    img.dataset.expect = url;
-    if (img.getAttribute("src") !== url) {
-      img.src = url;
-    }
-  } else {
-    img.hidden = true;
-    img.removeAttribute("src");
-    img.removeAttribute("data-expect");
-    letter.hidden = false;
-    letter.textContent = tabAvatarLetter(login);
-  }
-  host.classList.toggle("is-live", normalizeTabLive(live));
-  if (normalizeTabLive(live)) {
-    host.setAttribute("aria-label", t("header.live.title"));
-    host.setAttribute("aria-hidden", "false");
-  } else {
-    host.removeAttribute("aria-label");
-    host.setAttribute("aria-hidden", "true");
-  }
-}
-
-function buildTabAvatar(login: string, url: string | undefined, live: boolean): HTMLSpanElement {
-  const host = document.createElement("span");
-  host.className = "channel-tab-avatar";
-  const img = document.createElement("img");
-  img.className = "channel-tab-avatar-img";
-  img.alt = "";
-  img.width = 18;
-  img.height = 18;
-  img.hidden = true;
-  img.addEventListener("error", () => {
-    const expect = img.dataset.expect;
-    if (!expect || img.getAttribute("src") !== expect) {
-      return;
-    }
-    img.hidden = true;
-    img.removeAttribute("src");
-    img.removeAttribute("data-expect");
-    const letterEl = host.querySelector<HTMLElement>(".channel-tab-avatar-letter");
-    if (letterEl) {
-      letterEl.hidden = false;
-      letterEl.textContent = tabAvatarLetter(login);
-    }
-  });
-  const letter = document.createElement("span");
-  letter.className = "channel-tab-avatar-letter";
-  letter.setAttribute("aria-hidden", "true");
-  letter.hidden = true;
-  host.appendChild(img);
-  host.appendChild(letter);
-  paintTabAvatarHost(host, login, url, live);
-  return host;
-}
 
 export function bindChannelList(
   list: HTMLUListElement,
@@ -108,8 +34,6 @@ export function bindChannelList(
   let activeLogin = "";
   let showRecents = false;
   let suppressNextClick = false;
-  const avatarUrlByLogin = new Map<string, string>();
-  const liveByLogin = new Map<string, boolean>();
 
   let drag: {
     pointerId: number;
@@ -331,20 +255,6 @@ export function bindChannelList(
     window.addEventListener("pointercancel", onWindowPointerCancel);
   };
 
-  const findTabAvatar = (login: string): HTMLElement | null => {
-    const key = login.toLowerCase();
-    for (const node of list.children) {
-      if (!(node instanceof HTMLElement)) {
-        continue;
-      }
-      if ((node.dataset.channel ?? "").toLowerCase() !== key) {
-        continue;
-      }
-      return node.querySelector<HTMLElement>(".channel-tab-avatar");
-    }
-    return null;
-  };
-
   const paint = (active: string): void => {
     abortDragForPaint();
     activeLogin = active;
@@ -371,18 +281,7 @@ export function bindChannelList(
       btn.className = aria.className;
       btn.setAttribute("role", aria.role);
       btn.setAttribute("aria-selected", aria.ariaSelected);
-      const key = login.toLowerCase();
-      btn.appendChild(
-        buildTabAvatar(
-          key,
-          avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
-        ),
-      );
-      const label = document.createElement("span");
-      label.className = "channel-tab-label";
-      label.textContent = `#${login}`;
-      btn.appendChild(label);
+      btn.textContent = `#${login}`;
       btn.addEventListener("click", (ev) => {
         if (suppressNextClick) {
           ev.preventDefault();
@@ -447,9 +346,6 @@ export function bindChannelList(
       paint(makeActive ? login : activeLogin);
     },
     remove(login) {
-      const key = login.toLowerCase();
-      avatarUrlByLogin.delete(key);
-      liveByLogin.delete(key);
       const atOpen = open.indexOf(login);
       if (atOpen >= 0) {
         open.splice(atOpen, 1);
@@ -467,12 +363,6 @@ export function bindChannelList(
       const same =
         nextOpen.length === open.length &&
         nextOpen.every((login, i) => open[i] === login);
-      const dropped = open.filter((login) => !nextOpen.includes(login));
-      for (const login of dropped) {
-        const key = login.toLowerCase();
-        avatarUrlByLogin.delete(key);
-        liveByLogin.delete(key);
-      }
       open.length = 0;
       for (const login of nextOpen) {
         if (!open.includes(login)) {
@@ -516,46 +406,6 @@ export function bindChannelList(
       paint(activeLogin);
       onReorder?.([...open]);
       return [...open];
-    },
-    setAvatar(login, url) {
-      const key = login.trim().toLowerCase();
-      if (!key) {
-        return;
-      }
-      if (url) {
-        avatarUrlByLogin.set(key, url);
-      } else {
-        avatarUrlByLogin.delete(key);
-      }
-      const host = findTabAvatar(key);
-      if (host) {
-        paintTabAvatarHost(
-          host,
-          key,
-          avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
-        );
-      }
-    },
-    setLive(login, live) {
-      const key = login.trim().toLowerCase();
-      if (!key) {
-        return;
-      }
-      if (live) {
-        liveByLogin.set(key, true);
-      } else {
-        liveByLogin.delete(key);
-      }
-      const host = findTabAvatar(key);
-      if (host) {
-        paintTabAvatarHost(
-          host,
-          key,
-          avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
-        );
-      }
     },
   };
 }

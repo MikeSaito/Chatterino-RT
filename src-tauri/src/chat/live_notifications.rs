@@ -310,14 +310,12 @@ async fn poll_once(app: &AppHandle, shared: &Shared) {
         let title = status.and_then(|s| s.stream_title.as_deref());
         // Hub live for the active channel is owned by live_status (system notices).
         // Re-check active inside the same lock as the mutation to avoid races.
-        let mut emit_tab_live = false;
         if let Ok(mut hub) = shared.hub.lock() {
             let is_active = hub
                 .active
                 .as_deref()
                 .is_some_and(|a| a.eq_ignore_ascii_case(ch));
             if !is_active && hub.has_channel(ch) {
-                emit_tab_live = true;
                 if live {
                     hub.set_stream_meta(
                         ch,
@@ -332,11 +330,6 @@ async fn poll_once(app: &AppHandle, shared: &Shared) {
                     super::logging::close_stream_file(shared, ch);
                 }
             }
-        }
-        if emit_tab_live {
-            let resolved = status.cloned().unwrap_or_else(helix::StreamStatus::offline);
-            let payload = super::live_status::channel_live_payload(ch, &resolved);
-            let _ = app.emit("chat:channel_live", payload);
         }
         observe_live(shared, app, ch, live, title);
     }
