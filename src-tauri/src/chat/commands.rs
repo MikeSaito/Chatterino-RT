@@ -241,6 +241,13 @@ pub fn chat_subscribe(
 }
 
 #[tauri::command]
+pub fn chat_unsubscribe(state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
+    state
+        .clear_batch_channel()
+        .map_err(|_| ApiError::internal("lock"))
+}
+
+#[tauri::command]
 pub fn chat_snapshot(
     state: tauri::State<'_, Shared>,
     channel: String,
@@ -304,8 +311,9 @@ pub async fn chat_automod_manage(
     state: tauri::State<'_, Shared>,
     #[allow(non_snake_case)] msgId: String,
     action: String,
+    channel: String,
 ) -> Result<(), ApiError> {
-    super::automod::manage_message(app, state.inner().clone(), msgId, action).await
+    super::automod::manage_message(app, state.inner().clone(), msgId, action, channel).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -733,26 +741,24 @@ async fn handle_raid_slash(
                 }
             }
         }
-        RaidSlash::Cancel => {
-            match super::helix::cancel_raid(&room_id, &token, &client_id).await {
-                super::helix::HelixRaidOutcome::Ok => {
-                    emit_outgoing_raid(
-                        app,
-                        OutgoingRaidPayload {
-                            channel: channel.to_string(),
-                            active: false,
-                            target_login: None,
-                            target_display_name: None,
-                            started_at_ms: None,
-                            duration_ms: None,
-                        },
-                    );
-                }
-                super::helix::HelixRaidOutcome::Failed(msg) => {
-                    state.post_channel_notice(app, channel, msg);
-                }
+        RaidSlash::Cancel => match super::helix::cancel_raid(&room_id, &token, &client_id).await {
+            super::helix::HelixRaidOutcome::Ok => {
+                emit_outgoing_raid(
+                    app,
+                    OutgoingRaidPayload {
+                        channel: channel.to_string(),
+                        active: false,
+                        target_login: None,
+                        target_display_name: None,
+                        started_at_ms: None,
+                        duration_ms: None,
+                    },
+                );
             }
-        }
+            super::helix::HelixRaidOutcome::Failed(msg) => {
+                state.post_channel_notice(app, channel, msg);
+            }
+        },
         RaidSlash::UsageStart | RaidSlash::UsageCancel => unreachable!(),
     }
     Ok(())
@@ -2043,14 +2049,8 @@ mod tests {
         );
         assert_eq!(parse_raid_slash("/unraid"), Some(RaidSlash::Cancel));
         assert_eq!(parse_raid_slash("/raid"), Some(RaidSlash::UsageStart));
-        assert_eq!(
-            parse_raid_slash("/raid a b"),
-            Some(RaidSlash::UsageStart)
-        );
-        assert_eq!(
-            parse_raid_slash("/unraid x"),
-            Some(RaidSlash::UsageCancel)
-        );
+        assert_eq!(parse_raid_slash("/raid a b"), Some(RaidSlash::UsageStart));
+        assert_eq!(parse_raid_slash("/unraid x"), Some(RaidSlash::UsageCancel));
         assert_eq!(parse_raid_slash("/me waves"), None);
         assert_eq!(parse_raid_slash("raid foo"), None);
     }

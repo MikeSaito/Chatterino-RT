@@ -1204,12 +1204,7 @@ fn maybe_emit_gift_toast(app: &AppHandle, channel: &str, event: &ChatEvent) {
 }
 
 /// Inactive joined channel: in-app toast when someone highlights your login.
-fn maybe_emit_cross_mention(
-    app: &AppHandle,
-    shared: &Shared,
-    channel: &str,
-    event: &ChatEvent,
-) {
+fn maybe_emit_cross_mention(app: &AppHandle, shared: &Shared, channel: &str, event: &ChatEvent) {
     let enable_self = shared
         .filters
         .lock()

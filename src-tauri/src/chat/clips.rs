@@ -20,10 +20,7 @@ use super::state::Shared;
 
 const CACHE_LIMIT: usize = 128;
 const HELIX: &str = "https://api.twitch.tv/helix";
-const CLIP_THUMB_HOSTS: &[&str] = &[
-    "clips-media-assets2.twitch.tv",
-    "static-cdn.jtvnw.net",
-];
+const CLIP_THUMB_HOSTS: &[&str] = &["clips-media-assets2.twitch.tv", "static-cdn.jtvnw.net"];
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -44,10 +41,8 @@ pub struct ClipInfoResponse {
 struct ClipCache {
     by_id: HashMap<String, ClipInfoResponse>,
     order: Vec<String>,
-    inflight: HashMap<
-        String,
-        Vec<tokio::sync::oneshot::Sender<Result<ClipInfoResponse, ApiError>>>,
-    >,
+    inflight:
+        HashMap<String, Vec<tokio::sync::oneshot::Sender<Result<ClipInfoResponse, ApiError>>>>,
 }
 
 impl ClipCache {
@@ -336,10 +331,8 @@ pub async fn resolve_clip_info(
         None => {
             let mut guard = cache().lock().await;
             if let Some(waiters) = guard.inflight.remove(&clip_id) {
-                let err = ApiError::coded(
-                    "error.helix.forbidden",
-                    "Clip lookup requires Twitch login",
-                );
+                let err =
+                    ApiError::coded("error.helix.forbidden", "Clip lookup requires Twitch login");
                 for tx in waiters {
                     let _ = tx.send(Err(err.clone()));
                 }

@@ -55,10 +55,14 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
   let opBusy = false;
   let unlistenPipe: (() => void) | null = null;
   let unlistenHistory: (() => void) | null = null;
+  let activePipe: Channel<unknown> | null = null;
   const queued: ChatBatch[] = [];
   const ops: Op[] = [];
 
   const applySnapshot = async (channel: string, expected: number): Promise<boolean> => {
+    if (stopped || expected !== epoch) {
+      return false;
+    }
     const snap = await invoke<ChatBatch>("chat_snapshot", { channel });
     if (expected !== epoch || channel !== active || stopped) {
       return false;
@@ -180,9 +184,25 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     void pump();
   };
 
+  const dropPipe = (): void => {
+    pipeEpoch += 1;
+    if (activePipe) {
+      activePipe.onmessage = () => undefined;
+      activePipe = null;
+    }
+  };
+
   const attachChannel = async (): Promise<void> => {
+    if (stopped) {
+      return;
+    }
     const my = ++pipeEpoch;
+    if (activePipe) {
+      activePipe.onmessage = () => undefined;
+      activePipe = null;
+    }
     const channel = new Channel<unknown>();
+    activePipe = channel;
     channel.onmessage = (payload) => {
       if (my !== pipeEpoch || stopped) {
         return;
@@ -194,7 +214,23 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
         onBadPipe();
       }
     };
-    await invoke("chat_subscribe", { channel });
+    try {
+      await invoke("chat_subscribe", { channel });
+    } catch (err) {
+      if (my === pipeEpoch && activePipe === channel) {
+        activePipe.onmessage = () => undefined;
+        activePipe = null;
+      }
+      throw err;
+    }
+    if (stopped || my !== pipeEpoch) {
+      channel.onmessage = () => undefined;
+      if (activePipe === channel) {
+        activePipe = null;
+      }
+      // Never unsubscribe here: a newer attach may already own Rust batch_tx.
+      // stop() is the only place that clears the pipe on teardown.
+    }
   };
 
   const resubscribe = async (): Promise<void> => {
@@ -246,6 +282,13 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     ring.reset();
   };
 
+  const rejectQueuedOps = (): void => {
+    const pending = ops.splice(0);
+    for (const op of pending) {
+      op.reject(new Error("chat ipc stopped"));
+    }
+  };
+
   const runOps = async (): Promise<void> => {
     if (opBusy) {
       return;
@@ -259,16 +302,28 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
       try {
         if (op.kind === "join") {
           await attachChannel();
+          if (stopped) {
+            op.reject(new Error("chat ipc stopped"));
+            break;
+          }
           const joined = await invoke<string>("chat_join", {
             channel: op.channel,
             focus: op.focus,
           });
+          if (stopped) {
+            op.reject(new Error("chat ipc stopped"));
+            break;
+          }
           if (op.focus) {
             await mountActive(joined);
           }
           op.resolve(joined);
         } else if (op.kind === "leave") {
           const next = await invoke<string | null>("chat_leave", { channel: op.channel });
+          if (stopped) {
+            op.reject(new Error("chat ipc stopped"));
+            break;
+          }
           if (!next) {
             clearActive();
             op.resolve(null);
@@ -276,6 +331,10 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
             op.resolve(next);
           } else {
             await attachChannel();
+            if (stopped) {
+              op.reject(new Error("chat ipc stopped"));
+              break;
+            }
             await mountActive(next);
             op.resolve(next);
           }
@@ -286,11 +345,19 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
           op.resolve();
         } else {
           await attachChannel();
+          if (stopped) {
+            op.reject(new Error("chat ipc stopped"));
+            break;
+          }
           await mountActive(op.channel);
           op.resolve();
         }
       } catch (err) {
-        op.reject(err);
+        if (stopped) {
+          op.reject(new Error("chat ipc stopped"));
+        } else {
+          op.reject(err);
+        }
       }
     }
     opBusy = false;
@@ -325,32 +392,47 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
 
   return {
     join(channel: string, focus = true) {
+      if (stopped) {
+        return Promise.reject(new Error("chat ipc stopped"));
+      }
       return new Promise<string>((resolve, reject) => {
         ops.push({ kind: "join", channel, focus, resolve, reject });
         void runOps();
       });
     },
     leave(channel: string) {
+      if (stopped) {
+        return Promise.reject(new Error("chat ipc stopped"));
+      }
       return new Promise<string | null>((resolve, reject) => {
         ops.push({ kind: "leave", channel, resolve, reject });
         void runOps();
       });
     },
     syncActive(channel: string | null) {
+      if (stopped) {
+        return Promise.reject(new Error("chat ipc stopped"));
+      }
       return new Promise<void>((resolve, reject) => {
         ops.push({ kind: "sync", channel, resolve, reject });
         void runOps();
       });
     },
     async part() {
+      if (stopped) {
+        return;
+      }
       clearActive();
       await invoke("chat_part");
     },
     stop() {
+      if (stopped) {
+        return;
+      }
       stopped = true;
       epoch += 1;
-      pipeEpoch += 1;
-      ops.length = 0;
+      dropPipe();
+      rejectQueuedOps();
       queued.length = 0;
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer);
@@ -364,6 +446,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
         unlistenHistory();
         unlistenHistory = null;
       }
+      void invoke("chat_unsubscribe").catch(() => undefined);
     },
     active: () => active,
   };

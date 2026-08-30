@@ -4,14 +4,15 @@
 mod chat;
 mod security;
 
+use chat::clips::resolve_clip_info;
 use chat::commands::{
     about_info, auth_import, auth_logout, auth_remove, auth_select, auth_start, auth_status,
     cache_clear, cache_info, cache_pick_directory, channel_points_claim, channel_points_redeem,
-    channel_points_status,
-    chat_automod_manage, chat_blocked_users, chat_complete, chat_emote_popup_list,
-    chat_exec_custom_command, chat_join, chat_leave, chat_part, chat_profile_image, chat_search,
-    chat_send, chat_set_user_blocked, chat_set_user_ignore_highlights, chat_set_user_notes,
-    chat_snapshot, chat_subscribe, chat_toggle_favourite_emote, chat_typing, chat_user_blocked,
+    channel_points_status, chat_automod_manage, chat_blocked_users, chat_complete,
+    chat_emote_popup_list, chat_exec_custom_command, chat_join, chat_leave, chat_part,
+    chat_profile_image, chat_search, chat_send, chat_set_user_blocked,
+    chat_set_user_ignore_highlights, chat_set_user_notes, chat_snapshot, chat_subscribe,
+    chat_toggle_favourite_emote, chat_typing, chat_unsubscribe, chat_user_blocked,
     chat_user_followers, chat_user_ignore_highlights, chat_user_notes, chat_user_profile,
     chat_user_pronouns, chat_user_subage, chat_viewer_role, chatterino1_commands_available,
     fetch_emote_cdn, filters_get, filters_set, highlight_cancel_attention,
@@ -22,7 +23,6 @@ use chat::commands::{
     supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
-use chat::clips::resolve_clip_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
 use tauri::{AppHandle, Manager};
 
@@ -93,6 +93,7 @@ pub fn run() {
             chat_part,
             chat_snapshot,
             chat_subscribe,
+            chat_unsubscribe,
             chat_send,
             chat_typing,
             chat_automod_manage,

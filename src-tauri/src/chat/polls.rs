@@ -516,9 +516,9 @@ async fn refresh_snapshot(app: &AppHandle, wanted: &Wanted, live: &mut LivePanel
         .find(|p| matches!(p.status.as_str(), "ACTIVE" | "LOCKED"))
         .cloned()
         .or_else(|| {
-            predictions.into_iter().find(|p| {
-                matches!(p.status.as_str(), "RESOLVED" | "CANCELED" | "CANCELLED")
-            })
+            predictions
+                .into_iter()
+                .find(|p| matches!(p.status.as_str(), "RESOLVED" | "CANCELED" | "CANCELLED"))
         })
     {
         panels.push(prediction);
@@ -966,7 +966,10 @@ mod tests {
             ]
         });
         let panel = parse_helix_prediction(&v).expect("prediction");
-        assert_eq!(panel.started_at.as_deref(), Some("2021-04-28T17:11:22.595Z"));
+        assert_eq!(
+            panel.started_at.as_deref(),
+            Some("2021-04-28T17:11:22.595Z")
+        );
         assert_eq!(panel.ends_at.as_deref(), Some("2021-04-28T17:13:22.595Z"));
         assert_eq!(panel.options[0].color.as_deref(), Some("blue"));
     }

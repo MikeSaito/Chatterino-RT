@@ -235,12 +235,10 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Resolve {
         .and_then(|h| h.room_id(login).map(str::to_string));
     let broadcaster_id = match broadcaster_id {
         Some(id) if !id.is_empty() => id,
-        _ => {
-            match super::helix::fetch_user_profile(login, Some(&token), &client_id).await {
-                Some(p) => p.id,
-                None => return Resolve::NotEligible,
-            }
-        }
+        _ => match super::helix::fetch_user_profile(login, Some(&token), &client_id).await {
+            Some(p) => p.id,
+            None => return Resolve::NotEligible,
+        },
     };
     Resolve::Ready(Wanted {
         broadcaster_id,

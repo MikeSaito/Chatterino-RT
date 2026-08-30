@@ -52,9 +52,13 @@ function clearLoadTimer(): void {
   }
 }
 
-/** Twitch autoplay walks ancestors for visibility / display / opacity. */
+/** Twitch autoplay walks ancestors for visibility / display / opacity and needs a real box. */
 function isEmbedSurfaceVisible(el: HTMLElement): boolean {
   if (document.visibilityState !== "visible") {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  if (rect.width + 0.5 < MIN_PLAYER_W || rect.height + 0.5 < MIN_PLAYER_H) {
     return false;
   }
   let node: HTMLElement | null = el;
@@ -73,8 +77,9 @@ function isEmbedSurfaceVisible(el: HTMLElement): boolean {
 }
 
 function slotSize(host: HTMLElement): { w: number; h: number } {
-  const w = Math.floor(host.clientWidth || host.getBoundingClientRect().width);
-  const h = Math.floor(host.clientHeight || host.getBoundingClientRect().height);
+  const rect = host.getBoundingClientRect();
+  const w = Math.floor(Math.max(host.clientWidth || 0, rect.width));
+  const h = Math.floor(Math.max(host.clientHeight || 0, rect.height));
   return { w, h };
 }
 
@@ -112,9 +117,24 @@ function detachPlaceholder(host: HTMLElement): void {
   host.querySelector("#player-placeholder")?.remove();
 }
 
+/** Blank then remove so Twitch Player EventEmitters cannot stack across remounts. */
+function destroyFrame(frame: HTMLIFrameElement | null): void {
+  if (!frame) {
+    return;
+  }
+  try {
+    frame.onload = null;
+    frame.removeAttribute("src");
+    frame.src = "about:blank";
+  } catch {
+    /* detach anyway */
+  }
+  frame.remove();
+}
+
 function removeFrame(): void {
   if (frameEl) {
-    frameEl.remove();
+    destroyFrame(frameEl);
     frameEl = null;
   }
   iframeLoaded = false;
@@ -319,11 +339,19 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
       whenSlotReady(host, isLive, insert);
       return;
     }
+    // One live iframe only: destroy any stray node before append.
+    host.querySelectorAll("iframe").forEach((node) => {
+      destroyFrame(node);
+    });
     const frame = createPlayerFrame();
     frame.width = String(w);
     frame.height = String(h);
     frame.addEventListener("load", () => {
       if (!isLive() || frameEl !== frame) {
+        return;
+      }
+      // about:blank teardown load — ignore.
+      if (!frame.src || frame.src === "about:blank") {
         return;
       }
       iframeLoaded = true;
@@ -357,7 +385,7 @@ export function unmountPlayer(host: HTMLElement): void {
   slotWaitCleanup = null;
   clearLoadTimer();
   insertEmbed = null;
-  frameEl = null;
+  removeFrame();
   if (activeHost === host) {
     activeHost = null;
     activeChannel = "";
@@ -365,6 +393,9 @@ export function unmountPlayer(host: HTMLElement): void {
     liveKnown = null;
     overlayMode = "loading";
   }
+  host.querySelectorAll("iframe").forEach((node) => {
+    destroyFrame(node);
+  });
   host.replaceChildren();
 }
 
@@ -429,6 +460,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
       }
     };
     slotWaitCleanup = pendingPaintCleanup;
+    // Two rAFs: after layout+paint so Twitch's first visibility walk sees a real box.
     raf = requestAnimationFrame(() => {
       raf = 0;
       nestedRaf = requestAnimationFrame(() => {

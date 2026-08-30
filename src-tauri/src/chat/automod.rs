@@ -72,15 +72,17 @@ pub async fn manage_message(
     shared: Shared,
     msg_id: String,
     action: String,
+    channel: String,
 ) -> Result<(), ApiError> {
     let msg_id = validate_msg_id(&msg_id)?;
     let action = normalize_action(&action)?;
-    let channel = shared
-        .hub
-        .lock()
-        .ok()
-        .and_then(|h| h.active.clone())
-        .ok_or_else(|| ApiError::coded("error.automod.failed", "no active channel"))?;
+    let channel = super::commands::normalize_channel(&channel)?;
+    {
+        let hub = shared.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        if !hub.has_channel(&channel) && !hub.is_joined(&channel) {
+            return Err(ApiError::coded("error.automod.failed", "channel not open"));
+        }
+    }
     let (token, client_id, user_id) = action_creds(&shared).await?;
     let outcome = post_manage_message(&token, &client_id, &user_id, &msg_id, &action).await;
     match outcome {
@@ -90,6 +92,8 @@ pub async fn manage_message(
             } else {
                 "denied"
             };
+            // Status belongs to the channel that showed the held message (click time),
+            // not whatever is active after a tab switch mid-flight.
             publish_status(&app, &shared, &channel, &msg_id, status);
             Ok(())
         }
@@ -927,7 +931,8 @@ mod tests {
             }
             _ => panic!("expected automod held"),
         }
-        let expired = r#"{"type":"automod_message_update","data":{"message_id":"bt-1","status":"EXPIRED"}}"#;
+        let expired =
+            r#"{"type":"automod_message_update","data":{"message_id":"bt-1","status":"EXPIRED"}}"#;
         let parsed = parse_pubsub_automod(expired, "channel").unwrap();
         match parsed.event {
             ChatEvent::AutomodStatus { status, .. } => assert_eq!(status, "expired"),

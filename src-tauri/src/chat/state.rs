@@ -298,6 +298,13 @@ impl Shared {
         Ok(())
     }
 
+    /// Drop the JS Channel so Rust stops delivering into stale HMR / remount callbacks.
+    pub fn clear_batch_channel(&self) -> Result<(), ()> {
+        let mut slot = self.batch_tx.lock().map_err(|_| ())?;
+        *slot = None;
+        Ok(())
+    }
+
     pub fn send_batch(&self, batch: &ChatBatch) -> BatchSend {
         let Ok(bytes) = encode_batch(batch) else {
             return BatchSend::EncodeError;

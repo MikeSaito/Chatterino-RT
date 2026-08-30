@@ -109,8 +109,8 @@ export function bindGiftToast(
   };
 
   const trimVisible = (): void => {
-    while (active.length > GIFT_TOAST_MAX_VISIBLE) {
-      const oldest = active[0];
+    while (active.filter((c) => !c.leaving).length > GIFT_TOAST_MAX_VISIBLE) {
+      const oldest = active.find((c) => !c.leaving);
       if (!oldest) {
         return;
       }

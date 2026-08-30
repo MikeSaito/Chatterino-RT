@@ -55,6 +55,8 @@ type ClaimResult = {
 
 const REFRESH_MS = 20_000;
 const REFRESH_MS_HIDDEN = 60_000;
+/** When GQL needs re-login, do not hammer status every poll cycle. */
+const REFRESH_MS_AUTH_REQUIRED = 300_000;
 const TEXT_LIMIT = 500;
 
 export function bindChannelPoints(opts: {
@@ -108,8 +110,12 @@ export function bindChannelPoints(opts: {
 
   const schedule = (): void => {
     window.clearTimeout(timer);
-    const delay =
-      document.visibilityState === "hidden" && modal.hidden ? REFRESH_MS_HIDDEN : REFRESH_MS;
+    let delay = REFRESH_MS;
+    if (last?.authRequired) {
+      delay = REFRESH_MS_AUTH_REQUIRED;
+    } else if (document.visibilityState === "hidden" && modal.hidden) {
+      delay = REFRESH_MS_HIDDEN;
+    }
     timer = window.setTimeout(() => {
       void refresh(false);
     }, delay);
@@ -187,10 +193,11 @@ export function bindChannelPoints(opts: {
       if (token !== seq) {
         return;
       }
+      // Relogin is returned as authRequired snapshot; other errors only surface on demand.
       if (foreground) {
         onStatus(errorText(err, "points.error.load"));
       }
-      if (!modal.hidden) {
+      if (!modal.hidden && foreground) {
         paintError(errorText(err, "points.error.load"));
       }
     } finally {

@@ -157,6 +157,26 @@ window.addEventListener("pagehide", () => {
 
 async function boot(): Promise<void> {
   const myEpoch = ++bootEpoch;
+  const bootAlive = (): boolean => myEpoch === bootEpoch;
+  const eventUnlisteners: Array<() => void> = [];
+  const trackUnlisten = (unlisten: () => void): void => {
+    if (!bootAlive()) {
+      unlisten();
+      return;
+    }
+    eventUnlisteners.push(unlisten);
+  };
+  const chainTeardown = (fn: () => void): void => {
+    if (!bootAlive()) {
+      fn();
+      return;
+    }
+    const prior = teardownChat;
+    teardownChat = () => {
+      fn();
+      prior?.();
+    };
+  };
   applyLocale("en");
   applyDomI18n();
   applyChromeIcons();
@@ -775,6 +795,13 @@ async function boot(): Promise<void> {
   teardownChat = () => {
     earlyChromeAbort.abort();
     pendingJoins.length = 0;
+    for (const un of eventUnlisteners.splice(0)) {
+      try {
+        un();
+      } catch {
+        /* ignore */
+      }
+    }
     headerMenuCtl?.dispose();
     headerMenuCtl = null;
     tabOverflowCtl?.dispose();
@@ -785,13 +812,11 @@ async function boot(): Promise<void> {
     authMenuCtl = null;
   };
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       toast.dismissAll();
       toastLiftRo.disconnect();
       replyBarAttrObs.disconnect();
-      priorTeardown?.();
-    };
+    });
   }
 
   let app;
@@ -801,6 +826,10 @@ async function boot(): Promise<void> {
     teardownChat?.();
     teardownChat = null;
     throw err;
+  }
+  if (!bootAlive()) {
+    destroyChatApp();
+    return;
   }
   const textures = new TextureLru(
     textureLruLimitForDisplay({
@@ -819,6 +848,10 @@ async function boot(): Promise<void> {
     bootModActions = parseModActions(bootSettings.modActions ?? []);
   } catch {
     bootKnobs = {};
+  }
+  if (!bootAlive()) {
+    destroyChatApp();
+    return;
   }
   const poolSize = scrollbackLimitFromKnobs(bootKnobs);
   let usercardScrollbackLimit = scrollbackUsercardLimitFromKnobs(bootKnobs);
@@ -847,6 +880,12 @@ async function boot(): Promise<void> {
     teardownChat = null;
     throw err;
   }
+  if (!bootAlive()) {
+    ring.destroy();
+    textures.clear();
+    destroyChatApp();
+    return;
+  }
   ring.setModActions(modActionBtns);
   const clipCardLayerEl = document.querySelector<HTMLElement>("#clip-card-layer");
   if (!clipCardLayerEl) {
@@ -857,11 +896,9 @@ async function boot(): Promise<void> {
     clipCards.sync(anchors);
   });
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       clipCards.stop();
-      priorTeardown?.();
-    };
+    });
   }
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
@@ -941,23 +978,22 @@ async function boot(): Promise<void> {
     })();
   });
   let unbindImageUpload: (() => void) | null = null;
-  const chromeTeardown = teardownChat;
-  teardownChat = () => {
+  chainTeardown(() => {
     unbindImageUpload?.();
     unbindImageUpload = null;
-    chromeTeardown?.();
     stageSplitCtl?.dispose();
     stageSplitCtl = null;
     quickActionsCtl?.dispose();
     quickActionsCtl = null;
     ring.setHoverGuard(undefined);
     streamPreviewCtl?.hide();
+    unmountPlayer(playerSlot);
     chatIpc?.stop();
     chatIpc = null;
     ring.destroy();
     textures.clear();
     destroyChatApp();
-  };
+  });
   bindStreamerModeBadge(document.querySelector<HTMLElement>("#streamer-badge"));
   let autoCloseUserPopup = true;
   let autoCloseThreadPopup = false;
@@ -1024,6 +1060,9 @@ async function boot(): Promise<void> {
       (await invoke<boolean>("supports_incognito_links")) === true;
   } catch {
     supportsIncognito = false;
+  }
+  if (!bootAlive()) {
+    return;
   }
   let alwaysShowPinnedMessage = false;
   let pinnedBannerApi: {
@@ -1212,11 +1251,9 @@ async function boot(): Promise<void> {
     },
   });
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       linkEnrichment.stop();
-      priorTeardown?.();
-    };
+    });
   }
   readActiveChannel = () => ipc.active().trim();
   const pollPanel = bindPollPanel({
@@ -1233,13 +1270,11 @@ async function boot(): Promise<void> {
   pinnedBannerApi = pinnedBanner;
   pinnedBanner.setAlwaysShow(alwaysShowPinnedMessage);
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       pinnedBannerApi = null;
       pinnedBanner.stop();
       pollPanel.stop();
-      priorTeardown?.();
-    };
+    });
   }
   unbindImageUpload = bindImageUpload({
     input: messageInput,
@@ -1461,7 +1496,10 @@ async function boot(): Promise<void> {
   chatIpc = ipc;
   // Stock WindowDeactivate ≈ tab away / minimize. Prefer visibility hidden so
   // iframe player focus and in-window dialogs do not move the last-read line.
-  document.addEventListener("visibilitychange", () => {
+  const onDocHidden = (): void => {
+    if (!bootAlive()) {
+      return;
+    }
     if (document.visibilityState !== "hidden") {
       return;
     }
@@ -1469,6 +1507,10 @@ async function boot(): Promise<void> {
       return;
     }
     ring.markLastReadAtBottom();
+  };
+  document.addEventListener("visibilitychange", onDocHidden);
+  chainTeardown(() => {
+    document.removeEventListener("visibilitychange", onDocHidden);
   });
   const chatFindCtl = bindSearchPopup({
     ring,
@@ -1628,11 +1670,9 @@ async function boot(): Promise<void> {
     },
   });
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       channelPoints.stop();
-      priorTeardown?.();
-    };
+    });
   }
   function dispatchHotkey(action: HotkeyAction): boolean {
     switch (action) {
@@ -1890,12 +1930,17 @@ async function boot(): Promise<void> {
     if (modSendBusy) {
       return;
     }
+    const channel = (ipc.active() || "").trim();
+    if (!channel) {
+      return;
+    }
     modSendBusy = true;
     void (async () => {
       try {
         await invoke("chat_automod_manage", {
           msgId: messageId,
           action,
+          channel,
         });
       } catch (err) {
         setStatus(formatError(err));
@@ -2219,6 +2264,9 @@ async function boot(): Promise<void> {
   });
 
   await startLiveNotifyListener();
+  if (!bootAlive()) {
+    return;
+  }
 
   const resolveProfileAvatar = async (login: string): Promise<string | null> => {
     const key = login.trim().toLowerCase();
@@ -2309,8 +2357,7 @@ async function boot(): Promise<void> {
     resolveAvatar: resolveProfileAvatar,
   });
   {
-    const priorTeardown = teardownChat;
-    teardownChat = () => {
+    chainTeardown(() => {
       sendSelfTyping(false, true);
       clearTypingPaintTimer();
       typingByChannel.clear();
@@ -2318,24 +2365,32 @@ async function boot(): Promise<void> {
       giftToastCtl.stop();
       mentionToastCtl.stop();
       outgoingRaidCtl.stop();
-      priorTeardown?.();
-    };
+    });
   }
 
   await listen<ChatStatus>(CHAT_STATUS_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     if (holdStatus) {
       return;
     }
     const spin =
       ev.payload.state === "connecting" || ev.payload.state === "reconnecting";
     setStatus(formatStatus(ev.payload), { spin });
-  });
+  }).then(trackUnlisten);
 
   await listen<ChatTyping>(CHAT_TYPING_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     applyTypingEvent(ev.payload);
-  });
+  }).then(trackUnlisten);
 
   await listen<ChannelLive>(CHAT_CHANNEL_LIVE_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     const ch = ev.payload.channel?.trim().toLowerCase() ?? "";
     if (!ch) {
       return;
@@ -2345,9 +2400,12 @@ async function boot(): Promise<void> {
       return;
     }
     repaintChannelTitle();
-  });
+  }).then(trackUnlisten);
 
   await listen<ChannelRoomState>(CHAT_ROOMSTATE_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     const ch = ev.payload.channel?.trim().toLowerCase() ?? "";
     if (!ch) {
       return;
@@ -2366,9 +2424,12 @@ async function boot(): Promise<void> {
       return;
     }
     paintChatModes(headerChatModesEl, roomByChannel.get(ch) ?? null);
-  });
+  }).then(trackUnlisten);
 
   await listen<{ login: string; url: string }>("chat:profile_image", (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     const login = ev.payload.login?.trim().toLowerCase() ?? "";
     const url = ev.payload.url?.trim() ?? "";
     if (!login || !url) {
@@ -2378,9 +2439,12 @@ async function boot(): Promise<void> {
     if (headerAvatarLogin === login) {
       paintHeaderAvatar(login);
     }
-  });
+  }).then(trackUnlisten);
 
   bindPlayerOpenTwitch((channel) => {
+    if (!bootAlive()) {
+      return;
+    }
     void invoke("open_chat_link", {
       url: `https://www.twitch.tv/${channel}`,
     }).catch((err) => {
@@ -2393,6 +2457,9 @@ async function boot(): Promise<void> {
     open?: string[];
     dropped?: string | null;
   }>(CHAT_ROOMS_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     const open = Array.isArray(ev.payload.open) ? ev.payload.open : [];
     const focus = ev.payload.active || "";
     if (ev.payload.dropped) {
@@ -2411,9 +2478,12 @@ async function boot(): Promise<void> {
     if (!channelBusy) {
       drainChannelQueue();
     }
-  });
+  }).then(trackUnlisten);
 
   await listen<{ channelId: string; text: string }>(CHAT_SEND_WAIT_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     const ch = ev.payload.channelId?.trim().toLowerCase() ?? "";
     const text = ev.payload.text ?? "";
     if (!ch) {
@@ -2427,12 +2497,19 @@ async function boot(): Promise<void> {
     if (ipc.active().toLowerCase() === ch) {
       composerChrome.setWaitText(text);
     }
-  });
+  }).then(trackUnlisten);
 
   await listen<AuthInfo>(CHAT_AUTH_EVENT, (ev) => {
+    if (!bootAlive()) {
+      return;
+    }
     authPaintGen += 1;
     applyAuth(ev.payload);
-  });
+  }).then(trackUnlisten);
+
+  if (!bootAlive()) {
+    return;
+  }
 
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();
