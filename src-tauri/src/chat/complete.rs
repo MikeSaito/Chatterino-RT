@@ -275,6 +275,7 @@ const COMMANDS: &[&str] = &[
     "commercial",
     "raid",
     "unraid",
+    "warn",
     "marker",
     "color",
     "block",

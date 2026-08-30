@@ -1,7 +1,14 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { AuthInfo } from "../chat/types";
+import { formatInvokeError } from "../i18n/formatError.ts";
 import { onLocaleChange, t } from "../i18n/index.ts";
 
 export const CHAT_POLLS_EVENT = "chat:polls";
+
+const PREDICT_MIN = 10;
+const PREDICT_MAX = 250_000;
+const PRESET_POINTS = [10, 50, 100, 500, 1000] as const;
 
 type PanelKind = "poll" | "prediction";
 
@@ -33,17 +40,41 @@ export type PollsPayload = {
   panels: PollPanel[];
 };
 
+type VoteResult = {
+  ok: boolean;
+  errorCode?: string | null;
+};
+
+type PredictResult = {
+  ok: boolean;
+  errorCode?: string | null;
+  points: number;
+};
+
 export type BindPollPanelOpts = {
   host: HTMLElement;
   chatColumn: HTMLElement;
   activeChannel: () => string;
+  getAuth: () => AuthInfo;
+  startLogin: () => void;
+  onStatus: (message: string, kind?: "info" | "danger") => void;
 };
 
 export function bindPollPanel(opts: BindPollPanelOpts): {
   sync: () => void;
+  syncAuth: () => void;
   stop: () => void;
 } {
   const byChannel = new Map<string, PollPanel[]>();
+  const votedPolls = new Set<string>();
+  const predictedEvents = new Set<string>();
+  let busyKey = "";
+  let betPanelId = "";
+  let betOutcomeId = "";
+  let betPoints = String(PREDICT_MIN);
+  let statusMsg = "";
+  let statusPanelId = "";
+  let needsRelogin = false;
   let raf = 0;
   let pruneTimer = 0;
   let stopped = false;
@@ -123,6 +154,7 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       return;
     }
     const panels = sanitizePanels(ev.payload.panels);
+    pruneLocalSelections(channel, panels);
     if (panels.length === 0) {
       byChannel.delete(channel);
     } else {
@@ -158,14 +190,66 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     return changed;
   }
 
+  function pruneLocalSelections(channel: string, nextPanels: PollPanel[]): void {
+    const prev = byChannel.get(channel) ?? [];
+    const result = pruneChannelLocks({
+      prev,
+      next: nextPanels,
+      voted: votedPolls,
+      predicted: predictedEvents,
+      betPanelId,
+    });
+    if (!result.betPanelId) {
+      clearBetForm();
+    }
+    if (statusPanelId && result.removed.includes(statusPanelId)) {
+      statusMsg = "";
+      statusPanelId = "";
+    }
+  }
+
+  function clearBetForm(): void {
+    betPanelId = "";
+    betOutcomeId = "";
+    betPoints = String(PREDICT_MIN);
+  }
+
+  function setStatus(
+    panelId: string,
+    message: string,
+    kind: "info" | "danger" = "info",
+  ): void {
+    statusPanelId = panelId;
+    statusMsg = message;
+    if (message) {
+      opts.onStatus(message, kind);
+    }
+  }
+
   function paint(): void {
+    if (stopped) {
+      return;
+    }
+    const focusBet =
+      betPanelId &&
+      document.activeElement instanceof HTMLInputElement &&
+      document.activeElement.id === `poll-bet-points-${betPanelId}`
+        ? {
+            start: document.activeElement.selectionStart ?? betPoints.length,
+            end: document.activeElement.selectionEnd ?? betPoints.length,
+          }
+        : null;
     opts.host.replaceChildren();
     const panels = activePanels().filter(shouldKeepPanel);
     opts.host.hidden = panels.length === 0;
     opts.host.classList.toggle("is-empty", panels.length === 0);
+    opts.host.setAttribute("aria-label", t("polls.host.aria"));
     if (panels.length === 0) {
       stopRaf();
       stopPruneTimer();
+      statusMsg = "";
+      statusPanelId = "";
+      clearBetForm();
       syncOffset();
       return;
     }
@@ -176,6 +260,37 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     syncOffset();
     schedule();
     schedulePrune();
+    if (focusBet && betPanelId) {
+      const input = opts.host.querySelector<HTMLInputElement>(
+        `#poll-bet-points-${CSS.escape(betPanelId)}`,
+      );
+      if (input) {
+        input.focus();
+        try {
+          input.setSelectionRange(focusBet.start, focusBet.end);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  function canInteract(panel: PollPanel): boolean {
+    if (isFinished(panel)) {
+      return false;
+    }
+    if (panel.kind === "prediction" && panel.status === "LOCKED") {
+      return false;
+    }
+    return panel.status === "ACTIVE";
+  }
+
+  function hasAccount(): boolean {
+    return Boolean(opts.getAuth().login?.trim());
+  }
+
+  function canAct(): boolean {
+    return hasAccount() && !needsRelogin;
   }
 
   function renderPanel(panel: PollPanel): HTMLElement {
@@ -184,6 +299,7 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     root.dataset.id = panel.id;
     root.dataset.kind = panel.kind;
     root.dataset.status = panel.status;
+    root.setAttribute("role", "region");
     if (isFinished(panel)) {
       root.classList.add("is-finished");
     }
@@ -196,12 +312,14 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     kind.textContent = t(panel.kind === "poll" ? "polls.poll.kind" : "polls.prediction.kind");
     const title = document.createElement("h2");
     title.className = "poll-panel-title";
+    title.id = `poll-title-${panel.id}`;
     title.textContent = t(
       panel.kind === "poll" ? "polls.poll.title" : "polls.prediction.title",
       { title: panel.title },
     );
     titleBlock.append(kind, title);
     header.append(titleBlock);
+    root.setAttribute("aria-labelledby", title.id);
 
     if (!isFinished(panel) && panel.status === "LOCKED") {
       const locked = document.createElement("span");
@@ -211,6 +329,7 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     } else if (!isFinished(panel) && panel.endsAt) {
       const timer = document.createElement("span");
       timer.className = "poll-panel-timer";
+      timer.setAttribute("aria-live", "off");
       timer.dataset.endsAt = panel.endsAt;
       timer.dataset.startedAt = panel.startedAt ?? "";
       timer.textContent = formatPollCountdown(msLeft(panel.endsAt));
@@ -228,18 +347,65 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       root.append(bar);
     }
 
+    const interactive = canInteract(panel);
+    const loggedIn = canAct();
+    const showLogin = !hasAccount() || needsRelogin;
+    const voted = panel.kind === "poll" && votedPolls.has(panel.id);
+    const predicted = panel.kind === "prediction" && predictedEvents.has(panel.id);
+
     const list = document.createElement("ol");
     list.className = "poll-panel-options";
     const total = totalVotes(panel);
     for (const option of panel.options) {
-      list.append(renderOption(option, total, isFinished(panel)));
+      list.append(
+        renderOption(panel, option, total, {
+          interactive,
+          loggedIn,
+          voted,
+          predicted,
+        }),
+      );
     }
     root.append(list);
 
-    if (!isFinished(panel)) {
-      const hint = document.createElement("p");
-      hint.className = "poll-panel-hint";
-      hint.textContent = t("polls.viewerHint");
+    if (interactive && panel.kind === "prediction" && betPanelId === panel.id && betOutcomeId) {
+      root.append(renderBetForm(panel));
+    }
+
+    if (statusMsg && statusPanelId === panel.id) {
+      const err = document.createElement("p");
+      err.className = "poll-panel-status";
+      err.setAttribute("role", "status");
+      err.textContent = statusMsg;
+      root.append(err);
+    }
+
+    const hint = document.createElement("p");
+    hint.className = "poll-panel-hint";
+    if (isFinished(panel)) {
+      // summary below
+    } else if (showLogin) {
+      hint.textContent = needsRelogin ? t("error.polls.relogin") : t("polls.hint.login");
+      const login = document.createElement("button");
+      login.type = "button";
+      login.className = "poll-panel-login";
+      login.textContent = t("auth.signin");
+      login.addEventListener("click", () => opts.startLogin());
+      root.append(hint, login);
+    } else if (voted) {
+      hint.textContent = t("polls.hint.voted");
+      root.append(hint);
+    } else if (predicted) {
+      hint.textContent = t("polls.hint.predicted");
+      root.append(hint);
+    } else if (panel.kind === "prediction" && panel.status === "LOCKED") {
+      hint.textContent = t("polls.hint.locked");
+      root.append(hint);
+    } else if (panel.kind === "poll") {
+      hint.textContent = t("polls.hint.vote");
+      root.append(hint);
+    } else {
+      hint.textContent = t("polls.hint.predict");
       root.append(hint);
     }
 
@@ -253,24 +419,26 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     return root;
   }
 
-  function renderOption(option: PollOption, total: number, finished: boolean): HTMLElement {
-    const li = document.createElement("li");
-    li.className = "poll-panel-option";
-    li.classList.toggle("is-winner", Boolean(option.isWinner));
-    if (option.color === "blue" || option.color === "pink") {
-      li.dataset.color = option.color;
-    }
+  function renderOption(
+    panel: PollPanel,
+    option: PollOption,
+    total: number,
+    state: { interactive: boolean; loggedIn: boolean; voted: boolean; predicted: boolean },
+  ): HTMLElement {
+    const finished = isFinished(panel);
     const percent = total > 0 ? Math.round((option.votes / total) * 100) : 0;
-    li.style.setProperty("--poll-fill", `${Math.max(0, Math.min(100, percent))}%`);
+    const selected =
+      (panel.kind === "poll" && state.voted) ||
+      (panel.kind === "prediction" && betPanelId === panel.id && betOutcomeId === option.id);
+    const busy = busyKey === `${panel.kind}:${panel.id}:${option.id}`;
+    const canClick =
+      state.interactive &&
+      state.loggedIn &&
+      !state.voted &&
+      !state.predicted &&
+      !busyKey;
 
-    const fill = document.createElement("span");
-    fill.className = "poll-panel-option-fill";
-    const title = document.createElement("span");
-    title.className = "poll-panel-option-title";
-    title.textContent = option.title;
-    const count = document.createElement("span");
-    count.className = "poll-panel-option-count";
-    count.textContent =
+    const countText =
       option.points && option.points > 0
         ? t("polls.option.points", {
             count: compactNumber(option.votes),
@@ -281,11 +449,291 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
             count: compactNumber(option.votes),
             percent,
           });
-    if (finished && option.isWinner) {
-      count.setAttribute("aria-label", t("polls.option.winner"));
+
+    if (canClick || busy) {
+      const li = document.createElement("li");
+      li.className = "poll-panel-option-wrap";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "poll-panel-option poll-panel-option-btn";
+      btn.classList.toggle("is-winner", Boolean(option.isWinner));
+      btn.classList.toggle("is-selected", selected);
+      btn.classList.toggle("is-busy", busy);
+      btn.disabled = Boolean(busyKey);
+      if (option.color === "blue" || option.color === "pink") {
+        btn.dataset.color = option.color;
+      }
+      btn.style.setProperty("--poll-fill", `${Math.max(0, Math.min(100, percent))}%`);
+      btn.dataset.optionId = option.id;
+      const ariaAction =
+        panel.kind === "poll"
+          ? t("polls.option.voteAria", { title: option.title })
+          : t("polls.option.predictAria", { title: option.title });
+      btn.setAttribute(
+        "aria-label",
+        busy
+          ? `${ariaAction}. ${countText}. ${t("polls.option.submitting")}`
+          : `${ariaAction}. ${countText}`,
+      );
+      btn.setAttribute("aria-pressed", selected ? "true" : "false");
+      if (busy) {
+        btn.setAttribute("aria-busy", "true");
+      }
+
+      const fill = document.createElement("span");
+      fill.className = "poll-panel-option-fill";
+      fill.setAttribute("aria-hidden", "true");
+      const title = document.createElement("span");
+      title.className = "poll-panel-option-title";
+      title.textContent = option.title;
+      const count = document.createElement("span");
+      count.className = "poll-panel-option-count";
+      count.textContent = busy ? t("polls.option.submitting") : countText;
+      btn.append(fill, title, count);
+
+      btn.addEventListener("click", () => {
+        if (busyKey) {
+          return;
+        }
+        if (panel.kind === "poll") {
+          void submitVote(panel, option);
+        } else {
+          openBetForm(panel, option);
+        }
+      });
+      li.append(btn);
+      return li;
     }
+
+    const li = document.createElement("li");
+    li.className = "poll-panel-option";
+    li.classList.toggle("is-winner", Boolean(option.isWinner));
+    li.classList.toggle("is-selected", selected);
+    if (option.color === "blue" || option.color === "pink") {
+      li.dataset.color = option.color;
+    }
+    li.style.setProperty("--poll-fill", `${Math.max(0, Math.min(100, percent))}%`);
+
+    const fill = document.createElement("span");
+    fill.className = "poll-panel-option-fill";
+    fill.setAttribute("aria-hidden", "true");
+    const title = document.createElement("span");
+    title.className = "poll-panel-option-title";
+    title.textContent = option.title;
+    const count = document.createElement("span");
+    count.className = "poll-panel-option-count";
+    count.textContent = countText;
+    const winnerBit =
+      finished && option.isWinner ? ` ${t("polls.option.winner")}` : "";
+    li.setAttribute("aria-label", `${option.title}. ${countText}${winnerBit}`);
     li.append(fill, title, count);
     return li;
+  }
+
+  function openBetForm(panel: PollPanel, option: PollOption): void {
+    if (busyKey || stopped) {
+      return;
+    }
+    if (betPanelId === panel.id && betOutcomeId === option.id) {
+      clearBetForm();
+    } else {
+      betPanelId = panel.id;
+      betOutcomeId = option.id;
+      if (!betPoints.trim()) {
+        betPoints = String(PREDICT_MIN);
+      }
+    }
+    statusMsg = "";
+    statusPanelId = "";
+    paint();
+  }
+
+  function renderBetForm(panel: PollPanel): HTMLElement {
+    const form = document.createElement("form");
+    form.className = "poll-panel-bet";
+    form.setAttribute("aria-label", t("polls.bet.aria"));
+
+    const label = document.createElement("label");
+    label.className = "poll-panel-bet-label";
+    label.htmlFor = `poll-bet-points-${panel.id}`;
+    label.textContent = t("polls.bet.points");
+
+    const row = document.createElement("div");
+    row.className = "poll-panel-bet-row";
+
+    const input = document.createElement("input");
+    input.id = `poll-bet-points-${panel.id}`;
+    input.className = "poll-panel-bet-input";
+    input.type = "number";
+    input.min = String(PREDICT_MIN);
+    input.max = String(PREDICT_MAX);
+    input.step = "1";
+    input.required = true;
+    input.value = betPoints;
+    input.inputMode = "numeric";
+    input.setAttribute("aria-describedby", `poll-bet-hint-${panel.id}`);
+    input.addEventListener("input", () => {
+      betPoints = input.value;
+    });
+
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "poll-panel-bet-submit";
+    const submitting = busyKey.startsWith(`prediction:${panel.id}:`);
+    submit.textContent = submitting ? t("polls.option.submitting") : t("polls.bet.submit");
+    submit.disabled = Boolean(busyKey);
+
+    row.append(input, submit);
+
+    const presets = document.createElement("div");
+    presets.className = "poll-panel-bet-presets";
+    presets.setAttribute("role", "group");
+    presets.setAttribute("aria-label", t("polls.bet.presets"));
+    for (const amount of PRESET_POINTS) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "poll-panel-bet-preset";
+      chip.textContent = compactNumber(amount);
+      chip.disabled = Boolean(busyKey);
+      chip.addEventListener("click", () => {
+        betPoints = String(amount);
+        input.value = betPoints;
+      });
+      presets.append(chip);
+    }
+
+    const hint = document.createElement("p");
+    hint.id = `poll-bet-hint-${panel.id}`;
+    hint.className = "poll-panel-bet-hint";
+    hint.textContent = t("polls.bet.range", { min: PREDICT_MIN, max: PREDICT_MAX });
+
+    form.append(label, row, presets, hint);
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const outcome = panel.options.find((o) => o.id === betOutcomeId);
+      if (!outcome) {
+        return;
+      }
+      void submitPredict(panel, outcome, input.value);
+    });
+    return form;
+  }
+
+  async function submitVote(panel: PollPanel, option: PollOption): Promise<void> {
+    if (stopped || busyKey || votedPolls.has(panel.id) || !canAct()) {
+      return;
+    }
+    const key = `poll:${panel.id}:${option.id}`;
+    busyKey = key;
+    statusMsg = "";
+    statusPanelId = "";
+    paint();
+    try {
+      const result = await invoke<VoteResult>("polls_vote", {
+        pollId: panel.id,
+        choiceId: option.id,
+      });
+      if (stopped) {
+        return;
+      }
+      if (result.ok) {
+        votedPolls.add(panel.id);
+        setStatus(panel.id, t("polls.vote.ok"), "info");
+      } else {
+        setStatus(panel.id, voteErrorText(result.errorCode), "danger");
+        if (
+          result.errorCode === "MULTI_CHOICE_VOTE_FORBIDDEN" ||
+          result.errorCode === "VOTE_ID_CONFLICT"
+        ) {
+          votedPolls.add(panel.id);
+        }
+      }
+    } catch (err) {
+      if (stopped) {
+        return;
+      }
+      markReloginIfNeeded(err);
+      setStatus(panel.id, errorText(err, "polls.vote.error"), "danger");
+    } finally {
+      busyKey = "";
+      if (!stopped) {
+        paint();
+      }
+    }
+  }
+
+  async function submitPredict(
+    panel: PollPanel,
+    option: PollOption,
+    rawPoints: string,
+  ): Promise<void> {
+    if (stopped || busyKey || predictedEvents.has(panel.id) || !canAct()) {
+      return;
+    }
+    const points = parsePredictPoints(rawPoints);
+    if (points == null) {
+      setStatus(
+        panel.id,
+        t("error.polls.points_range", { min: PREDICT_MIN, max: PREDICT_MAX }),
+        "danger",
+      );
+      paint();
+      return;
+    }
+    const key = `prediction:${panel.id}:${option.id}`;
+    busyKey = key;
+    statusMsg = "";
+    statusPanelId = "";
+    paint();
+    try {
+      const result = await invoke<PredictResult>("polls_predict", {
+        eventId: panel.id,
+        outcomeId: option.id,
+        points,
+      });
+      if (stopped) {
+        return;
+      }
+      if (result.ok) {
+        predictedEvents.add(panel.id);
+        clearBetForm();
+        setStatus(
+          panel.id,
+          t("polls.predict.ok", { points: compactNumber(result.points) }),
+          "info",
+        );
+      } else {
+        setStatus(panel.id, predictErrorText(result.errorCode), "danger");
+        if (
+          result.errorCode === "MULTIPLE_OUTCOMES" ||
+          result.errorCode === "DUPLICATE_TRANSACTION"
+        ) {
+          predictedEvents.add(panel.id);
+          clearBetForm();
+        }
+      }
+    } catch (err) {
+      if (stopped) {
+        return;
+      }
+      markReloginIfNeeded(err);
+      setStatus(panel.id, errorText(err, "polls.predict.error"), "danger");
+    } finally {
+      busyKey = "";
+      if (!stopped) {
+        paint();
+      }
+    }
+  }
+
+  function markReloginIfNeeded(err: unknown): void {
+    if (!err || typeof err !== "object") {
+      return;
+    }
+    const code = (err as { code?: unknown }).code;
+    if (code === "error.polls.relogin" || code === "error.auth.required") {
+      needsRelogin = true;
+    }
   }
 
   function updateTimers(): void {
@@ -324,6 +772,13 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
 
   return {
     sync: paint,
+    syncAuth() {
+      const login = opts.getAuth().login?.trim();
+      if (login) {
+        needsRelogin = false;
+      }
+      paint();
+    },
     stop() {
       stopped = true;
       stopRaf();
@@ -332,6 +787,13 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       unlistenLocale();
       resize.disconnect();
       byChannel.clear();
+      votedPolls.clear();
+      predictedEvents.clear();
+      busyKey = "";
+      clearBetForm();
+      statusMsg = "";
+      statusPanelId = "";
+      needsRelogin = false;
       opts.host.replaceChildren();
       opts.host.hidden = true;
       syncOffset();
@@ -497,6 +959,60 @@ export function formatPollCountdown(ms: number): string {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** Pure helper: drop local locks only for panels that left this channel. */
+export function pruneChannelLocks(opts: {
+  prev: PollPanel[];
+  next: PollPanel[];
+  voted: Set<string>;
+  predicted: Set<string>;
+  betPanelId: string;
+}): { betPanelId: string; removed: string[] } {
+  const nextIds = new Set(opts.next.map((panel) => panel.id));
+  const removed: string[] = [];
+  let betPanelId = opts.betPanelId;
+  for (const panel of opts.prev) {
+    if (nextIds.has(panel.id)) {
+      continue;
+    }
+    removed.push(panel.id);
+    opts.voted.delete(panel.id);
+    opts.predicted.delete(panel.id);
+    if (betPanelId === panel.id) {
+      betPanelId = "";
+    }
+  }
+  return { betPanelId, removed };
+}
+
+export function parsePredictPoints(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^[1-9]\d*$/.test(trimmed)) {
+    return null;
+  }
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n) || n < PREDICT_MIN || n > PREDICT_MAX) {
+    return null;
+  }
+  return n;
+}
+
+export function voteErrorText(code: string | null | undefined): string {
+  const key = code ? `polls.vote.error.${code}` : "";
+  const translated = key ? t(key) : "";
+  return translated && translated !== key ? translated : t("polls.vote.error");
+}
+
+export function predictErrorText(code: string | null | undefined): string {
+  const key = code ? `polls.predict.error.${code}` : "";
+  const translated = key ? t(key) : "";
+  return translated && translated !== key ? translated : t("polls.predict.error");
+}
+
+function errorText(err: unknown, fallback: "polls.vote.error" | "polls.predict.error"): string {
+  const mapped = formatInvokeError(err, "status.error");
+  return mapped === t("status.error") ? t(fallback) : mapped;
 }
 
 function compactNumber(n: number): string {

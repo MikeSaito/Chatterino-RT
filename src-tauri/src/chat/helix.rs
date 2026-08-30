@@ -1085,6 +1085,25 @@ pub enum HelixRaidOutcome {
     Failed(String),
 }
 
+/// Result of Helix warn chat user (POST /moderation/warnings).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelixWarnOutcome {
+    Ok,
+    Failed(String),
+}
+
+pub async fn fetch_user_profile_by_id(
+    user_id: &str,
+    token: Option<&str>,
+    client_id: &str,
+) -> Option<UserProfile> {
+    if !user_id.chars().all(|c| c.is_ascii_digit()) || user_id.is_empty() {
+        return None;
+    }
+    let mut map = fetch_users_by_ids(&[user_id.to_string()], token, client_id).await;
+    map.remove(user_id).or_else(|| map.into_values().next())
+}
+
 fn helix_body_message(body: &Value) -> String {
     body.get("message")
         .and_then(Value::as_str)
@@ -1136,6 +1155,107 @@ pub fn map_cancel_raid_http_error(status: u16, body: &Value) -> String {
         429 => "You are being ratelimited by Twitch. Try again in a few seconds.".into(),
         _ => format!("Failed to cancel the raid - {message}"),
     }
+}
+
+pub fn map_warn_user_http_error(status: u16, body: &Value, display_name: &str) -> String {
+    let message = helix_body_message(body);
+    let lower = message.to_ascii_lowercase();
+    match status {
+        400 if lower.contains("may not be warned") => {
+            format!("Failed to warn user - You cannot warn {display_name}.")
+        }
+        400 => format!("Failed to warn user - {message}"),
+        401 if lower.starts_with("missing scope")
+            || lower.starts_with("user access token requires") =>
+        {
+            "Failed to warn user - Missing required scope. Re-login with your account and try again."
+                .into()
+        }
+        401 => format!("Failed to warn user - {message}"),
+        403 => {
+            "Failed to warn user - You don't have permission to perform that action.".into()
+        }
+        409 => {
+            "Failed to warn user - There was a conflicting warn operation on this user. Please try again."
+                .into()
+        }
+        429 => {
+            "Failed to warn user - You are being ratelimited by Twitch. Try again in a few seconds."
+                .into()
+        }
+        _ => format!("Failed to warn user - {message}"),
+    }
+}
+
+/// https://dev.twitch.tv/docs/api/reference#warn-chat-user
+pub async fn warn_user(
+    broadcaster_id: &str,
+    moderator_id: &str,
+    user_id: &str,
+    reason: &str,
+    token: &str,
+    client_id: &str,
+    display_name: &str,
+) -> HelixWarnOutcome {
+    let url = helix_query(
+        "/moderation/warnings",
+        &[
+            ("broadcaster_id", broadcaster_id),
+            ("moderator_id", moderator_id),
+        ],
+    );
+    let body = serde_json::json!({
+        "data": {
+            "user_id": user_id,
+            "reason": reason,
+        }
+    });
+    let client = http_client();
+    let mut delay = Duration::from_millis(200);
+    let mut last = String::from("no response");
+    for attempt in 0..ATTEMPTS {
+        match client
+            .post(&url)
+            .header("Client-Id", client_id)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    return HelixWarnOutcome::Ok;
+                }
+                let code = status.as_u16();
+                match resp.json::<Value>().await {
+                    Ok(v) => {
+                        return HelixWarnOutcome::Failed(map_warn_user_http_error(
+                            code,
+                            &v,
+                            display_name,
+                        ));
+                    }
+                    Err(e) => {
+                        last = format!("http {code}; json: {e}");
+                        if (400..500).contains(&code) {
+                            return HelixWarnOutcome::Failed(format!(
+                                "Failed to warn user - {last}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => last = e.to_string(),
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    HelixWarnOutcome::Failed(format!("Failed to warn user - {last}"))
 }
 
 /// https://dev.twitch.tv/docs/api/reference#start-a-raid
@@ -1665,6 +1785,36 @@ mod tests {
                 &serde_json::json!({ "message": "The channel is not currently raiding anyone." })
             ),
             "You don't have an active raid."
+        );
+    }
+
+    #[test]
+    fn map_warn_user_http_errors() {
+        assert_eq!(
+            map_warn_user_http_error(
+                400,
+                &serde_json::json!({
+                    "message": "The user specified in the user_id field may not be warned."
+                }),
+                "Viewer"
+            ),
+            "Failed to warn user - You cannot warn Viewer."
+        );
+        assert_eq!(
+            map_warn_user_http_error(
+                401,
+                &serde_json::json!({ "message": "Missing scope: moderator:manage:warnings" }),
+                "Viewer"
+            ),
+            "Failed to warn user - Missing required scope. Re-login with your account and try again."
+        );
+        assert_eq!(
+            map_warn_user_http_error(409, &serde_json::json!({ "message": "conflict" }), "Viewer"),
+            "Failed to warn user - There was a conflicting warn operation on this user. Please try again."
+        );
+        assert_eq!(
+            map_warn_user_http_error(429, &serde_json::json!({}), "Viewer"),
+            "Failed to warn user - You are being ratelimited by Twitch. Try again in a few seconds."
         );
     }
 }

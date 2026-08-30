@@ -81,7 +81,6 @@
               id="pinned-message-host"
               hidden
               class="is-collapsed"
-              aria-live="polite"
               data-i18n-aria-label="pinned.host.aria"
               aria-label="Pinned channel message"
             ></div>
@@ -89,13 +88,19 @@
             <div
               id="poll-panel-host"
               hidden
-              aria-live="polite"
               data-i18n-aria-label="polls.host.aria"
               aria-label="Channel polls and predictions"
             ></div>
-            <div id="chat-pane">
-              <div id="chat-canvas-host">
-                <canvas id="chat-canvas"></canvas>
+            <div id="chat-a11y-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+            <div id="chat-pane" role="region" data-i18n-aria-label="chat.a11y.pane" aria-label="Chat">
+              <div
+                id="chat-canvas-host"
+                role="region"
+                tabindex="0"
+                data-i18n-aria-label="chat.a11y.log"
+                aria-label="Chat messages"
+              >
+                <canvas id="chat-canvas" role="presentation" aria-hidden="true"></canvas>
                 <div id="event-toast-stack" aria-live="polite">
                   <div id="raid-toast-host"></div>
                   <div id="gift-toast-host"></div>
@@ -110,7 +115,7 @@
                   <button type="button" id="chat-qa-copy" class="btn-icon" data-i18n-title="chat.qa.copy" data-i18n-aria-label="chat.qa.copy" title="Copy" aria-label="Copy"></button>
                   <button type="button" id="chat-qa-more" class="btn-icon" data-i18n-title="chat.qa.more" data-i18n-aria-label="chat.qa.more" title="More" aria-label="More"></button>
                 </div>
-                <div id="chat-empty" hidden>
+                <div id="chat-empty" hidden role="status">
                   <div class="chat-empty-inner">
                     <span class="chat-empty-icon" aria-hidden="true"></span>
                     <p class="chat-empty-title">Select a channel</p>
@@ -125,7 +130,9 @@
                 id="chat-scroll"
                 role="scrollbar"
                 aria-orientation="vertical"
-                aria-controls="chat-canvas"
+                aria-controls="chat-canvas-host"
+                data-i18n-aria-label="chat.a11y.scrollbar"
+                aria-label="Chat scrollbar"
                 aria-valuemin="0"
                 aria-valuemax="0"
                 aria-valuenow="0"
@@ -161,13 +168,16 @@
                 </p>
                 <button type="button" id="emote-open" class="btn-icon" data-i18n-title="composer.emotes" data-i18n-aria-label="composer.emotes" title="Emotes" aria-label="Emotes"></button>
                 <div id="composer-field">
-                  <textarea
-                    id="composer-input"
-                    name="message"
-                    rows="1"
-                    maxlength="500"
-                    spellcheck="false"
-                  ></textarea>
+                  <div class="composer-input-wrap">
+                    <div id="composer-mirror" aria-hidden="true"></div>
+                    <textarea
+                      id="composer-input"
+                      name="message"
+                      rows="1"
+                      maxlength="500"
+                      spellcheck="false"
+                    ></textarea>
+                  </div>
                   <div id="composer-meta">
                     <span id="composer-wait" class="composer-wait-chip" hidden aria-live="polite">
                       <span class="composer-wait-icon" aria-hidden="true"></span>
@@ -296,6 +306,7 @@
           </div>
           <button type="button" id="usercard-unban" data-i18n="usercard.unban" data-i18n-title="usercard.unban" title="Unban" hidden>Unban</button>
           <div id="usercard-timeouts" class="usercard-timeouts" data-i18n-aria-label="usercard.timeouts.aria" aria-label="Timeout durations"></div>
+          <button type="button" id="usercard-warn" data-i18n="usercard.warn" data-i18n-title="usercard.warn" title="Warn" hidden>Warn</button>
           <button type="button" id="usercard-ban" class="is-danger" data-i18n="usercard.ban" data-i18n-title="usercard.ban" title="Ban" hidden>Ban</button>
         </div>
         <p id="usercard-status" class="usercard-status" hidden></p>

@@ -12,6 +12,7 @@ import { TextureLru } from "./chat/textures";
 import { textureLruLimitForDisplay } from "./chat/textureLruLimit";
 import { mountPlayer, unmountPlayer, setPlayerLiveHint, bindPlayerOpenTwitch } from "./player/embed";
 import { bindScrollChrome } from "./chat/scrollUi";
+import { bindChatA11y } from "./chat/chatA11y";
 import { bindChannelList } from "./shell/channels";
 import { normalizeChannelInput } from "./shell/channelName";
 import { applyChromeIcons } from "./shell/chromeIcons";
@@ -53,6 +54,14 @@ import {
   parseMessageOverflow,
   type ComposerChromeOpts,
 } from "./shell/composerUi";
+import {
+  bindComposerEmoteSprites,
+  isSafeEmoteCdnUrl,
+  normalizeCompleteItems,
+  type CompleteItem,
+  type ComposerSpriteOpts,
+} from "./shell/composerEmoteSprites";
+import { resolveEmoteUrl } from "./chat/emoteUrl";
 import {
   parseUsernameRclickAction,
   parseUsernameRclickModifier,
@@ -226,6 +235,7 @@ async function boot(): Promise<void> {
   const outgoingRaidProgress = document.querySelector<HTMLElement>("#outgoing-raid-progress");
   const outgoingRaidDismiss = document.querySelector<HTMLButtonElement>("#outgoing-raid-dismiss");
   const composerInput = document.querySelector<HTMLTextAreaElement>("#composer-input");
+  const composerMirror = document.querySelector<HTMLElement>("#composer-mirror");
   const composerSend = document.querySelector<HTMLButtonElement>("#composer-send");
   const composerLength = document.querySelector<HTMLElement>("#composer-length");
   const composerWait = document.querySelector<HTMLElement>("#composer-wait");
@@ -239,6 +249,7 @@ async function boot(): Promise<void> {
   const chatQaCopy = document.querySelector<HTMLButtonElement>("#chat-qa-copy");
   const chatQaMore = document.querySelector<HTMLButtonElement>("#chat-qa-more");
   const chatEmpty = document.querySelector<HTMLElement>("#chat-empty");
+  const chatA11yLive = document.querySelector<HTMLElement>("#chat-a11y-live");
   const pinnedMessageHost = document.querySelector<HTMLElement>("#pinned-message-host");
   const pollPanelHost = document.querySelector<HTMLElement>("#poll-panel-host");
   const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
@@ -303,6 +314,7 @@ async function boot(): Promise<void> {
     !outgoingRaidProgress ||
     !outgoingRaidDismiss ||
     !composerInput ||
+    !composerMirror ||
     !composerSend ||
     !composerLength ||
     !composerWait ||
@@ -316,6 +328,7 @@ async function boot(): Promise<void> {
     !chatQaCopy ||
     !chatQaMore ||
     !chatEmpty ||
+    !chatA11yLive ||
     !pinnedMessageHost ||
     !pollPanelHost ||
     !authChip ||
@@ -561,6 +574,11 @@ async function boot(): Promise<void> {
   const settingsBtn = settingsOpen;
   const completeBox = completeList;
   let composerOpts: ComposerChromeOpts = defaultComposerChrome();
+  let composerSpriteOpts: ComposerSpriteOpts = {
+    enableImages: true,
+    animate: true,
+  };
+  let composerEmojiSet = "Twitter";
   const sendWaitByChannel = new Map<string, string>();
   const composerChrome = bindComposerChrome({
     form: composer,
@@ -573,7 +591,13 @@ async function boot(): Promise<void> {
     sendBtn: composerSend,
     getOpts: () => composerOpts,
   });
+  const composerSprites = bindComposerEmoteSprites({
+    input: messageInput,
+    mirror: composerMirror,
+    getOpts: () => composerSpriteOpts,
+  });
   composerChrome.sync();
+  composerSprites.sync();
   let nickRclick = {
     behavior: "Mention" as UsernameRclickAction,
     modBehavior: "Reply" as UsernameRclickAction,
@@ -1010,6 +1034,16 @@ async function boot(): Promise<void> {
   const chatEmptyTitleEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-title");
   const chatEmptyHintEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-hint");
   const chatEmptyIconEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-icon");
+  const chatA11y = bindChatA11y({
+    ring,
+    host: canvasHost,
+    canvas,
+    live: chatA11yLive,
+    track: scrollTrack,
+  });
+  chainTeardown(() => {
+    chatA11y.dispose();
+  });
   const syncChatEmpty = (): void => {
     const ch = chatIpc?.active()?.trim() ?? "";
     const occupied = ring.occupiedCount();
@@ -1047,7 +1081,8 @@ async function boot(): Promise<void> {
     track: scrollTrack,
     thumb: scrollThumb,
     jump: jumpBottom,
-    onScroll: () => {
+    onScroll: (state) => {
+      chatA11y.onScroll(state);
       emoteTooltipCtl?.refresh();
       quickActionsCtl?.syncOnScroll(lastPointerY);
       syncChatEmpty();
@@ -1147,7 +1182,17 @@ async function boot(): Promise<void> {
         pulseOnSelf:
           data.knobs["appearance.pulseTextInputOnSelfMessage"] === true,
       };
+      composerSpriteOpts = {
+        enableImages: data.knobs["emotes.enableEmoteImages"] !== false,
+        animate: data.knobs["emotes.animateEmotes"] !== false,
+      };
+      const nextEmojiSet = String(data.knobs["emotes.emojiSet"] ?? "Twitter");
+      if (nextEmojiSet !== composerEmojiSet) {
+        composerEmojiSet = nextEmojiSet;
+        composerSprites.clearChannelCache();
+      }
       composerChrome.sync();
+      composerSprites.sync();
       scrollThumb.classList.toggle(
         "is-hidden-thumb",
         data.knobs["appearance.hideScrollbarThumb"] === true,
@@ -1263,6 +1308,13 @@ async function boot(): Promise<void> {
     host: pollPanelHost,
     chatColumn,
     activeChannel: () => ipc.active(),
+    getAuth: () => lastAuth,
+    startLogin: () => {
+      void startLogin();
+    },
+    onStatus: (message, kind = "info") => {
+      toast.push({ kind, text: message });
+    },
   });
   const pinnedBanner = bindPinnedBanner({
     host: pinnedMessageHost,
@@ -1642,7 +1694,10 @@ async function boot(): Promise<void> {
     modal: emotepopupModal,
     anchor: emoteOpen,
     activeChannel: () => ipc.active(),
-    insertEmote: (code) => {
+    insertEmote: (code, url) => {
+      if (url) {
+        composerSprites.remember(code, url);
+      }
       const start = messageInput.selectionStart ?? messageInput.value.length;
       const end = messageInput.selectionEnd ?? start;
       const before = messageInput.value.slice(0, start);
@@ -1653,6 +1708,8 @@ async function boot(): Promise<void> {
       const caret = before.length + padL.length + code.length + padR.length;
       messageInput.setSelectionRange(caret, caret);
       messageInput.focus();
+      composerSprites.sync();
+      composerChrome.sync();
     },
   });
   emoteOpen.addEventListener("click", () => {
@@ -1711,7 +1768,7 @@ async function boot(): Promise<void> {
   let complete: {
     start: number;
     suffix: string;
-    items: string[];
+    items: CompleteItem[];
     index: number;
     popup: "colon" | "at" | null;
     query: string;
@@ -1777,6 +1834,7 @@ async function boot(): Promise<void> {
     channelPoints.relabel();
     ring.relocalizeSystemStrings();
     scrollChrome.refreshLocale();
+    chatA11y.refreshLocale();
     repaintChannelTitle();
     paintTypingStatus();
   };
@@ -2919,6 +2977,7 @@ async function boot(): Promise<void> {
     }
     syncComposer();
     channelPoints.syncAuth();
+    pollPanel.syncAuth();
   }
 
   async function paintAuthFromServer(message?: string): Promise<void> {
@@ -2940,6 +2999,7 @@ async function boot(): Promise<void> {
         ? t("composer.send.title.needChannel")
         : t("composer.send.title.needAuth");
     composerChrome.sync();
+    composerSprites.sync();
   }
 
   async function startLogin(): Promise<void> {
@@ -3028,9 +3088,11 @@ async function boot(): Promise<void> {
     }
     const seq = ++completeSeq;
     completeInFlight = true;
-    let items: string[] = [];
+    let items: CompleteItem[] = [];
     try {
-      items = await invoke<string[]>("chat_complete", { token, firstWord });
+      items = normalizeCompleteItems(
+        await invoke("chat_complete", { token, firstWord }),
+      );
     } catch {
       if (seq === completeSeq && complete?.popup === "colon") {
         clearComplete();
@@ -3058,6 +3120,7 @@ async function boot(): Promise<void> {
       clearComplete();
       return;
     }
+    composerSprites.rememberMany(items);
     complete = {
       start,
       suffix: now.slice(nowCursor),
@@ -3084,9 +3147,11 @@ async function boot(): Promise<void> {
     }
     const seq = ++completeSeq;
     completeInFlight = true;
-    let items: string[] = [];
+    let items: CompleteItem[] = [];
     try {
-      items = await invoke<string[]>("chat_complete", { token, firstWord });
+      items = normalizeCompleteItems(
+        await invoke("chat_complete", { token, firstWord }),
+      );
     } catch {
       if (seq === completeSeq && complete?.popup === "at") {
         clearComplete();
@@ -3114,6 +3179,7 @@ async function boot(): Promise<void> {
       clearComplete();
       return;
     }
+    composerSprites.rememberMany(items);
     complete = {
       start,
       suffix: now.slice(nowCursor),
@@ -3129,8 +3195,8 @@ async function boot(): Promise<void> {
     const cursor = messageInput.selectionStart ?? 0;
     const text = messageInput.value;
     if (complete) {
-      const current = complete.items[complete.index];
-      if (text.slice(complete.start, cursor) === current) {
+      const current = complete.items[complete.index]?.insert;
+      if (current !== undefined && text.slice(complete.start, cursor) === current) {
         const n = complete.items.length;
         complete.index = reverse
           ? (complete.index - 1 + n) % n
@@ -3176,9 +3242,11 @@ async function boot(): Promise<void> {
     completePending = 0;
     const seq = ++completeSeq;
     completeInFlight = true;
-    let items: string[] = [];
+    let items: CompleteItem[] = [];
     try {
-      items = await invoke<string[]>("chat_complete", { token, firstWord });
+      items = normalizeCompleteItems(
+        await invoke("chat_complete", { token, firstWord }),
+      );
     } catch (err) {
       setStatus(formatError(err));
       if (seq === completeSeq) {
@@ -3201,6 +3269,7 @@ async function boot(): Promise<void> {
       clearComplete();
       return;
     }
+    composerSprites.rememberMany(items);
     const n = items.length;
     const extra = completePending;
     completePending = 0;
@@ -3225,12 +3294,17 @@ async function boot(): Promise<void> {
       return;
     }
     const item = complete.items[complete.index];
+    if (!item) {
+      return;
+    }
     applyingComplete = true;
     try {
-      messageInput.value = `${messageInput.value.slice(0, complete.start)}${item}${complete.suffix}`;
-      const pos = complete.start + item.length;
+      messageInput.value = `${messageInput.value.slice(0, complete.start)}${item.insert}${complete.suffix}`;
+      const pos = complete.start + item.insert.length;
       messageInput.setSelectionRange(pos, pos);
       complete.popup = null;
+      composerSprites.rememberMany([item]);
+      composerSprites.sync();
       paintComplete();
       sendSelfTyping(messageInput.value.trim().length > 0);
     } finally {
@@ -3245,15 +3319,32 @@ async function boot(): Promise<void> {
       return;
     }
     completeBox.hidden = false;
-    const iconName: IconName = complete.popup === "at" ? "user" : "emote";
+    const fallbackIcon: IconName = complete.popup === "at" ? "user" : "emote";
     complete.items.forEach((item, i) => {
       const li = document.createElement("li");
       const iconWrap = document.createElement("span");
       iconWrap.className = "complete-icon";
-      iconWrap.append(iconEl(iconName, 14));
+      const showImg =
+        item.kind === "emote" &&
+        typeof item.url === "string" &&
+        isSafeEmoteCdnUrl(item.url) &&
+        composerSpriteOpts.enableImages;
+      if (showImg && item.url) {
+        const img = document.createElement("img");
+        img.src = resolveEmoteUrl(item.url, composerSpriteOpts.animate);
+        img.alt = "";
+        img.draggable = false;
+        img.decoding = "async";
+        img.loading = "lazy";
+        iconWrap.append(img);
+      } else {
+        iconWrap.append(
+          iconEl(item.kind === "user" || complete?.popup === "at" ? "user" : fallbackIcon, 14),
+        );
+      }
       const text = document.createElement("span");
       text.className = "complete-text";
-      text.textContent = item.trimEnd();
+      text.textContent = item.insert.trimEnd();
       li.append(iconWrap, text);
       li.dataset.index = String(i);
       if (i === complete?.index) {
@@ -3290,6 +3381,7 @@ async function boot(): Promise<void> {
       clearComplete();
       clearReply();
       composerChrome.pulse();
+      composerSprites.sync();
       sendSelfTyping(false, true);
     } catch (err) {
       setStatus(formatError(err));
@@ -3321,6 +3413,8 @@ async function boot(): Promise<void> {
     ring.clearHover();
     syncChatEmpty();
     outgoingRaidCtl.syncActiveChannel();
+    composerSprites.clearChannelCache();
+    composerSprites.sync();
   }
 
   function drainChannelQueue(): void {

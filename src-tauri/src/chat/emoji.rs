@@ -123,6 +123,14 @@ pub(crate) fn unified_code(emoji: &str) -> String {
     out
 }
 
+/// CDN PNG for a unicode emoji grapheme (`emotes.emojiSet`), if recognized.
+pub fn emoji_cdn_url(grapheme: &str, set: &str) -> Option<String> {
+    let emoji = lookup_emoji(grapheme)?;
+    let id = unified_code(emoji.as_str());
+    let prefix = cdn_prefix_for(set, &id);
+    Some(format!("{}/{}.png", prefix, id))
+}
+
 fn lookup_emoji(grapheme: &str) -> Option<&'static emojis::Emoji> {
     if let Some(found) = emojis::get(grapheme) {
         return Some(found);
@@ -159,6 +167,14 @@ fn overlaps(spans: &[EmoteSpan], start: u32, end: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emoji_cdn_url_grinning() {
+        let url = emoji_cdn_url("😀", "Twitter").expect("url");
+        assert!(url.starts_with(EMOJI_CDN_TWITTER));
+        assert!(url.ends_with("/1f600.png"));
+        assert!(emoji_cdn_url("not-emoji", "Twitter").is_none());
+    }
 
     #[test]
     fn attaches_unicode_emoji() {

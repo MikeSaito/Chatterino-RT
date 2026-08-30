@@ -286,17 +286,6 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     root.className = "pinned-banner";
     root.setAttribute("role", "status");
     root.dataset.messageId = pin.messageId;
-    const speaker = pin.senderName || pin.senderLogin || pin.pinnedByName || "";
-    const snip =
-      pin.messageText.length > 140
-        ? `${pin.messageText.slice(0, 140)}…`
-        : pin.messageText;
-    root.setAttribute(
-      "aria-label",
-      speaker
-        ? `${t("pinned.label")} ${speaker}: ${snip}`
-        : `${t("pinned.label")} ${snip}`,
-    );
 
     const body = document.createElement("div");
     body.className = "pinned-banner-body";

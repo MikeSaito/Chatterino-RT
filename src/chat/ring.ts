@@ -962,6 +962,39 @@ export class MessageRing {
     return this.pendingBelow;
   }
 
+  /**
+   * Newest-last plain lines for SR readback. Caps work to `limit`; no layout/GPU.
+   */
+  a11yPlainLines(
+    limit = 6,
+  ): Array<{ nick: string; text: string; system: boolean }> {
+    const out: Array<{ nick: string; text: string; system: boolean }> = [];
+    if (limit <= 0 || this.occupied <= 0) {
+      return out;
+    }
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = this.occupied - 1; i >= 0 && out.length < limit; i -= 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.msgId) {
+        continue;
+      }
+      if (slot.disabled && this.hideModerated) {
+        continue;
+      }
+      const text = (slot.copyText || slot.bodyRaw || "").trim();
+      if (!text) {
+        continue;
+      }
+      out.push({
+        nick: slot.system ? "" : slot.nickRaw || slot.login || "",
+        text,
+        system: slot.system,
+      });
+    }
+    out.reverse();
+    return out;
+  }
+
   occupiedCount(): number {
     return this.occupied;
   }

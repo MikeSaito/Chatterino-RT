@@ -33,7 +33,7 @@ const ANCHOR_GAP = 6;
 export function bindEmotePopup(opts: {
   modal: HTMLElement;
   anchor: HTMLElement;
-  insertEmote: (code: string) => void;
+  insertEmote: (code: string, url?: string | null) => void;
   activeChannel: () => string | null;
 }): { open: () => void; close: () => void; toggle: () => void; relabel: () => void } {
   const { modal, anchor, insertEmote, activeChannel } = opts;
@@ -233,7 +233,7 @@ export function bindEmotePopup(opts: {
     if (!item.url && item.kind === "emote") {
       return;
     }
-    insertEmote(item.code);
+    insertEmote(item.code, item.url);
     close();
   };
 

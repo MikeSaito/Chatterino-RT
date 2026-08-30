@@ -16,9 +16,10 @@ const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 // channel:read/manage:redemptions scopes are broadcaster-only and are not needed.
 // If GQL returns 401/403, UI shows error.points.relogin (re-auth required).
 // moderator:read:chat_messages — Helix GET /chat/pins (pinned channel message banner).
+// moderator:manage:warnings — Helix POST /moderation/warnings (/warn).
 // Existing sessions need re-login after this scope is added.
 const DEVICE_SCOPES: &str =
-    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:automod";
+    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:automod moderator:manage:warnings";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";

@@ -1,8 +1,12 @@
 import {
   formatPollCountdown,
   isFinished,
+  parsePredictPoints,
+  predictErrorText,
+  pruneChannelLocks,
   sanitizePanels,
   summaryText,
+  voteErrorText,
   type PollPanel,
 } from "../src/shell/polls.ts";
 import { setLocale } from "../src/i18n/index.ts";
@@ -18,6 +22,63 @@ setLocale("en");
 assert(formatPollCountdown(0) === "0:00", "zero countdown");
 assert(formatPollCountdown(1_000) === "0:01", "one second");
 assert(formatPollCountdown(65_400) === "1:06", "minute+seconds");
+
+assert(parsePredictPoints("10") === 10, "min stake");
+assert(parsePredictPoints("250000") === 250_000, "max stake");
+assert(parsePredictPoints("9") === null, "below min");
+assert(parsePredictPoints("250001") === null, "above max");
+assert(parsePredictPoints("10.5") === null, "fraction rejected");
+assert(parsePredictPoints("-10") === null, "negative rejected");
+assert(parsePredictPoints("01") === null, "leading zero rejected");
+assert(parsePredictPoints("0") === null, "zero rejected");
+
+{
+  const voted = new Set(["poll-a", "poll-b"]);
+  const predicted = new Set(["pred-a"]);
+  const out = pruneChannelLocks({
+    prev: [
+      {
+        kind: "poll",
+        id: "poll-a",
+        title: "A",
+        status: "ACTIVE",
+        totalVotes: 1,
+        options: [{ id: "1", title: "1", votes: 1 }],
+      },
+      {
+        kind: "prediction",
+        id: "pred-a",
+        title: "P",
+        status: "ACTIVE",
+        totalVotes: 1,
+        options: [{ id: "1", title: "1", votes: 1 }],
+      },
+    ],
+    next: [
+      {
+        kind: "poll",
+        id: "poll-a",
+        title: "A",
+        status: "ACTIVE",
+        totalVotes: 2,
+        options: [{ id: "1", title: "1", votes: 2 }],
+      },
+    ],
+    voted,
+    predicted,
+    betPanelId: "pred-a",
+  });
+  assert(voted.has("poll-a"), "kept poll lock for surviving panel");
+  assert(voted.has("poll-b"), "locks from other channels untouched");
+  assert(!predicted.has("pred-a"), "removed prediction lock for channel clear");
+  assert(out.betPanelId === "", "cleared bet form for removed panel");
+  assert(out.removed.includes("pred-a"), "reports removed id");
+}
+
+assert(voteErrorText("POLL_NOT_ACTIVE").includes("not accepting"), "vote error mapped");
+assert(voteErrorText("NOPE") === "Could not submit vote", "vote error fallback");
+assert(predictErrorText("NOT_ENOUGH_POINTS").includes("Not enough"), "predict error mapped");
+assert(predictErrorText(undefined) === "Could not place prediction", "predict error fallback");
 
 const active: PollPanel = {
   kind: "poll",

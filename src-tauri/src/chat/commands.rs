@@ -87,6 +87,16 @@ impl From<super::channel_points::ChannelPointsError> for ApiError {
     }
 }
 
+impl From<super::poll_actions::PollActionsError> for ApiError {
+    fn from(e: super::poll_actions::PollActionsError) -> Self {
+        Self {
+            code: e.code,
+            message: e.message,
+            params: e.params,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn chat_join(
     app: AppHandle,
@@ -511,14 +521,37 @@ fn prepare_outgoing_text(
             custom_commands::resolve_user_commands(&set, text, &ctx)
         }
     };
-    if expanded.chars().count() > MAX_CHAT_CHARS {
+    let max_chars = if looks_like_warn_slash(&expanded) {
+        // Helix reason max 500; command prefix + optional --channel args need headroom.
+        WARN_SLASH_MAX_CHARS
+    } else {
+        MAX_CHAT_CHARS
+    };
+    if expanded.chars().count() > max_chars {
         return Err(ApiError::coded_params(
             "error.message.too_long",
-            format!("message longer than {MAX_CHAT_CHARS} characters"),
-            BTreeMap::from([("max".into(), MAX_CHAT_CHARS.to_string())]),
+            format!("message longer than {max_chars} characters"),
+            BTreeMap::from([("max".into(), max_chars.to_string())]),
         ));
     }
     Ok(expanded)
+}
+
+fn looks_like_warn_slash(text: &str) -> bool {
+    let t = text.trim();
+    let Some(first) = t.chars().next() else {
+        return false;
+    };
+    if first != '/' && first != '.' {
+        return false;
+    }
+    let rest = t[first.len_utf8()..].trim_start();
+    let cmd = rest
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    cmd == "warn"
 }
 
 async fn dispatch_chat_send(
@@ -530,6 +563,9 @@ async fn dispatch_chat_send(
 ) -> Result<(), ApiError> {
     if let Some(raid) = parse_raid_slash(text.trim()) {
         return handle_raid_slash(app, state, channel, raid).await;
+    }
+    if let Some(warn) = parse_warn_slash(text.trim()) {
+        return handle_warn_slash(app, state, channel, warn).await;
     }
     if should_send_helix(state) {
         return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;
@@ -642,6 +678,278 @@ fn parse_raid_slash(text: &str) -> Option<RaidSlash> {
         }
         _ => None,
     }
+}
+
+/// Twitch Helix warn reason max length (API reference).
+const WARN_REASON_MAX_CHARS: usize = 500;
+/// `/warn` + login + spaces + optional `--channel` args + reason headroom.
+const WARN_SLASH_MAX_CHARS: usize = 200 + WARN_REASON_MAX_CHARS;
+
+const WARN_USAGE: &str = r#"Usage: "/warn [options...] <username> <reason>" - Warn a user via their username. Reason is required and will be shown to the target user and other moderators. Options: --channel <channel> to override which channel the warn takes place in (can be specified multiple times)."#;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WarnTargetRef {
+    login: Option<String>,
+    id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WarnSlash {
+    Usage,
+    MissingReason,
+    ReasonTooLong,
+    Action {
+        target: WarnTargetRef,
+        reason: String,
+        /// Empty = current chat channel.
+        channels: Vec<WarnTargetRef>,
+    },
+}
+
+fn parse_user_name_or_id(raw: &str) -> Option<WarnTargetRef> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(id) = trimmed.strip_prefix("id:") {
+        let id = id.trim();
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        return Some(WarnTargetRef {
+            login: None,
+            id: Some(id.to_string()),
+        });
+    }
+    let mut login = trimmed.trim_start_matches(['#', '@']);
+    if let Some(stripped) = login.strip_suffix(',') {
+        login = stripped;
+    }
+    if login.is_empty()
+        || login.len() > 25
+        || !login
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    Some(WarnTargetRef {
+        login: Some(login.to_ascii_lowercase()),
+        id: None,
+    })
+}
+
+fn parse_warn_slash(text: &str) -> Option<WarnSlash> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let first = t.chars().next()?;
+    if first != '/' && first != '.' {
+        return None;
+    }
+    let rest = t[first.len_utf8()..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    let mut parts = rest.split_whitespace();
+    let cmd = parts.next()?.to_ascii_lowercase();
+    if cmd != "warn" {
+        return None;
+    }
+
+    let mut channels: Vec<WarnTargetRef> = Vec::new();
+    let mut positional: Vec<String> = Vec::new();
+    while let Some(tok) = parts.next() {
+        if tok.eq_ignore_ascii_case("--channel") {
+            let Some(ch) = parts.next() else {
+                return Some(WarnSlash::Usage);
+            };
+            let Some(parsed) = parse_user_name_or_id(ch) else {
+                return Some(WarnSlash::Usage);
+            };
+            channels.push(parsed);
+            continue;
+        }
+        if tok.starts_with("--") {
+            return Some(WarnSlash::Usage);
+        }
+        positional.push(tok.to_string());
+        for more in parts.by_ref() {
+            positional.push(more.to_string());
+        }
+        break;
+    }
+
+    if positional.is_empty() {
+        return Some(WarnSlash::Usage);
+    }
+    let Some(target) = parse_user_name_or_id(&positional[0]) else {
+        return Some(WarnSlash::Usage);
+    };
+    let reason = positional[1..].join(" ");
+    if reason.trim().is_empty() {
+        return Some(WarnSlash::MissingReason);
+    }
+    if reason.chars().any(|c| matches!(c, '\0' | '\r' | '\n')) {
+        return Some(WarnSlash::Usage);
+    }
+    if reason.chars().count() > WARN_REASON_MAX_CHARS {
+        return Some(WarnSlash::ReasonTooLong);
+    }
+    Some(WarnSlash::Action {
+        target,
+        reason,
+        channels,
+    })
+}
+
+async fn resolve_warn_profile(
+    target: &WarnTargetRef,
+    token: &str,
+    client_id: &str,
+) -> Option<super::helix::UserProfile> {
+    if let Some(id) = target.id.as_deref() {
+        return super::helix::fetch_user_profile_by_id(id, Some(token), client_id).await;
+    }
+    let login = target.login.as_deref()?;
+    super::helix::fetch_user_profile(login, Some(token), client_id).await
+}
+
+async fn handle_warn_slash(
+    app: &AppHandle,
+    state: &Shared,
+    channel: &str,
+    cmd: WarnSlash,
+) -> Result<(), ApiError> {
+    match &cmd {
+        WarnSlash::Usage => {
+            state.post_channel_notice(app, channel, WARN_USAGE.into());
+            return Ok(());
+        }
+        WarnSlash::MissingReason => {
+            state.post_channel_notice(
+                app,
+                channel,
+                "Failed to warn, you must specify a reason".into(),
+            );
+            return Ok(());
+        }
+        WarnSlash::ReasonTooLong => {
+            state.post_channel_notice(
+                app,
+                channel,
+                format!(
+                    "Failed to warn user - reason too long (max {WARN_REASON_MAX_CHARS} characters)."
+                ),
+            );
+            return Ok(());
+        }
+        WarnSlash::Action { .. } => {}
+    }
+
+    let WarnSlash::Action {
+        target,
+        reason,
+        channels,
+    } = cmd
+    else {
+        return Ok(());
+    };
+
+    let Some((mod_login, token)) = auth::resolved_login_token(state) else {
+        state.post_channel_notice(
+            app,
+            channel,
+            "You must be logged in to warn someone!".into(),
+        );
+        return Ok(());
+    };
+    let client_id = auth::resolved_client_id(state);
+    let Some(moderator_id) = auth::ensure_twitch_user_id(state).await else {
+        state.post_channel_notice(
+            app,
+            channel,
+            "You must be logged in to warn someone!".into(),
+        );
+        return Ok(());
+    };
+
+    let Some(target_profile) = resolve_warn_profile(&target, &token, &client_id).await else {
+        let label = target
+            .login
+            .clone()
+            .or_else(|| target.id.as_ref().map(|id| format!("id:{id}")))
+            .unwrap_or_else(|| "unknown".into());
+        state.post_channel_notice(
+            app,
+            channel,
+            format!("Failed to warn, bad target name: {label}"),
+        );
+        return Ok(());
+    };
+
+    let broadcaster_ids: Vec<String> = if channels.is_empty() {
+        let Some(room_id) = resolve_send_room_id(state, channel) else {
+            state.post_channel_notice(
+                app,
+                channel,
+                "Sending messages in this channel isn't possible.".into(),
+            );
+            return Ok(());
+        };
+        vec![room_id]
+    } else {
+        let mut out = Vec::new();
+        for ch_ref in channels {
+            let Some(broadcaster) = resolve_warn_profile(&ch_ref, &token, &client_id).await else {
+                let label = ch_ref
+                    .login
+                    .clone()
+                    .or_else(|| ch_ref.id.as_ref().map(|id| format!("id:{id}")))
+                    .unwrap_or_else(|| "unknown".into());
+                state.post_channel_notice(
+                    app,
+                    channel,
+                    format!("Failed to warn, bad channel name: {label}"),
+                );
+                continue;
+            };
+            out.push(broadcaster.id);
+        }
+        out
+    };
+
+    for broadcaster_id in broadcaster_ids {
+        match super::helix::warn_user(
+            &broadcaster_id,
+            &moderator_id,
+            &target_profile.id,
+            &reason,
+            &token,
+            &client_id,
+            &target_profile.display_name,
+        )
+        .await
+        {
+            super::helix::HelixWarnOutcome::Ok => {
+                // Stock shows this via EventSub channel.moderate; until that lands,
+                // emit the same system line locally so the moderator gets feedback.
+                state.post_channel_notice(
+                    app,
+                    channel,
+                    format!(
+                        "{mod_login} has warned {}: {reason}",
+                        target_profile.display_name
+                    ),
+                );
+            }
+            super::helix::HelixWarnOutcome::Failed(msg) => {
+                state.post_channel_notice(app, channel, msg);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn resolve_send_room_id(state: &Shared, channel: &str) -> Option<String> {
@@ -1053,6 +1361,25 @@ pub async fn channel_points_claim(
 }
 
 #[tauri::command]
+pub async fn polls_vote(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)] pollId: String,
+    #[allow(non_snake_case)] choiceId: String,
+) -> Result<super::poll_actions::PollVoteResult, ApiError> {
+    Ok(super::poll_actions::vote_in_poll(&state, &pollId, &choiceId).await?)
+}
+
+#[tauri::command]
+pub async fn polls_predict(
+    state: tauri::State<'_, Shared>,
+    #[allow(non_snake_case)] eventId: String,
+    #[allow(non_snake_case)] outcomeId: String,
+    points: u64,
+) -> Result<super::poll_actions::PredictionBetResult, ApiError> {
+    Ok(super::poll_actions::make_prediction(&state, &eventId, &outcomeId, points).await?)
+}
+
+#[tauri::command]
 pub fn chat_emote_popup_list(
     state: tauri::State<'_, Shared>,
     channel: String,
@@ -1078,12 +1405,145 @@ pub fn chat_toggle_favourite_emote(
     super::emote_popup::toggle_favourite(state.inner(), &code, isEmoji, add)
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteItem {
+    /// Text inserted into the composer (often with trailing space).
+    pub insert: String,
+    /// CDN image URL for emote/emoji rows; absent for users/commands.
+    pub url: Option<String>,
+    /// `emote` | `user` | `command`
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EmoteIconItem {
+    pub code: String,
+    pub url: String,
+}
+
+const EMOTE_ICON_CODES_CAP: usize = 64;
+const EMOTE_ICON_CODE_MAX: usize = 200;
+
+fn complete_item_kind(insert: &str) -> &'static str {
+    let trimmed = insert.trim_end();
+    if trimmed.starts_with('/') || trimmed.starts_with('.') {
+        "command"
+    } else if trimmed.starts_with('@') {
+        "user"
+    } else {
+        "emote"
+    }
+}
+
+fn emoji_set_knob(shared: &Shared) -> String {
+    let Ok(settings) = shared.settings.lock() else {
+        return "Twitter".into();
+    };
+    settings
+        .data
+        .knobs
+        .get("emotes.emojiSet")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Twitter")
+        .to_string()
+}
+
+fn resolve_composer_icon_url(
+    catalog: &super::emotes::Catalog,
+    channel: &str,
+    code: &str,
+    emoji_set: &str,
+) -> Option<String> {
+    if let Some(def) = catalog.lookup(channel, code) {
+        if !def.url.is_empty() {
+            return Some(def.url.clone());
+        }
+    }
+    super::emoji::emoji_cdn_url(code, emoji_set)
+}
+
+fn decorate_complete_items(
+    shared: &Shared,
+    channel: &str,
+    inserts: Vec<String>,
+) -> Result<Vec<CompleteItem>, ApiError> {
+    let emoji_set = emoji_set_knob(shared);
+    let catalog = shared
+        .catalog
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    Ok(inserts
+        .into_iter()
+        .map(|insert| {
+            let kind = complete_item_kind(&insert);
+            let url = if kind == "emote" {
+                resolve_composer_icon_url(&catalog, channel, insert.trim_end(), &emoji_set)
+            } else {
+                None
+            };
+            CompleteItem {
+                insert,
+                url,
+                kind: kind.to_string(),
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn chat_emote_icons(
+    state: tauri::State<'_, Shared>,
+    codes: Vec<String>,
+) -> Result<Vec<EmoteIconItem>, ApiError> {
+    if codes.len() > EMOTE_ICON_CODES_CAP {
+        return Err(ApiError::coded(
+            "error.emote.icons_limit",
+            "too many emote codes",
+        ));
+    }
+    let emoji_set = emoji_set_knob(state.inner());
+    let channel = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.active.clone().unwrap_or_default()
+    };
+    let catalog = state
+        .catalog
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for raw in codes {
+        if raw.chars().count() == 0 || raw.chars().count() > EMOTE_ICON_CODE_MAX {
+            continue;
+        }
+        if raw
+            .chars()
+            .any(|c| matches!(c, '\0' | '\r' | '\n' | '\u{0001}'))
+        {
+            continue;
+        }
+        let code = raw.trim_end();
+        if code.is_empty() || !seen.insert(code.to_string()) {
+            continue;
+        }
+        if let Some(url) = resolve_composer_icon_url(&catalog, &channel, code, &emoji_set) {
+            out.push(EmoteIconItem {
+                code: code.to_string(),
+                url,
+            });
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn chat_complete(
     state: tauri::State<'_, Shared>,
     token: String,
     first_word: bool,
-) -> Result<Vec<String>, ApiError> {
+) -> Result<Vec<CompleteItem>, ApiError> {
     let colon = complete::colon_emote_needle(&token).is_some();
     if token.chars().count() < complete::MIN_QUERY && !(colon && token == ":") {
         return Ok(Vec::new());
@@ -1097,14 +1557,19 @@ pub fn chat_complete(
     {
         return Ok(Vec::new());
     }
+    let channel = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        hub.active.clone().unwrap_or_default()
+    };
     if first_word && (token.starts_with('/') || token.starts_with('.')) {
-        return Ok(complete::suggestions_with_custom(
+        let inserts = complete::suggestions_with_custom(
             &token,
             first_word,
             Vec::new(),
             Vec::new(),
             &custom_command_triggers(state.inner()),
-        ));
+        );
+        return decorate_complete_items(state.inner(), &channel, inserts);
     }
     let (smart, prefix_only, user_completion_only_with_at, always_include_broadcaster) = {
         let settings = state
@@ -1135,10 +1600,6 @@ pub fn chat_complete(
         super::emotes::MatchMode::Prefix
     } else {
         super::emotes::MatchMode::Contains
-    };
-    let channel = {
-        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        hub.active.clone().unwrap_or_default()
     };
     // `:query` → emote-only (stock TabCompletionModel SourceKind::Emote).
     if let Some(needle) = complete::colon_emote_needle(&token) {
@@ -1175,13 +1636,15 @@ pub fn chat_complete(
             }
             emotes
         };
-        return Ok(complete::suggestions_with_rank(
+        drop(catalog);
+        let inserts = complete::suggestions_with_rank(
             &token,
             first_word,
             emotes,
             Vec::new(),
             !smart,
-        ));
+        );
+        return decorate_complete_items(state.inner(), &channel, inserts);
     }
     let at_only = token.starts_with('@');
     let emotes = if at_only {
@@ -1211,13 +1674,14 @@ pub fn chat_complete(
             .map_err(|_| ApiError::internal("lock"))?;
         chatters.prefixed(&channel, &token, always_include_broadcaster)
     };
-    Ok(complete::suggestions_with_rank(
+    let inserts = complete::suggestions_with_rank(
         &token,
         first_word,
         emotes,
         names,
         !smart || at_only,
-    ))
+    );
+    decorate_complete_items(state.inner(), &channel, inserts)
 }
 
 #[derive(Debug, Serialize)]
@@ -2056,6 +2520,68 @@ mod tests {
         assert_eq!(parse_raid_slash("/unraid x"), Some(RaidSlash::UsageCancel));
         assert_eq!(parse_raid_slash("/me waves"), None);
         assert_eq!(parse_raid_slash("raid foo"), None);
+    }
+
+    #[test]
+    fn parse_warn_slash_commands() {
+        assert_eq!(parse_warn_slash("/me waves"), None);
+        assert_eq!(parse_warn_slash("/warn"), Some(WarnSlash::Usage));
+        assert_eq!(
+            parse_warn_slash("/warn someone"),
+            Some(WarnSlash::MissingReason)
+        );
+        assert_eq!(
+            parse_warn_slash("/warn @Foo_Bar be nice"),
+            Some(WarnSlash::Action {
+                target: WarnTargetRef {
+                    login: Some("foo_bar".into()),
+                    id: None,
+                },
+                reason: "be nice".into(),
+                channels: vec![],
+            })
+        );
+        assert_eq!(
+            parse_warn_slash(".warn id:123 spam links"),
+            Some(WarnSlash::Action {
+                target: WarnTargetRef {
+                    login: None,
+                    id: Some("123".into()),
+                },
+                reason: "spam links".into(),
+                channels: vec![],
+            })
+        );
+        assert_eq!(
+            parse_warn_slash("/warn --channel other target please stop"),
+            Some(WarnSlash::Action {
+                target: WarnTargetRef {
+                    login: Some("target".into()),
+                    id: None,
+                },
+                reason: "please stop".into(),
+                channels: vec![WarnTargetRef {
+                    login: Some("other".into()),
+                    id: None,
+                }],
+            })
+        );
+        assert_eq!(
+            parse_warn_slash("/warn --channel"),
+            Some(WarnSlash::Usage)
+        );
+        let long = "x".repeat(501);
+        assert_eq!(
+            parse_warn_slash(&format!("/warn bob {long}")),
+            Some(WarnSlash::ReasonTooLong)
+        );
+        let ok_reason = "x".repeat(500);
+        assert!(matches!(
+            parse_warn_slash(&format!("/warn bob {ok_reason}")),
+            Some(WarnSlash::Action { .. })
+        ));
+        assert!(looks_like_warn_slash("/warn bob reason"));
+        assert!(!looks_like_warn_slash("/ban bob"));
     }
 
     #[test]
