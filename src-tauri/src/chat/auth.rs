@@ -12,11 +12,12 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
-// moderator:read:chat_messages — Helix GET /chat/pins (pinned channel message banner).
+// moderator:read:chat_messages — Helix GET /chat/pins (mod banner snapshot).
+// moderator:manage:chat_messages — Helix PUT/DELETE /chat/pins (context Pin/Unpin).
 // moderator:manage:warnings — Helix POST /moderation/warnings (/warn).
-// Existing sessions need re-login after this scope is added.
+// Existing sessions need re-login after scopes are added.
 const DEVICE_SCOPES: &str =
-    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:automod moderator:manage:warnings";
+    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";

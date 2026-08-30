@@ -323,6 +323,25 @@ pub async fn chat_automod_manage(
     super::automod::manage_message(app, state.inner().clone(), msgId, action, channel).await
 }
 
+#[tauri::command]
+pub async fn chat_pin_message(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    #[allow(non_snake_case)] messageId: String,
+    #[allow(non_snake_case)] durationSeconds: Option<u32>,
+) -> Result<(), ApiError> {
+    super::pins::pin_message(state.inner(), &channel, &messageId, durationSeconds).await
+}
+
+#[tauri::command]
+pub async fn chat_unpin_message(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+    #[allow(non_snake_case)] messageId: String,
+) -> Result<(), ApiError> {
+    super::pins::unpin_message(state.inner(), &channel, &messageId).await
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomCommandInvoke {

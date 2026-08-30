@@ -4683,9 +4683,13 @@ button.poll-panel-option-btn.is-selected {
   z-index: calc(var(--z-menu) + 1);
 }
 
-.chat-context-submenu:hover .chat-context-submenu-items,
-.chat-context-submenu:focus-within .chat-context-submenu-items {
+.chat-context-submenu:hover > .chat-context-submenu-items,
+.chat-context-submenu:focus-within > .chat-context-submenu-items {
   display: flex;
+}
+
+.chat-context-submenu-nested > .chat-context-submenu-items {
+  top: 0;
 }
 
 .chat-context-submenu-items button {

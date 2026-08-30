@@ -1839,6 +1839,8 @@ async function boot(): Promise<void> {
   let copyJsonSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
+  /** Channel snapshot at menu open (pin/unpin must not follow tab switch). */
+  let contextMenuChannel = "";
   let channelBusy = false;
   const channelQueue: {
     kind: "join" | "leave" | "sync";
@@ -2306,6 +2308,44 @@ async function boot(): Promise<void> {
           private: searchIncognito,
         }).catch(() => undefined);
       }
+      return;
+    }
+    if ((action === "pin" || action === "unpin") && target.msgId) {
+      const channel = snapshotModChannel(contextMenuChannel);
+      if (!channel) {
+        setStatus(t("status.noChannel"));
+        return;
+      }
+      if (!ring.canModerateOn()) {
+        setStatus(t("error.pin.forbidden"));
+        return;
+      }
+      const messageId = target.msgId;
+      void (async () => {
+        try {
+          if (action === "unpin") {
+            await invoke("chat_unpin_message", { channel, messageId });
+          } else {
+            const rawDuration = btn.dataset.duration?.trim() ?? "";
+            const durationSeconds =
+              rawDuration === "" ? null : Number.parseInt(rawDuration, 10);
+            if (
+              durationSeconds !== null &&
+              (!Number.isFinite(durationSeconds) || durationSeconds <= 0)
+            ) {
+              setStatus(t("error.pin.invalid_duration"));
+              return;
+            }
+            await invoke("chat_pin_message", {
+              channel,
+              messageId,
+              durationSeconds,
+            });
+          }
+        } catch (err) {
+          setStatus(formatError(err));
+        }
+      })();
       return;
     }
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
@@ -2867,6 +2907,7 @@ async function boot(): Promise<void> {
   function openContextMenu(ctx: SlotContext): void {
     headerMenuCtl?.hide();
     contextTarget = ctx;
+    contextMenuChannel = snapshotModChannel(ipc.active() || "");
     if (contextCustomHost && contextCustomSep) {
       contextCustomHost.replaceChildren();
       const cmds = menuCommands.filter(
@@ -2891,6 +2932,7 @@ async function boot(): Promise<void> {
     );
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
+    const moderateMenu = contextMenuEl.querySelector<HTMLElement>("#chat-context-moderate");
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
     const streamlinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-streamlink"]',
@@ -2917,6 +2959,9 @@ async function boot(): Promise<void> {
     }
     if (userBtn) {
       userBtn.hidden = !ctx.login;
+    }
+    if (moderateMenu) {
+      moderateMenu.hidden = !(ctx.msgId && !ctx.disabled && ring.canModerateOn());
     }
     if (twitchBtn) {
       twitchBtn.hidden = !ctx.login;
@@ -2996,6 +3041,7 @@ async function boot(): Promise<void> {
   function hideContextMenu(): void {
     contextMenuEl.hidden = true;
     contextTarget = null;
+    contextMenuChannel = "";
     headerMenuCtl?.hide();
     authMenuCtl?.hide();
     joinPopoverCtl?.hide();
