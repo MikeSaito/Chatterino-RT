@@ -23,11 +23,37 @@ export function moveOpenTab(
   return next;
 }
 
+/**
+ * Absolute drag preview from the order frozen at gesture arm.
+ * Always derives from `startOpen` + `startIndex` (not incremental live swaps),
+ * so a pointer over a far slot lands at that index in one step.
+ */
+export function orderAtDragTarget(
+  startOpen: readonly string[],
+  startIndex: number,
+  toIndex: number,
+): string[] | null {
+  if (
+    startIndex < 0 ||
+    toIndex < 0 ||
+    startIndex >= startOpen.length ||
+    toIndex >= startOpen.length
+  ) {
+    return null;
+  }
+  if (toIndex === startIndex) {
+    return [...startOpen];
+  }
+  return moveOpenTab(startOpen, startIndex, toIndex);
+}
+
 export type TabLayoutBox = { left: number; width: number };
 
 /**
- * Chatterino-style tabAt: index whose horizontal midpoint is to the right of `x`
- * (content coordinates: scrollLeft + clientX - listLeft).
+ * Slot index for content X: first tab whose horizontal midpoint is to the right
+ * of `x` (content coordinates: scrollLeft + clientX - listLeft).
+ * Used against geometry frozen at drag-arm so live DOM shifts cannot pin the
+ * dragged tab to a neighbor-only swap.
  */
 export function indexAtContentX(
   tabs: readonly TabLayoutBox[],

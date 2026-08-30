@@ -1,10 +1,15 @@
 import { setButtonIcon } from "./icons";
 import { channelTabAttrs } from "./channelTabAria";
-import { indexAtContentX, moveOpenTab } from "./channelTabOrder";
+import {
+  indexAtContentX,
+  moveOpenTab,
+  orderAtDragTarget,
+  type TabLayoutBox,
+} from "./channelTabOrder";
 import { normalizeTabLive, tabAvatarLetter } from "./channelTabChrome";
 import { t } from "../i18n";
 
-export { moveOpenTab, indexAtContentX } from "./channelTabOrder";
+export { moveOpenTab, indexAtContentX, orderAtDragTarget } from "./channelTabOrder";
 
 const DRAG_ARM_PX = 8;
 const EDGE_SCROLL_PX = 28;
@@ -130,6 +135,11 @@ export function bindChannelList(
     fromIndex: number;
     startIndex: number;
     startX: number;
+    lastClientX: number;
+    /** Open order frozen when the drag arms (absolute target base). */
+    startOpen: string[];
+    /** Tab boxes in content coords at arm time. */
+    frozenBoxes: TabLayoutBox[];
     armed: boolean;
     row: HTMLElement;
   } | null = null;
@@ -175,12 +185,40 @@ export function bindChannelList(
 
   /**
    * Own activation on pointerup: capture / is-dragging break the synthetic click.
-   * activate=false for cancel / lost capture (no accidental join).
+   * activate=false for cancel / lost capture (rollback preview, no persist / join).
    * Armed drag that returned to startIndex is not a select.
    */
-  const finishPointer = (activate: boolean): void => {
+  const finishPointer = (activate: boolean, clientX?: number): void => {
     if (!drag) {
       return;
+    }
+    if (typeof clientX === "number") {
+      drag.lastClientX = clientX;
+    }
+    if (!activate) {
+      if (
+        drag.armed &&
+        drag.fromIndex !== drag.startIndex &&
+        drag.startOpen.length > 0
+      ) {
+        open.length = 0;
+        open.push(...drag.startOpen);
+        syncDomToOpen(drag.login, false);
+      }
+      clearDrag();
+      suppressNextClick = true;
+      window.setTimeout(() => {
+        suppressNextClick = false;
+      }, 0);
+      return;
+    }
+    // Final hit-test from frozen geometry so a fast flick still lands on the
+    // slot under the pointer, not the last neighbor-only live step.
+    if (drag.armed && drag.frozenBoxes.length > 0) {
+      const to = indexAtContentX(drag.frozenBoxes, contentX(drag.lastClientX));
+      if (to >= 0) {
+        applyDragIndex(to);
+      }
     }
     const login = drag.login;
     const reordered = drag.armed && drag.fromIndex !== drag.startIndex;
@@ -194,18 +232,24 @@ export function bindChannelList(
       onReorder?.([...open]);
       return;
     }
-    if (activate && !wasArmed) {
+    if (!wasArmed) {
       onSelect(login);
     }
   };
 
-  const readTabBoxes = (): { left: number; width: number }[] => {
-    const boxes: { left: number; width: number }[] = [];
+  /** Content-coordinate boxes (scroll-aware); offsetLeft is wrong when offsetParent is the host. */
+  const readTabBoxes = (): TabLayoutBox[] => {
+    const listRect = list.getBoundingClientRect();
+    const boxes: TabLayoutBox[] = [];
     for (const node of list.children) {
       if (!(node instanceof HTMLElement) || !node.classList.contains("channel-row")) {
         continue;
       }
-      boxes.push({ left: node.offsetLeft, width: node.offsetWidth });
+      const rect = node.getBoundingClientRect();
+      boxes.push({
+        left: rect.left - listRect.left + list.scrollLeft,
+        width: rect.width,
+      });
     }
     return boxes;
   };
@@ -255,26 +299,29 @@ export function bindChannelList(
     if (!drag || toIndex === drag.fromIndex) {
       return;
     }
-    const next = moveOpenTab(open, drag.fromIndex, toIndex);
+    const next = orderAtDragTarget(drag.startOpen, drag.startIndex, toIndex);
     if (!next) {
       return;
     }
     open.length = 0;
     open.push(...next);
     drag.fromIndex = toIndex;
-    const moved = drag.fromIndex !== drag.startIndex;
-    syncDomToOpen(drag.login, moved);
+    // Keep grabbing chrome for the whole armed gesture, even at startIndex.
+    syncDomToOpen(drag.login, true);
   };
 
   const onWindowPointerMove = (ev: PointerEvent): void => {
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
+    drag.lastClientX = ev.clientX;
     if (!drag.armed) {
       if (Math.abs(ev.clientX - drag.startX) < DRAG_ARM_PX) {
         return;
       }
       drag.armed = true;
+      drag.startOpen = [...open];
+      drag.frozenBoxes = readTabBoxes();
       try {
         drag.row.setPointerCapture(ev.pointerId);
       } catch {
@@ -284,7 +331,8 @@ export function bindChannelList(
       ev.preventDefault();
     }
     autoScroll(ev.clientX);
-    const boxes = readTabBoxes();
+    const boxes =
+      drag.frozenBoxes.length > 0 ? drag.frozenBoxes : readTabBoxes();
     const to = indexAtContentX(boxes, contentX(ev.clientX));
     if (to < 0) {
       return;
@@ -296,21 +344,21 @@ export function bindChannelList(
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
-    finishPointer(true);
+    finishPointer(true, ev.clientX);
   };
 
   const onWindowPointerCancel = (ev: PointerEvent): void => {
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
-    finishPointer(false);
+    finishPointer(false, ev.clientX);
   };
 
   const onLostPointerCapture = (ev: PointerEvent): void => {
     if (!drag || ev.pointerId !== drag.pointerId) {
       return;
     }
-    finishPointer(false);
+    finishPointer(false, ev.clientX);
   };
 
   const onTabPointerDown = (
@@ -335,6 +383,9 @@ export function bindChannelList(
       fromIndex,
       startIndex: fromIndex,
       startX: ev.clientX,
+      lastClientX: ev.clientX,
+      startOpen: [...open],
+      frozenBoxes: [],
       armed: false,
       row: item,
     };
