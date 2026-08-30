@@ -41,6 +41,23 @@ pub struct ChannelLive {
     pub stream_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_mature: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelRoomState {
+    pub channel: String,
+    pub emote_only: bool,
+    pub subs_only: bool,
+    pub slow_sec: u32,
+    /// Twitch followers-only minutes; `-1` = off.
+    pub followers_only: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

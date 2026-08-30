@@ -770,6 +770,7 @@ fn dispatch_line(
                 return LineAction::None;
             }
             decorate_event(&mut event, shared, &channel);
+            let was_roomstate = matches!(&event, ChatEvent::Roomstate { .. });
             if matches!(&event, ChatEvent::Privmsg { .. }) {
                 if let Some(rid) = shared
                     .hub
@@ -803,6 +804,9 @@ fn dispatch_line(
             }
             if let Some(batch) = batch {
                 deliver_batch(app, shared, &batch);
+            }
+            if was_roomstate {
+                super::session::emit_roomstate(app, shared, &channel);
             }
             emit_send_waits(app, shared);
             if let Some(msg) = failed {

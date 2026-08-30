@@ -63,7 +63,10 @@
           </div>
         </header>
         <div id="stage">
-          <div id="player-slot"></div>
+          <div id="player-column">
+            <div id="player-slot"></div>
+            <aside id="player-meta" class="player-meta" aria-live="polite"></aside>
+          </div>
           <div
             id="stage-split"
             role="separator"
@@ -73,6 +76,7 @@
             tabindex="0"
           ></div>
           <div id="chat-column">
+            <aside id="chat-modes" class="chat-modes" aria-live="polite" hidden></aside>
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>

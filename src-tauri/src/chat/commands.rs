@@ -115,6 +115,9 @@ pub async fn chat_join(
     send_cmd(&state, IrcCmd::Join(normalized.clone())).await?;
     let _ = super::session::remember(&state, normalized.clone(), do_focus);
     auth::emit(&app, &state);
+    if do_focus {
+        super::session::emit_roomstate(&app, &state, &normalized);
+    }
     Ok(normalized)
 }
 
@@ -172,6 +175,7 @@ pub async fn chat_leave(
             }
             let _ = super::session::remember(&state, ch.clone(), true);
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
+            super::session::emit_roomstate(&app, &state, ch);
         } else {
             let _ = super::session::clear_last(&state);
         }

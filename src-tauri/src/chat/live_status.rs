@@ -61,6 +61,13 @@ fn channel_live_payload(channel: &str, status: &helix::StreamStatus) -> ChannelL
         game_name: status.live.then(|| status.game_name.clone()).flatten(),
         stream_title: status.live.then(|| status.stream_title.clone()).flatten(),
         started_at: status.live.then(|| status.started_at.clone()).flatten(),
+        language: status.live.then(|| status.language.clone()).flatten(),
+        tags: if status.live {
+            status.tags.clone()
+        } else {
+            Vec::new()
+        },
+        is_mature: status.live && status.is_mature,
     }
 }
 

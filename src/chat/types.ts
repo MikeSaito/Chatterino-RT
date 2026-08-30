@@ -192,6 +192,9 @@ export type ChannelLive = {
   gameName?: string;
   streamTitle?: string;
   startedAt?: string;
+  language?: string;
+  tags?: string[];
+  isMature?: boolean;
 };
 
 export type AuthAccountRow = {

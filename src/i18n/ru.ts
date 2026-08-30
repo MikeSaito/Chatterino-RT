@@ -36,6 +36,16 @@ export const ru: Record<MessageKey, string> = {
   "header.menu.reconnect": "Переподключить",
   "header.menu.leave": "Покинуть канал",
 
+  "player.meta.live": "LIVE",
+  "player.meta.offline": "Офлайн",
+  "player.meta.viewers": "Зрители",
+  "player.meta.mature": "18+",
+  "chat.modes.emoteOnly": "Только эмодзи",
+  "chat.modes.subsOnly": "Только сабы",
+  "chat.modes.followers": "Только фолловеры",
+  "chat.modes.followersMin": "Фолловеры ({minutes}м)",
+  "chat.modes.slow": "Медленный режим ({seconds}с)",
+
   "joinPopover.aria": "Присоединиться к каналу",
   "joinPopover.label": "канал",
   "joinPopover.submit": "Join",

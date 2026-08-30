@@ -257,6 +257,10 @@ impl Hub {
         }
     }
 
+    pub fn room_modes(&self, channel: &str) -> Option<super::room_modes::RoomModes> {
+        self.buffers.get(channel).and_then(|b| b.room_modes())
+    }
+
     pub fn drop_channel(&mut self, channel: &str) -> Option<String> {
         let clear = self
             .buffers

@@ -208,11 +208,27 @@ pub fn emit_rooms(app: &AppHandle, shared: &Shared, dropped: Option<String>) {
     let _ = app.emit(
         "chat:rooms",
         super::types::ChatRooms {
-            active,
+            active: active.clone(),
             open,
             dropped,
         },
     );
+    if let Some(ch) = active.as_deref() {
+        emit_roomstate(app, shared, ch);
+    }
+}
+
+/// Push current ROOMSTATE modes when known (skip unknown → avoid wiping UI).
+pub fn emit_roomstate(app: &AppHandle, shared: &Shared, channel: &str) {
+    let Some(modes) = shared
+        .hub
+        .lock()
+        .ok()
+        .and_then(|hub| hub.room_modes(channel))
+    else {
+        return;
+    };
+    let _ = app.emit("chat:roomstate", modes.to_payload(channel));
 }
 
 fn valid_login(login: &str) -> bool {

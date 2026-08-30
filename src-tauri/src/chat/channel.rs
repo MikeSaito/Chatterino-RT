@@ -68,6 +68,10 @@ impl ChannelBuf {
         true
     }
 
+    pub fn room_modes(&self) -> Option<RoomModes> {
+        self.room_modes
+    }
+
     /// ROOMSTATE / USERSTATE: merge or send-wait side effects; drop from scrollback.
     fn expand(&mut self, event: ChatEvent) -> Vec<ChatEvent> {
         match &event {

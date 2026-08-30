@@ -34,6 +34,16 @@ export const en = {
   "header.menu.reconnect": "Reconnect",
   "header.menu.leave": "Leave channel",
 
+  "player.meta.live": "LIVE",
+  "player.meta.offline": "Offline",
+  "player.meta.viewers": "Viewers",
+  "player.meta.mature": "Mature",
+  "chat.modes.emoteOnly": "Emote-only",
+  "chat.modes.subsOnly": "Subs-only",
+  "chat.modes.followers": "Followers-only",
+  "chat.modes.followersMin": "Followers ({minutes}m)",
+  "chat.modes.slow": "Slow ({seconds}s)",
+
   "joinPopover.aria": "Join channel",
   "joinPopover.label": "channel",
   "joinPopover.submit": "Join",

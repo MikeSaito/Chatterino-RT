@@ -329,6 +329,9 @@ pub struct StreamStatus {
     pub stream_title: Option<String>,
     pub started_at: Option<String>,
     pub stream_id: Option<String>,
+    pub language: Option<String>,
+    pub tags: Vec<String>,
+    pub is_mature: bool,
 }
 
 pub fn parse_stream_status(value: &Value) -> StreamStatus {
@@ -344,12 +347,26 @@ pub fn parse_stream_status(value: &Value) -> StreamStatus {
             stream_title: None,
             started_at: None,
             stream_id: None,
+            language: None,
+            tags: Vec::new(),
+            is_mature: false,
         };
     };
     parse_stream_item(item)
 }
 
 fn parse_stream_item(item: &Value) -> StreamStatus {
+    let tags = item
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     StreamStatus {
         live: true,
         viewer_count: item
@@ -376,6 +393,16 @@ fn parse_stream_item(item: &Value) -> StreamStatus {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        language: item
+            .get("language")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        tags,
+        is_mature: item
+            .get("is_mature")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -1255,6 +1282,23 @@ mod tests {
         assert_eq!(parsed.game_name.as_deref(), Some("Just Chatting"));
         assert_eq!(parsed.stream_title.as_deref(), Some("hello world"));
         assert_eq!(parsed.started_at.as_deref(), Some("2020-01-01T12:00:00Z"));
+        assert!(parsed.language.is_none());
+        assert!(parsed.tags.is_empty());
+        assert!(!parsed.is_mature);
+
+        let rich = serde_json::json!({
+            "data": [{
+                "viewer_count": 1,
+                "title": "t",
+                "language": "en",
+                "tags": ["English", "FPS"],
+                "is_mature": true
+            }]
+        });
+        let rich_parsed = parse_stream_status(&rich);
+        assert_eq!(rich_parsed.language.as_deref(), Some("en"));
+        assert_eq!(rich_parsed.tags, vec!["English", "FPS"]);
+        assert!(rich_parsed.is_mature);
     }
 
     #[test]

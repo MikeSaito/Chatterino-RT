@@ -100,9 +100,11 @@ import {
   type TooltipPreviewMode,
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
-import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
+import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
 import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
+import { paintPlayerMeta } from "./shell/playerMeta";
+import { paintChatModes, type ChannelRoomState } from "./shell/chatModes";
 
 let chatIpc: ChatIpc | null = null;
 let teardownChat: (() => void) | null = null;
@@ -180,6 +182,8 @@ async function boot(): Promise<void> {
     "#moderation-mode-btn",
   );
   const player = document.querySelector<HTMLElement>("#player-slot");
+  const playerMeta = document.querySelector<HTMLElement>("#player-meta");
+  const chatModesEl = document.querySelector<HTMLElement>("#chat-modes");
   const stage = document.querySelector<HTMLElement>("#stage");
   const stageSplit = document.querySelector<HTMLElement>("#stage-split");
   const status = document.querySelector<HTMLElement>("#status");
@@ -714,6 +718,7 @@ async function boot(): Promise<void> {
   let headerKnobs: HeaderKnobs = parseHeaderKnobs({});
   let thumbnailSizeStream: ThumbnailSizeStream = 2;
   const streamByChannel = new Map<string, ChannelLive>();
+  const roomByChannel = new Map<string, ChannelRoomState>();
   let emoteTooltipCtl: { hide: () => void; refresh: () => void } | null = null;
   let streamPreviewCtl: { hide: () => void; refresh: () => void } | null = null;
   if (emoteTooltip && emoteTooltipImg && emoteTooltipText && canvasHost) {
@@ -984,8 +989,6 @@ async function boot(): Promise<void> {
       );
       menuCommands = menuCommandsFromSettings(data);
       emoteTooltipCtl?.refresh();
-      repaintChannelTitle();
-      streamPreviewCtl?.refresh();
       uiLayout = parseUiLayout(data.knobs["appearance.uiLayout"]);
       if (!stageSplitCtl?.isDragging()) {
         playerChatSplit = parsePlayerChatSplit(data.knobs["appearance.playerChatSplit"]);
@@ -1008,6 +1011,8 @@ async function boot(): Promise<void> {
       joinPopoverCtl?.sync();
       tabOverflowCtl?.refresh();
       applyWindowMinForLayout(uiLayout);
+      repaintChannelTitle();
+      streamPreviewCtl?.refresh();
     },
   });
   prepareSettingsOpen = () => {
@@ -1166,28 +1171,67 @@ async function boot(): Promise<void> {
       return;
     }
     const ch = ipc.active();
+    const sm = streamerModeState();
+    const knobs = effectiveHeaderKnobs(headerKnobs, {
+      streamerActive: sm.active,
+      hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
+    });
     if (!ch) {
       titleEl.replaceChildren();
+      titleEl.hidden = false;
       headerLiveEl.hidden = true;
       headerChannelNameEl.textContent = "";
       paintHeaderAvatar("");
       setPlayerLiveHint(null);
       ring.setChannelLive(false);
       replyThreadCtl?.repaint();
+      if (playerMeta) {
+        paintPlayerMeta({
+          root: playerMeta,
+          stream: null,
+          knobs,
+          enabled: false,
+        });
+      }
+      if (chatModesEl) {
+        paintChatModes(chatModesEl, null);
+      }
       return;
     }
     const stream = streamByChannel.get(ch.toLowerCase());
     const live = stream?.live ?? false;
     ring.setChannelLive(live);
     replyThreadCtl?.repaint();
-    const sm = streamerModeState();
-    const knobs = effectiveHeaderKnobs(headerKnobs, {
-      streamerActive: sm.active,
-      hideViewerCountAndDuration: sm.hideViewerCountAndDuration,
-    });
     headerChannelNameEl.textContent = ch;
-    paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
-    headerLiveEl.hidden = !live;
+    const extended = uiLayout === "Extended";
+    if (extended) {
+      titleEl.replaceChildren();
+      titleEl.hidden = true;
+      headerLiveEl.hidden = true;
+      if (playerMeta) {
+        paintPlayerMeta({
+          root: playerMeta,
+          stream: stream ?? null,
+          knobs,
+          enabled: true,
+        });
+      }
+    } else {
+      titleEl.hidden = false;
+      paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
+      headerLiveEl.hidden = !live;
+      if (playerMeta) {
+        paintPlayerMeta({
+          root: playerMeta,
+          stream: null,
+          knobs,
+          enabled: false,
+        });
+      }
+    }
+    if (chatModesEl) {
+      paintChatModes(chatModesEl, roomByChannel.get(ch.toLowerCase()) ?? null);
+    }
     if (headerAvatarLogin !== ch.toLowerCase()) {
       paintHeaderAvatar(ch);
       requestChannelAvatar(ch);
@@ -1458,6 +1502,7 @@ async function boot(): Promise<void> {
     emotePopup.relabel();
     ring.relocalizeSystemStrings();
     scrollChrome.refreshLocale();
+    repaintChannelTitle();
   };
 
   onLocaleChange(() => {
@@ -1910,6 +1955,29 @@ async function boot(): Promise<void> {
     repaintChannelTitle();
   });
 
+  await listen<ChannelRoomState>(CHAT_ROOMSTATE_EVENT, (ev) => {
+    const ch = ev.payload.channel?.trim().toLowerCase() ?? "";
+    if (!ch) {
+      return;
+    }
+    roomByChannel.set(ch, {
+      channel: ch,
+      emoteOnly: Boolean(ev.payload.emoteOnly),
+      subsOnly: Boolean(ev.payload.subsOnly),
+      slowSec: Number(ev.payload.slowSec) || 0,
+      followersOnly:
+        typeof ev.payload.followersOnly === "number"
+          ? ev.payload.followersOnly
+          : -1,
+    });
+    if (ch !== ipc.active().toLowerCase()) {
+      return;
+    }
+    if (chatModesEl) {
+      paintChatModes(chatModesEl, roomByChannel.get(ch) ?? null);
+    }
+  });
+
   await listen<{ login: string; url: string }>("chat:profile_image", (ev) => {
     const login = ev.payload.login?.trim().toLowerCase() ?? "";
     const url = ev.payload.url?.trim() ?? "";
@@ -1941,6 +2009,7 @@ async function boot(): Promise<void> {
       channels.remove(ev.payload.dropped);
       sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
       streamByChannel.delete(ev.payload.dropped.toLowerCase());
+      roomByChannel.delete(ev.payload.dropped.toLowerCase());
       avatarUrlByLogin.delete(ev.payload.dropped.toLowerCase());
     }
     if (!channels.isReordering()) {
@@ -2750,8 +2819,8 @@ async function boot(): Promise<void> {
   function applyMounted(joined: string): void {
     replyThreadCtl?.close();
     channels.remember(joined);
-    streamByChannel.delete(joined.toLowerCase());
-    ring.setChannelLive(false);
+    // Keep last Helix snapshot across tab focus; poller refreshes in place.
+    ring.setChannelLive(streamByChannel.get(joined.toLowerCase())?.live ?? false);
     repaintChannelTitle();
     channelInput.value = joined;
     syncPlayerForLayout(joined);
@@ -2828,6 +2897,7 @@ async function boot(): Promise<void> {
       channels.remove(name);
       sendWaitByChannel.delete(name.toLowerCase());
       streamByChannel.delete(name.toLowerCase());
+      roomByChannel.delete(name.toLowerCase());
       if (!next) {
         repaintChannelTitle();
         channelInput.value = "";

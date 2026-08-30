@@ -50,6 +50,16 @@ impl RoomModes {
         }
         Some(next)
     }
+
+    pub fn to_payload(self, channel: &str) -> super::types::ChannelRoomState {
+        super::types::ChannelRoomState {
+            channel: channel.to_string(),
+            emote_only: self.emote_only,
+            subs_only: self.subs_only,
+            slow_sec: self.slow_sec,
+            followers_only: self.followers_only,
+        }
+    }
 }
 
 #[cfg(test)]
