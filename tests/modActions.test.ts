@@ -19,11 +19,13 @@ assert(modActionLabel("/timeout {user.name} 2h") === "2h", "2h");
 assert(modActionLabel("/timeout {user.name} 1d") === "1d", "1d");
 assert(modActionLabel("/timeout {user.name} 1w") === "1w", "1w");
 assert(modActionLabel("/ban {user.name}") === "Ban", "ban");
+assert(modActionLabel("/warn {user.name} spam") === "Warn", "warn");
 assert(modActionLabel("/delete {msg.id}") === "Del", "del");
 assert(modActionLabel("/w {user.name} hi") === "wuse", "custom");
 
 setLocale("ru");
 assert(modActionLabel("/ban {user.name}") === "Бан", "ban ru");
+assert(modActionLabel("/warn {user.name} spam") === "Варн", "warn ru");
 assert(modActionLabel("/delete {msg.id}") === "Удал.", "del ru");
 setLocale("en");
 

@@ -131,3 +131,44 @@ export function moderationSlashCommand(
   }
   return `/unvip ${user}`;
 }
+
+const WARN_REASON_MAX = 500;
+
+function reasonCodePointCount(reason: string): number {
+  return [...reason].length;
+}
+
+/** Build `/warn` slash command. Reason is required (Twitch Helix). */
+export function warnSlashCommand(login: string, reason: string): string | null {
+  const user = login.trim().toLowerCase();
+  if (!user || !/^[a-z0-9_]{1,25}$/.test(user)) {
+    return null;
+  }
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/[\r\n\0]/.test(trimmed)) {
+    return null;
+  }
+  if (reasonCodePointCount(trimmed) > WARN_REASON_MAX) {
+    return null;
+  }
+  return `/warn ${user} ${trimmed}`;
+}
+
+export function warnReasonRejectReason(
+  reason: string,
+): "empty" | "controls" | "too_long" | null {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    return "empty";
+  }
+  if (/[\r\n\0]/.test(trimmed)) {
+    return "controls";
+  }
+  if (reasonCodePointCount(trimmed) > WARN_REASON_MAX) {
+    return "too_long";
+  }
+  return null;
+}

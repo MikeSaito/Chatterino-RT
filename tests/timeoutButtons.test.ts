@@ -3,6 +3,8 @@ import {
   formatTimeoutLabel,
   moderationSlashCommand,
   parseTimeoutButtons,
+  warnReasonRejectReason,
+  warnSlashCommand,
 } from "../src/shell/timeoutButtons.ts";
 
 function assert(cond: boolean, msg: string): void {
@@ -48,5 +50,19 @@ assert(moderationSlashCommand("mod", "bob") === "/mod bob", "mod");
 assert(moderationSlashCommand("unmod", "bob") === "/unmod bob", "unmod");
 assert(moderationSlashCommand("vip", "bob") === "/vip bob", "vip");
 assert(moderationSlashCommand("unvip", "bob") === "/unvip bob", "unvip");
+
+assert(warnSlashCommand("Bob", "be nice") === "/warn bob be nice", "warn");
+assert(warnSlashCommand("bob", "  ") === null, "warn empty reason");
+assert(warnSlashCommand("bad name", "x") === null, "warn bad login");
+assert(warnSlashCommand("bob", "a\nb") === null, "warn newline");
+assert(warnReasonRejectReason("") === "empty", "reject empty");
+assert(warnReasonRejectReason("a\nb") === "controls", "reject nl");
+assert(warnReasonRejectReason("x".repeat(500)) === null, "reject 500 ok");
+assert(warnReasonRejectReason("x".repeat(501)) === "too_long", "reject 501");
+assert(
+  warnSlashCommand("bob", "x".repeat(500)) === `/warn bob ${"x".repeat(500)}`,
+  "warn 500",
+);
+assert(warnSlashCommand("bob", "x".repeat(501)) === null, "warn 501");
 
 console.log("timeoutButtons tests ok");

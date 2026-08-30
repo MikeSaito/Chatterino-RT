@@ -10,6 +10,8 @@ import {
 import { bindFocusTrap } from "./focusTrap";
 import {
   moderationSlashCommand,
+  warnSlashCommand,
+  warnReasonRejectReason,
   type ModerationCommandKind,
   type TimeoutButton,
 } from "./timeoutButtons";
@@ -115,6 +117,7 @@ export function bindUserCard(opts: {
   const roleVipBtn = modal.querySelector<HTMLButtonElement>("#usercard-vip");
   const roleUnvipBtn = modal.querySelector<HTMLButtonElement>("#usercard-unvip");
   const timeoutsEl = modal.querySelector<HTMLElement>("#usercard-timeouts");
+  const warnBtn = modal.querySelector<HTMLButtonElement>("#usercard-warn");
   const banBtn = modal.querySelector<HTMLButtonElement>("#usercard-ban");
   const unbanBtn = modal.querySelector<HTMLButtonElement>("#usercard-unban");
   const blockRow = modal.querySelector<HTMLElement>("#usercard-block-row");
@@ -480,6 +483,9 @@ export function bindUserCard(opts: {
     if (banBtn) {
       banBtn.disabled = busy;
     }
+    if (warnBtn) {
+      warnBtn.disabled = busy;
+    }
     if (unbanBtn) {
       unbanBtn.disabled = busy;
     }
@@ -511,6 +517,9 @@ export function bindUserCard(opts: {
     }
     if (banBtn) {
       banBtn.hidden = true;
+    }
+    if (warnBtn) {
+      warnBtn.hidden = true;
     }
     if (unbanBtn) {
       unbanBtn.hidden = true;
@@ -721,6 +730,9 @@ export function bindUserCard(opts: {
         if (banBtn) {
           banBtn.hidden = !showMod;
         }
+        if (warnBtn) {
+          warnBtn.hidden = !showMod;
+        }
         if (unbanBtn) {
           unbanBtn.hidden = !showMod;
         }
@@ -756,6 +768,55 @@ export function bindUserCard(opts: {
     }
     const loginAtSend = currentLogin;
     const text = moderationSlashCommand(kind, loginAtSend, seconds);
+    if (!text) {
+      setStatus(t("usercard.error.invalidUser"));
+      return;
+    }
+    setStatus("");
+    setModBusy(true);
+    try {
+      await invoke("chat_send", { text, replyToId: null });
+    } catch (e) {
+      if (modal.hidden || currentLogin !== loginAtSend) {
+        return;
+      }
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: unknown }).message)
+          : t("usercard.error.modSend");
+      setStatus(msg);
+    } finally {
+      if (!modal.hidden && currentLogin === loginAtSend) {
+        setModBusy(false);
+      } else {
+        modBusy = false;
+      }
+    }
+  };
+
+  const sendWarn = async (): Promise<void> => {
+    if (!currentLogin || modBusy || modal.hidden) {
+      return;
+    }
+    const loginAtSend = currentLogin;
+    const raw = window.prompt(t("usercard.warn.prompt"));
+    if (raw === null) {
+      return;
+    }
+    if (modal.hidden || currentLogin !== loginAtSend || modBusy) {
+      return;
+    }
+    const reason = raw.trim();
+    const reject = warnReasonRejectReason(reason);
+    if (reject === "empty" || reject === "controls") {
+      setStatus(t("usercard.warn.reasonRequired"));
+      return;
+    }
+    if (reject === "too_long") {
+      setStatus(t("usercard.warn.reasonTooLong"));
+      return;
+    }
+    const text = warnSlashCommand(loginAtSend, reason);
     if (!text) {
       setStatus(t("usercard.error.invalidUser"));
       return;
@@ -831,6 +892,9 @@ export function bindUserCard(opts: {
     setStatus("");
     if (banBtn) {
       banBtn.disabled = false;
+    }
+    if (warnBtn) {
+      warnBtn.disabled = false;
     }
     if (unbanBtn) {
       unbanBtn.disabled = false;
@@ -1201,6 +1265,11 @@ export function bindUserCard(opts: {
   if (banBtn) {
     banBtn.addEventListener("click", () => {
       void sendMod("ban");
+    });
+  }
+  if (warnBtn) {
+    warnBtn.addEventListener("click", () => {
+      void sendWarn();
     });
   }
   if (unbanBtn) {

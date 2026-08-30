@@ -72,6 +72,14 @@ export function modActionLabel(action: string): string {
   if (lower.startsWith("/ban ") || lower === "/ban") {
     return t("chat.mod.ban");
   }
+  if (
+    lower.startsWith("/warn ") ||
+    lower === "/warn" ||
+    lower.startsWith(".warn ") ||
+    lower === ".warn"
+  ) {
+    return t("chat.mod.warn");
+  }
   if (lower.startsWith("/delete ") || lower === "/delete") {
     return t("chat.mod.delete");
   }
