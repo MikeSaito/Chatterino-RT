@@ -14,18 +14,39 @@ import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
 /** Deterministic px grid: 1 code unit = 1 px (BitmapFont stub). */
 const adv = (s: string) => s.length;
 
-const text = "Kappa cvHazmat extra";
-const emotes = [
-  { start: 0, end: 5, zeroWidth: false },
-  { start: 6, end: 14, zeroWidth: true },
-];
+/** Emote hole sized to code length on the unit grid (explicit sprite box). */
+function codeBox(
+  start: number,
+  end: number,
+  zeroWidth = false,
+): {
+  start: number;
+  end: number;
+  zeroWidth: boolean;
+  displayWidth: number;
+  displayHeight: number;
+} {
+  const len = Math.max(1, end - start);
+  return {
+    start,
+    end,
+    zeroWidth,
+    displayWidth: len,
+    displayHeight: len,
+  };
+}
 
-const lines = wrapBody(text, 80, emotes, { measureAdvance: adv });
+const text = "Kappa cvHazmat extra";
+const emotes = [codeBox(0, 5), codeBox(6, 14, true)];
+/** Images-on unit tests must set emoteMinPx; hole = sprite box, not code advance. */
+const stackOpts = { measureAdvance: adv, emoteMinPx: 5 } as const;
+
+const lines = wrapBody(text, 80, emotes, stackOpts);
 if (lines.length !== 1 || lines[0].start !== 0 || lines[0].end !== text.length) {
   throw new Error("expected a single wrap line");
 }
 
-const rendered = renderWrapped(text, lines, emotes, { measureAdvance: adv });
+const rendered = renderWrapped(text, lines, emotes, stackOpts);
 if (rendered.includes("cvHazmat")) {
   throw new Error("zero-width code must not occupy the bitmap line");
 }
@@ -39,12 +60,12 @@ if (rendered.length !== 11) {
   throw new Error(`collapsed overlay should be 11 visible units, got ${rendered.length}`);
 }
 
-const extra = indexToLineCol(text, lines, 15, emotes, { measureAdvance: adv });
+const extra = indexToLineCol(text, lines, 15, emotes, stackOpts);
 if (!extra || extra.line !== 0 || extra.col !== 6) {
   throw new Error(`extra should start at visual col 6, got ${JSON.stringify(extra)}`);
 }
 
-const hit = lineColToIndex(text, lines, 0, 6, emotes, { measureAdvance: adv });
+const hit = lineColToIndex(text, lines, 0, 6, emotes, stackOpts);
 if (hit !== 15) {
   throw new Error(`col 6 should map back to extra, got ${hit}`);
 }
@@ -58,7 +79,7 @@ if (inner !== 2) {
   throw new Error(`wide grapheme inner col should map to start, got ${inner}`);
 }
 
-const narrow = wrapBody(text, 6, emotes, { measureAdvance: adv });
+const narrow = wrapBody(text, 6, emotes, stackOpts);
 if (narrow.length < 2) {
   throw new Error("width 6 should wrap after stacked emote and its trailing space");
 }
@@ -101,23 +122,50 @@ if (imagesOffMask.length !== text.length) {
   );
 }
 
-const noZw = wrapBody(text, 80, emotes, {
+const noZwEmotes = [codeBox(0, 5), codeBox(6, 14, true)];
+const noZwOpts = {
   measureAdvance: adv,
+  emoteMinPx: 5,
   enableZeroWidth: false,
-});
-const noZwRender = renderWrapped(text, noZw, emotes, {
-  measureAdvance: adv,
-  enableZeroWidth: false,
-});
+} as const;
+const noZw = wrapBody(text, 80, noZwEmotes, noZwOpts);
+const noZwRender = renderWrapped(text, noZw, noZwEmotes, noZwOpts);
 if (!noZwRender.includes(" ") || noZwRender.length <= 11) {
-  throw new Error("ZW off should reserve columns for overlay code");
+  throw new Error("ZW off should reserve columns for overlay emote");
 }
-const noZwExtra = indexToLineCol(text, noZw, 15, emotes, {
-  measureAdvance: adv,
-  enableZeroWidth: false,
-});
-if (!noZwExtra || noZwExtra.col !== 15) {
-  throw new Error(`ZW off extra at col 15, got ${JSON.stringify(noZwExtra)}`);
+// Kappa(5)+sp+overlay(5)+sp+extra → extra at 12 (sprite boxes, not code lengths).
+const noZwExtra = indexToLineCol(text, noZw, 15, noZwEmotes, noZwOpts);
+if (!noZwExtra || noZwExtra.col !== 12) {
+  throw new Error(`ZW off extra at col 12, got ${JSON.stringify(noZwExtra)}`);
+}
+
+// Long emote name must not inflate the hole past the sprite (gap after emote).
+const longNameText = "PogChamp hi";
+const longNameEmotes = [{ start: 0, end: 8, zeroWidth: false }];
+const longNameOpts = { measureAdvance: adv, emoteMinPx: 4 } as const;
+const longNameLines = wrapBody(longNameText, 80, longNameEmotes, longNameOpts);
+const longNamePos = indexToLineCol(
+  longNameText,
+  longNameLines,
+  9,
+  longNameEmotes,
+  longNameOpts,
+);
+if (!longNamePos || longNamePos.col !== 5) {
+  throw new Error(
+    `long code must not pad hole past emoteMinPx 4 (+space), got ${JSON.stringify(longNamePos)}`,
+  );
+}
+const longNameMask = renderWrapped(
+  longNameText,
+  longNameLines,
+  longNameEmotes,
+  longNameOpts,
+);
+if (longNameMask.length !== 7) {
+  throw new Error(
+    `long-name mask should be 4+1+2=7, got ${longNameMask.length}`,
+  );
 }
 
 const twitch =
@@ -182,16 +230,13 @@ if (mid) {
 
 const hugText = "Kappa PogChamp";
 const hugEmotes = [
-  { start: 0, end: 5, zeroWidth: false },
-  { start: 6, end: 14, zeroWidth: false },
+  { start: 0, end: 5, zeroWidth: false, displayWidth: 5, displayHeight: 5 },
+  { start: 6, end: 14, zeroWidth: false, displayWidth: 8, displayHeight: 5 },
 ];
-const hugOff = wrapBody(hugText, 80, hugEmotes, { measureAdvance: adv });
-const hugOffMask = renderWrapped(hugText, hugOff, hugEmotes, {
-  measureAdvance: adv,
-});
-const hugOffSecond = indexToLineCol(hugText, hugOff, 6, hugEmotes, {
-  measureAdvance: adv,
-});
+const hugBase = { measureAdvance: adv, emoteMinPx: 5 } as const;
+const hugOff = wrapBody(hugText, 80, hugEmotes, hugBase);
+const hugOffMask = renderWrapped(hugText, hugOff, hugEmotes, hugBase);
+const hugOffSecond = indexToLineCol(hugText, hugOff, 6, hugEmotes, hugBase);
 if (!hugOffSecond || hugOffSecond.col !== 6) {
   throw new Error(
     `hug off: second emote at col 6, got ${JSON.stringify(hugOffSecond)}`,
@@ -205,6 +250,7 @@ if (hugOffMask.length !== hugText.length) {
 
 const hugOnOpts = {
   measureAdvance: adv,
+  emoteMinPx: 5,
   removeSpacesBetweenEmotes: true,
 } as const;
 const hugOn = wrapBody(hugText, 80, hugEmotes, hugOnOpts);
@@ -227,11 +273,12 @@ if (hugHit !== 6) {
 
 const doubleText = "Kappa  PogChamp";
 const doubleEmotes = [
-  { start: 0, end: 5, zeroWidth: false },
-  { start: 7, end: 15, zeroWidth: false },
+  { start: 0, end: 5, zeroWidth: false, displayWidth: 5, displayHeight: 5 },
+  { start: 7, end: 15, zeroWidth: false, displayWidth: 8, displayHeight: 5 },
 ];
 const doubleOpts = {
   measureAdvance: adv,
+  emoteMinPx: 5,
   removeSpacesBetweenEmotes: true,
 } as const;
 const doubleLines = wrapBody(doubleText, 80, doubleEmotes, doubleOpts);
@@ -250,12 +297,13 @@ if (!doubleSecond || doubleSecond.col !== 7) {
 
 const hugZwText = "Kappa cvHazmat PogChamp";
 const hugZwEmotes = [
-  { start: 0, end: 5, zeroWidth: false },
-  { start: 6, end: 14, zeroWidth: true },
-  { start: 15, end: 23, zeroWidth: false },
+  { start: 0, end: 5, zeroWidth: false, displayWidth: 5, displayHeight: 5 },
+  { start: 6, end: 14, zeroWidth: true, displayWidth: 8, displayHeight: 5 },
+  { start: 15, end: 23, zeroWidth: false, displayWidth: 8, displayHeight: 5 },
 ];
 const hugZwOpts = {
   measureAdvance: adv,
+  emoteMinPx: 5,
   removeSpacesBetweenEmotes: true,
 } as const;
 const hugZwLines = wrapBody(hugZwText, 80, hugZwEmotes, hugZwOpts);

@@ -460,18 +460,20 @@ function spacesForPx(px: number, ctx: WrapCtx): string {
   return " ".repeat(Math.max(1, n));
 }
 
-/** Ideal emote hole (sprite / code); layout width = measured mask spaces. */
+/**
+ * Ideal emote hole; layout width = measured mask spaces.
+ * Images on: sprite display width only (Chatterino EmoteElement image size).
+ * Using max(codeW) left a visible gap after short sprites with long names.
+ * Images off: advance of the visible emote code.
+ */
 function emoteIdealPx(
   span: WrapEmote,
   text: string,
   ctx: WrapCtx,
 ): number {
-  const code = text.slice(span.start, span.end);
-  const codeW = Math.max(0, ctx.measureAdvance(code));
-  const emoteW = emoteDisplaySize(span, ctx.emoteMinPx).w;
   let w = ctx.maskEmotes
-    ? Math.max(Math.max(1, emoteW), codeW)
-    : Math.max(1, codeW);
+    ? Math.max(1, emoteDisplaySize(span, ctx.emoteMinPx).w)
+    : Math.max(1, ctx.measureAdvance(text.slice(span.start, span.end)));
   if (span.bitsAmount != null && span.bitsAmount > 0) {
     w += Math.max(0, ctx.measureAdvance(` ${span.bitsAmount}`));
   }
