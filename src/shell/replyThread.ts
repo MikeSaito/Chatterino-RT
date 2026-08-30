@@ -105,7 +105,7 @@ export function bindReplyThread(opts: {
     }
   };
 
-  /** Смена активного канала закрывает ветку; stub «закройте ветку» не показываем. */
+  /** Смена активного канала закрывает ветку; stub не показываем. */
   const dismissIfChannelMismatch = (): boolean => {
     if (modal.hidden || !current || channelMatches()) {
       return false;
