@@ -142,31 +142,43 @@ export function bindChannelPoints(opts: {
     button.hidden = false;
     button.disabled = false;
     button.classList.toggle("is-loading", loading);
+    button.classList.remove("is-auth-cta");
     if (!auth.login) {
-      label.textContent = t("points.loginCta");
+      label.textContent = "—";
       button.title = t("points.loginCta");
+      button.setAttribute("aria-label", t("points.loginCta"));
+      button.classList.add("is-auth-cta");
       return;
     }
     if (!ch) {
       label.textContent = t("points.noChannel");
       button.disabled = true;
+      button.title = t("points.noChannel");
+      button.setAttribute("aria-label", t("points.noChannel"));
       return;
     }
     if (last && last.channel === ch && last.authRequired) {
-      label.textContent = t("points.loginCta");
+      label.textContent = "—";
       button.title = t("points.empty.relogin");
+      button.setAttribute("aria-label", t("points.empty.relogin"));
+      button.classList.add("is-auth-cta");
       return;
     }
     if (last && last.channel === ch && !last.authRequired && last.enabled && typeof last.balance === "number") {
       label.textContent = formatPoints(last.balance);
       button.title = t("points.balanceTitle", { points: formatPoints(last.balance) });
+      button.setAttribute("aria-label", t("points.open"));
       return;
     }
     if (last && last.channel === ch && !last.enabled) {
       label.textContent = t("points.disabledShort");
+      button.title = t("points.disabled");
+      button.setAttribute("aria-label", t("points.disabled"));
       return;
     }
-    label.textContent = loading ? t("points.loading") : t("points.label");
+    label.textContent = loading ? "…" : "—";
+    button.title = loading ? t("points.loading") : t("points.label");
+    button.setAttribute("aria-label", t("points.open"));
   };
 
   const refresh = async (foreground: boolean): Promise<void> => {

@@ -236,6 +236,13 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     }
     root.append(list);
 
+    if (!isFinished(panel)) {
+      const hint = document.createElement("p");
+      hint.className = "poll-panel-hint";
+      hint.textContent = t("polls.viewerHint");
+      root.append(hint);
+    }
+
     const summary = summaryText(panel);
     if (summary) {
       const el = document.createElement("p");
