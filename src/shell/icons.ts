@@ -29,6 +29,7 @@ export type IconName =
   | "chevron-left"
   | "chevron-right"
   | "clock"
+  | "heart"
   | "star"
   | "user"
   | "bell"
@@ -77,6 +78,8 @@ const PATHS: Record<IconName, string> = {
   "chevron-left": '<path d="M15 6l-6 6 6 6"/>',
   "chevron-right": '<path d="M9 6l6 6-6 6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  heart:
+    '<path d="M12 21s-7-4.5-9.5-9A5.2 5.2 0 0 1 12 6.2 5.2 5.2 0 0 1 21.5 12C19 16.5 12 21 12 21z"/>',
   star:
     '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.3L12 15.8 6.2 17.8l.9-5.3L3.2 8.7l5.4-.8L12 3z"/>',
   user:

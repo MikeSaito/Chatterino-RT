@@ -103,7 +103,6 @@ import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
 import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
-import { paintPlayerMeta } from "./shell/playerMeta";
 import { paintChatModes, type ChannelRoomState } from "./shell/chatModes";
 
 let chatIpc: ChatIpc | null = null;
@@ -171,7 +170,6 @@ async function boot(): Promise<void> {
   const listHost = document.querySelector<HTMLElement>("#channel-list-host");
   const list = document.querySelector<HTMLUListElement>("#channel-list");
   const title = document.querySelector<HTMLElement>("#channel-title");
-  const headerLive = document.querySelector<HTMLElement>("#header-live");
   const headerChannelName = document.querySelector<HTMLElement>("#header-channel-name");
   const headerAvatar = document.querySelector<HTMLElement>("#header-channel-avatar");
   const headerAvatarImg = document.querySelector<HTMLImageElement>("#header-channel-avatar-img");
@@ -182,8 +180,7 @@ async function boot(): Promise<void> {
     "#moderation-mode-btn",
   );
   const player = document.querySelector<HTMLElement>("#player-slot");
-  const playerMeta = document.querySelector<HTMLElement>("#player-meta");
-  const chatModesEl = document.querySelector<HTMLElement>("#chat-modes");
+  const chatModesEl = document.querySelector<HTMLElement>("#header-chat-modes");
   const stage = document.querySelector<HTMLElement>("#stage");
   const stageSplit = document.querySelector<HTMLElement>("#stage-split");
   const status = document.querySelector<HTMLElement>("#status");
@@ -238,13 +235,13 @@ async function boot(): Promise<void> {
     !listHost ||
     !list ||
     !title ||
-    !headerLive ||
     !headerChannelName ||
     !headerAvatar ||
     !headerAvatarImg ||
     !headerAvatarLetter ||
     !headerMore ||
     !headerMenu ||
+    !chatModesEl ||
     !player ||
     !stage ||
     !stageSplit ||
@@ -294,13 +291,13 @@ async function boot(): Promise<void> {
   const joinPopoverInputEl = joinPopoverInput;
   const channelListHost = listHost;
   const titleEl = title;
-  const headerLiveEl = headerLive;
   const headerChannelNameEl = headerChannelName;
   const headerAvatarEl = headerAvatar;
   const headerAvatarImgEl = headerAvatarImg;
   const headerAvatarLetterEl = headerAvatarLetter;
   const headerMoreBtn = headerMore;
   const headerMenuEl = headerMenu;
+  const headerChatModesEl = chatModesEl;
   const channelInput = input;
   const playerSlot = player;
   const stageEl = stage;
@@ -1146,24 +1143,32 @@ async function boot(): Promise<void> {
     live: boolean,
   ): void {
     el.replaceChildren();
-    const restBits = [parts.uptime, parts.game, parts.streamTitle].filter(
-      (p): p is string => Boolean(p),
-    );
+    el.hidden = false;
+    const bits: string[] = [];
+    if (parts.uptime) {
+      bits.push(parts.uptime);
+    }
     if (parts.viewers) {
-      const viewers = document.createElement("span");
-      viewers.className = "header-meta-viewers";
-      viewers.append(iconEl("viewers", 14), document.createTextNode(parts.viewers));
-      el.appendChild(viewers);
+      bits.push(parts.viewers);
     }
-    if (restBits.length > 0) {
-      const rest = document.createElement("span");
-      rest.className = "header-meta-rest";
-      const prefix = parts.viewers ? " · " : "";
-      rest.textContent = prefix + restBits.join(" · ");
-      el.appendChild(rest);
-    } else if (!parts.viewers && live) {
-      el.textContent = "\u00a0";
+    if (parts.game) {
+      bits.push(parts.game);
     }
+    if (parts.streamTitle) {
+      bits.push(parts.streamTitle);
+    }
+    if (bits.length === 0) {
+      if (live) {
+        el.textContent = "\u00a0";
+      }
+      return;
+    }
+    const rest = document.createElement("span");
+    rest.className = "header-meta-rest";
+    const line = bits.join(" · ");
+    rest.textContent = line;
+    rest.title = line;
+    el.appendChild(rest);
   }
 
   let repaintChannelTitle = (): void => {
@@ -1179,23 +1184,14 @@ async function boot(): Promise<void> {
     if (!ch) {
       titleEl.replaceChildren();
       titleEl.hidden = false;
-      headerLiveEl.hidden = true;
       headerChannelNameEl.textContent = "";
+      headerAvatarEl.classList.remove("is-live");
+      headerAvatarEl.removeAttribute("aria-label");
       paintHeaderAvatar("");
       setPlayerLiveHint(null);
       ring.setChannelLive(false);
       replyThreadCtl?.repaint();
-      if (playerMeta) {
-        paintPlayerMeta({
-          root: playerMeta,
-          stream: null,
-          knobs,
-          enabled: false,
-        });
-      }
-      if (chatModesEl) {
-        paintChatModes(chatModesEl, null);
-      }
+      paintChatModes(headerChatModesEl, null);
       return;
     }
     const stream = streamByChannel.get(ch.toLowerCase());
@@ -1203,35 +1199,17 @@ async function boot(): Promise<void> {
     ring.setChannelLive(live);
     replyThreadCtl?.repaint();
     headerChannelNameEl.textContent = ch;
-    const extended = uiLayout === "Extended";
-    if (extended) {
-      titleEl.replaceChildren();
-      titleEl.hidden = true;
-      headerLiveEl.hidden = true;
-      if (playerMeta) {
-        paintPlayerMeta({
-          root: playerMeta,
-          stream: stream ?? null,
-          knobs,
-          enabled: true,
-        });
-      }
+    headerAvatarEl.classList.toggle("is-live", live);
+    if (live) {
+      headerAvatarEl.setAttribute("aria-label", t("header.live.title"));
     } else {
-      titleEl.hidden = false;
-      paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
-      headerLiveEl.hidden = !live;
-      if (playerMeta) {
-        paintPlayerMeta({
-          root: playerMeta,
-          stream: null,
-          knobs,
-          enabled: false,
-        });
-      }
+      headerAvatarEl.removeAttribute("aria-label");
     }
-    if (chatModesEl) {
-      paintChatModes(chatModesEl, roomByChannel.get(ch.toLowerCase()) ?? null);
-    }
+    paintHeaderMeta(titleEl, channelMetaParts(ch, stream, knobs), live);
+    paintChatModes(
+      headerChatModesEl,
+      roomByChannel.get(ch.toLowerCase()) ?? null,
+    );
     if (headerAvatarLogin !== ch.toLowerCase()) {
       paintHeaderAvatar(ch);
       requestChannelAvatar(ch);
@@ -1973,9 +1951,7 @@ async function boot(): Promise<void> {
     if (ch !== ipc.active().toLowerCase()) {
       return;
     }
-    if (chatModesEl) {
-      paintChatModes(chatModesEl, roomByChannel.get(ch) ?? null);
-    }
+    paintChatModes(headerChatModesEl, roomByChannel.get(ch) ?? null);
   });
 
   await listen<{ login: string; url: string }>("chat:profile_image", (ev) => {

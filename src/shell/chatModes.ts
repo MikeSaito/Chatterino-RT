@@ -1,8 +1,9 @@
 /**
- * Active IRC ROOMSTATE chips above the chat message strip.
+ * Active IRC ROOMSTATE status in the header (right cluster).
  */
 
 import { t } from "../i18n/index.ts";
+import { iconEl, type IconName } from "./icons.ts";
 
 export type ChannelRoomState = {
   channel: string;
@@ -13,6 +14,48 @@ export type ChannelRoomState = {
   followersOnly: number;
 };
 
+type ModeChip = { icon: IconName; label: string; title: string };
+
+function modeChips(modes: ChannelRoomState): ModeChip[] {
+  const chips: ModeChip[] = [];
+  if (modes.emoteOnly) {
+    chips.push({
+      icon: "emote",
+      label: t("chat.modes.emoteShort"),
+      title: t("chat.modes.emoteOnly"),
+    });
+  }
+  if (modes.subsOnly) {
+    chips.push({
+      icon: "star",
+      label: t("chat.modes.subsShort"),
+      title: t("chat.modes.subsOnly"),
+    });
+  }
+  if (modes.followersOnly >= 0) {
+    const label =
+      modes.followersOnly === 0
+        ? t("chat.modes.followers")
+        : t("chat.modes.followersShort", { minutes: modes.followersOnly });
+    chips.push({
+      icon: "heart",
+      label,
+      title:
+        modes.followersOnly === 0
+          ? t("chat.modes.followers")
+          : t("chat.modes.followersMin", { minutes: modes.followersOnly }),
+    });
+  }
+  if (modes.slowSec > 0) {
+    chips.push({
+      icon: "clock",
+      label: t("chat.modes.slowShort", { seconds: modes.slowSec }),
+      title: t("chat.modes.slow", { seconds: modes.slowSec }),
+    });
+  }
+  return chips;
+}
+
 export function paintChatModes(
   root: HTMLElement,
   modes: ChannelRoomState | null | undefined,
@@ -22,34 +65,17 @@ export function paintChatModes(
     root.hidden = true;
     return;
   }
-  const chips: string[] = [];
-  if (modes.emoteOnly) {
-    chips.push(t("chat.modes.emoteOnly"));
-  }
-  if (modes.subsOnly) {
-    chips.push(t("chat.modes.subsOnly"));
-  }
-  if (modes.followersOnly >= 0) {
-    if (modes.followersOnly === 0) {
-      chips.push(t("chat.modes.followers"));
-    } else {
-      chips.push(
-        t("chat.modes.followersMin", { minutes: modes.followersOnly }),
-      );
-    }
-  }
-  if (modes.slowSec > 0) {
-    chips.push(t("chat.modes.slow", { seconds: modes.slowSec }));
-  }
+  const chips = modeChips(modes);
   if (chips.length === 0) {
     root.hidden = true;
     return;
   }
   root.hidden = false;
-  for (const label of chips) {
-    const chip = document.createElement("span");
-    chip.className = "chat-modes-chip";
-    chip.textContent = label;
-    root.appendChild(chip);
+  for (const chip of chips) {
+    const el = document.createElement("span");
+    el.className = "header-chat-mode";
+    el.title = chip.title;
+    el.append(iconEl(chip.icon, 14), document.createTextNode(chip.label));
+    root.appendChild(el);
   }
 }

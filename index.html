@@ -48,8 +48,9 @@
             <span id="header-channel-avatar-letter" class="header-avatar-letter" hidden aria-hidden="true"></span>
           </span>
           <span id="header-channel-name"></span>
-          <span id="header-live" hidden data-i18n="header.live" data-i18n-title="header.live.title" title="Live">LIVE</span>
           <p id="channel-title" class="header-meta"></p>
+          <span id="header-spacer" aria-hidden="true"></span>
+          <aside id="header-chat-modes" class="header-chat-modes" aria-live="polite" hidden></aside>
           <button type="button" id="moderation-mode-btn" class="btn-ghost" data-i18n="header.mod" data-i18n-title="header.mod.title" title="Moderation mode" aria-pressed="false">Mod</button>
           <span id="streamer-badge" hidden data-i18n="header.streamer" data-i18n-title="header.streamer.title" title="Streamer Mode">Streamer Mode</span>
           <p id="status" class="status-line">
@@ -65,7 +66,6 @@
         <div id="stage">
           <div id="player-column">
             <div id="player-slot"></div>
-            <aside id="player-meta" class="player-meta" aria-live="polite"></aside>
           </div>
           <div
             id="stage-split"
@@ -76,7 +76,6 @@
             tabindex="0"
           ></div>
           <div id="chat-column">
-            <aside id="chat-modes" class="chat-modes" aria-live="polite" hidden></aside>
             <div id="chat-pane">
               <div id="chat-canvas-host">
                 <canvas id="chat-canvas"></canvas>

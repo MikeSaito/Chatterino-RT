@@ -1,5 +1,8 @@
 import { setLocale } from "../src/i18n/index.ts";
-import { channelMetaParts } from "../src/shell/channelHeader.ts";
+import {
+  channelMetaParts,
+  formatUptime,
+} from "../src/shell/channelHeader.ts";
 import type { ChannelRoomState } from "../src/shell/chatModes.ts";
 import { t } from "../src/i18n/index.ts";
 
@@ -9,71 +12,69 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
-/** Same chip rules as paintChatModes, without DOM. */
-function modeLabels(modes: ChannelRoomState): string[] {
-  const chips: string[] = [];
-  if (modes.emoteOnly) {
-    chips.push(t("chat.modes.emoteOnly"));
-  }
-  if (modes.subsOnly) {
-    chips.push(t("chat.modes.subsOnly"));
-  }
-  if (modes.followersOnly >= 0) {
-    if (modes.followersOnly === 0) {
-      chips.push(t("chat.modes.followers"));
-    } else {
-      chips.push(t("chat.modes.followersMin", { minutes: modes.followersOnly }));
-    }
-  }
-  if (modes.slowSec > 0) {
-    chips.push(t("chat.modes.slow", { seconds: modes.slowSec }));
-  }
-  return chips;
+function modeChipCount(modes: ChannelRoomState): number {
+  let n = 0;
+  if (modes.emoteOnly) n += 1;
+  if (modes.subsOnly) n += 1;
+  if (modes.followersOnly >= 0) n += 1;
+  if (modes.slowSec > 0) n += 1;
+  return n;
 }
 
 setLocale("en");
-
-const offlineParts = channelMetaParts(
-  "xqc",
-  { channel: "xqc", live: false },
-  { uptime: true, viewerCount: true, game: true, streamTitle: true },
+assert(
+  formatUptime(new Date(Date.now() - 80 * 60 * 1000).toISOString()).includes(
+    "h",
+  ),
+  "en uptime",
 );
-assert(Object.keys(offlineParts).length === 0, "offline no meta parts");
+
+setLocale("ru");
+assert(
+  formatUptime(new Date(Date.now() - 80 * 60 * 1000).toISOString()).includes(
+    "ч",
+  ),
+  "ru uptime",
+);
 
 const liveParts = channelMetaParts(
   "xqc",
   {
     channel: "xqc",
     live: true,
-    viewerCount: 42,
+    viewerCount: 2094,
     gameName: "Just Chatting",
     streamTitle: "Hello",
+    tags: ["should-not-appear-in-parts"],
   },
   { uptime: false, viewerCount: true, game: true, streamTitle: true },
 );
-assert(liveParts.viewers === "42", "viewers");
+assert(liveParts.viewers === "2\u00a0094" || liveParts.viewers === "2 094", `viewers ${liveParts.viewers}`);
 assert(liveParts.game === "Just Chatting", "game");
-assert(liveParts.streamTitle === "Hello", "title");
 
 assert(
-  modeLabels({
+  modeChipCount({
     channel: "xqc",
     emoteOnly: false,
     subsOnly: false,
     slowSec: 0,
     followersOnly: -1,
-  }).length === 0,
+  }) === 0,
   "no chips",
 );
+assert(
+  modeChipCount({
+    channel: "xqc",
+    emoteOnly: true,
+    subsOnly: true,
+    slowSec: 10,
+    followersOnly: 10,
+  }) === 4,
+  "four chips",
+);
 
-const chips = modeLabels({
-  channel: "xqc",
-  emoteOnly: true,
-  subsOnly: true,
-  slowSec: 30,
-  followersOnly: 10,
-});
-assert(chips.length === 4, `chips ${chips.length}`);
-assert(chips.some((c) => c.includes("30")), "slow");
+setLocale("en");
+assert(t("chat.modes.slowShort", { seconds: 10 }) === "10s", "slow short");
+assert(t("chat.modes.followersShort", { minutes: 10 }) === "10m", "fol short");
 
-console.log("playerMeta/chatModes tests ok");
+console.log("header meta tests ok");

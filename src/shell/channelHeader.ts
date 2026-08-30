@@ -1,4 +1,5 @@
 import type { ChannelLive } from "../chat/types";
+import { getLocale } from "../i18n/index.ts";
 
 export type HeaderKnobs = {
   uptime: boolean;
@@ -211,7 +212,8 @@ export function effectiveHeaderKnobs(
   };
 }
 
-function formatUptime(startedAt: string): string {
+/** Chatterino-style uptime; RU uses ч/м like the shell mock. */
+export function formatUptime(startedAt: string): string {
   const since = Date.parse(startedAt);
   if (!Number.isFinite(since)) {
     return "";
@@ -219,6 +221,9 @@ function formatUptime(startedAt: string): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - since) / 1000));
   const hours = Math.floor(diffSec / 3600);
   const minutes = Math.floor((diffSec % 3600) / 60);
+  if (getLocale() === "ru") {
+    return `${hours}ч ${minutes}м`;
+  }
   return `${hours}h ${minutes}m`;
 }
 
@@ -246,7 +251,9 @@ export function channelMetaParts(
     }
   }
   if (knobs.viewerCount && stream.viewerCount != null) {
-    parts.viewers = stream.viewerCount.toLocaleString();
+    parts.viewers = stream.viewerCount.toLocaleString(
+      getLocale() === "ru" ? "ru-RU" : "en-US",
+    );
   }
   if (knobs.game && stream.gameName) {
     parts.game = stream.gameName;
