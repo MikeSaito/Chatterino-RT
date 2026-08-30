@@ -705,6 +705,8 @@ export class MessageRing {
       this.mediaRepaintRaf = 0;
       const batch = [...this.mediaRepaintSlots];
       this.mediaRepaintSlots.clear();
+      // Capture while root.y and lineCount still agree; paint may change heights.
+      const anchors = this.captureScrollAnchors();
       let lineCountChanged = false;
       for (const s of batch) {
         if (!s.msgId || !s.root.visible) {
@@ -717,7 +719,7 @@ export class MessageRing {
         }
       }
       if (lineCountChanged) {
-        this.repositionRootsFromCache();
+        this.repositionRootsFromCache(anchors);
       }
     });
   }
@@ -844,9 +846,44 @@ export class MessageRing {
     }
   }
 
+  /** Sealed desired+visual anchors captured against one laidSlots epoch. */
+  private captureScrollAnchors(explicitTarget?: ScrollAnchor): {
+    target: ScrollAnchor | undefined;
+    visual: ScrollAnchor | undefined;
+    sealed: true;
+  } {
+    const laid = this.laidSlots();
+    const target = explicitTarget ?? this.scroll.captureAnchor(laid);
+    const visual = this.scroll.atBottom
+      ? undefined
+      : this.scroll.captureAnchor(laid, this.scroll.current);
+    return { target, visual, sealed: true };
+  }
+
+  private isAnchorPair(
+    arg:
+      | ScrollAnchor
+      | {
+          target: ScrollAnchor | undefined;
+          visual: ScrollAnchor | undefined;
+          sealed: true;
+        }
+      | undefined,
+  ): arg is {
+    target: ScrollAnchor | undefined;
+    visual: ScrollAnchor | undefined;
+    sealed: true;
+  } {
+    return !!arg && "sealed" in arg && arg.sealed === true;
+  }
+
   /** Update root.y / startRow from cached lineCount without paintClip. */
-  private repositionRootsFromCache(anchor?: ScrollAnchor): void {
-    const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
+  private repositionRootsFromCache(pair?: {
+    target: ScrollAnchor | undefined;
+    visual: ScrollAnchor | undefined;
+    sealed: true;
+  }): void {
+    const anchors = pair ?? this.captureScrollAnchors();
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     const visible: Slot[] = [];
     for (let i = 0; i < this.occupied; i += 1) {
@@ -874,8 +911,10 @@ export class MessageRing {
       this.lineHeight > 0 ? y / this.lineHeight : 0,
       viewRows,
       this.laidSlots(),
-      resolved,
+      anchors.target,
       this.isPaused(),
+      anchors.visual,
+      true,
     );
     this.afterScrollChange();
   }
@@ -2184,7 +2223,7 @@ export class MessageRing {
 
   applySnapshot(events: ChatEvent[]): void {
     const follow = this.scroll.atBottom;
-    const anchor = this.scroll.captureAnchor(this.laidSlots());
+    const anchors = follow ? undefined : this.captureScrollAnchors();
     this.clearSlots();
     const start = Math.max(0, events.length - this.poolSize);
     this.loadingSnapshot = true;
@@ -2195,11 +2234,11 @@ export class MessageRing {
     } finally {
       this.loadingSnapshot = false;
     }
-    this.layout(follow ? undefined : anchor);
+    this.layout(follow ? undefined : anchors);
   }
 
   pushMany(events: ChatEvent[]): void {
-    const anchor = this.scroll.captureAnchor(this.laidSlots());
+    const anchors = this.captureScrollAnchors();
     const paintSlots = new Set<Slot>();
     let needFull = false;
     for (const event of events) {
@@ -2214,9 +2253,9 @@ export class MessageRing {
     if (needFull) {
       // Visibility / stacking changed — reposition all, paint only new/updated rows.
       if (paintSlots.size > 0) {
-        this.layout(anchor, paintSlots);
+        this.layout(anchors, paintSlots);
       } else {
-        this.layout(anchor);
+        this.layout(anchors);
       }
       this.repaintHighlights();
       return;
@@ -2224,7 +2263,7 @@ export class MessageRing {
     if (paintSlots.size === 0) {
       return;
     }
-    this.layout(anchor, paintSlots);
+    this.layout(anchors, paintSlots);
   }
 
   private clearSlots(): void {
@@ -3854,12 +3893,24 @@ export class MessageRing {
     return out;
   }
 
-  private layout(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
+  private layout(
+    arg?:
+      | ScrollAnchor
+      | {
+          target: ScrollAnchor | undefined;
+          visual: ScrollAnchor | undefined;
+          sealed: true;
+        },
+    paintOnly?: Set<Slot>,
+  ): void {
     if (!this.ready) {
       return;
     }
+    const anchors = this.isAnchorPair(arg)
+      ? arg
+      : this.captureScrollAnchors(arg);
     this.withPerfMeasure("crt-layout", () => {
-      this.layoutInner(anchor, paintOnly);
+      this.layoutInner(anchors, paintOnly);
     });
   }
 
@@ -3908,8 +3959,14 @@ export class MessageRing {
     };
   }
 
-  private layoutInner(anchor?: ScrollAnchor, paintOnly?: Set<Slot>): void {
-    const resolved = anchor ?? this.scroll.captureAnchor(this.laidSlots());
+  private layoutInner(
+    anchors: {
+      target: ScrollAnchor | undefined;
+      visual: ScrollAnchor | undefined;
+      sealed: true;
+    },
+    paintOnly?: Set<Slot>,
+  ): void {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     const visible: Slot[] = [];
     for (let i = 0; i < this.occupied; i += 1) {
@@ -3993,8 +4050,10 @@ export class MessageRing {
       this.lineHeight > 0 ? totalY / this.lineHeight : 0,
       viewRows,
       this.laidSlots(),
-      resolved,
+      anchors.target,
       this.isPaused(),
+      anchors.visual,
+      true,
     );
     this.afterScrollChange();
   }
@@ -4103,7 +4162,8 @@ export class MessageRing {
       shown += 1;
     }
     const band = this.viewportPaintBand(contentH);
-    const anchor = this.scroll.captureAnchor(this.laidSlots());
+    // Anchors must be taken before paintClip mutates lineCount under stale root.y.
+    const anchors = this.captureScrollAnchors();
     const paintStarted = performance.now();
     const paintBudgetMs = 8;
     let heightsChanged = false;
@@ -4130,7 +4190,7 @@ export class MessageRing {
       }
     }
     if (heightsChanged) {
-      this.layout(anchor, new Set());
+      this.repositionRootsFromCache(anchors);
     }
     if (unfinished) {
       this.scheduleViewportPaint();
@@ -4288,7 +4348,8 @@ export class MessageRing {
     }
     if (slot.collapsed && !slot.expanded) {
       slot.expanded = true;
-      this.paintClip(slot);
+      // Invalidate wrap so layoutInner paints after sealed anchors are captured.
+      slot.wrapReady = false;
       this.layout();
       return;
     }

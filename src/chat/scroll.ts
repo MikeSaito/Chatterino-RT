@@ -149,11 +149,19 @@ export class ScrollModel {
     return true;
   }
 
-  captureAnchor(slots: readonly LaidSlot[]): ScrollAnchor | undefined {
-    if (this.atBottom) {
+  /**
+   * Snapshot a scroll position against laid rows.
+   * `atRows` defaults to desired; pass `current` to stabilize the visible frame
+   * while a smooth tween is in flight.
+   */
+  captureAnchor(
+    slots: readonly LaidSlot[],
+    atRows?: number,
+  ): ScrollAnchor | undefined {
+    if (atRows === undefined && this.atBottom) {
       return undefined;
     }
-    const y = this.desired;
+    const y = atRows ?? this.desired;
     for (const slot of slots) {
       if (slot.msgId.length === 0 || slot.lineCount <= 0) {
         continue;
@@ -172,45 +180,94 @@ export class ScrollModel {
     return undefined;
   }
 
+  /** Map an anchor onto current laid geometry; undefined if the message is gone. */
+  resolveAnchor(
+    slots: readonly LaidSlot[],
+    anchor: ScrollAnchor | undefined,
+  ): number | undefined {
+    if (!anchor) {
+      return undefined;
+    }
+    const found = slots.find((slot) => slot.msgId === anchor.msgId);
+    if (!found || found.lineCount <= 0) {
+      return undefined;
+    }
+    const frac = Math.min(1, Math.max(0, anchor.offsetFrac));
+    return found.startRow + frac * found.lineCount;
+  }
+
+  /**
+   * @param visualAnchor - pre-mutation anchor for the painted frame (`current`).
+   *   Omit to leave current alone except desired-delta compensation while animating.
+   *   Pass explicitly (including `undefined` via `glueVisual=true`) from ring sealed pairs.
+   * @param glueVisual - when true, apply `visualAnchor` (or desired-delta if unresolved).
+   */
   applyLayout(
     contentRows: number,
     viewRows: number,
     slots: readonly LaidSlot[],
     anchor: ScrollAnchor | undefined,
     paused = false,
+    visualAnchor?: ScrollAnchor,
+    glueVisual = false,
   ): void {
     const prevBottom = this.bottom();
     const prevContent = this.contentRows;
+    const prevDesired = this.desired;
+    const prevCurrent = this.current;
     const wasFollowing = this.atBottom;
+    const wasAnimating = this.animating;
     this.contentRows = Math.max(0, contentRows);
     this.viewRows = Math.max(0, viewRows);
     if (paused) {
       this.atBottom = false;
       if (anchor) {
-        const found = slots.find((slot) => slot.msgId === anchor.msgId);
-        if (found && found.lineCount > 0) {
-          const frac = Math.min(1, Math.max(0, anchor.offsetFrac));
-          this.desired = found.startRow + frac * found.lineCount;
+        const next = this.resolveAnchor(slots, anchor);
+        if (next !== undefined) {
+          this.desired = next;
         } else if (wasFollowing) {
           this.desired = prevBottom;
         }
       } else if (wasFollowing) {
         this.desired = prevBottom;
       }
+      this.stabilizeCurrent(
+        slots,
+        visualAnchor,
+        glueVisual,
+        wasFollowing,
+        wasAnimating,
+        prevDesired,
+        prevCurrent,
+      );
       this.finish(false);
-      this.startOrRetarget(false);
+      this.clampCurrent();
+      if (wasAnimating && this.smoothEnabled) {
+        this.startOrRetarget(true);
+      } else {
+        this.startOrRetarget(false);
+      }
       return;
     }
     if (!this.atBottom && anchor) {
-      const found = slots.find((slot) => slot.msgId === anchor.msgId);
-      if (found && found.lineCount > 0) {
-        const frac = Math.min(1, Math.max(0, anchor.offsetFrac));
-        this.desired = found.startRow + frac * found.lineCount;
+      const next = this.resolveAnchor(slots, anchor);
+      if (next !== undefined) {
+        this.desired = next;
       } else {
         this.desired = 0;
       }
     }
+    this.stabilizeCurrent(
+      slots,
+      visualAnchor,
+      glueVisual,
+      wasFollowing,
+      wasAnimating,
+      prevDesired,
+      prevCurrent,
+    );
     this.finish(true);
+    this.clampCurrent();
     const grewWhileFollowing =
       wasFollowing &&
       this.atBottom &&
@@ -220,7 +277,7 @@ export class ScrollModel {
       Math.abs(this.current - this.desired) > EPS;
     if (grewWhileFollowing) {
       this.startOrRetarget(true);
-    } else if (this.animating && this.smoothEnabled && !this.atBottom) {
+    } else if (wasAnimating && this.smoothEnabled && !this.atBottom) {
       this.startOrRetarget(true);
     } else {
       this.snapCurrent();
@@ -232,6 +289,46 @@ export class ScrollModel {
       return 0;
     }
     return -this.current * lineHeight;
+  }
+
+  private stabilizeCurrent(
+    slots: readonly LaidSlot[],
+    visualAnchor: ScrollAnchor | undefined,
+    glueVisual: boolean,
+    wasFollowing: boolean,
+    wasAnimating: boolean,
+    prevDesired: number,
+    prevCurrent: number,
+  ): void {
+    if (wasFollowing || this.atBottom) {
+      return;
+    }
+    // Painted frame only drifts from desired during a tween (or pause mid-tween).
+    if (!wasAnimating && !glueVisual) {
+      return;
+    }
+    if (glueVisual) {
+      const next = this.resolveAnchor(slots, visualAnchor);
+      if (next !== undefined) {
+        this.current = next;
+        return;
+      }
+      // Visual message evicted: keep the frame via the same content delta as desired.
+      this.current = prevCurrent + (this.desired - prevDesired);
+      return;
+    }
+    if (wasAnimating) {
+      this.current = prevCurrent + (this.desired - prevDesired);
+    }
+  }
+
+  private clampCurrent(): void {
+    const b = this.bottom();
+    if (b <= EPS) {
+      this.current = 0;
+      return;
+    }
+    this.current = Math.min(Math.max(0, this.current), b);
   }
 
   private snapCurrent(): void {

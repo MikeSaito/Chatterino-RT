@@ -270,4 +270,179 @@ function assert(cond: boolean, msg: string): void {
   assert(!m.isAnimating() && m.current === m.desired, "follow without newMessages snaps");
 }
 
+{
+  // Smooth scroll up: row growth above the visible frame must shift current, not only desired.
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(10, 4, laid, undefined);
+  m.setDesired(2, true);
+  assert(m.isAnimating(), "tween toward older rows");
+  assert(Math.abs(m.current - 6) < 1e-3, `current starts at bottom 6, got ${m.current}`);
+  const target = m.captureAnchor(laid);
+  const visual = m.captureAnchor(laid, m.current);
+  assert(target?.msgId === "b", `target b, got ${target?.msgId}`);
+  assert(visual?.msgId === "d", `visual d, got ${visual?.msgId}`);
+  const grown = slots([
+    ["a", 4],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(12, 4, grown, target, false, visual, true);
+  assert(Math.abs(m.desired - 4) < 1e-3, `desired follows b after +2, got ${m.desired}`);
+  assert(Math.abs(m.current - 8) < 1e-3, `current follows d after +2, got ${m.current}`);
+  assert(m.isAnimating(), "keeps tween after geometry change");
+  m.tick(0);
+  m.tick(SMOOTH_SCROLL_MS);
+  assert(Math.abs(m.current - m.desired) < 1e-3, "tween settles on anchored desired");
+}
+
+{
+  // Height change between current and desired needs independent visual/target anchors.
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(10, 3, laid, undefined);
+  m.setDesired(2, true);
+  const target = m.captureAnchor(laid);
+  const visual = m.captureAnchor(laid, m.current);
+  assert(target?.msgId === "b", `target b, got ${target?.msgId}`);
+  assert(visual?.msgId === "d", `visual d, got ${visual?.msgId}`);
+  const midGrew = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 4],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(12, 3, midGrew, target, false, visual, true);
+  assert(Math.abs(m.desired - 2) < 1e-3, `target b unmoved, got ${m.desired}`);
+  assert(Math.abs(m.current - 9) < 1e-3, `visual d shifted +2, got ${m.current}`);
+}
+
+{
+  // Without glueVisual, never snap current onto target mid-tween.
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+    ["f", 2],
+  ]);
+  m.applyLayout(12, 4, laid, undefined);
+  m.setDesired(2, true);
+  assert(Math.abs(m.current - 8) < 1e-3, `setup current at bottom 8, got ${m.current}`);
+  const target = m.captureAnchor(laid);
+  const grown = slots([
+    ["a", 4],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+    ["f", 2],
+  ]);
+  m.applyLayout(14, 4, grown, target, false);
+  assert(Math.abs(m.desired - 4) < 1e-3, `desired +2 via target, got ${m.desired}`);
+  assert(Math.abs(m.current - 10) < 1e-3, `current +2 via desired-delta, got ${m.current}`);
+  assert(m.current > m.desired + 1, "current stays behind desired (no target glue)");
+}
+
+{
+  // Visual message evicted: compensate current by desired delta, do not jump to target.
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+  ]);
+  m.applyLayout(10, 4, laid, undefined);
+  m.setDesired(2, true);
+  const target = m.captureAnchor(laid);
+  const visual = m.captureAnchor(laid, m.current);
+  assert(visual?.msgId === "d", `visual d, got ${visual?.msgId}`);
+  const afterEvict = slots([
+    ["b", 2],
+    ["c", 2],
+    ["e", 2],
+    ["f", 2],
+  ]);
+  const prevCurrent = m.current;
+  const prevDesired = m.desired;
+  m.applyLayout(8, 4, afterEvict, target, false, visual, true);
+  const delta = m.desired - prevDesired;
+  assert(Math.abs(m.current - (prevCurrent + delta)) < 1e-3, `evict visual uses desired delta, got ${m.current}`);
+  assert(Math.abs(m.current - m.desired) > 1, "does not snap current onto target");
+}
+
+{
+  // Pause mid-tween must keep visual frame, not snap to desired.
+  const m = new ScrollModel();
+  m.configureSmooth({ enabled: true, newMessages: false });
+  const laid = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+    ["f", 2],
+  ]);
+  m.applyLayout(12, 4, laid, undefined);
+  m.setDesired(2, true);
+  assert(Math.abs(m.current - 8) < 1e-3, `pause setup current 8, got ${m.current}`);
+  const target = m.captureAnchor(laid);
+  const visual = m.captureAnchor(laid, m.current);
+  assert(visual?.msgId === "e", `visual e, got ${visual?.msgId}`);
+  const grown = slots([
+    ["a", 2],
+    ["b", 2],
+    ["c", 2],
+    ["d", 2],
+    ["e", 2],
+    ["f", 2],
+    ["g", 2],
+  ]);
+  m.applyLayout(14, 4, grown, target, true, visual, true);
+  assert(!m.atBottom, "paused leaves bottom");
+  assert(Math.abs(m.desired - 2) < 1e-3, `paused desired held, got ${m.desired}`);
+  assert(Math.abs(m.current - 8) < 1e-3, `paused visual held at 8, got ${m.current}`);
+  assert(m.isAnimating(), "paused mid-tween keeps animation");
+}
+
+{
+  // resolveAnchor / capture at explicit row
+  const m = new ScrollModel();
+  const laid = slots([
+    ["a", 2],
+    ["b", 4],
+    ["c", 2],
+  ]);
+  m.applyLayout(8, 3, laid, undefined);
+  m.setDesired(3);
+  const mid = m.captureAnchor(laid, 3);
+  assert(mid?.msgId === "b", `mid b, got ${mid?.msgId}`);
+  assert(Math.abs((mid?.offsetFrac ?? 0) - 0.25) < 1e-3, `frac 0.25, got ${mid?.offsetFrac}`);
+  const resolved = m.resolveAnchor(laid, mid);
+  assert(resolved !== undefined && Math.abs(resolved - 3) < 1e-3, `resolve 3, got ${resolved}`);
+}
+
 console.log("scroll tests ok");
