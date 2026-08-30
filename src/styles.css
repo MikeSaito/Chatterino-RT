@@ -4010,6 +4010,62 @@ button.poll-panel-option-btn.is-selected {
   padding: 16px;
 }
 
+#emotepopup-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popup);
+  display: block;
+  padding: 0;
+  pointer-events: none;
+}
+
+#replythread-modal[hidden],
+#emotepopup-modal[hidden] {
+  display: none;
+}
+
+#replythread-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#emotepopup-backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+#replythread-dialog,
+#emotepopup-dialog {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  animation: modal-in var(--transition-normal);
+}
+
+#replythread-dialog {
+  width: min(420px, 100%);
+  height: min(480px, 90vh);
+}
+
+#emotepopup-dialog {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: min(320px, calc(100vw - 16px));
+  height: min(420px, min(60vh, calc(100vh - 24px)));
+  max-height: calc(100vh - 24px);
+  pointer-events: auto;
+}
+
 .popup-head h2 {
   margin: 0;
   font-size: 15px;
@@ -5064,10 +5120,13 @@ button.poll-panel-option-btn.is-selected {
 
 #app[data-ui-layout="classic"] .channel-item {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   border-radius: 6px 6px 0 0;
   background: transparent;
-  padding: 0 10px;
+  padding: 0 10px 0 8px;
   font-size: var(--font-md);
   font-family: "Segoe UI", sans-serif;
   height: 32px;

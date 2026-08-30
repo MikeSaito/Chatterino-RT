@@ -255,6 +255,7 @@ pub fn shutdown() {
 
 async fn run_poller(app: AppHandle, shared: Shared) {
     let mut ticks: u32 = 0;
+    let mut last_fingerprint = String::new();
     // First pass after a short delay so settings are loaded.
     loop {
         if NOTIFY_SHUTDOWN.load(Ordering::SeqCst) {
@@ -265,10 +266,16 @@ async fn run_poller(app: AppHandle, shared: Shared) {
             break;
         }
         ticks = ticks.saturating_add(1);
-        if ticks != 1 && ticks % POLL_EVERY_TICKS != 0 {
+        let channels = channels_to_poll(&shared);
+        let fingerprint = channels.join("\0");
+        let set_changed = fingerprint != last_fingerprint;
+        if set_changed {
+            last_fingerprint = fingerprint;
+        }
+        if ticks != 1 && ticks % POLL_EVERY_TICKS != 0 && !set_changed {
             continue;
         }
-        poll_once(&app, &shared).await;
+        poll_once(&app, &shared, &channels).await;
         mark_initial_pass_done(&shared);
     }
 }
@@ -292,24 +299,25 @@ fn channels_to_poll(shared: &Shared) -> Vec<String> {
     out
 }
 
-async fn poll_once(app: &AppHandle, shared: &Shared) {
-    let channels = channels_to_poll(shared);
+async fn poll_once(app: &AppHandle, shared: &Shared, channels: &[String]) {
     if channels.is_empty() {
         return;
     }
     let token = auth::oauth_token(shared);
     let client_id = auth::resolved_client_id(shared);
     let Some(live_map) =
-        helix::fetch_streams_by_logins(&channels, token.as_deref(), &client_id).await
+        helix::fetch_streams_by_logins(channels, token.as_deref(), &client_id).await
     else {
         return;
     };
-    for ch in &channels {
+    for ch in channels {
         let status = live_map.get(ch);
         let live = status.is_some_and(|s| s.live);
         let title = status.and_then(|s| s.stream_title.as_deref());
         // Hub live for the active channel is owned by live_status (system notices).
         // Re-check active inside the same lock as the mutation to avoid races.
+        // Emit chat:channel_live only when the live flag changes (tab chrome).
+        let mut emit_tab_live = false;
         if let Ok(mut hub) = shared.hub.lock() {
             let is_active = hub
                 .active
@@ -323,13 +331,18 @@ async fn poll_once(app: &AppHandle, shared: &Shared) {
                         status.and_then(|s| s.stream_title.clone()),
                         status.and_then(|s| s.stream_id.clone()),
                     );
-                    let _ = hub.set_channel_live(ch, true);
+                    emit_tab_live = hub.set_channel_live(ch, true);
                 } else if hub.channel_live(ch) {
-                    let _ = hub.set_channel_live(ch, false);
+                    emit_tab_live = hub.set_channel_live(ch, false);
                     drop(hub);
                     super::logging::close_stream_file(shared, ch);
                 }
             }
+        }
+        if emit_tab_live {
+            let resolved = status.cloned().unwrap_or_else(helix::StreamStatus::offline);
+            let payload = super::live_status::channel_live_payload(ch, &resolved);
+            let _ = app.emit("chat:channel_live", payload);
         }
         observe_live(shared, app, ch, live, title);
     }

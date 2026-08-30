@@ -53,7 +53,7 @@ async fn run_poller(app: AppHandle, shared: Shared) {
     }
 }
 
-fn channel_live_payload(channel: &str, status: &helix::StreamStatus) -> ChannelLive {
+pub fn channel_live_payload(channel: &str, status: &helix::StreamStatus) -> ChannelLive {
     ChannelLive {
         channel: channel.to_string(),
         live: status.live,
