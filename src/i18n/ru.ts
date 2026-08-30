@@ -3,7 +3,7 @@ import type { MessageKey } from "./en.ts";
 /** Russian UI strings. Must cover every MessageKey. */
 export const ru: Record<MessageKey, string> = {
   "sidebar.join.label": "канал",
-  "sidebar.join.submit": "Добавить",
+  "sidebar.join.submit": "Join",
   "sidebar.join.toggle": "Присоединиться к каналу",
   "sidebar.channels.aria": "Каналы",
   "sidebar.channel.leave": "Покинуть",
@@ -47,7 +47,7 @@ export const ru: Record<MessageKey, string> = {
 
   "joinPopover.aria": "Присоединиться к каналу",
   "joinPopover.label": "канал",
-  "joinPopover.submit": "Добавить",
+  "joinPopover.submit": "Join",
 
   "composer.label": "сообщение",
   "composer.dropHint": "Перетащите изображение сюда",
