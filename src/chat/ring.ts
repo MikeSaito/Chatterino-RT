@@ -108,6 +108,13 @@ const BADGE_GAP = 2;
 const MESSAGE_GAP = 4;
 /** Soft-clip nick only when it would leave less than this many body columns. */
 const MIN_BODY_COLS_AFTER_NICK = 1;
+/** Centered system-event cloud (Twitch web-style pill). */
+const SYSTEM_CLOUD_BG = 0x2b273f;
+const SYSTEM_CLOUD_FG = 0xa39bb8;
+const SYSTEM_CLOUD_PAD_X = 14;
+const SYSTEM_CLOUD_PAD_Y = 5;
+const SYSTEM_CLOUD_RADIUS = 12;
+const SYSTEM_CLOUD_MARGIN_X = 16;
 
 export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 
@@ -145,6 +152,7 @@ export type SlotContext = {
 type Slot = {
   root: Container;
   highlight: Graphics;
+  systemCloud: Graphics;
   mentions: Graphics;
   disabledGfx: Graphics;
   time: BitmapText;
@@ -188,6 +196,14 @@ type Slot = {
   bodyIndent: number;
   /** Pixel origin of wrap lines 2+ (under timestamp / after mod gutter). */
   bodyContIndent: number;
+  /** Centered system cloud bounds (null when not a cloud). */
+  systemCloudBounds: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    radius: number;
+  } | null;
   /** Rows occupied by reply header above the main line. */
   replyRows: number;
   startRow: number;
@@ -600,6 +616,10 @@ export class MessageRing {
    * Falls back to paintClip only when wrap metrics are missing.
    */
   private repositionSlotMedia(slot: Slot): void {
+    if (this.isSystemCloud(slot)) {
+      this.paintClip(slot);
+      return;
+    }
     if (
       slot.wrapLines.length === 0 ||
       (slot.wrapLines.length === 1 &&
@@ -1626,6 +1646,8 @@ export class MessageRing {
       root.hitArea = new Rectangle(0, 0, 1, this.lineHeight);
       const hl = new Graphics();
       hl.eventMode = "none";
+      const systemCloud = new Graphics();
+      systemCloud.eventMode = "none";
       const mentions = new Graphics();
       mentions.eventMode = "none";
       const disabledGfx = new Graphics();
@@ -1741,6 +1763,7 @@ export class MessageRing {
       }
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
+        systemCloud,
         hl,
         mentions,
         ...modBtns,
@@ -1759,6 +1782,7 @@ export class MessageRing {
       const slot: Slot = {
         root,
         highlight: hl,
+        systemCloud,
         mentions,
         disabledGfx,
         time,
@@ -1794,6 +1818,7 @@ export class MessageRing {
         lineCount: 1,
         bodyIndent: 0,
         bodyContIndent: 0,
+        systemCloudBounds: null,
         replyRows: 0,
         startRow: 0,
         highlightColor: "",
@@ -1836,9 +1861,18 @@ export class MessageRing {
       root.on("pointermove", (ev: FederatedPointerEvent) => {
         this.onSlotMove(slot, ev);
       });
-      root.on("pointerover", () => {
+      root.on("pointerover", (ev: FederatedPointerEvent) => {
+        if (!slot.msgId) {
+          return;
+        }
+        if (slot.systemCloudBounds) {
+          const local = ev.getLocalPosition(slot.root);
+          if (this.pointInSystemCloud(slot, local.x, local.y)) {
+            this.setHoveredMsgId(slot.msgId);
+          }
+          return;
+        }
         if (
-          slot.msgId &&
           !slot.system &&
           slot.login &&
           !(slot.disabled && this.hideModerated)
@@ -2194,6 +2228,8 @@ export class MessageRing {
     slot.replyHeader.visible = false;
     slot.replyHeader.text = "";
     slot.highlight.clear();
+    slot.systemCloud.clear();
+    slot.systemCloudBounds = null;
     slot.mentions.clear();
     slot.disabledGfx.clear();
     for (const spr of slot.emotes) {
@@ -2397,7 +2433,11 @@ export class MessageRing {
         });
       }
     }
-    this.loadBadgeSprites(slot);
+    if (this.isSystemCloud(slot)) {
+      slot.badgesRaw = [];
+    } else {
+      this.loadBadgeSprites(slot);
+    }
   }
 
   private line(event: ChatEvent): Drawn {
@@ -2559,6 +2599,216 @@ export class MessageRing {
     }
   }
 
+  private isSystemCloud(slot: Slot): boolean {
+    return (
+      slot.system &&
+      !slot.useNickStyle &&
+      !slot.isWhisper &&
+      slot.bodyRaw.length > 0
+    );
+  }
+
+  /** Width of one wrap line in ChatFont layout px (emote holes included). */
+  private measureBodyLineWidth(
+    slot: Slot,
+    line: WrapLine,
+    opts: WrapOptions,
+  ): number {
+    if (line.end <= line.start) {
+      return 0;
+    }
+    const rendered = renderWrapped(
+      slot.bodyRaw,
+      [line],
+      slot.spansRaw,
+      opts,
+    );
+    return this.measureBitmapTextWidth("ChatFont", rendered);
+  }
+
+  /**
+   * Centered pill for CLEARCHAT / CLEARMSG / USERNOTICE / NOTICE
+   * (Twitch web-style system “cloud”).
+   */
+  private paintSystemCloud(slot: Slot): void {
+    const padX = Math.max(8, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
+    const padY = Math.max(3, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
+    const radius = Math.max(8, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
+    const marginX = Math.max(
+      8,
+      Math.round(SYSTEM_CLOUD_MARGIN_X * this.fontScale),
+    );
+    const paneW = this.app.screen.width;
+
+    slot.time.visible = false;
+    slot.nick.visible = false;
+    slot.nickPaintSpr.visible = false;
+    slot.nick.text = "";
+    slot.replyHeader.visible = false;
+    slot.replyHeader.text = "";
+    for (const spr of slot.badges) {
+      spr.visible = false;
+    }
+    for (const mt of slot.modBtns) {
+      mt.visible = false;
+      mt.text = "";
+    }
+    slot.modBtnHits = [];
+    slot.bitsLabel.visible = false;
+    slot.bitsLabel.text = "";
+    slot.body.style.fill = SYSTEM_CLOUD_FG;
+    slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
+
+    const maxInner = Math.max(1, Math.floor(paneW - 2 * marginX - 2 * padX));
+    // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
+    const layoutOpts = this.wrapOpts(slot, [], maxInner);
+    const lines = wrapBody(
+      slot.bodyRaw,
+      maxInner,
+      slot.spansRaw,
+      layoutOpts,
+    );
+    slot.collapsed = false;
+    slot.root.cursor = "default";
+    slot.wrapLines = lines;
+    slot.wrapReady = true;
+    slot.replyRows = 0;
+
+    let maxLineW = 0;
+    for (const line of lines) {
+      maxLineW = Math.max(
+        maxLineW,
+        this.measureBodyLineWidth(slot, line, layoutOpts),
+      );
+    }
+    const textRows = Math.max(1, lines.length);
+    const textBlockW = Math.max(1, Math.ceil(maxLineW));
+    const cloudW = Math.min(paneW - 2 * marginX, textBlockW + 2 * padX);
+    const cloudH = textRows * this.lineHeight + 2 * padY;
+    slot.lineCount = Math.max(
+      1,
+      Math.ceil(cloudH / Math.max(1, this.lineHeight)),
+    );
+    const allocatedH = slot.lineCount * this.lineHeight;
+    const cloudX = Math.max(0, Math.floor((paneW - cloudW) / 2));
+    const cloudY = Math.max(0, Math.floor((allocatedH - cloudH) / 2));
+    const textOriginX =
+      cloudX +
+      padX +
+      Math.max(0, (cloudW - 2 * padX - textBlockW) / 2);
+    const contentY = cloudY + padY;
+
+    slot.bodyIndent = textOriginX;
+    slot.bodyContIndent = textOriginX;
+    slot.body.x = textOriginX;
+    slot.body.y = contentY;
+    slot.bodyCont.x = textOriginX;
+    slot.bodyCont.y = contentY + this.lineHeight;
+
+    const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
+    const restLines = lines.slice(1);
+    slot.body.text = renderWrapped(
+      slot.bodyRaw,
+      firstOnly,
+      slot.spansRaw,
+      layoutOpts,
+    );
+    dirtyBitmapText(slot.body);
+    if (restLines.length === 0) {
+      slot.bodyCont.visible = false;
+      slot.bodyCont.text = "";
+    } else {
+      slot.bodyCont.visible = true;
+      slot.bodyCont.text = renderWrapped(
+        slot.bodyRaw,
+        restLines,
+        slot.spansRaw,
+        layoutOpts,
+      );
+      dirtyBitmapText(slot.bodyCont);
+    }
+
+    slot.systemCloudBounds = {
+      x: cloudX,
+      y: cloudY,
+      w: cloudW,
+      h: cloudH,
+      radius,
+    };
+    slot.systemCloud.clear();
+    slot.systemCloud
+      .roundRect(cloudX, cloudY, cloudW, cloudH, radius)
+      .fill({ color: SYSTEM_CLOUD_BG, alpha: 1 });
+
+    if (slot.root.hitArea instanceof Rectangle) {
+      slot.root.hitArea.width = paneW;
+      slot.root.hitArea.height = allocatedH;
+    }
+
+    this.paintHighlight(slot);
+    slot.mentions.clear();
+    for (const mt of slot.mentionTexts) {
+      mt.visible = false;
+      mt.text = "";
+    }
+    this.paintLinks(
+      slot,
+      textOriginX,
+      textOriginX,
+      contentY,
+      layoutOpts,
+    );
+    this.paintDisabled(slot);
+
+    let prevX = 0;
+    let prevY = 0;
+    let hasPrev = false;
+    for (let i = 0; i < slot.emotes.length; i += 1) {
+      const spr = slot.emotes[i];
+      const span = slot.spansRaw[i];
+      if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
+        spr.visible = false;
+        continue;
+      }
+      const paint = this.emotePaintSize(span);
+      const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
+      if (zw && hasPrev) {
+        spr.visible = true;
+        spr.x = prevX;
+        spr.y = prevY;
+        if (spr.texture !== Texture.EMPTY) {
+          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
+        }
+        continue;
+      }
+      const pos = indexToLineCol(
+        slot.bodyRaw,
+        lines,
+        span.start,
+        slot.spansRaw,
+        layoutOpts,
+      );
+      if (!pos) {
+        spr.visible = false;
+        continue;
+      }
+      spr.visible = true;
+      spr.x = textOriginX + pos.col;
+      spr.y =
+        contentY +
+        pos.line * this.lineHeight +
+        Math.max(1, (this.lineHeight - paint.h) / 2);
+      if (spr.texture !== Texture.EMPTY) {
+        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
+      }
+      prevX = spr.x;
+      prevY = spr.y;
+      hasPrev = true;
+    }
+    slot.bitsLabel.visible = false;
+    slot.bitsLabel.text = "";
+  }
+
   private paintClip(slot: Slot): void {
     slot.time.style.fontSize = this.fontSize;
     slot.time.style.lineHeight = this.lineHeight;
@@ -2571,6 +2821,14 @@ export class MessageRing {
     slot.bodyCont.style.lineHeight = this.lineHeight;
     slot.bitsLabel.style.fontSize = this.fontSize;
     slot.bitsLabel.style.lineHeight = this.lineHeight;
+    if (this.isSystemCloud(slot)) {
+      this.paintSystemCloud(slot);
+      return;
+    }
+    slot.systemCloud.clear();
+    slot.systemCloudBounds = null;
+    slot.body.style.fill = this.themeFills.body;
+    slot.bodyCont.style.fill = this.themeFills.body;
     const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
     const timeSample = this.timestampsVisible()
       ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
@@ -2812,22 +3070,44 @@ export class MessageRing {
 
   private paintHighlight(slot: Slot): void {
     slot.highlight.clear();
+    const cloud = slot.systemCloudBounds;
     const h = slot.lineCount * this.lineHeight;
     const w = this.app.screen.width;
     if (this.findHitId && slot.msgId === this.findHitId) {
-      slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
+      if (cloud) {
+        slot.highlight
+          .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
+          .fill({ color: 0xf0ad4e, alpha: 0.28 });
+      } else {
+        slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
+      }
     } else {
       const parsed = parseHighlight(slot.highlightColor);
       if (parsed) {
-        slot.highlight
-          .rect(0, 0, w, h)
-          .fill({ color: parsed.color, alpha: parsed.alpha });
+        if (cloud) {
+          slot.highlight
+            .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
+            .fill({ color: parsed.color, alpha: parsed.alpha });
+        } else {
+          slot.highlight
+            .rect(0, 0, w, h)
+            .fill({ color: parsed.color, alpha: parsed.alpha });
+        }
       } else if (this.hoveredMsgId && slot.msgId === this.hoveredMsgId) {
-        slot.highlight.rect(0, 0, w, h).fill({
-          color: this.themeFills.hover,
-          alpha: this.themeFills.hoverAlpha,
-        });
-      } else if (this.alternateMessages && slot.startRow % 2 === 1) {
+        if (cloud) {
+          slot.highlight
+            .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
+            .fill({
+              color: this.themeFills.hover,
+              alpha: this.themeFills.hoverAlpha,
+            });
+        } else {
+          slot.highlight.rect(0, 0, w, h).fill({
+            color: this.themeFills.hover,
+            alpha: this.themeFills.hoverAlpha,
+          });
+        }
+      } else if (!cloud && this.alternateMessages && slot.startRow % 2 === 1) {
         slot.highlight
           .rect(0, 0, w, h)
           .fill({
@@ -2836,7 +3116,7 @@ export class MessageRing {
           });
       }
     }
-    if (this.separateMessages) {
+    if (this.separateMessages && !slot.systemCloudBounds) {
       slot.highlight
         .moveTo(0, h - 0.5)
         .lineTo(w, h - 0.5)
@@ -3481,6 +3761,14 @@ export class MessageRing {
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {
+    if (slot.systemCloudBounds && slot.msgId) {
+      const local = ev.getLocalPosition(slot.root);
+      if (this.pointInSystemCloud(slot, local.x, local.y)) {
+        this.setHoveredMsgId(slot.msgId);
+      } else if (this.hoveredMsgId === slot.msgId && !this.hoverGuard?.()) {
+        this.clearHover();
+      }
+    }
     if (this.modActionAt(slot, ev)) {
       slot.root.cursor = "pointer";
       return;
@@ -3730,10 +4018,17 @@ export class MessageRing {
     localX: number,
     slotLocalY: number,
   ): number | null {
-    const contentY = slot.replyRows * this.lineHeight;
+    if (slot.systemCloudBounds) {
+      if (!this.pointInSystemCloud(slot, localX, slotLocalY)) {
+        return null;
+      }
+    }
+    const contentY = slot.systemCloudBounds
+      ? slot.body.y
+      : slot.replyRows * this.lineHeight;
     if (
       slotLocalY < contentY ||
-      slotLocalY >= slot.lineCount * this.lineHeight
+      slotLocalY >= contentY + slot.wrapLines.length * this.lineHeight
     ) {
       return null;
     }
@@ -3756,7 +4051,24 @@ export class MessageRing {
       bodyLine,
       xPx,
       slot.spansRaw,
-      this.wrapOpts(slot),
+      this.wrapOpts(slot, slot.systemCloudBounds ? [] : undefined),
+    );
+  }
+
+  private pointInSystemCloud(
+    slot: Slot,
+    localX: number,
+    localY: number,
+  ): boolean {
+    const b = slot.systemCloudBounds;
+    if (!b) {
+      return false;
+    }
+    return (
+      localX >= b.x &&
+      localX < b.x + b.w &&
+      localY >= b.y &&
+      localY < b.y + b.h
     );
   }
 
