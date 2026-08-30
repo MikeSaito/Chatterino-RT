@@ -806,7 +806,7 @@ async fn get_helix(
                 if status.is_success() {
                     match resp.json::<Value>().await {
                         Ok(v) => return HelixFetch::Ok(v),
-                        Err(e) => last = format!("json: {e}"),
+                        Err(e) => last = super::http_client::format_reqwest_error(&e),
                     }
                 } else {
                     last = format!("http {status}");
@@ -821,7 +821,7 @@ async fn get_helix(
                     }
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -939,10 +939,10 @@ pub async fn send_chat_message(
                             &v,
                         ))
                     }
-                    Err(e) => last = format!("json: {e}"),
+                    Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -1246,7 +1246,10 @@ pub async fn warn_user(
                         ));
                     }
                     Err(e) => {
-                        last = format!("http {code}; json: {e}");
+                        last = format!(
+                            "http {code}; {}",
+                            super::http_client::format_reqwest_error_brief(&e)
+                        );
                         if (400..500).contains(&code) {
                             return HelixWarnOutcome::Failed(format!(
                                 "Failed to warn user - {last}"
@@ -1255,7 +1258,7 @@ pub async fn warn_user(
                     }
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -1302,7 +1305,10 @@ pub async fn start_raid(
                         return HelixRaidOutcome::Failed(map_start_raid_http_error(code, &v));
                     }
                     Err(e) => {
-                        last = format!("http {code}; json: {e}");
+                        last = format!(
+                            "http {code}; {}",
+                            super::http_client::format_reqwest_error_brief(&e)
+                        );
                         if (400..500).contains(&code) {
                             return HelixRaidOutcome::Failed(format!(
                                 "Failed to start a raid - {last}"
@@ -1311,7 +1317,7 @@ pub async fn start_raid(
                     }
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -1347,7 +1353,10 @@ pub async fn cancel_raid(broadcaster_id: &str, token: &str, client_id: &str) -> 
                         return HelixRaidOutcome::Failed(map_cancel_raid_http_error(code, &v));
                     }
                     Err(e) => {
-                        last = format!("http {code}; json: {e}");
+                        last = format!(
+                            "http {code}; {}",
+                            super::http_client::format_reqwest_error_brief(&e)
+                        );
                         if (400..500).contains(&code) {
                             return HelixRaidOutcome::Failed(format!(
                                 "Failed to cancel the raid - {last}"
@@ -1356,7 +1365,7 @@ pub async fn cancel_raid(broadcaster_id: &str, token: &str, client_id: &str) -> 
                     }
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;

@@ -727,7 +727,7 @@ async fn post_manage_message(
                 let body = resp.json::<Value>().await.unwrap_or(Value::Null);
                 return Err(map_helix_error(status, &body));
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < HTTP_ATTEMPTS {
             tokio::time::sleep(delay).await;

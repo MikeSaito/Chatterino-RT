@@ -291,10 +291,10 @@ async fn post_gql(client_id: &str, token: &str, body: Value) -> Result<Value, Po
                         }
                         last = format!("http {status}: {message}");
                     }
-                    Err(e) => last = format!("json: {e}"),
+                    Err(e) => last = super::http_client::format_reqwest_error(&e),
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;

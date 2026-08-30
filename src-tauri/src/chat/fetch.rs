@@ -335,7 +335,7 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
                 if status.is_success() {
                     match resp.json::<Value>().await {
                         Ok(v) => return Ok(v),
-                        Err(e) => last = format!("json: {e}"),
+                        Err(e) => last = super::http_client::format_reqwest_error(&e),
                     }
                 } else if status.as_u16() == 404 || status.as_u16() == 410 {
                     // Канал без BTTV/FFZ/7TV — ожидаемо, не спамим stderr.
@@ -353,7 +353,7 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, ()> {
                     return Err(());
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -747,13 +747,13 @@ pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), Str
                             return Ok((bytes.to_vec(), content_type));
                         }
                         Ok(_) => last = "empty body".to_string(),
-                        Err(e) => last = e.to_string(),
+                        Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
                     }
                 } else {
                     last = format!("http {status}");
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -923,17 +923,12 @@ mod tests {
         );
         assert!(allowed_emote_cdn_url("https://evil.example/emote/x.png").is_none());
         assert_eq!(
-            allowed_emote_cdn_url(
-                "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"
-            ),
-            Some(
-                "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg".to_string()
-            )
+            allowed_emote_cdn_url("https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"),
+            Some("https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg".to_string())
         );
-        assert!(allowed_emote_cdn_url(
-            "https://evil.clips-media-assets2.twitch.tv/foo.jpg"
-        )
-        .is_none());
+        assert!(
+            allowed_emote_cdn_url("https://evil.clips-media-assets2.twitch.tv/foo.jpg").is_none()
+        );
     }
 
     #[test]

@@ -520,9 +520,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
     let user_id = validated
         .user_id
         .filter(|id| valid_twitch_user_id(id))
-        .or_else(|| {
-            valid_twitch_user_id(&parsed.user_id).then_some(parsed.user_id.clone())
-        });
+        .or_else(|| valid_twitch_user_id(&parsed.user_id).then_some(parsed.user_id.clone()));
     if !persist_and_relogin(
         &app,
         &shared,
@@ -1057,10 +1055,10 @@ async fn request_device(client_id: &str) -> Result<DeviceJson, AuthFail> {
                             .unwrap_or("device code error")
                             .to_string();
                     }
-                    Err(e) => last = e.to_string(),
+                    Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < HTTP_ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -1172,10 +1170,10 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                             .unwrap_or("validate error")
                             .to_string();
                     }
-                    Err(e) => last = e.to_string(),
+                    Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
                 }
             }
-            Err(e) => last = e.to_string(),
+            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
         }
         if attempt + 1 < HTTP_ATTEMPTS {
             tokio::time::sleep(delay).await;
