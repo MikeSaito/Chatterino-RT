@@ -152,6 +152,11 @@ export function bindChannelPoints(opts: {
       button.disabled = true;
       return;
     }
+    if (last && last.channel === ch && last.authRequired) {
+      label.textContent = t("points.loginCta");
+      button.title = t("points.empty.relogin");
+      return;
+    }
     if (last && last.channel === ch && !last.authRequired && last.enabled && typeof last.balance === "number") {
       label.textContent = formatPoints(last.balance);
       button.title = t("points.balanceTitle", { points: formatPoints(last.balance) });
@@ -193,11 +198,12 @@ export function bindChannelPoints(opts: {
       if (token !== seq) {
         return;
       }
-      // Relogin is returned as authRequired snapshot; other errors only surface on demand.
+      // Relogin is returned as authRequired snapshot; other errors only surface on demand
+      // or while the modal is open (avoid silent stale rewards list).
       if (foreground) {
         onStatus(errorText(err, "points.error.load"));
       }
-      if (!modal.hidden && foreground) {
+      if (!modal.hidden) {
         paintError(errorText(err, "points.error.load"));
       }
     } finally {

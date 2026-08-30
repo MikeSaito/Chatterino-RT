@@ -71,7 +71,7 @@ import {
   isStreamerModeActive,
   streamerModeState,
 } from "./shell/streamerMode";
-import { startLiveNotifyListener } from "./shell/liveNotify";
+import { startLiveNotifyListener, stopLiveNotifyListener } from "./shell/liveNotify";
 import { bindMentionToast } from "./shell/mentionToast";
 import { bindChannelPoints } from "./shell/channelPoints";
 import { bindRaidToast } from "./shell/raidToast";
@@ -988,8 +988,6 @@ async function boot(): Promise<void> {
     ring.setHoverGuard(undefined);
     streamPreviewCtl?.hide();
     unmountPlayer(playerSlot);
-    chatIpc?.stop();
-    chatIpc = null;
     ring.destroy();
     textures.clear();
     destroyChatApp();
@@ -1250,9 +1248,14 @@ async function boot(): Promise<void> {
       linkEnrichment.afterBatch(events);
     },
   });
+  chatIpc = ipc;
   {
     chainTeardown(() => {
       linkEnrichment.stop();
+      ipc.stop();
+      if (chatIpc === ipc) {
+        chatIpc = null;
+      }
     });
   }
   readActiveChannel = () => ipc.active().trim();
@@ -1493,7 +1496,6 @@ async function boot(): Promise<void> {
     const ch = ipc.active().toLowerCase();
     composerChrome.setWaitText(ch ? (sendWaitByChannel.get(ch) ?? "") : "");
   }
-  chatIpc = ipc;
   // Stock WindowDeactivate ≈ tab away / minimize. Prefer visibility hidden so
   // iframe player focus and in-window dialogs do not move the last-read line.
   const onDocHidden = (): void => {
@@ -2265,8 +2267,12 @@ async function boot(): Promise<void> {
 
   await startLiveNotifyListener();
   if (!bootAlive()) {
+    stopLiveNotifyListener();
     return;
   }
+  chainTeardown(() => {
+    stopLiveNotifyListener();
+  });
 
   const resolveProfileAvatar = async (login: string): Promise<string | null> => {
     const key = login.trim().toLowerCase();

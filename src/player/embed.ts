@@ -123,7 +123,8 @@ function destroyFrame(frame: HTMLIFrameElement | null): void {
     return;
   }
   try {
-    frame.onload = null;
+    const abort = (frame as HTMLIFrameElement & { __crtAbort?: AbortController }).__crtAbort;
+    abort?.abort();
     frame.removeAttribute("src");
     frame.src = "about:blank";
   } catch {
@@ -346,25 +347,31 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
     const frame = createPlayerFrame();
     frame.width = String(w);
     frame.height = String(h);
-    frame.addEventListener("load", () => {
-      if (!isLive() || frameEl !== frame) {
-        return;
-      }
-      // about:blank teardown load — ignore.
-      if (!frame.src || frame.src === "about:blank") {
-        return;
-      }
-      iframeLoaded = true;
-      clearLoadTimer();
-      if (liveKnown === false) {
-        removeFrame();
-        overlayMode = "offline";
+    const loadAbort = new AbortController();
+    (frame as HTMLIFrameElement & { __crtAbort?: AbortController }).__crtAbort = loadAbort;
+    frame.addEventListener(
+      "load",
+      () => {
+        if (!isLive() || frameEl !== frame) {
+          return;
+        }
+        // about:blank teardown load — ignore.
+        if (!frame.src || frame.src === "about:blank") {
+          return;
+        }
+        iframeLoaded = true;
+        clearLoadTimer();
+        if (liveKnown === false) {
+          removeFrame();
+          overlayMode = "offline";
+          paintOverlay();
+          return;
+        }
+        overlayMode = "ready";
         paintOverlay();
-        return;
-      }
-      overlayMode = "ready";
-      paintOverlay();
-    });
+      },
+      { signal: loadAbort.signal },
+    );
     frameEl = frame;
     // Detach before append: hidden placeholder still flashes if recreated later.
     detachPlaceholder(host);

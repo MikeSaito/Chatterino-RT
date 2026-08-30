@@ -234,16 +234,19 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
 pub fn chat_subscribe(
     state: tauri::State<'_, Shared>,
     channel: Channel<Vec<u8>>,
-) -> Result<(), ApiError> {
+) -> Result<u64, ApiError> {
     state
         .set_batch_channel(channel)
         .map_err(|_| ApiError::internal("lock"))
 }
 
 #[tauri::command]
-pub fn chat_unsubscribe(state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
+pub fn chat_unsubscribe(
+    state: tauri::State<'_, Shared>,
+    generation: Option<u64>,
+) -> Result<(), ApiError> {
     state
-        .clear_batch_channel()
+        .clear_batch_channel(generation)
         .map_err(|_| ApiError::internal("lock"))
 }
 

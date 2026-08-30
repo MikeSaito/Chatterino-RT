@@ -56,6 +56,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
   let unlistenPipe: (() => void) | null = null;
   let unlistenHistory: (() => void) | null = null;
   let activePipe: Channel<unknown> | null = null;
+  let pipeGeneration: number | null = null;
   const queued: ChatBatch[] = [];
   const ops: Op[] = [];
 
@@ -192,6 +193,10 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     }
   };
 
+  const unsubscribePipe = (generation: number | null): void => {
+    void invoke("chat_unsubscribe", { generation }).catch(() => undefined);
+  };
+
   const attachChannel = async (): Promise<void> => {
     if (stopped) {
       return;
@@ -214,8 +219,9 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
         onBadPipe();
       }
     };
+    let generation: number;
     try {
-      await invoke("chat_subscribe", { channel });
+      generation = await invoke<number>("chat_subscribe", { channel });
     } catch (err) {
       if (my === pipeEpoch && activePipe === channel) {
         activePipe.onmessage = () => undefined;
@@ -228,9 +234,11 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
       if (activePipe === channel) {
         activePipe = null;
       }
-      // Never unsubscribe here: a newer attach may already own Rust batch_tx.
-      // stop() is the only place that clears the pipe on teardown.
+      // Clear only this install; a newer attach keeps its generation.
+      unsubscribePipe(generation);
+      return;
     }
+    pipeGeneration = generation;
   };
 
   const resubscribe = async (): Promise<void> => {
@@ -431,6 +439,8 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
       }
       stopped = true;
       epoch += 1;
+      const generation = pipeGeneration;
+      pipeGeneration = null;
       dropPipe();
       rejectQueuedOps();
       queued.length = 0;
@@ -446,7 +456,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
         unlistenHistory();
         unlistenHistory = null;
       }
-      void invoke("chat_unsubscribe").catch(() => undefined);
+      unsubscribePipe(generation);
     },
     active: () => active,
   };

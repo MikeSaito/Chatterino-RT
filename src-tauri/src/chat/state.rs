@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
@@ -164,7 +164,9 @@ pub struct Shared {
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
-    pub batch_tx: Arc<Mutex<Option<Channel<Vec<u8>>>>>,
+    pub batch_tx: Arc<Mutex<Option<(u64, Channel<Vec<u8>>)>>>,
+    /// Monotonic id for batch Channel install; stale unsubscribe must not clear a newer pipe.
+    pub batch_gen: Arc<AtomicU64>,
     pub session: Arc<Mutex<SessionInner>>,
     pub settings: Arc<Mutex<SettingsInner>>,
     /// Compiled highlight phrase rules; refreshed on settings load/replace.
@@ -238,6 +240,7 @@ impl Shared {
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
             batch_tx: Arc::new(Mutex::new(None)),
+            batch_gen: Arc::new(AtomicU64::new(0)),
             session: Arc::new(Mutex::new(SessionInner::default())),
             settings: Arc::new(Mutex::new(SettingsInner::default())),
             highlight_sound: Arc::new(Mutex::new(HighlightSoundCtx::default())),
@@ -292,16 +295,28 @@ impl Shared {
             });
     }
 
-    pub fn set_batch_channel(&self, channel: Channel<Vec<u8>>) -> Result<(), ()> {
+    /// Install a JS Channel; returns generation so unsubscribe can ignore stale clears.
+    pub fn set_batch_channel(&self, channel: Channel<Vec<u8>>) -> Result<u64, ()> {
+        let gen = self.batch_gen.fetch_add(1, Ordering::AcqRel) + 1;
         let mut slot = self.batch_tx.lock().map_err(|_| ())?;
-        *slot = Some(channel);
-        Ok(())
+        *slot = Some((gen, channel));
+        Ok(gen)
     }
 
     /// Drop the JS Channel so Rust stops delivering into stale HMR / remount callbacks.
-    pub fn clear_batch_channel(&self) -> Result<(), ()> {
+    /// When `generation` is set, clear only if it still matches the installed pipe.
+    pub fn clear_batch_channel(&self, generation: Option<u64>) -> Result<(), ()> {
         let mut slot = self.batch_tx.lock().map_err(|_| ())?;
-        *slot = None;
+        if let Some(want) = generation {
+            match slot.as_ref() {
+                Some((gen, _)) if *gen == want => {
+                    *slot = None;
+                }
+                Some(_) | None => {}
+            }
+        } else {
+            *slot = None;
+        }
         Ok(())
     }
 
@@ -312,7 +327,7 @@ impl Shared {
         let Ok(slot) = self.batch_tx.lock() else {
             return BatchSend::NoSubscriber;
         };
-        let Some(channel) = slot.as_ref() else {
+        let Some((_, channel)) = slot.as_ref() else {
             return BatchSend::NoSubscriber;
         };
         if channel.send(bytes).is_ok() {

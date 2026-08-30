@@ -220,7 +220,7 @@ pub async fn snapshot(
     let channel = super::commands::normalize_channel(channel)
         .map_err(|e| ChannelPointsError::coded_params(e.code, e.message, e.params))?;
     let Some((client_id, token)) = graph_creds(shared) else {
-        return Ok(auth_required_snapshot(&channel));
+        return Ok(auth_required_snapshot(&channel, "no_creds"));
     };
     match post_gql(
         &client_id,
@@ -235,12 +235,14 @@ pub async fn snapshot(
     {
         Ok(value) => Ok(parse_context(&value, &channel)),
         // Stale / revoked token: UI CTA, not a thrown poll error every refresh.
-        Err(err) if err.code == "error.points.relogin" => Ok(auth_required_snapshot(&channel)),
+        Err(err) if err.code == "error.points.relogin" => {
+            Ok(auth_required_snapshot(&channel, "relogin"))
+        }
         Err(err) => Err(err),
     }
 }
 
-fn auth_required_snapshot(channel: &str) -> ChannelPointsSnapshot {
+fn auth_required_snapshot(channel: &str, reason: &str) -> ChannelPointsSnapshot {
     ChannelPointsSnapshot {
         channel: channel.to_string(),
         channel_id: None,
@@ -251,7 +253,7 @@ fn auth_required_snapshot(channel: &str) -> ChannelPointsSnapshot {
         is_subscribed: false,
         enabled: false,
         auth_required: true,
-        unavailable_reason: Some("relogin".into()),
+        unavailable_reason: Some(reason.into()),
         rewards: Vec::new(),
     }
 }
