@@ -83,6 +83,4 @@ try {
   }
 }
 
-assert(10 * 2 === 20, "size × zoom");
-
 console.log("chatFont tests ok");

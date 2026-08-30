@@ -479,7 +479,11 @@ mod tests {
             no_stack(),
         );
         let text = buf.poll_send_wait().expect("wait");
-        assert!(text.contains('s') || text.contains('m'), "{text}");
+        // Instant truncation: now+10s often reports 9s via as_secs().
+        assert!(
+            text == "10s" || text == "9s",
+            "expected ~10s slow-mode wait label, got {text}"
+        );
     }
 
     #[test]

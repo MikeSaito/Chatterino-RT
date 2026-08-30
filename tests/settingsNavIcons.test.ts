@@ -8,10 +8,10 @@ function assert(cond: boolean, msg: string): void {
 }
 
 const pages = Object.keys(SETTINGS_NAV_ICONS);
-assert(pages.length >= 12, "nav map size");
-for (const id of pages) {
-  const name = settingsNavIcon(id);
-  assert(hasIcon(name), `icon for ${id}`);
+assert(pages.length === 12, `nav map size ${pages.length}`);
+for (const [id, icon] of Object.entries(SETTINGS_NAV_ICONS)) {
+  assert(settingsNavIcon(id) === icon, `${id} → ${icon}`);
+  assert(hasIcon(icon), `icon exists for ${id}: ${icon}`);
 }
 assert(settingsNavIcon("general") === "settings", "general");
 assert(settingsNavIcon("unknown-page") === "settings", "fallback");

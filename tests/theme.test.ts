@@ -64,13 +64,49 @@ assert(argb.color === 0x191919, `ARGB rgb got ${argb.color.toString(16)}`);
 const rgb = parseArgb("#ffffff");
 assert(rgb.alpha === 1 && rgb.color === 0xffffff, "RGB parse");
 
-if (typeof document !== "undefined") {
-  applyThemeCss(light);
-  assert(
-    document.documentElement.style.getPropertyValue("--c-window-bg") ===
-      light.windowBg,
-    "CSS window bg",
-  );
+{
+  const props = new Map<string, string>();
+  const root = {
+    style: {
+      setProperty(key: string, value: string) {
+        props.set(key, value);
+      },
+      getPropertyValue(key: string) {
+        return props.get(key) ?? "";
+      },
+    },
+  } as unknown as HTMLElement;
+  applyThemeCss(light, root);
+  const expected: Array<[string, string]> = [
+    ["--c-window-bg", light.windowBg],
+    ["--c-window-text", light.windowText],
+    ["--c-split-bg", light.splitBg],
+    ["--c-border", light.border],
+    ["--c-muted", light.muted],
+    ["--c-input-bg", light.inputBg],
+    ["--c-input-text", light.inputText],
+    ["--c-header-bg", light.headerBg],
+    ["--c-header-border", light.headerBorder],
+    ["--c-header-text", light.headerText],
+    ["--c-scroll-thumb", light.scrollThumb],
+    ["--c-surface-1", light.surface1],
+    ["--c-surface-2", light.surface2],
+    ["--c-surface-3", light.surface3],
+    ["--c-accent", light.accent],
+    ["--c-accent-hover", light.accentHover],
+    ["--c-accent-text", light.accentText],
+    ["--c-success", light.success],
+    ["--c-danger", light.danger],
+    ["--c-warning", light.warning],
+    ["--c-focus-ring", light.focusRing],
+  ];
+  assert(props.size === expected.length, `css var count ${props.size}`);
+  for (const [key, value] of expected) {
+    assert(
+      root.style.getPropertyValue(key) === value,
+      `CSS ${key}`,
+    );
+  }
 }
 
 console.log("theme tests ok");

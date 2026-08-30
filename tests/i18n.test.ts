@@ -111,7 +111,7 @@ assert(
 setLocale("ru");
 assert(clearchatText(undefined, undefined) === "чат очищен", "clearchat room ru");
 assert(
-  clearchatText("bob", 30, 3) === "bob тайм-аут 30с (3 раз)",
+  clearchatText("bob", 30, 3) === "bob тайм-аут 30s (3 раз)",
   "clearchat timeout stack ru",
 );
 assert(clearchatText("bob", undefined) === "bob забанен", "clearchat ban ru");

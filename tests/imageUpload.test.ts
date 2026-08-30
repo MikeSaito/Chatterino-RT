@@ -25,4 +25,39 @@ assert(formatFromMime("text/plain") === null, "mime plain");
 assert(imageFromDataTransfer(null) === null, "null dt");
 assert(dataTransferLooksLikeImage(null) === false, "looks null");
 
+{
+  const file = new File([new Uint8Array([1, 2, 3, 4])], "shot.png", {
+    type: "image/png",
+  });
+  const dt = {
+    types: ["Files", "image/png"],
+    items: [
+      {
+        kind: "file",
+        type: "image/png",
+        getAsFile: () => file,
+      },
+    ],
+    files: [file],
+  } as unknown as DataTransfer;
+  assert(dataTransferLooksLikeImage(dt) === true, "looks png");
+  const hit = imageFromDataTransfer(dt);
+  assert(hit !== null, "hit from png dt");
+  assert(hit!.format === "png", `format ${hit!.format}`);
+  assert(hit!.blob.size === 4, "blob size");
+}
+
+{
+  const file = new File([new Uint8Array([9])], "note.txt", {
+    type: "text/plain",
+  });
+  const dt = {
+    types: ["Files"],
+    items: [{ kind: "file", type: "text/plain", getAsFile: () => file }],
+    files: [file],
+  } as unknown as DataTransfer;
+  assert(dataTransferLooksLikeImage(dt) === true, "Files type allows dragover");
+  assert(imageFromDataTransfer(dt) === null, "plain file not image hit");
+}
+
 console.log("imageUpload tests ok");

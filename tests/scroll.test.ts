@@ -183,7 +183,6 @@ function assert(cond: boolean, msg: string): void {
   assert(lines === -3, `line delta, got ${lines}`);
   const page = wheelDeltaRows(1, 2, 22, 10);
   assert(page === 10, `page delta, got ${page}`);
-  assert(Math.abs(px * 2 - 4) < 1e-9, "multiplier scales wheel rows");
 }
 
 {

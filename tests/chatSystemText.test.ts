@@ -18,6 +18,8 @@ assert(formatDuration(3661) === "1h 1m 1s", "3661");
 assert(formatDuration(90_000) === "1d 1h", "90000");
 assert(formatBitsThreshold(1000) === "1K", "bits");
 assert(formatBitsThreshold(5000) === "5K", "bits5");
+assert(formatBitsThreshold(999) === "0K", "bits under 1K");
+assert(formatBitsThreshold(0) === "0K", "bits zero");
 
 setLocale("en");
 assert(
@@ -48,7 +50,8 @@ const gift = usernoticeFormatted({
   },
 });
 assert(
-  gift.text.includes("gifted 3 months") && gift.text.includes("Bob"),
+  gift.text ===
+    "Gifter gifted 3 months of a Tier 1 sub to Bob! They've gifted 10 months in the channel.",
   `gift text: ${gift.text}`,
 );
 assert(gift.mentions.some((m) => m.login === "gifter"), "gifter mention");
@@ -60,7 +63,10 @@ const bits = usernoticeFormatted({
   msgId: "bitsbadgetier",
   params: { displayName: "Ann", login: "ann", bitsThreshold: 1000 },
 });
-assert(bits.text.includes("1K"), `bits: ${bits.text}`);
+assert(
+  bits.text === "Ann just earned a new 1K Bits badge!",
+  `bits: ${bits.text}`,
+);
 
 const multi = usernoticeFormatted({
   systemText: "x",
@@ -74,11 +80,14 @@ const multi = usernoticeFormatted({
     multimonthDuration: 3,
   },
 });
-assert(multi.text.includes("3 months in advance"), `multi: ${multi.text}`);
+assert(
+  multi.text === "Ann subscribed at Tier 1 for 3 months in advance!",
+  `multi: ${multi.text}`,
+);
 
 setLocale("ru");
 assert(
-  clearchatText("bob", 60).includes("1m"),
+  clearchatText("bob", 60) === "bob тайм-аут 1m",
   `clearchat ru: ${clearchatText("bob", 60)}`,
 );
 

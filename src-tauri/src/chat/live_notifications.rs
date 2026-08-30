@@ -193,6 +193,11 @@ pub fn build_live_notify(
     })
 }
 
+/// Offline→live (or first live sighting) that should fire notify effects.
+fn should_emit_on_live_edge(prev: Option<bool>, live: bool) -> bool {
+    live && prev != Some(true)
+}
+
 /// Apply a live snapshot for one channel. Emits notify on offline→live when appropriate.
 /// Returns whether the cached live flag changed.
 pub fn observe_live(
@@ -213,12 +218,7 @@ pub fn observe_live(
     let is_initial = !state.initial_pass && prev.is_none();
     let changed = prev != Some(live);
     state.live.insert(ch.clone(), live);
-    if !(changed && live) {
-        return changed;
-    }
-    // offline→live (or first sighting as live)
-    let was_offline = prev != Some(true);
-    if !was_offline {
+    if !should_emit_on_live_edge(prev, live) {
         return changed;
     }
     let cfg = state.cfg.clone();
@@ -400,20 +400,12 @@ mod tests {
     }
 
     #[test]
-    fn live_to_live_no_effect_via_observe_cache() {
-        let shared = Shared::new();
-        {
-            let mut st = shared.live_notify.lock().unwrap();
-            st.cfg = cfg_selected("xqc");
-            st.live.insert("xqc".into(), true);
-            st.initial_pass = true;
-        }
-        // Going live again should not emit — we only check build when was offline.
-        // Direct: was_offline false path.
-        let prev = Some(true);
-        let live = true;
-        let was_offline = prev != Some(true);
-        assert!(!was_offline || !live);
+    fn live_edge_emit_gate() {
+        assert!(!should_emit_on_live_edge(Some(true), true));
+        assert!(should_emit_on_live_edge(Some(false), true));
+        assert!(should_emit_on_live_edge(None, true));
+        assert!(!should_emit_on_live_edge(Some(false), false));
+        assert!(!should_emit_on_live_edge(Some(true), false));
     }
 
     #[test]

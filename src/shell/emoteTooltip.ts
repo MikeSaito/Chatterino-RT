@@ -1,3 +1,4 @@
+import { isAllowedHttpUrl } from "./webSearch.ts";
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing, TooltipHit } from "../chat/ring";
 
@@ -19,7 +20,11 @@ const resolveFailUntil = new Map<string, number>();
 /** Original chat URL → validated resolved destination from resolver `link`. */
 const resolvedUrlByOriginal = new Map<string, string>();
 
-function rememberResolved(original: string, resolved: string): void {
+/** Seed / update resolved-URL cache after a successful link resolve. */
+export function rememberResolvedUrl(original: string, resolved: string): void {
+  if (!isAllowedHttpUrl(resolved)) {
+    return;
+  }
   if (resolvedUrlByOriginal.has(original)) {
     resolvedUrlByOriginal.delete(original);
   }
@@ -136,7 +141,7 @@ function fetchLinkInfo(url: string): Promise<LinkInfoResponse> {
       .then((info) => {
         const resolved = info.resolved_url?.trim();
         if (resolved) {
-          rememberResolved(url, resolved);
+          rememberResolvedUrl(url, resolved);
         } else {
           resolvedUrlByOriginal.delete(url);
         }

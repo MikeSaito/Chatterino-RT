@@ -20,8 +20,6 @@ export const ru: Record<MessageKey, string> = {
   "auth.menu.aria": "Аккаунт",
   "settings.open": "Настройки",
 
-  "header.live": "LIVE",
-  "header.live.title": "В эфире",
   "header.mod": "Mod",
   "header.mod.title": "Режим модерации",
   "header.streamer": "Streamer Mode",
@@ -44,7 +42,9 @@ export const ru: Record<MessageKey, string> = {
   "chat.modes.subsOnly": "Только сабы",
   "chat.modes.followers": "Только фолловеры",
   "chat.modes.followersMin": "Фолловеры ({minutes}м)",
+  "chat.modes.followersShort": "{minutes}м",
   "chat.modes.slow": "Медленный режим ({seconds}с)",
+  "chat.modes.slowShort": "{seconds}с",
 
   "joinPopover.aria": "Присоединиться к каналу",
   "joinPopover.label": "канал",

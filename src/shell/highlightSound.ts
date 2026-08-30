@@ -51,6 +51,21 @@ export function configureHighlightSound(opts: {
   }
 }
 
+/** Gate for mention/highlight playback (not live-notify). */
+export function highlightSoundMayPlay(focused: boolean): boolean {
+  if (muted) {
+    return false;
+  }
+  if (focused && !alwaysPlay) {
+    return false;
+  }
+  return true;
+}
+
+function documentIsFocused(): boolean {
+  return typeof document !== "undefined" && document.hasFocus();
+}
+
 export function notifyHighlightSounds(
   events: ReadonlyArray<
     { highlightSound?: boolean; highlightSoundPath?: string } | object
@@ -68,13 +83,9 @@ export function notifyHighlightSounds(
 
 async function playHighlightSoundBatch(
   hits: ReadonlyArray<{ highlightSoundPath?: string }>,
-): Promise<void> {
-  if (muted) {
-    return;
-  }
-  const focused = document.hasFocus();
-  if (focused && !alwaysPlay) {
-    return;
+): Promise<boolean> {
+  if (!highlightSoundMayPlay(documentIsFocused())) {
+    return false;
   }
   for (const hit of hits) {
     const now = Date.now();
@@ -96,10 +107,12 @@ async function playHighlightSoundBatch(
       // Autoplay / decode failures are non-fatal.
     }
   }
+  return true;
 }
 
-export async function playHighlightSound(overridePath?: string): Promise<void> {
-  await playHighlightSoundBatch([
+/** Returns false when muted / focus-suppressed (playback not attempted). */
+export async function playHighlightSound(overridePath?: string): Promise<boolean> {
+  return playHighlightSoundBatch([
     { highlightSoundPath: overridePath },
   ]);
 }

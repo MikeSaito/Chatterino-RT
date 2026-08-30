@@ -18,8 +18,6 @@ export const en = {
   "auth.menu.aria": "Account",
   "settings.open": "Settings",
 
-  "header.live": "LIVE",
-  "header.live.title": "Live",
   "header.mod": "Mod",
   "header.mod.title": "Moderation mode",
   "header.streamer": "Streamer Mode",
@@ -42,7 +40,9 @@ export const en = {
   "chat.modes.subsOnly": "Subs-only",
   "chat.modes.followers": "Followers-only",
   "chat.modes.followersMin": "Followers ({minutes}m)",
+  "chat.modes.followersShort": "{minutes}m",
   "chat.modes.slow": "Slow ({seconds}s)",
+  "chat.modes.slowShort": "{seconds}s",
 
   "joinPopover.aria": "Join channel",
   "joinPopover.label": "channel",
