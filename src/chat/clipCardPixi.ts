@@ -163,8 +163,8 @@ export function paintClipCard(opts: {
   clipCardRows: number;
   lineCount: number;
   lineHeight: number;
+  /** Left edge of the message text column (wrap lines 2+ / reply). */
   bodyContIndent: number;
-  bodyIndent: number;
   paneW: number;
   fontSize: number;
   mutedFill: number;
@@ -180,7 +180,6 @@ export function paintClipCard(opts: {
     lineCount,
     lineHeight,
     bodyContIndent,
-    bodyIndent,
     paneW,
     fontSize,
     mutedFill,
@@ -196,7 +195,9 @@ export function paintClipCard(opts: {
     return;
   }
 
-  const left = Math.max(8, bodyContIndent || bodyIndent || 8);
+  // Flush left with the text column (same origin as reply / bodyCont).
+  // Do not fall through to first-line-after-nick indent — that reads as centered.
+  const left = Math.max(8, bodyContIndent);
   const maxW = Math.max(120, paneW - left - 12);
   const width = Math.min(CLIP_CARD_MAX_W, maxW);
   const bodyRows = Math.max(0, lineCount - clipCardRows);

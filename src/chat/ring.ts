@@ -3527,7 +3527,6 @@ export class MessageRing {
       lineCount: slot.lineCount,
       lineHeight: this.lineHeight,
       bodyContIndent: slot.bodyContIndent,
-      bodyIndent: slot.bodyIndent,
       paneW: this.app.screen.width,
       fontSize: this.fontSize,
       mutedFill: this.themeFills.timestamp,
