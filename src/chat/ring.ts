@@ -222,7 +222,7 @@ type Slot = {
   bodyIndent: number;
   /** Pixel origin of wrap lines 2+ (under timestamp / after mod gutter). */
   bodyContIndent: number;
-  /** Centered system cloud bounds (null when not a cloud). */
+  /** Left-aligned system cloud bounds (null when not a cloud). */
   systemCloudBounds: {
     x: number;
     y: number;
@@ -2997,7 +2997,7 @@ export class MessageRing {
   }
 
   /**
-   * Centered pill for CLEARCHAT / CLEARMSG / USERNOTICE / NOTICE
+   * Left-aligned pill for CLEARCHAT / CLEARMSG / USERNOTICE / NOTICE
    * (Twitch web-style system “cloud”).
    */
   private paintSystemCloud(slot: Slot): void {
@@ -3037,7 +3037,8 @@ export class MessageRing {
     slot.body.style.fill = SYSTEM_CLOUD_FG;
     slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
-    const maxInner = Math.max(1, Math.floor(paneW - 2 * marginX - padX * 2));
+    // Left margin only: cloud hugs text and stays left-aligned (not centered).
+    const maxInner = Math.max(1, Math.floor(paneW - marginX - padX * 2));
     // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
     const layoutOpts = this.wrapOpts(slot, [], maxInner);
     const lines = wrapBody(
@@ -3061,11 +3062,11 @@ export class MessageRing {
     }
     const textRows = Math.max(1, lines.length);
     const textBlockW = Math.max(1, Math.ceil(maxLineW));
-    const cloudW = Math.min(paneW - 2 * marginX, textBlockW + 2 * padX);
+    const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
     // Hug text rows; vertical pad may slightly use message gap below.
     slot.lineCount = textRows;
     const allocatedH = slot.lineCount * this.lineHeight;
-    const cloudX = Math.max(marginX, Math.floor((paneW - cloudW) / 2));
+    const cloudX = marginX;
     const cloudY = 0;
     const cloudH = textRows * this.lineHeight + 2 * padY;
     const textOriginX = cloudX + padX;
