@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { onLocaleChange, t } from "../i18n/index.ts";
-import { iconEl, setButtonIcon } from "./icons";
+import { iconEl, setButtonIcon } from "./icons.ts";
 
 export const CHAT_PINNED_EVENT = "chat:pinned";
 export const PINNED_AUTO_HIDE_MS = 30_000;
@@ -37,7 +37,9 @@ type BannerState = {
   el: HTMLElement;
   hideTimer: ReturnType<typeof setTimeout> | null;
   endsTimer: ReturnType<typeof setTimeout> | null;
+  leaveTimer: ReturnType<typeof setTimeout> | null;
   leaving: boolean;
+  shownAt: number;
 };
 
 function escapeHtml(s: string): string {
@@ -50,17 +52,26 @@ function escapeHtml(s: string): string {
 
 /** Linkify http(s), www., and bare host/path like t.me/x. */
 export function formatPinnedBody(text: string): string {
-  const escaped = escapeHtml(text);
   const re =
     /(https?:\/\/[^\s<]+)|(www\.[^\s<]+)|((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<]*)?)/gi;
-  return escaped.replace(re, (raw) => {
+  let out = "";
+  let last = 0;
+  for (const match of text.matchAll(re)) {
+    const index = match.index ?? 0;
+    const raw = match[0];
+    out += escapeHtml(text.slice(last, index));
     const display = stripUrlTail(raw);
+    const trailing = raw.slice(display.length);
     const href = normalizePinnedUrl(display);
-    if (!href) {
-      return raw;
+    if (href) {
+      out += `<a class="pinned-banner-link" href="${escapeHtml(href)}" rel="noopener noreferrer">${escapeHtml(display)}</a>${escapeHtml(trailing)}`;
+    } else {
+      out += escapeHtml(raw);
     }
-    return `<a class="pinned-banner-link" href="${escapeHtml(href)}" rel="noopener noreferrer">${display}</a>`;
-  });
+    last = index + raw.length;
+  }
+  out += escapeHtml(text.slice(last));
+  return out;
 }
 
 function stripUrlTail(raw: string): string {
@@ -165,6 +176,10 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       clearTimeout(state.endsTimer);
       state.endsTimer = null;
     }
+    if (state.leaveTimer !== null) {
+      clearTimeout(state.leaveTimer);
+      state.leaveTimer = null;
+    }
   }
 
   function syncOffset(): void {
@@ -182,11 +197,27 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       return;
     }
     state.leaving = true;
-    clearTimers(state);
+    if (state.hideTimer !== null) {
+      clearTimeout(state.hideTimer);
+      state.hideTimer = null;
+    }
+    if (state.endsTimer !== null) {
+      clearTimeout(state.endsTimer);
+      state.endsTimer = null;
+    }
     state.el.classList.remove("is-visible");
     state.el.classList.add("is-leaving");
+    let finished = false;
     const done = (): void => {
+      if (finished) {
+        return;
+      }
+      finished = true;
       state.el.removeEventListener("transitionend", done);
+      if (state.leaveTimer !== null) {
+        clearTimeout(state.leaveTimer);
+        state.leaveTimer = null;
+      }
       if (remove) {
         state.el.remove();
       }
@@ -201,12 +232,15 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       syncOffset();
     };
     state.el.addEventListener("transitionend", done);
-    window.setTimeout(done, 320);
+    state.leaveTimer = setTimeout(done, 320);
     window.requestAnimationFrame(() => syncOffset());
   }
 
-  function scheduleHide(state: BannerState): void {
-    clearTimers(state);
+  function scheduleHide(state: BannerState, restartAutoHide: boolean): void {
+    if (state.endsTimer !== null) {
+      clearTimeout(state.endsTimer);
+      state.endsTimer = null;
+    }
     const endMs = endsAtMs(state.pin.endsAt);
     if (endMs !== null) {
       const left = endMs - Date.now();
@@ -222,14 +256,28 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
         }
       }, left);
     }
-    if (!alwaysShow) {
-      state.hideTimer = setTimeout(() => {
-        if (active === state && !state.leaving) {
-          dismissedByChannel.set(state.channel, state.pin.messageId);
-          collapse(state, false);
-        }
-      }, PINNED_AUTO_HIDE_MS);
+    if (alwaysShow) {
+      if (state.hideTimer !== null) {
+        clearTimeout(state.hideTimer);
+        state.hideTimer = null;
+      }
+      return;
     }
+    if (!restartAutoHide && state.hideTimer !== null) {
+      return;
+    }
+    if (state.hideTimer !== null) {
+      clearTimeout(state.hideTimer);
+      state.hideTimer = null;
+    }
+    const elapsed = Date.now() - state.shownAt;
+    const left = Math.max(0, PINNED_AUTO_HIDE_MS - elapsed);
+    state.hideTimer = setTimeout(() => {
+      if (active === state && !state.leaving) {
+        dismissedByChannel.set(state.channel, state.pin.messageId);
+        collapse(state, false);
+      }
+    }, left);
   }
 
   function renderBanner(pin: PinnedMessage): HTMLElement {
@@ -330,7 +378,8 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       active.pin.pinnedByLogin === pin.pinnedByLogin;
 
     if (same && active) {
-      scheduleHide(active);
+      active.pin = pin;
+      scheduleHide(active, false);
       return;
     }
 
@@ -350,7 +399,9 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       el,
       hideTimer: null,
       endsTimer: null,
+      leaveTimer: null,
       leaving: false,
+      shownAt: Date.now(),
     };
     active = state;
     requestAnimationFrame(() => {
@@ -359,7 +410,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
         syncOffset();
       }
     });
-    scheduleHide(state);
+    scheduleHide(state, true);
     syncOffset();
   }
 
@@ -373,14 +424,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
         dismissedByChannel.clear();
       }
       if (active && !active.leaving) {
-        if (alwaysShow) {
-          if (active.hideTimer !== null) {
-            clearTimeout(active.hideTimer);
-            active.hideTimer = null;
-          }
-        } else {
-          scheduleHide(active);
-        }
+        scheduleHide(active, true);
       } else {
         paint();
       }
