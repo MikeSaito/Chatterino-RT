@@ -127,6 +127,8 @@ const SYSTEM_CLOUD_PAD_X = 12;
 const SYSTEM_CLOUD_PAD_Y = 1;
 const SYSTEM_CLOUD_RADIUS = 8;
 const SYSTEM_CLOUD_MARGIN_X = 8;
+/** System event pills: effective chat fontSize minus this many CSS px. */
+const SYSTEM_CLOUD_FONT_DELTA = 2;
 const MOD_GUTTER_ICON_COUNT = 2;
 /** Stock-ish green chrome for AutoMod held rows (#00ad33 @ ~50%). */
 const AUTOMOD_HIGHLIGHT = "#00ad3380";
@@ -238,6 +240,9 @@ type Slot = {
     w: number;
     h: number;
     radius: number;
+    /** Row height used inside the pill (fontSize − delta). */
+    lineHeight: number;
+    fontSize: number;
   } | null;
   /** Rows occupied by reply header above the main line. */
   replyRows: number;
@@ -787,7 +792,7 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      const paint = this.emotePaintSize(span);
+      const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       if (zw && hasPrev) {
         spr.visible = true;
@@ -1560,7 +1565,7 @@ export class MessageRing {
         const spr = slot.emotes[e];
         const span = slot.spansRaw[e];
         if (spr.visible && spr.texture !== Texture.EMPTY && span) {
-          const paint = this.emotePaintSize(span);
+          const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, spr.texture, paint.w, paint.h);
         }
       }
@@ -1607,14 +1612,18 @@ export class MessageRing {
    * Width of painted BitmapText (measurement units × layout.scale).
    * Canvas measureTextWidth drifts from ChatFont/ChatNickFont advances.
    */
-  private measureBitmapTextWidth(fontFamily: string, text: string): number {
+  private measureBitmapTextWidth(
+    fontFamily: string,
+    text: string,
+    fontSize: number = this.fontSize,
+  ): number {
     if (!text) {
       return 0;
     }
     try {
       const style = new TextStyle({
         fontFamily,
-        fontSize: this.fontSize,
+        fontSize,
         fill: "#ffffff",
       });
       const m = BitmapFontManager.measureText(text, style, false);
@@ -1632,9 +1641,22 @@ export class MessageRing {
     return measureTextWidth(
       this.chatFontFamily,
       qtWeightToCss(weight),
-      this.fontSize,
+      fontSize,
       text,
     );
+  }
+
+  /** Effective size for CLEARCHAT / USERNOTICE / NOTICE pills (PRIVMSG unchanged). */
+  private systemCloudFontSize(): number {
+    return Math.max(1, this.fontSize - SYSTEM_CLOUD_FONT_DELTA);
+  }
+
+  private systemCloudLineHeight(fontSize: number): number {
+    return measureFontMetrics(
+      this.chatFontFamily,
+      qtWeightToCss(this.chatFontWeight),
+      fontSize,
+    ).lineHeight;
   }
 
   /** Ellipsis nick to fit maxPx in ChatNickFont (optional trailing ':'). */
@@ -2800,7 +2822,7 @@ export class MessageRing {
             slot.emoteKeys[i] === key &&
             this.animateEmotes === wantAnimate
           ) {
-            const paint = this.emotePaintSize(span);
+            const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
             applySpriteTexture(spr, tex, paint.w, paint.h);
             this.repaintSlotMedia(slot);
           }
@@ -3036,6 +3058,7 @@ export class MessageRing {
     slot: Slot,
     line: WrapLine,
     opts: WrapOptions,
+    fontSize: number = this.fontSize,
   ): number {
     if (line.end <= line.start) {
       return 0;
@@ -3046,7 +3069,7 @@ export class MessageRing {
       slot.spansRaw,
       opts,
     );
-    return this.measureBitmapTextWidth("ChatFont", rendered);
+    return this.measureBitmapTextWidth("ChatFont", rendered, fontSize);
   }
 
   /**
@@ -3064,6 +3087,8 @@ export class MessageRing {
       Math.round(SYSTEM_CLOUD_MARGIN_X * this.fontScale),
     );
     const paneW = this.app.screen.width;
+    const cloudFontSize = this.systemCloudFontSize();
+    const cloudLineHeight = this.systemCloudLineHeight(cloudFontSize);
 
     slot.time.visible = false;
     slot.nick.visible = false;
@@ -3089,13 +3114,17 @@ export class MessageRing {
     slot.automodBtnHits = [];
     slot.bitsLabel.visible = false;
     slot.bitsLabel.text = "";
+    slot.body.style.fontSize = cloudFontSize;
+    slot.body.style.lineHeight = cloudLineHeight;
     slot.body.style.fill = SYSTEM_CLOUD_FG;
+    slot.bodyCont.style.fontSize = cloudFontSize;
+    slot.bodyCont.style.lineHeight = cloudLineHeight;
     slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
     // Left margin only: cloud hugs text and stays left-aligned (not centered).
     const maxInner = Math.max(1, Math.floor(paneW - marginX - padX * 2));
     // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
-    const layoutOpts = this.wrapOpts(slot, [], maxInner);
+    const layoutOpts = this.wrapOpts(slot, [], maxInner, cloudFontSize);
     const lines = wrapBody(
       slot.bodyRaw,
       maxInner,
@@ -3112,18 +3141,19 @@ export class MessageRing {
     for (const line of lines) {
       maxLineW = Math.max(
         maxLineW,
-        this.measureBodyLineWidth(slot, line, layoutOpts),
+        this.measureBodyLineWidth(slot, line, layoutOpts, cloudFontSize),
       );
     }
     const textRows = Math.max(1, lines.length);
     const textBlockW = Math.max(1, Math.ceil(maxLineW));
     const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
-    // Hug text rows; vertical pad may slightly use message gap below.
+    // Hug text rows at cloud metrics; vertical pad may use message gap below.
+    // Scroll grid stays textRows × main lineHeight (smaller pill, no clip).
     slot.lineCount = textRows;
     const allocatedH = slot.lineCount * this.lineHeight;
     const cloudX = marginX;
     const cloudY = 0;
-    const cloudH = textRows * this.lineHeight + 2 * padY;
+    const cloudH = textRows * cloudLineHeight + 2 * padY;
     const textOriginX = cloudX + padX;
     const contentY = cloudY + padY;
 
@@ -3132,7 +3162,7 @@ export class MessageRing {
     slot.body.x = textOriginX;
     slot.body.y = contentY;
     slot.bodyCont.x = textOriginX;
-    slot.bodyCont.y = contentY + this.lineHeight;
+    slot.bodyCont.y = contentY + cloudLineHeight;
 
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
@@ -3163,6 +3193,8 @@ export class MessageRing {
       w: cloudW,
       h: cloudH,
       radius,
+      lineHeight: cloudLineHeight,
+      fontSize: cloudFontSize,
     };
     slot.systemCloud.clear();
     slot.systemCloud
@@ -3190,6 +3222,8 @@ export class MessageRing {
       textOriginX,
       contentY,
       layoutOpts,
+      cloudLineHeight,
+      cloudFontSize,
     );
     this.paintDisabled(slot);
 
@@ -3203,7 +3237,7 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      const paint = this.emotePaintSize(span);
+      const paint = this.emotePaintSize(span, cloudFontSize);
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       if (zw && hasPrev) {
         spr.visible = true;
@@ -3227,7 +3261,10 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x = textOriginX + pos.col;
-      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
+      spr.y =
+        contentY +
+        pos.line * cloudLineHeight +
+        Math.max(0, cloudLineHeight - paint.h);
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, paint.w, paint.h);
       }
@@ -3460,7 +3497,7 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      const paint = this.emotePaintSize(span);
+      const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       if (zw && hasPrev) {
         spr.visible = true;
@@ -3652,6 +3689,8 @@ export class MessageRing {
     contOriginX: number,
     contentY: number,
     wrapOpts: WrapOptions,
+    rowLineHeight: number = this.lineHeight,
+    measureFontSize: number = this.fontSize,
   ): void {
     if (slot.linkSpans.length === 0) {
       return;
@@ -3683,12 +3722,16 @@ export class MessageRing {
         }
         const linkW = Math.max(
           1,
-          this.measureBitmapTextWidth("ChatFont", slot.bodyRaw.slice(a, b)),
+          this.measureBitmapTextWidth(
+            "ChatFont",
+            slot.bodyRaw.slice(a, b),
+            measureFontSize,
+          ),
         );
         const x0 =
           wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col;
         const y =
-          contentY + start.line * this.lineHeight + this.lineHeight - 2;
+          contentY + start.line * rowLineHeight + rowLineHeight - 2;
         slot.mentions
           .moveTo(x0, y)
           .lineTo(x0 + linkW, y)
@@ -4820,16 +4863,17 @@ export class MessageRing {
         return null;
       }
     }
-    const contentY = slot.systemCloudBounds
-      ? slot.body.y
-      : slot.replyRows * this.lineHeight;
+    const cloud = slot.systemCloudBounds;
+    const rowLh = cloud?.lineHeight ?? this.lineHeight;
+    const measureSize = cloud?.fontSize ?? this.fontSize;
+    const contentY = cloud ? slot.body.y : slot.replyRows * this.lineHeight;
     if (
       slotLocalY < contentY ||
-      slotLocalY >= contentY + slot.wrapLines.length * this.lineHeight
+      slotLocalY >= contentY + slot.wrapLines.length * rowLh
     ) {
       return null;
     }
-    const bodyLine = Math.floor((slotLocalY - contentY) / this.lineHeight);
+    const bodyLine = Math.floor((slotLocalY - contentY) / rowLh);
     if (bodyLine < 0 || bodyLine >= slot.wrapLines.length) {
       return null;
     }
@@ -4848,7 +4892,12 @@ export class MessageRing {
       bodyLine,
       xPx,
       slot.spansRaw,
-      this.wrapOpts(slot, slot.systemCloudBounds ? [] : undefined),
+      this.wrapOpts(
+        slot,
+        cloud ? [] : undefined,
+        undefined,
+        measureSize,
+      ),
     );
   }
 
@@ -5202,15 +5251,23 @@ export class MessageRing {
     return this.lineHeight > 0 ? slot.root.y / this.lineHeight : 0;
   }
 
-  private emotePixelSize(): number {
+  private emotePixelSize(fontSize: number = this.fontSize): number {
     return Math.max(
       1,
-      Math.round(chatTextRowHeight(this.fontSize) * this.emoteScale),
+      Math.round(chatTextRowHeight(fontSize) * this.emoteScale),
     );
   }
 
-  private emotePaintSize(span: EmoteSpan): { w: number; h: number } {
-    return emoteDisplaySize(span, this.emotePixelSize());
+  private emotePaintSize(
+    span: EmoteSpan,
+    fontSize: number = this.fontSize,
+  ): { w: number; h: number } {
+    return emoteDisplaySize(span, this.emotePixelSize(fontSize));
+  }
+
+  /** Body glyph size for a slot (cloud pills use fontSize − delta). */
+  private slotBodyFontSize(slot: Slot): number {
+    return slot.systemCloudBounds?.fontSize ?? this.fontSize;
   }
 
   private emoteLoadUrl(span: EmoteSpan): string {
@@ -5224,9 +5281,10 @@ export class MessageRing {
     slot?: Slot,
     maskMentions?: readonly MentionSpan[],
     firstLineMaxWidthPx?: number,
+    fontSize: number = this.fontSize,
   ): WrapOptions {
     const images = this.enableEmoteImages;
-    const emoteMinPx = images ? this.emotePixelSize() : 0;
+    const emoteMinPx = images ? this.emotePixelSize(fontSize) : 0;
     const chrome = this.boldUsernames || this.colorUsernames;
     const mentions =
       slot && chrome && slot.mentionSpans.length > 0
@@ -5241,7 +5299,7 @@ export class MessageRing {
       if (hit !== undefined) {
         return hit;
       }
-      const w = this.measureBitmapTextWidth("ChatFont", slice);
+      const w = this.measureBitmapTextWidth("ChatFont", slice, fontSize);
       cache.set(slice, w);
       return w;
     };
@@ -5255,7 +5313,7 @@ export class MessageRing {
           if (hit !== undefined) {
             return hit;
           }
-          const w = this.measureBitmapTextWidth("ChatNickFont", slice);
+          const w = this.measureBitmapTextWidth("ChatNickFont", slice, fontSize);
           nickCache.set(slice, w);
           return w;
         }
@@ -5315,7 +5373,7 @@ export class MessageRing {
             slot.emoteKeys[e] === key &&
             this.animateEmotes === wantAnimate
           ) {
-            const paint = this.emotePaintSize(span);
+            const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
             applySpriteTexture(spr, tex, paint.w, paint.h);
             this.repaintSlotMedia(slot);
           }
@@ -5337,7 +5395,7 @@ export class MessageRing {
         const span = slot.spansRaw[e];
         const tex = this.textures.frameAt(key, 0) ?? this.textures.get(key);
         if (tex && spr.visible && span) {
-          const paint = this.emotePaintSize(span);
+          const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, tex, paint.w, paint.h);
         }
       }
@@ -5367,7 +5425,7 @@ export class MessageRing {
         }
         const tex = this.textures.frameAt(key, pos);
         if (tex && spr.texture !== tex) {
-          const paint = this.emotePaintSize(span);
+          const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, tex, paint.w, paint.h);
         }
       }
