@@ -285,6 +285,17 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     root.className = "pinned-banner";
     root.setAttribute("role", "status");
     root.dataset.messageId = pin.messageId;
+    const speaker = pin.senderName || pin.senderLogin || pin.pinnedByName || "";
+    const snip =
+      pin.messageText.length > 140
+        ? `${pin.messageText.slice(0, 140)}…`
+        : pin.messageText;
+    root.setAttribute(
+      "aria-label",
+      speaker
+        ? `${t("pinned.label")} ${speaker}: ${snip}`
+        : `${t("pinned.label")} ${snip}`,
+    );
 
     const body = document.createElement("div");
     body.className = "pinned-banner-body";
@@ -306,7 +317,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     const badge = document.createElement("span");
     badge.className = "pinned-banner-mod-badge";
     badge.setAttribute("aria-hidden", "true");
-    badge.title = "Moderator";
+    badge.title = t("pinned.moderator");
     const who = document.createElement("span");
     who.className = "pinned-banner-who";
     who.textContent = pin.pinnedByLogin || pin.pinnedByName;

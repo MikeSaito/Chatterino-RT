@@ -221,7 +221,7 @@ export function mountSettingsPanel(opts: {
       if (!Array.isArray(logins) || logins.length === 0) {
         const empty = document.createElement("li");
         empty.className = "settings-blocked-users-empty";
-        empty.textContent = "No blocked users.";
+        empty.textContent = t("settings.blocked.empty");
         list.append(empty);
         return;
       }
@@ -238,7 +238,7 @@ export function mountSettingsPanel(opts: {
       list.replaceChildren();
       const err = document.createElement("li");
       err.className = "settings-blocked-users-empty";
-      err.textContent = "Could not load blocked users.";
+      err.textContent = t("settings.blocked.loadError");
       list.append(err);
     }
   };
@@ -253,7 +253,7 @@ export function mountSettingsPanel(opts: {
         el.textContent = info.path;
       })
       .catch(() => {
-        el.textContent = "(unavailable)";
+        el.textContent = t("settings.about.unavailable");
       });
   };
 
@@ -271,7 +271,7 @@ export function mountSettingsPanel(opts: {
         const msg =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not pick sound file.";
+            : t("settings.status.pickSoundFailed");
         statusEl.textContent = msg;
       }
       return;
@@ -298,7 +298,7 @@ export function mountSettingsPanel(opts: {
         const msg =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not select log directory.";
+            : t("settings.status.pickLogDirFailed");
         statusEl.textContent = msg;
       }
       return;
@@ -329,7 +329,7 @@ export function mountSettingsPanel(opts: {
         const msg =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not pick sound file.";
+            : t("settings.status.pickSoundFailed");
         statusEl.textContent = msg;
       }
       return;
@@ -342,13 +342,13 @@ export function mountSettingsPanel(opts: {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not open settings directory.";
+            : t("settings.status.openDirFailed");
       }
       return;
     }
     if (path === "__action.chooseCachePath") {
       if (saving || !loadReady) {
-        statusEl.textContent = "Settings are busy; try again.";
+        statusEl.textContent = t("settings.status.busy");
         return;
       }
       saving = true;
@@ -364,7 +364,7 @@ export function mountSettingsPanel(opts: {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not select cache directory.";
+            : t("settings.status.pickCacheFailed");
         return;
       }
       if (!loadReady) {
@@ -406,7 +406,7 @@ export function mountSettingsPanel(opts: {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not save cache path.";
+            : t("settings.status.saveCacheFailed");
       } finally {
         saving = false;
         okBtn.disabled = !loadReady;
@@ -416,7 +416,7 @@ export function mountSettingsPanel(opts: {
     }
     if (path === "__action.resetCachePath") {
       if (saving || !loadReady) {
-        statusEl.textContent = "Settings are busy; try again.";
+        statusEl.textContent = t("settings.status.busy");
         return;
       }
       saving = true;
@@ -455,7 +455,7 @@ export function mountSettingsPanel(opts: {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not reset cache path.";
+            : t("settings.status.resetCacheFailed");
       } finally {
         saving = false;
         okBtn.disabled = !loadReady;
@@ -465,18 +465,14 @@ export function mountSettingsPanel(opts: {
     }
     if (path === "__action.clearCache") {
       if (saving || !loadReady) {
-        statusEl.textContent = "Settings are busy; try again.";
+        statusEl.textContent = t("settings.status.busy");
         return;
       }
-      if (
-        !window.confirm(
-          "Are you sure that you want to clear your cache? Emotes may take longer to load next time Chatterino RT is started.",
-        )
-      ) {
+      if (!window.confirm(t("settings.confirm.clearCache"))) {
         return;
       }
       if (saving) {
-        statusEl.textContent = "Settings are busy; try again.";
+        statusEl.textContent = t("settings.status.busy");
         return;
       }
       saving = true;
@@ -484,13 +480,13 @@ export function mountSettingsPanel(opts: {
       cancelBtn.disabled = true;
       try {
         await invoke("cache_clear");
-        statusEl.textContent = "Cache cleared.";
+        statusEl.textContent = t("settings.status.cacheCleared");
         refreshCacheResolved();
       } catch (e) {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not clear cache.";
+            : t("settings.status.clearCacheFailed");
       } finally {
         saving = false;
         okBtn.disabled = !loadReady;
@@ -525,12 +521,10 @@ export function mountSettingsPanel(opts: {
       const text = JSON.stringify(payload, null, 2);
       try {
         await navigator.clipboard.writeText(text);
-        statusEl.textContent =
-          "Image uploader settings have been copied to clipboard as JSON.";
+        statusEl.textContent = t("settings.status.uploaderCopied");
       } catch {
-        window.prompt("Copy image uploader settings JSON:", text);
-        statusEl.textContent =
-          "Clipboard unavailable; JSON shown in the prompt for manual copy.";
+        window.prompt(t("settings.prompt.copyUploaderJson"), text);
+        statusEl.textContent = t("settings.status.uploaderClipboardFallback");
       }
       return;
     }
@@ -539,10 +533,7 @@ export function mountSettingsPanel(opts: {
       try {
         clipboardText = await navigator.clipboard.readText();
       } catch {
-        const pasted = window.prompt(
-          "Clipboard unavailable. Paste image uploader settings JSON:",
-          "",
-        );
+        const pasted = window.prompt(t("settings.prompt.pasteUploaderJson"), "");
         if (pasted === null) {
           return;
         }
@@ -550,24 +541,21 @@ export function mountSettingsPanel(opts: {
       }
       const validated = validateImportJson(clipboardText);
       if (!validated.ok) {
-        statusEl.textContent = `Error validating image uploader import: ${validated.error}.`;
+        statusEl.textContent = t("settings.status.uploaderImportInvalid", {
+          error: validated.error,
+        });
         return;
       }
       const imported = importImageUploaderSettings(validated.value);
       if (!imported) {
-        statusEl.textContent =
-          "No valid image uploader settings found in the JSON.";
+        statusEl.textContent = t("settings.status.uploaderImportEmpty");
         return;
       }
-      if (
-        !window.confirm(
-          "This will overwrite your current image uploader settings. Continue?",
-        )
-      ) {
+      if (!window.confirm(t("settings.confirm.overwriteUploader"))) {
         return;
       }
       if (saving || !loadReady) {
-        statusEl.textContent = "Settings are busy; try import again.";
+        statusEl.textContent = t("settings.status.busyImport");
         return;
       }
       saving = true;
@@ -621,14 +609,13 @@ export function mountSettingsPanel(opts: {
         if (enabled && isSwitchControl(enabled)) {
           setSwitchChecked(enabled, true);
         }
-        statusEl.textContent =
-          "Image uploader settings have been imported successfully!";
+        statusEl.textContent = t("settings.status.uploaderImported");
         schedulePreview();
       } catch (e) {
         statusEl.textContent =
           e && typeof e === "object" && "message" in e
             ? String((e as { message: unknown }).message)
-            : "Could not save imported image uploader settings.";
+            : t("settings.status.uploaderSaveFailed");
       } finally {
         saving = false;
         okBtn.disabled = !loadReady;
@@ -636,7 +623,7 @@ export function mountSettingsPanel(opts: {
       }
       return;
     }
-    statusEl.textContent = "This action is not available in Chatterino RT yet.";
+    statusEl.textContent = t("settings.status.actionUnavailable");
   };
 
   const renderKnob = (knob: KnobDef, block: HTMLElement): void => {
@@ -976,7 +963,7 @@ export function mountSettingsPanel(opts: {
             statusEl.textContent =
               e && typeof e === "object" && "message" in e
                 ? String((e as { message: unknown }).message)
-                : "Could not open settings directory.";
+                : t("settings.status.openDirFailed");
           });
       });
       dirRow.append(dirLabel, dirPath, openDirBtn);
@@ -1025,7 +1012,7 @@ export function mountSettingsPanel(opts: {
               statusEl.textContent =
                 e && typeof e === "object" && "message" in e
                   ? String((e as { message: unknown }).message)
-                  : "Could not open link.";
+                  : t("settings.status.openLinkFailed");
             });
         });
         li.append(btn);
@@ -1072,7 +1059,7 @@ export function mountSettingsPanel(opts: {
               statusEl.textContent =
                 e && typeof e === "object" && "message" in e
                   ? String((e as { message: unknown }).message)
-                  : "Could not open link.";
+                  : t("settings.status.openLinkFailed");
             });
         });
         li.append(btn);
@@ -1292,13 +1279,12 @@ export function mountSettingsPanel(opts: {
         importWrap.className = "settings-commands-import";
         const importBtn = document.createElement("button");
         importBtn.type = "button";
-        importBtn.textContent = "Import commands from Chatterino 1";
+        importBtn.textContent = t("settings.commands.import");
         importBtn.hidden = true;
         const dupHint = document.createElement("p");
         dupHint.className = "settings-commands-dup-hint";
         dupHint.hidden = true;
-        dupHint.textContent =
-          "Multiple commands with the same trigger found. Only one of the commands will work.";
+        dupHint.textContent = t("settings.commands.dupHint");
         importBtn.addEventListener("click", () => {
           void (async () => {
             try {
@@ -1347,8 +1333,12 @@ export function mountSettingsPanel(opts: {
               api.setRows(rows);
               dupHint.hidden = !hasDuplicateCommandTriggers(rows);
               statusEl.textContent = replaced
-                ? `Imported ${imported.length} command(s); duplicate triggers replaced.`
-                : `Imported ${imported.length} command(s).`;
+                ? t("settings.status.commandsImportedReplaced", {
+                    count: String(imported.length),
+                  })
+                : t("settings.status.commandsImported", {
+                    count: String(imported.length),
+                  });
               schedulePreview();
             } catch (err) {
               statusEl.textContent = formatError(err);
@@ -1375,14 +1365,14 @@ export function mountSettingsPanel(opts: {
       const filterBar = document.createElement("div");
       filterBar.className = "settings-hotkey-search";
       const label = document.createElement("label");
-      label.textContent = "Search keybind:";
+      label.textContent = t("settings.hotkeys.searchLabel");
       const input = document.createElement("input");
       input.type = "text";
       input.readOnly = true;
-      input.placeholder = "Press a key combination…";
+      input.placeholder = t("settings.hotkeys.searchPlaceholder");
       const clearBtn = document.createElement("button");
       clearBtn.type = "button";
-      clearBtn.textContent = "Clear";
+      clearBtn.textContent = t("settings.search.clear");
       filterBar.append(label, input, clearBtn);
       section.append(filterBar);
 
@@ -1735,8 +1725,7 @@ export function mountSettingsPanel(opts: {
       if (isSwitchControl(input)) {
         input.disabled = !ok;
         if (!ok) {
-          input.title =
-            "Private browsing is not available for the default browser.";
+          input.title = t("settings.status.incognitoUnavailable");
         } else {
           input.removeAttribute("title");
         }
@@ -1747,8 +1736,7 @@ export function mountSettingsPanel(opts: {
       }
       input.disabled = !ok;
       if (!ok) {
-        input.title =
-          "Private browsing is not available for the default browser.";
+        input.title = t("settings.status.incognitoUnavailable");
       } else {
         input.removeAttribute("title");
       }

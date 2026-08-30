@@ -224,11 +224,12 @@ export const ru: Record<MessageKey, string> = {
   "emotes.search.placeholder": "Поиск эмодзи",
   "emotes.empty.favourite":
     "Нет избранных эмодзи. Ctrl+клик по эмодзи добавляет в избранное.",
-  "emotes.empty.subs": "Нет subscriber emotes.",
+  "emotes.empty.subs": "Нет эмодзи подписки.",
   "emotes.empty.channel": "Нет эмодзи канала.",
-  "emotes.empty.global": "Нет global emotes.",
+  "emotes.empty.global": "Нет глобальных эмодзи.",
   "emotes.empty.emojis": "Нет эмодзи.",
   "emotes.empty.query": "Нет эмодзи по запросу.",
+  "tooltip.link.unavailable": "Нет данных о ссылке",
   "emotes.item.favouriteSuffix": "{code} (избранное)",
   "emotes.item.unavailable": "Недоступно",
   "emotes.error.favourite": "Не удалось обновить избранное",
@@ -324,13 +325,14 @@ export const ru: Record<MessageKey, string> = {
   "polls.poll.cancelled": "Опрос отменён",
   "polls.prediction.cancelled": "Прогноз отменён",
   "polls.option.votes": "{count} · {percent}%",
-  "polls.option.points": "{count} · {points} pts · {percent}%",
+  "polls.option.points": "{count} · {points} очк. · {percent}%",
   "polls.option.winner": "Победитель",
   "polls.viewerHint": "Только просмотр. Действия на Twitch",
 
   "pinned.host.aria": "Закреплённое сообщение канала",
   "pinned.label": "Закреплено:",
   "pinned.dismiss": "Скрыть закреп",
+  "pinned.moderator": "Модератор",
 
 
   "player.loading": "Загрузка…",
@@ -487,6 +489,51 @@ export const ru: Record<MessageKey, string> = {
   "settings.language": "Язык",
   "settings.language.en": "English",
   "settings.language.ru": "Русский",
+
+  "settings.blocked.empty": "Нет заблокированных пользователей.",
+  "settings.blocked.loadError": "Не удалось загрузить список блокировок.",
+  "settings.status.busy": "Настройки заняты; попробуйте снова.",
+  "settings.status.busyImport": "Настройки заняты; повторите импорт позже.",
+  "settings.status.cacheCleared": "Кэш очищен.",
+  "settings.status.actionUnavailable":
+    "Это действие пока недоступно в Chatterino RT.",
+  "settings.status.pickSoundFailed": "Не удалось выбрать звуковой файл.",
+  "settings.status.pickLogDirFailed": "Не удалось выбрать каталог логов.",
+  "settings.status.openDirFailed": "Не удалось открыть каталог настроек.",
+  "settings.status.openLinkFailed": "Не удалось открыть ссылку.",
+  "settings.status.incognitoUnavailable":
+    "Приватный режим недоступен для браузера по умолчанию.",
+  "settings.status.pickCacheFailed": "Не удалось выбрать каталог кэша.",
+  "settings.status.saveCacheFailed": "Не удалось сохранить путь кэша.",
+  "settings.status.resetCacheFailed": "Не удалось сбросить путь кэша.",
+  "settings.status.clearCacheFailed": "Не удалось очистить кэш.",
+  "settings.status.uploaderCopied":
+    "Настройки загрузчика изображений скопированы в буфер как JSON.",
+  "settings.status.uploaderClipboardFallback":
+    "Буфер обмена недоступен; JSON показан в окне для копирования вручную.",
+  "settings.status.uploaderImportInvalid":
+    "Ошибка проверки импорта загрузчика изображений: {error}.",
+  "settings.status.uploaderImportEmpty":
+    "В JSON нет корректных настроек загрузчика изображений.",
+  "settings.status.uploaderImported":
+    "Настройки загрузчика изображений успешно импортированы!",
+  "settings.status.uploaderSaveFailed":
+    "Не удалось сохранить импортированные настройки загрузчика.",
+  "settings.status.commandsImported": "Импортировано команд: {count}.",
+  "settings.status.commandsImportedReplaced":
+    "Импортировано команд: {count}; дубликаты trigger заменены.",
+  "settings.confirm.clearCache":
+    "Очистить кэш? Эмодзи могут загружаться дольше при следующем запуске Chatterino RT.",
+  "settings.confirm.overwriteUploader":
+    "Текущие настройки загрузчика изображений будут перезаписаны. Продолжить?",
+  "settings.prompt.copyUploaderJson": "Скопируйте JSON настроек загрузчика:",
+  "settings.prompt.pasteUploaderJson":
+    "Буфер обмена недоступен. Вставьте JSON настроек загрузчика изображений:",
+  "settings.commands.import": "Импорт команд из Chatterino 1",
+  "settings.commands.dupHint":
+    "Найдено несколько команд с одним trigger. Сработает только одна из них.",
+  "settings.hotkeys.searchLabel": "Поиск сочетания:",
+  "settings.hotkeys.searchPlaceholder": "Нажмите комбинацию клавиш…",
 
   "settings.table.tool.add": "Добавить",
   "settings.table.tool.remove": "Удалить",

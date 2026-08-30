@@ -1,6 +1,7 @@
 import { isAllowedHttpUrl } from "./webSearch.ts";
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageRing, TooltipHit } from "../chat/ring";
+import { t } from "../i18n/index.ts";
 
 export type TooltipPreviewMode = "DontShow" | "AlwaysShow" | "ShowOnShift";
 export type EmoteTooltipScale = "Small" | "Medium" | "Large" | "Huge";
@@ -267,7 +268,7 @@ export function bindEmoteTooltip(opts: {
       if (activeResolveUrl !== url || lastHit?.resolveUrl !== url) {
         return;
       }
-      opts.text.textContent = "No link info found";
+      opts.text.textContent = t("tooltip.link.unavailable");
       clearImage();
       positionTooltip(clientX, clientY);
     }

@@ -227,6 +227,7 @@ export const en = {
   "emotes.empty.global": "No global emotes.",
   "emotes.empty.emojis": "No emojis.",
   "emotes.empty.query": "No emotes match the query.",
+  "tooltip.link.unavailable": "No link info found",
   "emotes.item.favouriteSuffix": "{code} (favourite)",
   "emotes.item.unavailable": "Unavailable",
   "emotes.error.favourite": "Could not update favourite",
@@ -329,6 +330,7 @@ export const en = {
   "pinned.host.aria": "Pinned channel message",
   "pinned.label": "Pinned:",
   "pinned.dismiss": "Hide pinned message",
+  "pinned.moderator": "Moderator",
 
 
   "player.loading": "Loading…",
@@ -485,6 +487,51 @@ export const en = {
   "settings.language": "Language",
   "settings.language.en": "English",
   "settings.language.ru": "Русский",
+
+  "settings.blocked.empty": "No blocked users.",
+  "settings.blocked.loadError": "Could not load blocked users.",
+  "settings.status.busy": "Settings are busy; try again.",
+  "settings.status.busyImport": "Settings are busy; try import again.",
+  "settings.status.cacheCleared": "Cache cleared.",
+  "settings.status.actionUnavailable":
+    "This action is not available in Chatterino RT yet.",
+  "settings.status.pickSoundFailed": "Could not pick sound file.",
+  "settings.status.pickLogDirFailed": "Could not select log directory.",
+  "settings.status.openDirFailed": "Could not open settings directory.",
+  "settings.status.openLinkFailed": "Could not open link.",
+  "settings.status.incognitoUnavailable":
+    "Private browsing is not available for the default browser.",
+  "settings.status.pickCacheFailed": "Could not select cache directory.",
+  "settings.status.saveCacheFailed": "Could not save cache path.",
+  "settings.status.resetCacheFailed": "Could not reset cache path.",
+  "settings.status.clearCacheFailed": "Could not clear cache.",
+  "settings.status.uploaderCopied":
+    "Image uploader settings have been copied to clipboard as JSON.",
+  "settings.status.uploaderClipboardFallback":
+    "Clipboard unavailable; JSON shown in the prompt for manual copy.",
+  "settings.status.uploaderImportInvalid":
+    "Error validating image uploader import: {error}.",
+  "settings.status.uploaderImportEmpty":
+    "No valid image uploader settings found in the JSON.",
+  "settings.status.uploaderImported":
+    "Image uploader settings have been imported successfully!",
+  "settings.status.uploaderSaveFailed":
+    "Could not save imported image uploader settings.",
+  "settings.status.commandsImported": "Imported {count} command(s).",
+  "settings.status.commandsImportedReplaced":
+    "Imported {count} command(s); duplicate triggers replaced.",
+  "settings.confirm.clearCache":
+    "Are you sure that you want to clear your cache? Emotes may take longer to load next time Chatterino RT is started.",
+  "settings.confirm.overwriteUploader":
+    "This will overwrite your current image uploader settings. Continue?",
+  "settings.prompt.copyUploaderJson": "Copy image uploader settings JSON:",
+  "settings.prompt.pasteUploaderJson":
+    "Clipboard unavailable. Paste image uploader settings JSON:",
+  "settings.commands.import": "Import commands from Chatterino 1",
+  "settings.commands.dupHint":
+    "Multiple commands with the same trigger found. Only one of the commands will work.",
+  "settings.hotkeys.searchLabel": "Search keybind:",
+  "settings.hotkeys.searchPlaceholder": "Press a key combination…",
 
   "settings.table.tool.add": "Add",
   "settings.table.tool.remove": "Remove",

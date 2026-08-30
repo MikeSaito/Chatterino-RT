@@ -4655,7 +4655,7 @@ div.points-empty {
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-2);
-  z-index: 21;
+  z-index: calc(var(--z-menu) + 1);
 }
 
 .chat-context-submenu:hover .chat-context-submenu-items,
