@@ -44,6 +44,10 @@ pub struct ClipInfoResponse {
 struct ClipCache {
     by_id: HashMap<String, ClipInfoResponse>,
     order: Vec<String>,
+    inflight: HashMap<
+        String,
+        Vec<tokio::sync::oneshot::Sender<Result<ClipInfoResponse, ApiError>>>,
+    >,
 }
 
 impl ClipCache {
@@ -51,6 +55,7 @@ impl ClipCache {
         Self {
             by_id: HashMap::new(),
             order: Vec::new(),
+            inflight: HashMap::new(),
         }
     }
 
@@ -314,16 +319,52 @@ pub async fn resolve_clip_info(
         if let Some(hit) = guard.get(&clip_id) {
             return Ok(hit);
         }
+        if let Some(waiters) = guard.inflight.get_mut(&clip_id) {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            waiters.push(tx);
+            drop(guard);
+            return rx
+                .await
+                .unwrap_or_else(|_| Err(ApiError::internal("clip wait failed")));
+        }
+        guard.inflight.insert(clip_id.clone(), Vec::new());
     }
     let token = auth::resolved_login_token(&state).map(|(_, t)| t);
     let client_id = auth::resolved_client_id(&state);
-    let (client_id, token) = helix_creds(token.as_deref(), &client_id).ok_or_else(|| {
-        ApiError::coded("error.helix.forbidden", "Clip lookup requires Twitch login")
-    })?;
-    let info = fetch_clip(&clip_id, &token, &client_id, &normalized).await?;
+    let (client_id, token) = match helix_creds(token.as_deref(), &client_id) {
+        Some(v) => v,
+        None => {
+            let mut guard = cache().lock().await;
+            if let Some(waiters) = guard.inflight.remove(&clip_id) {
+                let err = ApiError::coded(
+                    "error.helix.forbidden",
+                    "Clip lookup requires Twitch login",
+                );
+                for tx in waiters {
+                    let _ = tx.send(Err(err.clone()));
+                }
+            }
+            return Err(ApiError::coded(
+                "error.helix.forbidden",
+                "Clip lookup requires Twitch login",
+            ));
+        }
+    };
+    let result = fetch_clip(&clip_id, &token, &client_id, &normalized).await;
     let mut guard = cache().lock().await;
-    guard.store(clip_id, info.clone());
-    Ok(info)
+    if let Ok(ref value) = result {
+        guard.store(clip_id.clone(), value.clone());
+    }
+    if let Some(waiters) = guard.inflight.remove(&clip_id) {
+        for tx in waiters {
+            let msg = match &result {
+                Ok(v) => Ok(v.clone()),
+                Err(e) => Err(e.clone()),
+            };
+            let _ = tx.send(msg);
+        }
+    }
+    result
 }
 
 #[cfg(test)]

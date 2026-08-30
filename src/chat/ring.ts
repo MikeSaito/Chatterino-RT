@@ -185,7 +185,13 @@ type Slot = {
   modBtns: BitmapText[];
   modIcons: Sprite[];
   modBtnHits: Array<{ x0: number; x1: number; action: string }>;
-  automodBtnHits: Array<{ x0: number; x1: number; action: "allow" | "deny" }>;
+  automodBtnHits: Array<{
+    x0: number;
+    x1: number;
+    y0: number;
+    y1: number;
+    action: "allow" | "deny";
+  }>;
   automodMessageId: string;
   automodStatus: string;
   automodCaught: AutomodRange[];
@@ -206,6 +212,8 @@ type Slot = {
   mentionSpans: MentionSpan[];
   clipCard: ClipCardInfo | null;
   clipCardRows: number;
+  /** True after title/host rewrite; displayBody must not rebuild from bodySource. */
+  linkEnriched: boolean;
   wrapLines: WrapLine[];
   /** false until paintClip finishes metrics for current bodyRaw. */
   wrapReady: boolean;
@@ -481,6 +489,7 @@ export class MessageRing {
       payload.clip && this.lineHeight > 0
         ? Math.max(1, Math.ceil(CLIP_CARD_HEIGHT_PX / this.lineHeight))
         : 0;
+    slot.linkEnriched = true;
     slot.wrapReady = false;
     this.markLayoutFullPaint();
     this.layout();
@@ -637,13 +646,7 @@ export class MessageRing {
     if (!this.ready) {
       return;
     }
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      if (slot.msgId) {
-        slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
-      }
-    }
+    this.refreshDisplayBodies();
     this.markLayoutFullPaint();
     this.layout();
   }
@@ -667,6 +670,18 @@ export class MessageRing {
       return source;
     }
     return lowercaseLinkHosts(source, links);
+  }
+
+  /** Rebuild painted bodies after lowercaseDomains toggle; skip title-enriched rows. */
+  private refreshDisplayBodies(): void {
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.msgId || slot.linkEnriched) {
+        continue;
+      }
+      slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
+    }
   }
 
   private visibleBadges(slot: Slot): Badge[] {
@@ -1152,6 +1167,12 @@ export class MessageRing {
         if (shift !== 0) {
           slot.spansRaw = shiftSpans(slot.spansRaw, shift);
           slot.linkSpans = shiftSpans(slot.linkSpans, shift);
+        }
+        if (slot.linkEnriched) {
+          slot.hostSpans = [];
+          slot.clipCard = null;
+          slot.clipCardRows = 0;
+          slot.linkEnriched = false;
         }
         slot.mentionSpans = [
           ...fmt.mentions,
@@ -1981,6 +2002,7 @@ export class MessageRing {
         mentionSpans: [],
         clipCard: null,
         clipCardRows: 0,
+        linkEnriched: false,
         wrapLines: [{ start: 0, end: 0 }],
         wrapReady: false,
         lineCount: 1,
@@ -2372,6 +2394,7 @@ export class MessageRing {
     slot.mentionSpans = [];
     slot.clipCard = null;
     slot.clipCardRows = 0;
+    slot.linkEnriched = false;
     slot.modBtnHits = [];
     slot.automodBtnHits = [];
     slot.automodMessageId = "";
@@ -2541,6 +2564,7 @@ export class MessageRing {
     slot.hostSpans = [];
     slot.clipCard = null;
     slot.clipCardRows = 0;
+    slot.linkEnriched = false;
     slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
     // Recycled slots keep stale wrapLines; cull must see them as dirty.
     slot.wrapLines = [{ start: 0, end: 0 }];
@@ -2602,8 +2626,17 @@ export class MessageRing {
           : t("chat.automod.held")
         : status === "allowed"
           ? t("chat.automod.allowed")
-          : t("chat.automod.denied");
-      const shift = head.length + 1 + prefix.length;
+          : status === "expired"
+            ? t("chat.automod.expired")
+            : t("chat.automod.denied");
+      const allowLabel = t("chat.automod.allow");
+      const denyLabel = t("chat.automod.deny");
+      const actionLine = pending ? `${allowLabel}  ${denyLabel}` : "";
+      const shift =
+        head.length +
+        1 +
+        (pending ? actionLine.length + 1 : 0) +
+        prefix.length;
       slot.automodCaught = (event.caughtRanges ?? []).map((r) => ({
         start: r.start + shift,
         end: r.end + shift,
@@ -2849,8 +2882,15 @@ export class MessageRing {
             : t("chat.automod.held")
           : status === "allowed"
             ? t("chat.automod.allowed")
-            : t("chat.automod.denied");
-        const body = `${head}\n${prefix}${event.text}`;
+            : status === "expired"
+              ? t("chat.automod.expired")
+              : t("chat.automod.denied");
+        const allowLabel = t("chat.automod.allow");
+        const denyLabel = t("chat.automod.deny");
+        const actionLine = pending ? `${allowLabel}  ${denyLabel}` : "";
+        const body = pending
+          ? `${head}\n${actionLine}\n${prefix}${event.text}`
+          : `${head}\n${prefix}${event.text}`;
         return {
           time,
           nick: "AutoMod",
@@ -3710,19 +3750,16 @@ export class MessageRing {
     ) {
       return;
     }
-    const line0 = lines[0];
-    if (!line0) {
+    if (lines.length < 2) {
       return;
     }
     const allowLabel = t("chat.automod.allow");
     const denyLabel = t("chat.automod.deny");
     const gap = Math.max(8, Math.round(8 * this.fontScale));
-    const headW = this.measureBitmapTextWidth(
-      "ChatFont",
-      slot.bodyRaw.slice(line0.start, line0.end),
-    );
-    let x = firstOriginX + headW + gap;
-    const y = contentY;
+    // Dedicated action row (line 1) so buttons never overflow the header.
+    let x = firstOriginX;
+    const y = contentY + this.lineHeight;
+    const y1 = y + this.lineHeight;
     const btns: Array<{ label: string; action: "allow" | "deny"; color: number }> = [
       { label: allowLabel, action: "allow", color: 0x33cc66 },
       { label: denyLabel, action: "deny", color: 0xff5555 },
@@ -3749,6 +3786,8 @@ export class MessageRing {
       slot.automodBtnHits.push({
         x0: x,
         x1: x + w,
+        y0: y,
+        y1,
         action: def.action,
       });
       x += w + gap;
@@ -4398,14 +4437,13 @@ export class MessageRing {
       return null;
     }
     const local = ev.getLocalPosition(slot.root);
-    const y0 = slot.systemCloudBounds
-      ? slot.systemCloudBounds.y
-      : slot.replyRows * this.lineHeight;
-    if (local.y < y0 || local.y >= y0 + this.lineHeight) {
-      return null;
-    }
     for (const hit of slot.automodBtnHits) {
-      if (local.x >= hit.x0 && local.x < hit.x1) {
+      if (
+        local.x >= hit.x0 &&
+        local.x < hit.x1 &&
+        local.y >= hit.y0 &&
+        local.y < hit.y1
+      ) {
         return hit.action;
       }
     }

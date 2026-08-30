@@ -113,5 +113,5 @@ export function bindClipCardLayer(
   };
 }
 
-/** Pixel height reserved under a message for one clip card. */
-export const CLIP_CARD_HEIGHT_PX = 84;
+/** Pixel height reserved under a message for one clip card (matches .clip-card). */
+export const CLIP_CARD_HEIGHT_PX = 76;

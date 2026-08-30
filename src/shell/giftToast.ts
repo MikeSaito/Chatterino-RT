@@ -70,6 +70,7 @@ export function bindGiftToast(
   handlers: GiftToastHandlers,
 ): { stop: () => void } {
   let unlisten: UnlistenFn | null = null;
+  let stopped = false;
   const active: ActiveCard[] = [];
 
   const clearTimer = (card: ActiveCard): void => {
@@ -184,13 +185,20 @@ export function bindGiftToast(
   };
 
   void listen<GiftToastPayload>(CHAT_GIFT_TOAST_EVENT, (ev) => {
-    show(ev.payload);
+    if (!stopped) {
+      show(ev.payload);
+    }
   }).then((fn) => {
+    if (stopped) {
+      fn();
+      return;
+    }
     unlisten = fn;
   });
 
   return {
     stop: () => {
+      stopped = true;
       for (const card of [...active]) {
         dismiss(card);
       }

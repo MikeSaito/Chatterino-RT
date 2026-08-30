@@ -49,6 +49,7 @@ type ClipInfoResponse = {
 
 const titleCache = new Map<string, LinkTitleSpec>();
 const clipCache = new Map<string, ClipCardInfo>();
+const clipInflight = new Map<string, Promise<ClipCardInfo | null>>();
 const TITLE_CACHE_LIMIT = 200;
 
 function rememberTitle(spec: LinkTitleSpec): void {
@@ -106,45 +107,50 @@ async function resolveClip(url: string): Promise<ClipCardInfo | null> {
   if (cached) {
     return cached;
   }
-  try {
-    const info = await invoke<ClipInfoResponse>("resolve_clip_info", { url });
-    const card: ClipCardInfo = {
-      clipId: info.clipId,
-      url: info.url || url,
-      title: info.title,
-      host: info.host || "clip.twitch.tv",
-      thumbnailUrl: info.thumbnailUrl ?? null,
-      durationSec: info.durationSec,
-      viewCount: info.viewCount,
-      creatorName: info.creatorName,
-      broadcasterName: info.broadcasterName,
-      gameName: info.gameName ?? null,
-      createdAt: info.createdAt ?? null,
-    };
-    clipCache.set(url, card);
-    while (clipCache.size > TITLE_CACHE_LIMIT) {
-      const oldest = clipCache.keys().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      clipCache.delete(oldest);
-    }
-    return card;
-  } catch {
-    return null;
+  const pending = clipInflight.get(url);
+  if (pending) {
+    return pending;
   }
+  const job = (async (): Promise<ClipCardInfo | null> => {
+    try {
+      const info = await invoke<ClipInfoResponse>("resolve_clip_info", { url });
+      const card: ClipCardInfo = {
+        clipId: info.clipId,
+        url: info.url || url,
+        title: info.title,
+        host: info.host || "clip.twitch.tv",
+        thumbnailUrl: info.thumbnailUrl ?? null,
+        durationSec: info.durationSec,
+        viewCount: info.viewCount,
+        creatorName: info.creatorName,
+        broadcasterName: info.broadcasterName,
+        gameName: info.gameName ?? null,
+        createdAt: info.createdAt ?? null,
+      };
+      clipCache.set(url, card);
+      while (clipCache.size > TITLE_CACHE_LIMIT) {
+        const oldest = clipCache.keys().next().value;
+        if (oldest === undefined) {
+          break;
+        }
+        clipCache.delete(oldest);
+      }
+      return card;
+    } catch {
+      return null;
+    } finally {
+      clipInflight.delete(url);
+    }
+  })();
+  clipInflight.set(url, job);
+  return job;
 }
 
 function eventHasLinks(event: ChatEvent): string | null {
+  // Clip/title cards only for plain privmsg (system clouds skip clipCardRows).
   if (event.kind === "privmsg") {
     if ((event.linkSpans?.length ?? 0) > 0) {
       return event.id;
-    }
-    return null;
-  }
-  if (event.kind === "usernotice" && event.privmsg?.kind === "privmsg") {
-    if ((event.privmsg.linkSpans?.length ?? 0) > 0) {
-      return event.privmsg.id;
     }
   }
   return null;
@@ -171,11 +177,16 @@ export function bindLinkEnrichment(
         if (spec) {
           titles.push(spec);
         }
-        if (!clip && isTwitchClipUrl(link.url)) {
-          clip = await resolveClip(link.url);
-        }
       }),
     );
+    for (const link of target.links) {
+      if (isTwitchClipUrl(link.url)) {
+        clip = await resolveClip(link.url);
+        if (clip) {
+          break;
+        }
+      }
+    }
     if (gen !== generation) {
       return;
     }
@@ -226,6 +237,7 @@ export function bindLinkEnrichment(
 
   return {
     afterBatch: (events) => {
+      generation += 1;
       const gen = generation;
       const seen = new Set<string>();
       for (const event of events) {
