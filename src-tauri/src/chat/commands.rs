@@ -128,6 +128,7 @@ pub async fn chat_join(
     if do_focus {
         super::session::emit_roomstate(&app, &state, &normalized);
         state.notify_polls(super::polls::PollsCmd::SetChannel(normalized.clone()));
+        state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(normalized.clone()));
         state.notify_pins(super::pins::PinsCmd::SetChannel(normalized.clone()));
     }
     Ok(normalized)
@@ -149,6 +150,7 @@ pub async fn chat_leave(
         state.notify_event(EventCmd::ClearChannel);
         state.notify_bttv(BttvCmd::ClearChannel);
         state.notify_polls(super::polls::PollsCmd::ClearChannel);
+        state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
         state.notify_pins(super::pins::PinsCmd::ClearChannel);
     }
     if let Ok(mut cat) = state.catalog.lock() {
@@ -191,10 +193,12 @@ pub async fn chat_leave(
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
             super::session::emit_roomstate(&app, &state, ch);
             state.notify_polls(super::polls::PollsCmd::SetChannel(ch.clone()));
+            state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(ch.clone()));
             state.notify_pins(super::pins::PinsCmd::SetChannel(ch.clone()));
         } else {
             let _ = super::session::clear_last(&state);
             state.notify_polls(super::polls::PollsCmd::ClearChannel);
+            state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
             state.notify_pins(super::pins::PinsCmd::ClearChannel);
         }
     }
@@ -208,6 +212,7 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     state.notify_event(EventCmd::ClearChannel);
     state.notify_bttv(BttvCmd::ClearChannel);
     state.notify_polls(super::polls::PollsCmd::ClearChannel);
+    state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
     state.notify_pins(super::pins::PinsCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -615,6 +620,9 @@ async fn dispatch_chat_send(
     }
     if let Some(warn) = parse_warn_slash(text.trim()) {
         return handle_warn_slash(app, state, channel, warn).await;
+    }
+    if let Some(lt) = super::low_trust::parse_low_trust_slash(text.trim()) {
+        return super::low_trust::handle_low_trust_slash(app, state, channel, lt).await;
     }
     if should_send_helix(state) {
         return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;

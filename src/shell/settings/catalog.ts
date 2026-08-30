@@ -1152,13 +1152,11 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Hide moderation actions",
         true,
       ),
-      vx(
-        cb(
-          "sm-hide-restricted",
-          "streamerMode.hideRestrictedUsers",
-          "Hide messages from restricted users",
-          true,
-        ),
+      cb(
+        "sm-hide-restricted",
+        "streamerMode.hideRestrictedUsers",
+        "Hide messages from restricted users",
+        true,
       ),
       vx(
         cb(
@@ -1216,7 +1214,6 @@ const GENERAL_SECTIONS: SectionDef[] = [
   },
   {
     title: "Beta",
-    v1Exclude: true,
     knobs: [
       cb("beta-updates", "misc.betaUpdates", "Receive beta updates", false),
     ],

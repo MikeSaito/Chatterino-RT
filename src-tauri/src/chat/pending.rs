@@ -138,6 +138,8 @@ mod tests {
             target_login: Some("dev".into()),
             duration_sec: Some(60),
             stack_count: 1,
+        source_login: None,
+        moderator_login: None,
         });
         assert!(p.upsert_by_id(ChatEvent::Clearchat {
             id: "c1".into(),
@@ -145,6 +147,8 @@ mod tests {
             target_login: Some("dev".into()),
             duration_sec: Some(120),
             stack_count: 2,
+        source_login: None,
+        moderator_login: None,
         }));
         assert_eq!(p.events.len(), 1);
         match &p.events[0] {

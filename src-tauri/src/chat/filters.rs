@@ -1133,6 +1133,7 @@ pub(crate) fn event_sender_login(event: &ChatEvent) -> Option<&str> {
                 Some(ChatEvent::Privmsg { login, .. }) if !login.is_empty() => Some(login.as_str()),
                 _ => None,
             }),
+        ChatEvent::LowTrustMessage { login, .. } if !login.is_empty() => Some(login.as_str()),
         _ => None,
     }
 }

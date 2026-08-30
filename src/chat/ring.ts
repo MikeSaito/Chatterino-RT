@@ -38,6 +38,9 @@ import {
   paintRepresentativeRgb,
   rasterizeNickPaint,
 } from "./nickPaint";
+
+/** Stock Chatterino low-trust / restricted row tint (ARGB-ish hex for Pixi fill). */
+const LOW_TRUST_HIGHLIGHT = "#ff4f4d55";
 import {
   clearchatFormatted,
   deletionNoticeText,
@@ -205,6 +208,8 @@ type Slot = {
   automodMessageId: string;
   automodStatus: string;
   automodCaught: AutomodRange[];
+  /** Low Trust status for streamer-mode hide (`restricted` | `monitored` | ""). */
+  lowTrustStatus: string;
   caughtTexts: BitmapText[];
   clipUi: ClipCardWidgets;
   msgId: string;
@@ -275,6 +280,8 @@ type Slot = {
   clearLogin: string;
   clearDurationSec: number | undefined;
   clearStackCount: number;
+  clearSourceLogin: string;
+  clearModeratorLogin: string;
   clearmsgBody: string;
   usernoticeMsgId: string;
   usernoticeSystemText: string;
@@ -336,6 +343,7 @@ export class MessageRing {
   private findHitId = "";
   private hideModerated = false;
   private hideModerationActions = false;
+  private hideRestrictedUsers = false;
   private hideDeletionActions = false;
   private deletedMessageLengthLimit = 50;
   private fadeMessageHistory = true;
@@ -508,7 +516,11 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      out.push(slot.msgId ? slot.highlightColor : "");
+      if (this.isSlotHiddenByPrivacy(slot)) {
+        out.push("");
+      } else {
+        out.push(slot.msgId ? slot.highlightColor : "");
+      }
     }
     this.highlightMarksCache = out;
     this.highlightMarksCacheGen = this.highlightMarksGen;
@@ -522,6 +534,20 @@ export class MessageRing {
 
   private bumpHighlightMarks(): void {
     this.highlightMarksGen += 1;
+  }
+
+  /** Streamer-mode / hide-moderated privacy gate for layout, a11y, scrollbar marks. */
+  private isSlotHiddenByPrivacy(slot: Slot): boolean {
+    if (!slot.msgId) {
+      return true;
+    }
+    if (this.hideModerated && slot.disabled) {
+      return true;
+    }
+    if (this.hideRestrictedUsers && slot.lowTrustStatus === "restricted") {
+      return true;
+    }
+    return false;
   }
 
   setOnContextMenu(cb: (ctx: SlotContext) => void): void {
@@ -912,7 +938,7 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       const live = slot.msgId.length > 0;
-      const show = live && !(this.hideModerated && slot.disabled);
+      const show = live && !this.isSlotHiddenByPrivacy(slot);
       slot.root.visible = show;
       if (show) {
         visible.push(slot);
@@ -1038,10 +1064,7 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = this.occupied - 1; i >= 0 && out.length < limit; i -= 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId) {
-        continue;
-      }
-      if (slot.disabled && this.hideModerated) {
+      if (this.isSlotHiddenByPrivacy(slot)) {
         continue;
       }
       const text = (slot.copyText || slot.bodyRaw || "").trim();
@@ -1227,6 +1250,8 @@ export class MessageRing {
           slot.clearLogin || undefined,
           slot.clearDurationSec,
           slot.clearStackCount > 0 ? slot.clearStackCount : undefined,
+          slot.clearSourceLogin || undefined,
+          slot.clearModeratorLogin || undefined,
         );
         slot.bodySource = fmt.text;
         slot.copyText = fmt.text;
@@ -1513,6 +1538,7 @@ export class MessageRing {
     hideTimestampsWhenLive = false,
     showReplyButton = true,
     linksDoubleClickOnly = false,
+    hideRestrictedUsers = false,
     emotes?: {
       scale?: number;
       images?: boolean;
@@ -1537,6 +1563,7 @@ export class MessageRing {
       Math.floor(Number(collapseMessagesMinLines) || 0),
     );
     this.hideModerationActions = hideModerationActions;
+    this.hideRestrictedUsers = hideRestrictedUsers;
     this.hideDeletionActions = hideDeletionActions;
     this.deletedMessageLengthLimit = Math.max(
       0,
@@ -2104,6 +2131,7 @@ export class MessageRing {
         automodMessageId: "",
         automodStatus: "",
         automodCaught: [],
+        lowTrustStatus: "",
         caughtTexts,
         clipUi,
         msgId: "",
@@ -2150,6 +2178,8 @@ export class MessageRing {
         clearLogin: "",
         clearDurationSec: undefined,
         clearStackCount: 0,
+        clearSourceLogin: "",
+        clearModeratorLogin: "",
         clearmsgBody: "",
         usernoticeMsgId: "",
         usernoticeSystemText: "",
@@ -2380,6 +2410,8 @@ export class MessageRing {
       slot.clearmsgBody = deletedBody;
       slot.clearDurationSec = undefined;
       slot.clearStackCount = 0;
+      slot.clearSourceLogin = "";
+      slot.clearModeratorLogin = "";
       this.head = (this.head + 1) % this.poolSize;
       if (this.occupied < this.poolSize) {
         this.occupied += 1;
@@ -2428,6 +2460,12 @@ export class MessageRing {
         this.bumpHighlightMarks();
         return { slot: existing, needFullLayout: true };
       }
+      return { needFullLayout: false };
+    } else if (
+      event.kind === "notice" &&
+      event.msgId === "suspicious_user_update" &&
+      this.hideModerationActions
+    ) {
       return { needFullLayout: false };
     }
     const slot = this.slots[this.head];
@@ -2572,6 +2610,8 @@ export class MessageRing {
     slot.clearLogin = "";
     slot.clearDurationSec = undefined;
     slot.clearStackCount = 0;
+    slot.clearSourceLogin = "";
+    slot.clearModeratorLogin = "";
     slot.clearmsgBody = "";
     slot.usernoticeMsgId = "";
     slot.usernoticeSystemText = "";
@@ -2633,8 +2673,16 @@ export class MessageRing {
     slot.expanded = false;
     slot.collapsed = false;
     // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
-    slot.system = event.kind !== "privmsg" && event.kind !== "automodHeld";
-    slot.collapsible = event.kind === "privmsg";
+    slot.system =
+      event.kind !== "privmsg" &&
+      event.kind !== "automodHeld" &&
+      event.kind !== "lowTrustMessage";
+    slot.collapsible = event.kind === "privmsg" || event.kind === "lowTrustMessage";
+    if (event.kind === "lowTrustHeader" || event.kind === "lowTrustMessage") {
+      slot.lowTrustStatus = event.status;
+    } else {
+      slot.lowTrustStatus = "";
+    }
     if (event.kind === "usernotice" && event.privmsg && event.privmsg.kind === "privmsg") {
       slot.msgId = event.privmsg.id;
       slot.login = event.privmsg.login.toLowerCase();
@@ -2677,6 +2725,14 @@ export class MessageRing {
       slot.nickDisplay = event.authorDisplayName || event.authorLogin;
       slot.nickPaint = null;
       slot.login = event.authorLogin.toLowerCase();
+    } else if (event.kind === "lowTrustMessage") {
+      slot.useNickStyle = true;
+      slot.nickUserId = event.userId;
+      slot.nickColorRaw = "";
+      slot.nickLogin = event.login;
+      slot.nickDisplay = event.displayName || event.login;
+      slot.nickPaint = null;
+      slot.login = event.login.toLowerCase();
     } else {
       slot.useNickStyle = false;
       slot.nickUserId = "";
@@ -2732,6 +2788,8 @@ export class MessageRing {
     slot.clearLogin = "";
     slot.clearDurationSec = undefined;
     slot.clearStackCount = 0;
+    slot.clearSourceLogin = "";
+    slot.clearModeratorLogin = "";
     slot.clearmsgBody = "";
     slot.usernoticeMsgId = "";
     slot.usernoticeSystemText = "";
@@ -2780,6 +2838,8 @@ export class MessageRing {
       slot.clearLogin = event.targetLogin ?? "";
       slot.clearDurationSec = event.durationSec;
       slot.clearStackCount = event.stackCount ?? 1;
+      slot.clearSourceLogin = event.sourceLogin ?? "";
+      slot.clearModeratorLogin = event.moderatorLogin ?? "";
     } else if (event.kind === "usernotice") {
       slot.systemTextKind = "usernotice";
       slot.usernoticeMsgId = event.msgId ?? "";
@@ -2949,6 +3009,8 @@ export class MessageRing {
           event.targetLogin,
           event.durationSec,
           event.stackCount,
+          event.sourceLogin,
+          event.moderatorLogin,
         );
         return {
           time,
@@ -3048,6 +3110,39 @@ export class MessageRing {
           badges: [],
           highlightColor: "",
         };
+      case "lowTrustHeader": {
+        const body = `Suspicious User: ${event.detail}`;
+        return {
+          time,
+          nick: "Suspicious User",
+          nickColor: 0x0000ff,
+          body,
+          copyText: body,
+          leadLen: 0,
+          spans: [],
+          links: [],
+          mentions: [],
+          badges: [],
+          highlightColor: LOW_TRUST_HIGHLIGHT,
+        };
+      }
+      case "lowTrustMessage": {
+        const author = event.displayName || event.login;
+        const body = `${author}: ${event.text}`;
+        return {
+          time,
+          nick: author,
+          nickColor: this.themeFills.nickFallback,
+          body,
+          copyText: body,
+          leadLen: 0,
+          spans: [],
+          links: event.linkSpans ?? [],
+          mentions: event.mentionSpans ?? [],
+          badges: [],
+          highlightColor: LOW_TRUST_HIGHLIGHT,
+        };
+      }
       default:
         return {
           time,
@@ -4088,7 +4183,7 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       const live = slot.msgId.length > 0;
-      const show = live && !(this.hideModerated && slot.disabled);
+      const show = live && !this.isSlotHiddenByPrivacy(slot);
       slot.root.visible = show;
       if (show) {
         visible.push(slot);
@@ -4386,10 +4481,7 @@ export class MessageRing {
     const shown: Slot[] = [];
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (slot.msgId.length === 0) {
-        continue;
-      }
-      if (this.hideModerated && slot.disabled) {
+      if (this.isSlotHiddenByPrivacy(slot)) {
         continue;
       }
       shown.push(slot);

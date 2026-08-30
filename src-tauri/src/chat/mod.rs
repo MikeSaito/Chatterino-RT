@@ -41,6 +41,7 @@ pub mod link_resolver;
 pub mod live_notifications;
 pub mod live_status;
 pub mod logging;
+pub mod low_trust;
 pub mod membership_batch;
 pub mod parse;
 pub mod pending;

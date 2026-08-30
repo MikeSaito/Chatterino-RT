@@ -51,10 +51,31 @@ export function clearchatText(
   login: string | undefined,
   durationSec: number | undefined,
   stackCount?: number,
+  sourceLogin?: string,
+  moderatorLogin?: string,
 ): string {
+  const source = sourceLogin?.trim() || undefined;
+  const mod = moderatorLogin?.trim() || undefined;
   let text: string;
   if (!login) {
     text = t("chat.clearchat.room");
+  } else if (durationSec !== undefined && source && mod) {
+    text = t("chat.clearchat.timeoutSharedMod", {
+      mod,
+      login,
+      duration: formatDuration(durationSec),
+      source,
+    });
+  } else if (durationSec === undefined && source && mod) {
+    text = t("chat.clearchat.banSharedMod", { mod, login, source });
+  } else if (durationSec !== undefined && source) {
+    text = t("chat.clearchat.timeoutShared", {
+      login,
+      duration: formatDuration(durationSec),
+      source,
+    });
+  } else if (source) {
+    text = t("chat.clearchat.banShared", { login, source });
   } else if (durationSec !== undefined) {
     text = t("chat.clearchat.timeout", {
       login,
@@ -317,11 +338,25 @@ export function clearchatFormatted(
   login: string | undefined,
   durationSec: number | undefined,
   stackCount?: number,
+  sourceLogin?: string,
+  moderatorLogin?: string,
 ): FormattedSystemLine {
-  const text = clearchatText(login, durationSec, stackCount);
+  const text = clearchatText(
+    login,
+    durationSec,
+    stackCount,
+    sourceLogin,
+    moderatorLogin,
+  );
   const mentions: MentionSpan[] = [];
   if (login) {
     pushMention(mentions, text, login, login);
+  }
+  if (sourceLogin) {
+    pushMention(mentions, text, sourceLogin, sourceLogin);
+  }
+  if (moderatorLogin) {
+    pushMention(mentions, text, moderatorLogin, moderatorLogin);
   }
   return { text, mentions };
 }

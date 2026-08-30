@@ -38,8 +38,8 @@ pub fn resolve_identifier(name: &str, ctx: &RunContext<'_>) -> FilterValue {
         "flags.whisper" => FilterValue::Bool(flag_whisper(ctx.event)),
         "flags.reply" => FilterValue::Bool(flag_reply(ctx.event)),
         "flags.automod" => FilterValue::Bool(flag_automod(ctx.event)),
-        "flags.restricted" => FilterValue::Bool(false),
-        "flags.monitored" => FilterValue::Bool(false),
+        "flags.restricted" => FilterValue::Bool(flag_restricted(ctx.event)),
+        "flags.monitored" => FilterValue::Bool(flag_monitored(ctx.event)),
         "flags.shared" => FilterValue::Bool(flag_shared(ctx.event)),
         "flags.similar" => FilterValue::Bool(flag_similar(ctx.event)),
         "flags.watch_streak" => FilterValue::Bool(flag_watch_streak(ctx.event)),
@@ -222,6 +222,8 @@ fn flag_system_message(event: &ChatEvent) -> bool {
             | ChatEvent::Clearchat { .. }
             | ChatEvent::Clearmsg { .. }
             | ChatEvent::Usernotice { .. }
+            | ChatEvent::LowTrustHeader { .. }
+            | ChatEvent::LowTrustMessage { .. }
     )
 }
 
@@ -268,6 +270,25 @@ fn flag_automod(event: &ChatEvent) -> bool {
         ChatEvent::Privmsg { system_msg_id, .. } => system_msg_id
             .as_deref()
             .is_some_and(|id| id.contains("automod")),
+        ChatEvent::AutomodHeld { .. } | ChatEvent::AutomodStatus { .. } => true,
+        _ => false,
+    }
+}
+
+fn flag_restricted(event: &ChatEvent) -> bool {
+    match event {
+        ChatEvent::LowTrustHeader { status, .. } | ChatEvent::LowTrustMessage { status, .. } => {
+            status.eq_ignore_ascii_case("restricted")
+        }
+        _ => false,
+    }
+}
+
+fn flag_monitored(event: &ChatEvent) -> bool {
+    match event {
+        ChatEvent::LowTrustHeader { status, .. } | ChatEvent::LowTrustMessage { status, .. } => {
+            status.eq_ignore_ascii_case("monitored")
+        }
         _ => false,
     }
 }
@@ -300,6 +321,12 @@ fn message_content(event: &ChatEvent) -> String {
         ChatEvent::Privmsg { text, .. } => text.clone(),
         ChatEvent::Notice { text, .. } => text.clone(),
         ChatEvent::Usernotice { system_text, .. } => system_text.clone(),
+        ChatEvent::LowTrustHeader { detail, .. } => format!("Suspicious User: {detail}"),
+        ChatEvent::LowTrustMessage {
+            display_name,
+            text,
+            ..
+        } => format!("{display_name}: {text}"),
         _ => String::new(),
     }
 }

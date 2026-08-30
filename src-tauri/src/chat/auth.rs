@@ -15,9 +15,10 @@ const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 // moderator:read:chat_messages — Helix GET /chat/pins (mod banner snapshot).
 // moderator:manage:chat_messages — Helix PUT/DELETE /chat/pins (context Pin/Unpin).
 // moderator:manage:warnings — Helix POST /moderation/warnings (/warn).
+// moderator:read|manage:suspicious_users — Low Trust EventSub + Helix treat/untreat.
 // Existing sessions need re-login after scopes are added.
 const DEVICE_SCOPES: &str =
-    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings";
+    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings moderator:read:suspicious_users moderator:manage:suspicious_users";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";
@@ -834,6 +835,7 @@ async fn after_identity_change(shared: &Shared) {
     request_relogin(shared).await;
     shared.notify_pins(super::pins::PinsCmd::Relogin);
     shared.notify_polls(super::polls::PollsCmd::Relogin);
+    shared.notify_low_trust(super::low_trust::LowTrustCmd::Relogin);
     super::provider_activity::clear_identity_cache(shared);
     super::twitch_blocks::clear_blocks(shared);
     super::shared_chat::clear(shared);

@@ -37,6 +37,7 @@ fn shutdown_background(app: &AppHandle) {
         state.notify_event(EventCmd::Shutdown);
         state.notify_bttv(BttvCmd::Shutdown);
         state.notify_polls(chat::polls::PollsCmd::Shutdown);
+        state.notify_low_trust(chat::low_trust::LowTrustCmd::Shutdown);
         state.notify_pins(chat::pins::PinsCmd::Shutdown);
         chat::automod::shutdown();
         chat::live_status::shutdown();
@@ -70,6 +71,7 @@ pub fn run() {
             chat::eventapi::start(shared.clone())?;
             chat::bttv_live::start(shared.clone())?;
             chat::polls::start(app.handle().clone(), shared.clone())?;
+            chat::low_trust::start(app.handle().clone(), shared.clone())?;
             chat::pins::start(app.handle().clone(), shared.clone())?;
             chat::automod::start(app.handle().clone(), shared.clone())?;
             chat::live_status::start(app.handle().clone(), shared.clone());

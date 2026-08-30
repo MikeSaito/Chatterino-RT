@@ -349,11 +349,15 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
             target_login,
             duration_sec,
             stack_count,
+            source_login,
+            moderator_login,
             ..
         } => Some(super::clearchat_text::clearchat_text_en(
             target_login.as_deref(),
             duration_sec.map(u64::from),
             *stack_count,
+            source_login.as_deref(),
+            moderator_login.as_deref(),
         )),
         ChatEvent::Clearmsg { .. } | ChatEvent::Roomstate { .. } | ChatEvent::Userstate { .. } => {
             None
@@ -375,6 +379,23 @@ fn message_body(event: &ChatEvent, cfg: &LoggingConfig) -> Option<String> {
         ChatEvent::AutomodStatus {
             target_id, status, ..
         } => Some(format!("AutoMod status {status} ({target_id})")),
+        ChatEvent::LowTrustHeader { detail, status, .. } => {
+            Some(format!("Suspicious User: {detail} ({status})"))
+        }
+        ChatEvent::LowTrustMessage {
+            login,
+            display_name,
+            text,
+            status,
+            ..
+        } => {
+            let nick = if display_name.is_empty() {
+                login.clone()
+            } else {
+                display_name.clone()
+            };
+            Some(format!("LowTrust ({status}) {nick}: {text}"))
+        }
     }
 }
 
@@ -735,6 +756,8 @@ mod tests {
             target_login: Some("bob".into()),
             duration_sec: Some(60),
             stack_count: 1,
+        source_login: None,
+        moderator_login: None,
         };
         let line = format_log_line(&ev, &cfg).unwrap();
         assert_eq!(line, "bob timed out for 1m");

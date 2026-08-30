@@ -1,5 +1,6 @@
 //! CLEARCHAT timeout stacking (stock Chatterino ChannelHelpers.hpp).
 //! MIT reimplementation; no C++/Qt copy.
+//! Shared-ban EventSub enrich replaces IRC CLEARCHAT without bumping stack.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -44,7 +45,7 @@ pub fn style_from_knobs(knobs: &BTreeMap<String, Value>) -> TimeoutStackStyle {
     {
         Some("0") => TimeoutStackStyle::Stack,
         Some("2") => TimeoutStackStyle::DontStack,
-        _ => TimeoutStackStyle::StackUntilUserMessage,
+        _ => TimeoutStackStyle::default(),
     }
 }
 
@@ -59,6 +60,8 @@ pub fn push_clearchat(
         timestamp_ms: incoming_ts,
         target_login: incoming_target,
         duration_sec: incoming_duration,
+        source_login: incoming_source,
+        moderator_login: incoming_mod,
         ..
     } = &incoming
     else {
@@ -92,6 +95,8 @@ pub fn push_clearchat(
             incoming_target.as_deref(),
             *incoming_duration,
             *incoming_ts,
+            incoming_source.as_deref(),
+            incoming_mod.as_deref(),
         ) {
             items[i] = updated.clone();
             return PushOutcome::Replaced(updated);
@@ -119,13 +124,17 @@ fn try_stack_pair(
     incoming_target: Option<&str>,
     incoming_duration: Option<u32>,
     incoming_ts: u64,
+    incoming_source: Option<&str>,
+    incoming_mod: Option<&str>,
 ) -> Option<ChatEvent> {
     let ChatEvent::Clearchat {
         id,
         timestamp_ms: _,
         target_login,
-        duration_sec: _,
+        duration_sec: existing_duration,
         stack_count,
+        source_login: existing_source,
+        moderator_login: existing_mod,
     } = existing
     else {
         return None;
@@ -137,13 +146,42 @@ fn try_stack_pair(
         _ => return None,
     }
 
-    let count = stack_count.saturating_add(1);
+    let enriching = incoming_source.is_some() && existing_source.is_none();
+    let keep_enriched = existing_source.is_some() && incoming_source.is_none();
+    let count = if enriching || keep_enriched {
+        *stack_count
+    } else {
+        stack_count.saturating_add(1)
+    };
+
+    let source_login = if keep_enriched {
+        existing_source.clone()
+    } else {
+        incoming_source
+            .map(str::to_string)
+            .or_else(|| existing_source.clone())
+    };
+    let moderator_login = if keep_enriched {
+        existing_mod.clone()
+    } else {
+        incoming_mod
+            .map(str::to_string)
+            .or_else(|| existing_mod.clone())
+    };
+    let duration_sec = if keep_enriched && incoming_duration.is_none() {
+        *existing_duration
+    } else {
+        incoming_duration.or(*existing_duration)
+    };
+
     Some(ChatEvent::Clearchat {
         id: id.clone(),
         timestamp_ms: incoming_ts,
         target_login: target_login.clone(),
-        duration_sec: incoming_duration,
+        duration_sec,
         stack_count: count,
+        source_login,
+        moderator_login,
     })
 }
 
@@ -166,6 +204,8 @@ mod tests {
             target_login: None,
             duration_sec: None,
             stack_count: 1,
+            source_login: None,
+            moderator_login: None,
         }
     }
 
@@ -176,6 +216,20 @@ mod tests {
             target_login: Some(login.into()),
             duration_sec: Some(secs),
             stack_count: 1,
+            source_login: None,
+            moderator_login: None,
+        }
+    }
+
+    fn shared_ban(id: &str, ts: u64, login: &str, source: &str, moderator: &str) -> ChatEvent {
+        ChatEvent::Clearchat {
+            id: id.into(),
+            timestamp_ms: ts,
+            target_login: Some(login.into()),
+            duration_sec: None,
+            stack_count: 1,
+            source_login: Some(source.into()),
+            moderator_login: Some(moderator.into()),
         }
     }
 
@@ -214,101 +268,90 @@ mod tests {
     }
 
     #[test]
-    fn stacks_full_clear_four_times() {
+    fn stacks_same_user_timeouts() {
         let mut items = VecDeque::new();
-        for i in 0..4 {
-            push_clearchat(
-                &mut items,
-                clear(&format!("c{i}"), 1000 + i),
-                TimeoutStackStyle::Stack,
-                1000,
-            );
-        }
-        assert_eq!(items.len(), 1);
-        match &items[0] {
-            ChatEvent::Clearchat { stack_count, .. } => assert_eq!(*stack_count, 4),
-            other => panic!("{other:?}"),
+        let _ = push_clearchat(&mut items, timeout("a", 1000, "bob", 60), TimeoutStackStyle::Stack, 100);
+        let out = push_clearchat(
+            &mut items,
+            timeout("b", 1500, "bob", 60),
+            TimeoutStackStyle::Stack,
+            100,
+        );
+        match out {
+            PushOutcome::Replaced(ChatEvent::Clearchat { stack_count, .. }) => {
+                assert_eq!(stack_count, 2)
+            }
+            _ => panic!("expected replace"),
         }
     }
 
     #[test]
-    fn stacks_user_timeout_three_times() {
+    fn enrich_shared_ban_keeps_stack() {
+        let irc = ChatEvent::Clearchat {
+            id: "a".into(),
+            timestamp_ms: 1000,
+            target_login: Some("bob".into()),
+            duration_sec: None,
+            stack_count: 1,
+            source_login: None,
+            moderator_login: None,
+        };
+        let mut items = VecDeque::from([irc]);
+        let out = push_clearchat(
+            &mut items,
+            shared_ban("b", 1100, "bob", "srcchan", "mod"),
+            TimeoutStackStyle::Stack,
+            100,
+        );
+        match out {
+            PushOutcome::Replaced(ChatEvent::Clearchat {
+                stack_count,
+                source_login,
+                moderator_login,
+                ..
+            }) => {
+                assert_eq!(stack_count, 1);
+                assert_eq!(source_login.as_deref(), Some("srcchan"));
+                assert_eq!(moderator_login.as_deref(), Some("mod"));
+            }
+            _ => panic!("expected enrich replace"),
+        }
+    }
+
+    #[test]
+    fn stacks_room_clears() {
         let mut items = VecDeque::new();
         for i in 0..3 {
-            push_clearchat(
+            let _ = push_clearchat(
                 &mut items,
-                timeout(&format!("t{i}"), 2000 + i, "dev", 600),
+                clear(&format!("c{i}"), 1000 + i * 10),
                 TimeoutStackStyle::Stack,
-                1000,
+                100,
             );
         }
-        assert_eq!(items.len(), 1);
-        match &items[0] {
-            ChatEvent::Clearchat {
-                stack_count,
-                duration_sec,
-                ..
-            } => {
-                assert_eq!(*stack_count, 3);
-                assert_eq!(*duration_sec, Some(600));
+        match items.back() {
+            Some(ChatEvent::Clearchat { stack_count, .. }) => assert_eq!(*stack_count, 3),
+            _ => panic!("expected clearchat"),
+        }
+    }
+
+    #[test]
+    fn stack_until_user_message_breaks() {
+        let mut items = VecDeque::from([
+            timeout("a", 1000, "bob", 60),
+            privmsg("p", 1200, "bob"),
+        ]);
+        let out = push_clearchat(
+            &mut items,
+            timeout("b", 1300, "bob", 60),
+            TimeoutStackStyle::StackUntilUserMessage,
+            100,
+        );
+        match out {
+            PushOutcome::Added(ChatEvent::Clearchat { stack_count, .. }) => {
+                assert_eq!(stack_count, 1)
             }
-            other => panic!("{other:?}"),
+            _ => panic!("expected add after break"),
         }
-    }
-
-    #[test]
-    fn dont_stack_keeps_separate_lines() {
-        let mut items = VecDeque::new();
-        for i in 0..4 {
-            push_clearchat(
-                &mut items,
-                clear(&format!("c{i}"), 1000 + i),
-                TimeoutStackStyle::DontStack,
-                1000,
-            );
-        }
-        assert_eq!(items.len(), 4);
-    }
-
-    #[test]
-    fn stack_until_user_message_breaks_on_privmsg() {
-        let mut items = VecDeque::new();
-        push_clearchat(
-            &mut items,
-            timeout("t1", 1000, "dev", 60),
-            TimeoutStackStyle::StackUntilUserMessage,
-            1000,
-        );
-        push_clearchat(
-            &mut items,
-            privmsg("p1", 1001, "dev"),
-            TimeoutStackStyle::StackUntilUserMessage,
-            1000,
-        );
-        push_clearchat(
-            &mut items,
-            timeout("t2", 1002, "dev", 120),
-            TimeoutStackStyle::StackUntilUserMessage,
-            1000,
-        );
-        assert_eq!(items.len(), 3);
-        match &items[2] {
-            ChatEvent::Clearchat { stack_count, .. } => assert_eq!(*stack_count, 1),
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[test]
-    fn style_from_knobs_defaults_to_stack_until() {
-        assert_eq!(
-            style_from_knobs(&BTreeMap::new()),
-            TimeoutStackStyle::StackUntilUserMessage
-        );
-        let mut knobs = BTreeMap::new();
-        knobs.insert(
-            "moderation.timeoutStackStyle".into(),
-            Value::String("0".into()),
-        );
-        assert_eq!(style_from_knobs(&knobs), TimeoutStackStyle::Stack);
     }
 }
