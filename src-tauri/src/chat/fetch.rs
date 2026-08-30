@@ -685,6 +685,7 @@ pub fn allowed_emote_cdn_url(raw: &str) -> Option<String> {
         .or_else(|| crate::chat::helix::allowed_badge_url(raw))
         .or_else(|| crate::chat::helix::allowed_cheer_url(raw))
         .or_else(|| allowed_jsdelivr_emoji_url(raw))
+        .or_else(|| crate::chat::clips::allowed_clip_thumbnail_url(raw))
 }
 
 fn allowed_7tv_cdn_url(raw: &str) -> Option<String> {
@@ -921,6 +922,18 @@ mod tests {
             )
         );
         assert!(allowed_emote_cdn_url("https://evil.example/emote/x.png").is_none());
+        assert_eq!(
+            allowed_emote_cdn_url(
+                "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"
+            ),
+            Some(
+                "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg".to_string()
+            )
+        );
+        assert!(allowed_emote_cdn_url(
+            "https://evil.clips-media-assets2.twitch.tv/foo.jpg"
+        )
+        .is_none());
     }
 
     #[test]

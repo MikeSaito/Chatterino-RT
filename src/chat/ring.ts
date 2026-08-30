@@ -57,7 +57,15 @@ import {
 } from "./badgeVisibility";
 import { lowercaseLinkHosts, type HostSpanRange } from "./linkDisplay";
 import type { ClipCardInfo } from "./linkEnrichment";
-import { CLIP_CARD_HEIGHT_PX } from "../shell/clipCards";
+import {
+  clipCardContains,
+  clipCardRowCount,
+  createClipCardWidgets,
+  hideClipCard,
+  paintClipCard,
+  releaseClipThumb,
+  type ClipCardWidgets,
+} from "./clipCardPixi";
 import { EmoteFrameTicker, TextureLru } from "./textures";
 import {
   ScrollModel,
@@ -196,6 +204,7 @@ type Slot = {
   automodStatus: string;
   automodCaught: AutomodRange[];
   caughtTexts: BitmapText[];
+  clipUi: ClipCardWidgets;
   msgId: string;
   login: string;
   /** Текст до host-display transform (whisper/action lead). */
@@ -405,15 +414,6 @@ export class MessageRing {
   private lastReadFadeRaf = 0;
   private pendingBelow = 0;
   private onScroll: ((state: ScrollSnapshot) => void) | undefined;
-  private onClipCards:
-    | ((anchors: Array<{
-        msgId: string;
-        top: number;
-        left: number;
-        width: number;
-        clip: ClipCardInfo;
-      }>) => void)
-    | undefined;
   private onContext: ((ctx: SlotContext) => void) | undefined;
   private onNickClick: ((ctx: SlotContext) => void) | undefined;
   private onNickRightClick: ((ctx: SlotContext, ev: FederatedPointerEvent) => void) | undefined;
@@ -445,17 +445,6 @@ export class MessageRing {
     this.onScroll = cb;
   }
 
-  setOnClipCards(
-    cb: (anchors: Array<{
-      msgId: string;
-      top: number;
-      left: number;
-      width: number;
-      clip: ClipCardInfo;
-    }>) => void,
-  ): void {
-    this.onClipCards = cb;
-  }
 
   peekLinkEnrichment(msgId: string): {
     bodySource: string;
@@ -496,14 +485,11 @@ export class MessageRing {
     slot.spansRaw = payload.spans;
     slot.mentionSpans = payload.mentions;
     slot.clipCard = payload.clip;
-    slot.clipCardRows =
-      payload.clip && this.lineHeight > 0
-        ? Math.max(1, Math.ceil(CLIP_CARD_HEIGHT_PX / this.lineHeight))
-        : 0;
+    slot.clipCardRows = payload.clip ? clipCardRowCount(this.lineHeight) : 0;
     slot.linkEnriched = true;
+    // Only this row needs wrap recompute; dual-anchor layout preserves scroll.
     slot.wrapReady = false;
-    this.markLayoutFullPaint();
-    this.layout();
+    this.layout(undefined, new Set([slot]));
   }
 
   /** Highlight colors in scrollback order (empty string = no mark). Stock 1:1 with messages. */
@@ -1254,6 +1240,8 @@ export class MessageRing {
         }
         if (slot.linkEnriched) {
           slot.hostSpans = [];
+          releaseClipThumb(slot.clipUi, this.textures);
+          hideClipCard(slot.clipUi);
           slot.clipCard = null;
           slot.clipCardRows = 0;
           slot.linkEnriched = false;
@@ -2021,6 +2009,7 @@ export class MessageRing {
         ct.eventMode = "none";
         caughtTexts.push(ct);
       }
+      const clipUi = createClipCardWidgets(this.themeFills.timestamp);
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
         systemCloud,
@@ -2040,6 +2029,7 @@ export class MessageRing {
         bitsLabel,
         ...badges,
         ...emotes,
+        clipUi.root,
         disabledGfx,
       );
       const slot: Slot = {
@@ -2072,6 +2062,7 @@ export class MessageRing {
         automodStatus: "",
         automodCaught: [],
         caughtTexts,
+        clipUi,
         msgId: "",
         login: "",
         bodySource: "",
@@ -2451,6 +2442,8 @@ export class MessageRing {
   }
 
   private clearSlot(slot: Slot): void {
+    releaseClipThumb(slot.clipUi, this.textures);
+    hideClipCard(slot.clipUi);
     for (const key of slot.emoteKeys) {
       if (key) {
         this.textures.release(key);
@@ -2653,6 +2646,8 @@ export class MessageRing {
     slot.copyText = drawn.copyText;
     slot.linkSpans = drawn.links;
     slot.hostSpans = [];
+    releaseClipThumb(slot.clipUi, this.textures);
+    hideClipCard(slot.clipUi);
     slot.clipCard = null;
     slot.clipCardRows = 0;
     slot.linkEnriched = false;
@@ -3059,6 +3054,8 @@ export class MessageRing {
    * (Twitch web-style system “cloud”).
    */
   private paintSystemCloud(slot: Slot): void {
+    releaseClipThumb(slot.clipUi, this.textures);
+    hideClipCard(slot.clipUi);
     const padX = Math.max(6, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
     const padY = Math.max(1, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
     const radius = Math.max(6, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
@@ -3388,6 +3385,11 @@ export class MessageRing {
       collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     slot.wrapLines = lines;
     slot.wrapReady = true;
+    if (slot.clipCard) {
+      slot.clipCardRows = clipCardRowCount(this.lineHeight);
+    } else {
+      slot.clipCardRows = 0;
+    }
     slot.lineCount = replyRows + lines.length + slot.clipCardRows;
     slot.bodyIndent = firstOriginX;
     slot.bodyContIndent = contOriginX;
@@ -3512,6 +3514,32 @@ export class MessageRing {
       slot.bitsLabel.visible = false;
       slot.bitsLabel.text = "";
     }
+    this.paintSlotClipCard(slot);
+  }
+
+  private paintSlotClipCard(slot: Slot): void {
+    const msgId = slot.msgId;
+    const clipId = slot.clipCard?.clipId ?? "";
+    paintClipCard({
+      clip: slot.clipUi,
+      info: slot.clipCard,
+      clipCardRows: slot.clipCardRows,
+      lineCount: slot.lineCount,
+      lineHeight: this.lineHeight,
+      bodyContIndent: slot.bodyContIndent,
+      bodyIndent: slot.bodyIndent,
+      paneW: this.app.screen.width,
+      fontSize: this.fontSize,
+      mutedFill: this.themeFills.timestamp,
+      textures: this.textures,
+      measure: (text) => this.measureBitmapTextWidth("ChatFont", text),
+      applySprite: applySpriteTexture,
+      stillCurrent: () =>
+        slot.msgId === msgId &&
+        !!slot.clipCard &&
+        slot.clipCard.clipId === clipId &&
+        slot.clipUi.thumbKey === `clip:${clipId}`,
+    });
   }
 
   private paintHighlight(slot: Slot): void {
@@ -4108,7 +4136,6 @@ export class MessageRing {
     }
     this.applyStageY();
     this.notifyScroll();
-    this.syncClipCardAnchors();
     this.ensureScrollTick();
     this.scheduleViewportPaint();
   }
@@ -4187,47 +4214,6 @@ export class MessageRing {
       this.scroll.goToBottom(false);
     }
     this.afterScrollChange();
-  }
-
-  private syncClipCardAnchors(): void {
-    if (!this.onClipCards || !this.ready) {
-      return;
-    }
-    const stageY = this.app.stage.y;
-    const viewH = this.app.screen.height;
-    const pad = this.lineHeight;
-    const out: Array<{
-      msgId: string;
-      top: number;
-      left: number;
-      width: number;
-      clip: ClipCardInfo;
-    }> = [];
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId || !slot.clipCard || !slot.root.visible) {
-        continue;
-      }
-      const bodyRows = Math.max(0, slot.lineCount - slot.clipCardRows);
-      const top = slot.root.y + stageY + bodyRows * this.lineHeight + 4;
-      if (top > viewH + pad || top + CLIP_CARD_HEIGHT_PX < -pad) {
-        continue;
-      }
-      const left = Math.max(8, slot.bodyContIndent || slot.bodyIndent || 8);
-      const width = Math.max(
-        160,
-        this.app.screen.width - left - 12,
-      );
-      out.push({
-        msgId: slot.msgId,
-        top,
-        left,
-        width: Math.min(420, width),
-        clip: slot.clipCard,
-      });
-    }
-    this.onClipCards(out);
   }
 
   private scheduleViewportPaint(): void {
@@ -4445,6 +4431,19 @@ export class MessageRing {
       this.onModAction(modAction, this.makeSlotContext(slot, ev));
       return;
     }
+    {
+      const local = ev.getLocalPosition(slot.root);
+      if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+        // Card is layout chrome, not a body link: always single-click open.
+        const clipUrl = slot.clipCard.url;
+        if (this.onOpenChatLink) {
+          this.onOpenChatLink(clipUrl);
+          return;
+        }
+        void invoke("open_chat_link", { url: clipUrl }).catch(() => undefined);
+        return;
+      }
+    }
     if (slot.collapsed && !slot.expanded) {
       slot.expanded = true;
       // Invalidate wrap so layoutInner paints after sealed anchors are captured.
@@ -4510,7 +4509,13 @@ export class MessageRing {
     const imageHit = this.imageHitAt(slot, ev);
     this.onContext(
       this.makeSlotContext(slot, ev, {
-        linkUrl: this.linkAt(slot, ev) ?? "",
+        linkUrl: (() => {
+          const local = ev.getLocalPosition(slot.root);
+          if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+            return slot.clipCard.url;
+          }
+          return this.linkAt(slot, ev) ?? "";
+        })(),
         imageUrl: imageHit?.url ?? "",
         imageKind: imageHit?.kind ?? "",
         imageProvider: imageHit?.provider ?? "",
@@ -4538,6 +4543,13 @@ export class MessageRing {
     if (this.mentionLoginAt(slot, ev)) {
       slot.root.cursor = "pointer";
       return;
+    }
+    {
+      const local = ev.getLocalPosition(slot.root);
+      if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+        slot.root.cursor = "pointer";
+        return;
+      }
     }
     if (slot.collapsed && !slot.expanded) {
       slot.root.cursor = "pointer";

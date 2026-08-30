@@ -84,7 +84,6 @@ import { startLiveNotifyListener, stopLiveNotifyListener } from "./shell/liveNot
 import { bindMentionToast } from "./shell/mentionToast";
 import { bindRaidToast } from "./shell/raidToast";
 import { bindGiftToast } from "./shell/giftToast";
-import { bindClipCardLayer } from "./shell/clipCards";
 import { bindLinkEnrichment } from "./chat/linkEnrichment";
 import { bindPollPanel } from "./shell/polls";
 import { bindPinnedBanner } from "./shell/pinnedMessage";
@@ -904,19 +903,6 @@ async function boot(): Promise<void> {
     return;
   }
   ring.setModActions(modActionBtns);
-  const clipCardLayerEl = document.querySelector<HTMLElement>("#clip-card-layer");
-  if (!clipCardLayerEl) {
-    throw new Error("clip-card-layer missing");
-  }
-  const clipCards = bindClipCardLayer(clipCardLayerEl);
-  ring.setOnClipCards((anchors) => {
-    clipCards.sync(anchors);
-  });
-  {
-    chainTeardown(() => {
-      clipCards.stop();
-    });
-  }
   const emoteTooltip = document.querySelector<HTMLElement>("#emote-tooltip");
   const emoteTooltipImg =
     document.querySelector<HTMLImageElement>("#emote-tooltip-img");
