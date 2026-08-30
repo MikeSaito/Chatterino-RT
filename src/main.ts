@@ -101,7 +101,7 @@ import {
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
-import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus } from "./chat/types";
+import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus, ViewerRole } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
 import { paintChatModes, type ChannelRoomState } from "./shell/chatModes";
 
@@ -1050,12 +1050,41 @@ async function boot(): Promise<void> {
     },
   });
 
+  let syncModerationModeBtn = (): void => {
+    /* filled when #moderation-mode-btn exists */
+  };
   if (moderationModeBtn) {
+    moderationModeBtn.hidden = true;
+    syncModerationModeBtn = (): void => {
+      const channel = ipc.active().trim();
+      if (!channel) {
+        moderationModeBtn.hidden = true;
+        return;
+      }
+      const seqChannel = channel.toLowerCase();
+      void invoke<ViewerRole>("chat_viewer_role", { channel })
+        .then((role) => {
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          // Stock SplitHeader: show only with mod rights, or while mode already on.
+          const show =
+            role.isMod || role.isBroadcaster || ring.moderationModeOn();
+          moderationModeBtn.hidden = !show;
+        })
+        .catch(() => {
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          moderationModeBtn.hidden = !ring.moderationModeOn();
+        });
+    };
     moderationModeBtn.addEventListener("click", () => {
       const next = !ring.moderationModeOn();
       ring.setModerationMode(next);
       moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
       moderationModeBtn.classList.toggle("is-active", next);
+      syncModerationModeBtn();
       if (next && modActionBtns.length === 0) {
         void requestOpenSettingsWindow();
       }
@@ -1600,6 +1629,7 @@ async function boot(): Promise<void> {
   });
   ring.setOnViewerRoleChange(() => {
     userCard?.syncMod();
+    syncModerationModeBtn();
   });
   ring.setOnNickClick((ctx) => {
     hideContextMenu();
@@ -2343,6 +2373,7 @@ async function boot(): Promise<void> {
     lastAuth = info;
     ring.setSelfLogin(info.login);
     userCard?.syncMod();
+    syncModerationModeBtn();
     replyThreadCtl?.syncComposer();
     const signed = Boolean(info.login);
     const pendingPaste = Boolean(info.pendingPaste);
@@ -2802,8 +2833,9 @@ async function boot(): Promise<void> {
     syncPlayerForLayout(joined);
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
-    userCard?.syncMod();
-    userCard?.syncSubage();
+      userCard?.syncMod();
+      syncModerationModeBtn();
+      userCard?.syncSubage();
     quickActionsCtl?.hide();
     ring.clearHover();
     syncChatEmpty();
