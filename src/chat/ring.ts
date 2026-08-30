@@ -108,13 +108,13 @@ const BADGE_GAP = 2;
 const MESSAGE_GAP = 4;
 /** Soft-clip nick only when it would leave less than this many body columns. */
 const MIN_BODY_COLS_AFTER_NICK = 1;
-/** Centered system-event cloud (Twitch web-style pill). */
+/** Left-aligned system-event cloud (Twitch web-style pill). */
 const SYSTEM_CLOUD_BG = 0x2b273f;
 const SYSTEM_CLOUD_FG = 0xa39bb8;
-const SYSTEM_CLOUD_PAD_X = 14;
-const SYSTEM_CLOUD_PAD_Y = 5;
-const SYSTEM_CLOUD_RADIUS = 12;
-const SYSTEM_CLOUD_MARGIN_X = 16;
+const SYSTEM_CLOUD_PAD_X = 12;
+const SYSTEM_CLOUD_PAD_Y = 1;
+const SYSTEM_CLOUD_RADIUS = 8;
+const SYSTEM_CLOUD_MARGIN_X = 8;
 
 export type PauseModifier = "None" | "Shift" | "Control" | "Alt" | "Meta";
 
@@ -655,7 +655,7 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
-      spr.y = contentY + (this.lineHeight - this.badgeSize) / 2;
+      spr.y = this.lineMediaY(contentY, this.badgeSize);
     }
     const firstOriginX = slot.bodyIndent;
     const contOriginX = slot.bodyContIndent;
@@ -697,10 +697,7 @@ export class MessageRing {
       spr.visible = true;
       spr.x =
         wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-      spr.y =
-        contentY +
-        pos.line * this.lineHeight +
-        Math.max(1, (this.lineHeight - paint.h) / 2);
+      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, paint.w, paint.h);
       }
@@ -1360,7 +1357,7 @@ export class MessageRing {
         slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
       }
       for (const spr of slot.badges) {
-        spr.y = (this.lineHeight - this.badgeSize) / 2;
+        spr.y = this.lineMediaY(0, this.badgeSize);
         if (spr.visible && spr.texture !== Texture.EMPTY) {
           applySpriteTexture(spr, spr.texture, this.badgeSize, this.badgeSize);
         }
@@ -1398,6 +1395,18 @@ export class MessageRing {
     );
     this.charWidth = metrics.charWidth;
     this.lineHeight = metrics.lineHeight;
+  }
+
+  /**
+   * Badge/emote Y in a text row (Chatterino alignRectBottomCenter).
+   * Vertical center looked slightly above BitmapText glyphs.
+   */
+  private lineMediaY(contentY: number, mediaH: number, line = 0): number {
+    return (
+      contentY +
+      line * this.lineHeight +
+      Math.max(0, this.lineHeight - mediaH)
+    );
   }
 
   /**
@@ -1743,7 +1752,7 @@ export class MessageRing {
         const spr = new Sprite(Texture.EMPTY);
         spr.visible = false;
         spr.eventMode = "none";
-        spr.y = (this.lineHeight - this.badgeSize) / 2;
+        spr.y = this.lineMediaY(0, this.badgeSize);
         badges.push(spr);
       }
       const modBtns: BitmapText[] = [];
@@ -2631,11 +2640,11 @@ export class MessageRing {
    * (Twitch web-style system “cloud”).
    */
   private paintSystemCloud(slot: Slot): void {
-    const padX = Math.max(8, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
-    const padY = Math.max(3, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
-    const radius = Math.max(8, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
+    const padX = Math.max(6, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
+    const padY = Math.max(1, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
+    const radius = Math.max(6, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
     const marginX = Math.max(
-      8,
+      4,
       Math.round(SYSTEM_CLOUD_MARGIN_X * this.fontScale),
     );
     const paneW = this.app.screen.width;
@@ -2659,7 +2668,7 @@ export class MessageRing {
     slot.body.style.fill = SYSTEM_CLOUD_FG;
     slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
-    const maxInner = Math.max(1, Math.floor(paneW - 2 * marginX - 2 * padX));
+    const maxInner = Math.max(1, Math.floor(paneW - marginX - padX * 2));
     // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
     const layoutOpts = this.wrapOpts(slot, [], maxInner);
     const lines = wrapBody(
@@ -2683,19 +2692,14 @@ export class MessageRing {
     }
     const textRows = Math.max(1, lines.length);
     const textBlockW = Math.max(1, Math.ceil(maxLineW));
-    const cloudW = Math.min(paneW - 2 * marginX, textBlockW + 2 * padX);
-    const cloudH = textRows * this.lineHeight + 2 * padY;
-    slot.lineCount = Math.max(
-      1,
-      Math.ceil(cloudH / Math.max(1, this.lineHeight)),
-    );
+    const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
+    // Hug text rows; vertical pad may slightly use message gap below.
+    slot.lineCount = textRows;
     const allocatedH = slot.lineCount * this.lineHeight;
-    const cloudX = Math.max(0, Math.floor((paneW - cloudW) / 2));
-    const cloudY = Math.max(0, Math.floor((allocatedH - cloudH) / 2));
-    const textOriginX =
-      cloudX +
-      padX +
-      Math.max(0, (cloudW - 2 * padX - textBlockW) / 2);
+    const cloudX = marginX;
+    const cloudY = 0;
+    const cloudH = textRows * this.lineHeight + 2 * padY;
+    const textOriginX = cloudX + padX;
     const contentY = cloudY + padY;
 
     slot.bodyIndent = textOriginX;
@@ -2794,10 +2798,7 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x = textOriginX + pos.col;
-      spr.y =
-        contentY +
-        pos.line * this.lineHeight +
-        Math.max(1, (this.lineHeight - paint.h) / 2);
+      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, paint.w, paint.h);
       }
@@ -2878,7 +2879,7 @@ export class MessageRing {
       }
       spr.visible = true;
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
-      spr.y = contentY + (this.lineHeight - this.badgeSize) / 2;
+      spr.y = this.lineMediaY(contentY, this.badgeSize);
     }
     slot.nick.x = gutterW + timeW + badgeBand;
     slot.nick.y = contentY;
@@ -3034,10 +3035,7 @@ export class MessageRing {
       spr.visible = true;
       spr.x =
         wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-      spr.y =
-        contentY +
-        pos.line * this.lineHeight +
-        Math.max(1, (this.lineHeight - paint.h) / 2);
+      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
       if (spr.texture !== Texture.EMPTY) {
         applySpriteTexture(spr, spr.texture, paint.w, paint.h);
       }
