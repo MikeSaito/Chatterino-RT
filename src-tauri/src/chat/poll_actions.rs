@@ -93,9 +93,8 @@ pub async fn vote_in_poll(
 ) -> Result<PollVoteResult, PollActionsError> {
     let poll_id = validate_id(poll_id, "error.polls.poll_id", "Invalid poll id")?;
     let choice_id = validate_id(choice_id, "error.polls.choice_id", "Invalid choice id")?;
-    let (client_id, token) = graph_creds(shared).ok_or_else(|| {
-        PollActionsError::coded("error.auth.required", "Twitch login required")
-    })?;
+    let (client_id, token) = graph_creds(shared)
+        .ok_or_else(|| PollActionsError::coded("error.auth.required", "Twitch login required"))?;
     let user_id = super::auth::ensure_twitch_user_id(shared)
         .await
         .ok_or_else(|| {
@@ -157,9 +156,8 @@ pub async fn make_prediction(
     let event_id = validate_id(event_id, "error.polls.event_id", "Invalid prediction id")?;
     let outcome_id = validate_id(outcome_id, "error.polls.outcome_id", "Invalid outcome id")?;
     let points = validate_predict_points(points)?;
-    let (client_id, token) = graph_creds(shared).ok_or_else(|| {
-        PollActionsError::coded("error.auth.required", "Twitch login required")
-    })?;
+    let (client_id, token) = graph_creds(shared)
+        .ok_or_else(|| PollActionsError::coded("error.auth.required", "Twitch login required"))?;
     // Ensure token still resolves to a user id (stale sessions fail early).
     if super::auth::ensure_twitch_user_id(shared).await.is_none() {
         return Err(PollActionsError::coded(

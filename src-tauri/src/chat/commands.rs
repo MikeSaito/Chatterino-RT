@@ -77,16 +77,6 @@ impl From<AuthFail> for ApiError {
     }
 }
 
-impl From<super::channel_points::ChannelPointsError> for ApiError {
-    fn from(e: super::channel_points::ChannelPointsError) -> Self {
-        Self {
-            code: e.code,
-            message: e.message,
-            params: e.params,
-        }
-    }
-}
-
 impl From<super::poll_actions::PollActionsError> for ApiError {
     fn from(e: super::poll_actions::PollActionsError) -> Self {
         Self {
@@ -727,9 +717,7 @@ fn parse_user_name_or_id(raw: &str) -> Option<WarnTargetRef> {
     }
     if login.is_empty()
         || login.len() > 25
-        || !login
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         return None;
     }
@@ -1334,33 +1322,6 @@ pub async fn auth_remove(
 }
 
 #[tauri::command]
-pub async fn channel_points_status(
-    state: tauri::State<'_, Shared>,
-    channel: String,
-) -> Result<super::channel_points::ChannelPointsSnapshot, ApiError> {
-    Ok(super::channel_points::snapshot(&state, &channel).await?)
-}
-
-#[tauri::command]
-pub async fn channel_points_redeem(
-    state: tauri::State<'_, Shared>,
-    channel: String,
-    #[allow(non_snake_case)] rewardId: String,
-    #[allow(non_snake_case)] textInput: Option<String>,
-) -> Result<super::channel_points::ChannelPointsRedeemResult, ApiError> {
-    Ok(super::channel_points::redeem(&state, &channel, &rewardId, textInput.as_deref()).await?)
-}
-
-#[tauri::command]
-pub async fn channel_points_claim(
-    state: tauri::State<'_, Shared>,
-    channel: String,
-    #[allow(non_snake_case)] claimId: String,
-) -> Result<super::channel_points::ChannelPointsClaimResult, ApiError> {
-    Ok(super::channel_points::claim(&state, &channel, &claimId).await?)
-}
-
-#[tauri::command]
 pub async fn polls_vote(
     state: tauri::State<'_, Shared>,
     #[allow(non_snake_case)] pollId: String,
@@ -1637,13 +1598,8 @@ pub fn chat_complete(
             emotes
         };
         drop(catalog);
-        let inserts = complete::suggestions_with_rank(
-            &token,
-            first_word,
-            emotes,
-            Vec::new(),
-            !smart,
-        );
+        let inserts =
+            complete::suggestions_with_rank(&token, first_word, emotes, Vec::new(), !smart);
         return decorate_complete_items(state.inner(), &channel, inserts);
     }
     let at_only = token.starts_with('@');
@@ -1674,13 +1630,8 @@ pub fn chat_complete(
             .map_err(|_| ApiError::internal("lock"))?;
         chatters.prefixed(&channel, &token, always_include_broadcaster)
     };
-    let inserts = complete::suggestions_with_rank(
-        &token,
-        first_word,
-        emotes,
-        names,
-        !smart || at_only,
-    );
+    let inserts =
+        complete::suggestions_with_rank(&token, first_word, emotes, names, !smart || at_only);
     decorate_complete_items(state.inner(), &channel, inserts)
 }
 
@@ -2566,10 +2517,7 @@ mod tests {
                 }],
             })
         );
-        assert_eq!(
-            parse_warn_slash("/warn --channel"),
-            Some(WarnSlash::Usage)
-        );
+        assert_eq!(parse_warn_slash("/warn --channel"), Some(WarnSlash::Usage));
         let long = "x".repeat(501);
         assert_eq!(
             parse_warn_slash(&format!("/warn bob {long}")),

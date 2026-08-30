@@ -7,10 +7,9 @@ mod security;
 use chat::clips::resolve_clip_info;
 use chat::commands::{
     about_info, auth_import, auth_logout, auth_remove, auth_select, auth_start, auth_status,
-    cache_clear, cache_info, cache_pick_directory, channel_points_claim, channel_points_redeem,
-    channel_points_status, chat_automod_manage, chat_blocked_users, chat_complete, chat_emote_icons,
-    chat_emote_popup_list, chat_exec_custom_command, chat_join, chat_leave, chat_part,
-    chat_profile_image, chat_search, chat_send, chat_set_user_blocked,
+    cache_clear, cache_info, cache_pick_directory, chat_automod_manage, chat_blocked_users,
+    chat_complete, chat_emote_icons, chat_emote_popup_list, chat_exec_custom_command, chat_join,
+    chat_leave, chat_part, chat_profile_image, chat_search, chat_send, chat_set_user_blocked,
     chat_set_user_ignore_highlights, chat_set_user_notes, chat_snapshot, chat_subscribe,
     chat_toggle_favourite_emote, chat_typing, chat_unsubscribe, chat_user_blocked,
     chat_user_followers, chat_user_ignore_highlights, chat_user_notes, chat_user_profile,
@@ -19,9 +18,8 @@ use chat::commands::{
     highlight_request_attention, highlight_sound_pick, highlight_sound_read, image_upload,
     logging_pick_directory, open_chat_link, open_in_custom_player, open_in_streamlink,
     open_settings_directory, open_settings_window, polls_predict, polls_vote,
-    read_chatterino1_commands, session_get,
-    session_reorder_open, settings_get, settings_set, streamer_mode_detect,
-    supports_incognito_links,
+    read_chatterino1_commands, session_get, session_reorder_open, settings_get, settings_set,
+    streamer_mode_detect, supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -138,9 +136,6 @@ pub fn run() {
             auth_logout,
             auth_select,
             auth_remove,
-            channel_points_status,
-            channel_points_redeem,
-            channel_points_claim,
             polls_vote,
             polls_predict,
             filters_get,
