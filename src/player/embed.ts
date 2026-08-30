@@ -5,17 +5,30 @@ let playerEpoch = 0;
 let localeUnsub: (() => void) | null = null;
 let slotWaitCleanup: (() => void) | null = null;
 let loadTimer: ReturnType<typeof setTimeout> | null = null;
+let mountDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let errorRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let reinsertTimer: ReturnType<typeof setTimeout> | null = null;
 let activeHost: HTMLElement | null = null;
 let activeChannel = "";
 let iframeLoaded = false;
 let liveKnown: boolean | null = null;
 let overlayMode: "loading" | "offline" | "error" | "ready" = "loading";
+/** Non-null while a frame exists or is mid-insert (before appendChild). */
 let frameEl: HTMLIFrameElement | null = null;
 let openTwitchBound = false;
 /** Insert closure for the current mount epoch; kept across offline→online. */
 let insertEmbed: (() => void) | null = null;
+/** Last failed insert / tear-down — blocks live-hint remount spam / 429 loops. */
+let lastErrorAt = 0;
+/** Last successful iframe append (anti flap offline↔online). */
+let lastInsertAt = 0;
+/** Pending channel from debounced mountPlayer (abort in-flight switches). */
+let pendingChannel = "";
 
 const LOAD_TIMEOUT_MS = 12_000;
+const CHANNEL_SWITCH_DEBOUNCE_MS = 320;
+const ERROR_RETRY_MIN_MS = 60_000;
+const REINSERT_COOLDOWN_MS = 8_000;
 const MIN_PLAYER_W = 400;
 const MIN_PLAYER_H = 300;
 
@@ -54,6 +67,31 @@ function clearLoadTimer(): void {
   }
 }
 
+function clearMountDebounce(): void {
+  if (mountDebounceTimer != null) {
+    clearTimeout(mountDebounceTimer);
+    mountDebounceTimer = null;
+  }
+}
+
+function clearErrorRetryTimer(): void {
+  if (errorRetryTimer != null) {
+    clearTimeout(errorRetryTimer);
+    errorRetryTimer = null;
+  }
+}
+
+function clearReinsertTimer(): void {
+  if (reinsertTimer != null) {
+    clearTimeout(reinsertTimer);
+    reinsertTimer = null;
+  }
+}
+
+function openTwitchChannel(): string {
+  return activeChannel || pendingChannel;
+}
+
 /** Twitch autoplay walks ancestors for visibility / display / opacity and needs a real box. */
 function isEmbedSurfaceVisible(el: HTMLElement): boolean {
   if (document.visibilityState !== "visible") {
@@ -61,6 +99,15 @@ function isEmbedSurfaceVisible(el: HTMLElement): boolean {
   }
   const rect = el.getBoundingClientRect();
   if (rect.width + 0.5 < MIN_PLAYER_W || rect.height + 0.5 < MIN_PLAYER_H) {
+    return false;
+  }
+  // Off-layout / scrolled fully away — Twitch still treats as hidden for autoplay.
+  if (
+    rect.bottom <= 0 ||
+    rect.right <= 0 ||
+    rect.top >= (window.innerHeight || 0) ||
+    rect.left >= (window.innerWidth || 0)
+  ) {
     return false;
   }
   let node: HTMLElement | null = el;
@@ -119,7 +166,10 @@ function detachPlaceholder(host: HTMLElement): void {
   host.querySelector("#player-placeholder")?.remove();
 }
 
-/** Blank then remove so Twitch Player EventEmitters cannot stack across remounts. */
+/**
+ * Blank then remove so Twitch Player EventEmitters cannot stack across remounts.
+ * Claimed slot (`frameEl`) must already be cleared by the caller.
+ */
 function destroyFrame(frame: HTMLIFrameElement | null): void {
   if (!frame) {
     return;
@@ -127,6 +177,7 @@ function destroyFrame(frame: HTMLIFrameElement | null): void {
   try {
     const abort = (frame as HTMLIFrameElement & { __crtAbort?: AbortController }).__crtAbort;
     abort?.abort();
+    frame.onload = null;
     frame.removeAttribute("src");
     frame.src = "about:blank";
   } catch {
@@ -136,12 +187,11 @@ function destroyFrame(frame: HTMLIFrameElement | null): void {
 }
 
 function removeFrame(): void {
-  if (frameEl) {
-    destroyFrame(frameEl);
-    frameEl = null;
-  }
+  const frame = frameEl;
+  frameEl = null;
   iframeLoaded = false;
   clearLoadTimer();
+  destroyFrame(frame);
 }
 
 function paintOverlay(): void {
@@ -189,18 +239,55 @@ function armLoadTimeout(isLive: () => boolean): void {
   clearLoadTimer();
   loadTimer = setTimeout(() => {
     loadTimer = null;
-    if (!isLive() || iframeLoaded || liveKnown !== true) {
+    // Timeout while known-offline is irrelevant; null|true both need recovery UX.
+    if (!isLive() || iframeLoaded || liveKnown === false) {
       return;
     }
-    removeFrame();
-    overlayMode = "error";
-    paintOverlay();
+    enterErrorState(isLive);
   }, LOAD_TIMEOUT_MS);
+}
+
+function enterErrorState(isLive: () => boolean): void {
+  lastErrorAt = Date.now();
+  removeFrame();
+  overlayMode = "error";
+  paintOverlay();
+  armErrorRetry(isLive);
+}
+
+function armErrorRetry(isLive: () => boolean): void {
+  clearErrorRetryTimer();
+  if (lastErrorAt <= 0) {
+    return;
+  }
+  const wait = Math.max(0, ERROR_RETRY_MIN_MS - (Date.now() - lastErrorAt));
+  errorRetryTimer = setTimeout(() => {
+    errorRetryTimer = null;
+    if (!isLive() || liveKnown === false || frameEl) {
+      return;
+    }
+    if (overlayMode === "error" || overlayMode === "offline") {
+      overlayMode = "loading";
+      paintOverlay();
+    }
+    scheduleInsert(isLive);
+  }, wait);
 }
 
 /** Insert unless channel is known offline (Helix). Do not wait for live=true. */
 function canInsertEmbed(): boolean {
   return liveKnown !== false;
+}
+
+function errorBackoffBlocksRetry(): boolean {
+  if (lastErrorAt <= 0) {
+    return false;
+  }
+  return Date.now() - lastErrorAt < ERROR_RETRY_MIN_MS;
+}
+
+function reinsertCooldownBlocks(): boolean {
+  return lastInsertAt > 0 && Date.now() - lastInsertAt < REINSERT_COOLDOWN_MS;
 }
 
 function scheduleInsert(isLive: () => boolean): void {
@@ -210,7 +297,25 @@ function scheduleInsert(isLive: () => boolean): void {
   if (!canInsertEmbed()) {
     return;
   }
-  if (frameEl?.isConnected) {
+  // frameEl claimed as soon as insert begins — blocks stacked Playing listeners / 429.
+  if (frameEl) {
+    return;
+  }
+  if (errorBackoffBlocksRetry()) {
+    armErrorRetry(isLive);
+    return;
+  }
+  if (reinsertCooldownBlocks()) {
+    if (reinsertTimer == null) {
+      const wait = Math.max(0, REINSERT_COOLDOWN_MS - (Date.now() - lastInsertAt));
+      reinsertTimer = setTimeout(() => {
+        reinsertTimer = null;
+        if (!isLive() || !canInsertEmbed() || frameEl) {
+          return;
+        }
+        scheduleInsert(isLive);
+      }, wait);
+    }
     return;
   }
   whenSlotReady(activeHost, isLive, insertEmbed);
@@ -220,16 +325,16 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
   if (!isLive()) {
     return;
   }
-  if (overlayMode === "error" && liveKnown !== true) {
-    paintOverlay();
-    return;
-  }
+  // Offline first — never leave a stale error chrome after Helix says offline.
   if (liveKnown === false) {
+    clearErrorRetryTimer();
+    clearReinsertTimer();
     slotWaitCleanup?.();
     slotWaitCleanup = null;
     removeFrame();
     overlayMode = "offline";
     paintOverlay();
+    // Keep lastErrorAt so a Helix offline blip cannot bypass ERROR_RETRY_MIN_MS.
     return;
   }
   if (liveKnown === null) {
@@ -238,12 +343,20 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
       paintOverlay();
       return;
     }
-    if (frameEl?.isConnected) {
+    if (frameEl) {
       overlayMode = "loading";
       paintOverlay();
       return;
     }
-    overlayMode = "loading";
+    if (overlayMode === "error") {
+      if (errorBackoffBlocksRetry()) {
+        paintOverlay();
+        return;
+      }
+      overlayMode = "loading";
+    } else {
+      overlayMode = "loading";
+    }
     paintOverlay();
     scheduleInsert(isLive);
     return;
@@ -254,24 +367,66 @@ function syncOverlayAfterLive(isLive: () => boolean): void {
     paintOverlay();
     return;
   }
-  if (overlayMode !== "error") {
+  if (frameEl && !iframeLoaded) {
+    if (overlayMode !== "error") {
+      overlayMode = "loading";
+    }
+    paintOverlay();
+    armLoadTimeout(isLive);
+    return;
+  }
+  if (overlayMode === "error" && errorBackoffBlocksRetry()) {
+    paintOverlay();
+    return;
+  }
+  if (overlayMode === "error") {
+    overlayMode = "loading";
+  } else if (overlayMode !== "loading") {
     overlayMode = "loading";
   }
   paintOverlay();
-  if (frameEl?.isConnected && !iframeLoaded) {
-    armLoadTimeout(isLive);
-  }
   scheduleInsert(isLive);
 }
 
 export function setPlayerLiveHint(live: PlayerLiveHint): void {
+  const prev = liveKnown;
   liveKnown = live;
   if (!activeHost) {
     return;
   }
+  // Debounced mount: no insertEmbed yet — only track hint / offline chrome.
+  if (!insertEmbed) {
+    if (live === false) {
+      clearErrorRetryTimer();
+      clearReinsertTimer();
+      removeFrame();
+      overlayMode = "offline";
+      paintOverlay();
+    } else if (live === true && overlayMode === "offline") {
+      overlayMode = "loading";
+      paintOverlay();
+    }
+    return;
+  }
+  if (live === prev) {
+    // Same hint: kick waiting insert; after error backoff, allow one recovery attempt.
+    if (live === false || frameEl) {
+      return;
+    }
+    if (overlayMode === "error") {
+      if (errorBackoffBlocksRetry()) {
+        return;
+      }
+      overlayMode = "loading";
+      paintOverlay();
+    }
+    const epoch = playerEpoch;
+    scheduleInsert(() => epoch === playerEpoch);
+    return;
+  }
   const epoch = playerEpoch;
   const isLive = () => epoch === playerEpoch;
-  if (live === true && overlayMode === "error") {
+  if (live === true && overlayMode === "error" && !errorBackoffBlocksRetry()) {
     overlayMode = "loading";
   }
   syncOverlayAfterLive(isLive);
@@ -292,16 +447,17 @@ export function bindPlayerOpenTwitch(
     if (!t.closest("#player-placeholder-action")) {
       return;
     }
-    if (!activeChannel) {
+    if (!openTwitchChannel()) {
       return;
     }
-    handler(activeChannel);
+    handler(openTwitchChannel());
   });
 }
 
 function createPlayerFrame(): HTMLIFrameElement {
   const frame = document.createElement("iframe");
   frame.title = t("player.iframeTitle");
+  // No bluetooth: Twitch may still log Permissions-Policy noise from its own iframe.
   frame.allow =
     "autoplay; encrypted-media; picture-in-picture; storage-access; accelerometer; gyroscope";
   frame.allowFullscreen = true;
@@ -327,15 +483,21 @@ function ensureLocaleHook(): void {
   });
 }
 
-export function mountPlayer(host: HTMLElement, channel: string): void {
-  unmountPlayer(host);
+function beginMount(host: HTMLElement, channel: string, hint: PlayerLiveHint): void {
   ensureLocaleHook();
   const epoch = ++playerEpoch;
   activeHost = host;
-  activeChannel = channel.trim().toLowerCase();
+  activeChannel = channel;
+  pendingChannel = channel;
   iframeLoaded = false;
-  liveKnown = null;
-  overlayMode = "loading";
+  // Preserve Helix hint applied while debounce waited (avoid null→insert→offline flap).
+  liveKnown = hint;
+  lastErrorAt = 0;
+  if (hint === false) {
+    overlayMode = "offline";
+  } else {
+    overlayMode = "loading";
+  }
   frameEl = null;
   insertEmbed = null;
   ensurePlaceholder(host);
@@ -344,10 +506,13 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
   const isLive = () => epoch === playerEpoch;
 
   const insert = () => {
-    if (!isLive() || frameEl?.isConnected) {
+    if (!isLive() || frameEl) {
       return;
     }
     if (!canInsertEmbed()) {
+      return;
+    }
+    if (errorBackoffBlocksRetry()) {
       return;
     }
     if (!isEmbedSurfaceVisible(host)) {
@@ -359,13 +524,17 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
       whenSlotReady(host, isLive, insert);
       return;
     }
-    // One live iframe only: destroy any stray node before append.
-    host.querySelectorAll("iframe").forEach((node) => {
-      destroyFrame(node);
-    });
+    // Claim the slot before DOM work so a re-entrant scheduleInsert cannot stack iframes.
     const frame = createPlayerFrame();
+    frameEl = frame;
     frame.width = String(w);
     frame.height = String(h);
+    // One live iframe only: destroy any stray node before append.
+    host.querySelectorAll("iframe").forEach((node) => {
+      if (node !== frame) {
+        destroyFrame(node);
+      }
+    });
     const loadAbort = new AbortController();
     (frame as HTMLIFrameElement & { __crtAbort?: AbortController }).__crtAbort = loadAbort;
     frame.addEventListener(
@@ -379,6 +548,8 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
           return;
         }
         iframeLoaded = true;
+        lastErrorAt = 0;
+        clearErrorRetryTimer();
         clearLoadTimer();
         if (liveKnown === false) {
           removeFrame();
@@ -391,22 +562,80 @@ export function mountPlayer(host: HTMLElement, channel: string): void {
       },
       { signal: loadAbort.signal },
     );
-    frameEl = frame;
     // Detach before append: hidden placeholder still flashes if recreated later.
     detachPlaceholder(host);
     // Canon: insert with src already set (compensation.md).
     frame.src = buildTwitchPlayerSrc(channel);
     host.appendChild(frame);
+    lastInsertAt = Date.now();
     armLoadTimeout(isLive);
   };
 
   insertEmbed = insert;
-  // Start embed immediately; Helix live hint only tears down on offline.
+  if (hint === false) {
+    return;
+  }
+  // Start embed immediately when not known-offline; Helix only tears down on offline.
   scheduleInsert(isLive);
+}
+
+/**
+ * Mount (or remount) the Twitch embed. Channel switches are debounced; the previous
+ * iframe is destroyed immediately so Playing listeners and fp? requests cannot stack.
+ */
+export function mountPlayer(host: HTMLElement, channel: string): void {
+  const ch = channel.trim().toLowerCase();
+  if (!ch) {
+    unmountPlayer(host);
+    return;
+  }
+  if (activeHost === host && activeChannel === ch && mountDebounceTimer == null) {
+    return;
+  }
+  if (activeHost === host && pendingChannel === ch && mountDebounceTimer != null) {
+    return;
+  }
+  pendingChannel = ch;
+  // Tear down the previous embed immediately — do not let old Twitch sessions keep polling.
+  clearMountDebounce();
+  clearErrorRetryTimer();
+  clearReinsertTimer();
+  slotWaitCleanup?.();
+  slotWaitCleanup = null;
+  clearLoadTimer();
+  insertEmbed = null;
+  removeFrame();
+  playerEpoch += 1;
+  activeHost = host;
+  // Keep pending login for Open Twitch during debounce; activeChannel set in beginMount.
+  activeChannel = ch;
+  iframeLoaded = false;
+  // Null until syncPlayerForLayout / Helix hint; do not reuse the previous channel's live flag.
+  liveKnown = null;
+  lastErrorAt = 0;
+  lastInsertAt = 0;
+  overlayMode = "loading";
+  host.querySelectorAll("iframe").forEach((node) => {
+    destroyFrame(node);
+  });
+  ensurePlaceholder(host);
+  paintOverlay();
+
+  mountDebounceTimer = setTimeout(() => {
+    mountDebounceTimer = null;
+    if (pendingChannel !== ch || activeHost !== host) {
+      return;
+    }
+    beginMount(host, ch, liveKnown);
+  }, CHANNEL_SWITCH_DEBOUNCE_MS);
 }
 
 export function unmountPlayer(host: HTMLElement): void {
   playerEpoch += 1;
+  clearMountDebounce();
+  clearErrorRetryTimer();
+  clearReinsertTimer();
+  pendingChannel = "";
   slotWaitCleanup?.();
   slotWaitCleanup = null;
   clearLoadTimer();
@@ -417,6 +646,8 @@ export function unmountPlayer(host: HTMLElement): void {
     activeChannel = "";
     iframeLoaded = false;
     liveKnown = null;
+    lastErrorAt = 0;
+    lastInsertAt = 0;
     overlayMode = "loading";
   }
   host.querySelectorAll("iframe").forEach((node) => {
@@ -433,6 +664,15 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
   const observer = new ResizeObserver(() => {
     kick();
   });
+  let io: IntersectionObserver | null = null;
+  if (typeof IntersectionObserver === "function") {
+    io = new IntersectionObserver(
+      () => {
+        kick();
+      },
+      { threshold: 0 },
+    );
+  }
   const onVisibility = () => {
     kick();
   };
@@ -450,6 +690,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
 
   const cleanup = () => {
     observer.disconnect();
+    io?.disconnect();
     document.removeEventListener("visibilitychange", onVisibility);
     cancelRafs();
     if (slotWaitCleanup === cleanup) {
@@ -469,6 +710,11 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     if (!canInsertEmbed()) {
       return;
     }
+    if (frameEl) {
+      done = true;
+      cleanup();
+      return;
+    }
     if (!isEmbedSurfaceVisible(host)) {
       return;
     }
@@ -478,6 +724,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
     }
     done = true;
     observer.disconnect();
+    io?.disconnect();
     document.removeEventListener("visibilitychange", onVisibility);
     const pendingPaintCleanup = () => {
       cancelRafs();
@@ -494,7 +741,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
         if (slotWaitCleanup === pendingPaintCleanup) {
           slotWaitCleanup = null;
         }
-        if (!isLive() || !canInsertEmbed()) {
+        if (!isLive() || !canInsertEmbed() || frameEl) {
           return;
         }
         if (isEmbedSurfaceVisible(host)) {
@@ -511,6 +758,7 @@ function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void
 
   slotWaitCleanup = cleanup;
   observer.observe(host);
+  io?.observe(host);
   document.addEventListener("visibilitychange", onVisibility);
   raf = requestAnimationFrame(() => {
     raf = 0;

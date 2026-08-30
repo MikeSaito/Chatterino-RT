@@ -1113,6 +1113,7 @@ async function boot(): Promise<void> {
       mountedChannel = ch;
     }
     const stream = streamByChannel.get(ch.toLowerCase());
+    // Prefer cached Helix boolean; null only when never observed (allows early embed).
     setPlayerLiveHint(stream ? stream.live : null);
   }
 
@@ -3413,9 +3414,11 @@ async function boot(): Promise<void> {
     ensureOpenChannelChrome();
     // Keep last Helix snapshot across tab focus; poller refreshes in place.
     ring.setChannelLive(streamByChannel.get(joined.toLowerCase())?.live ?? false);
-    repaintChannelTitle();
+    // Player before title paint: unmount/mount first so setPlayerLiveHint cannot
+    // schedule an insert on a slot that is about to be torn down.
     channelInput.value = joined;
     syncPlayerForLayout(joined);
+    repaintChannelTitle();
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
     pollPanel.sync();
@@ -3462,9 +3465,9 @@ async function boot(): Promise<void> {
         applyMounted(focus);
       } else {
         replyThreadCtl?.close();
-        repaintChannelTitle();
         channelInput.value = "";
         syncPlayerForLayout("");
+        repaintChannelTitle();
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
             pollPanel.sync();
@@ -3508,9 +3511,9 @@ async function boot(): Promise<void> {
       avatarFetchInFlight.delete(leftKey);
       if (!next) {
         replyThreadCtl?.close();
-        repaintChannelTitle();
         channelInput.value = "";
         syncPlayerForLayout("");
+        repaintChannelTitle();
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
             pollPanel.sync();
