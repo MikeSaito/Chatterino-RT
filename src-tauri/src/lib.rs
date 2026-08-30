@@ -3,6 +3,7 @@
 
 mod chat;
 mod security;
+mod updater;
 
 use chat::clips::resolve_clip_info;
 use chat::commands::{
@@ -24,7 +25,12 @@ use chat::commands::{
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
+use updater::{
+    updater_check, updater_clear_pending, updater_install, updater_status, PendingUpdate,
+    UpdaterGate,
+};
 
 /// Остановить фоновые IRC/7TV/BTTV/poll задачи перед выходом.
 fn shutdown_background(app: &AppHandle) {
@@ -60,8 +66,13 @@ pub fn run() {
     let shared = Shared::new();
     tauri::Builder::default()
         .plugin(security::freeze_app_prototype())
+        .plugin(tauri_plugin_process::init())
         .manage(shared.clone())
+        .manage(PendingUpdate(Mutex::new(None)))
+        .manage(UpdaterGate::default())
         .setup(move |app| {
+            app.handle()
+                .plugin(updater::plugin_builder().build())?;
             chat::auth::init(app.handle(), &shared)?;
             chat::filters::init(app.handle(), &shared)?;
             chat::session::init(app.handle(), &shared)?;
@@ -155,7 +166,11 @@ pub fn run() {
             highlight_request_attention,
             highlight_cancel_attention,
             image_upload,
-            streamer_mode_detect
+            streamer_mode_detect,
+            updater_status,
+            updater_check,
+            updater_clear_pending,
+            updater_install
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -43,6 +43,7 @@ import { bindAuthMenu } from "./shell/authMenu";
 import { bindChatQuickActions } from "./shell/chatQuickActions";
 import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
 import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
+import { checkForUpdates } from "./shell/updater";
 import {
   actionAllowsEditable,
   resolveAction,
@@ -2730,6 +2731,12 @@ async function boot(): Promise<void> {
   if (!bootAlive()) {
     return;
   }
+
+  // Как Chatterino: тихая проверка при старте (no-op, пока stub-конфиг).
+  void checkForUpdates({
+    beta: bootKnobs["misc.betaUpdates"] === true,
+    quiet: true,
+  });
 
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();

@@ -17,6 +17,8 @@
     "core:window:allow-close",
     "core:window:allow-is-visible",
     "core:event:allow-emit",
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }
