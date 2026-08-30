@@ -219,9 +219,7 @@ export const en = {
   "thread.send": "Send",
   "thread.placeholder": "Reply...",
   "thread.placeholder.login": "Log in to send messages...",
-  "thread.placeholder.channelChanged": "Channel changed — close thread",
   "thread.placeholder.asUser": "Reply as {login}...",
-  "thread.status.channelChanged": "Channel changed; close and reopen the thread.",
   "thread.error.send": "Send failed",
 
   "emotes.title": "Emotes",

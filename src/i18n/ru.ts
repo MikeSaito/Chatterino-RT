@@ -221,9 +221,7 @@ export const ru: Record<MessageKey, string> = {
   "thread.send": "Отправить",
   "thread.placeholder": "Ответ…",
   "thread.placeholder.login": "Войдите, чтобы отправлять сообщения…",
-  "thread.placeholder.channelChanged": "Канал сменился — закройте ветку",
   "thread.placeholder.asUser": "Ответ от {login}…",
-  "thread.status.channelChanged": "Канал сменился; закройте и откройте ветку снова.",
   "thread.error.send": "Не удалось отправить",
 
   "emotes.title": "Эмодзи",

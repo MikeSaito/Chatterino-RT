@@ -3417,6 +3417,7 @@ async function boot(): Promise<void> {
       if (focus) {
         applyMounted(focus);
       } else {
+        replyThreadCtl?.close();
         repaintChannelTitle();
         channelInput.value = "";
         syncPlayerForLayout("");
@@ -3459,6 +3460,7 @@ async function boot(): Promise<void> {
       roomByChannel.delete(name.toLowerCase());
       typingByChannel.delete(name.toLowerCase());
       if (!next) {
+        replyThreadCtl?.close();
         repaintChannelTitle();
         channelInput.value = "";
         syncPlayerForLayout("");

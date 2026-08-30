@@ -105,15 +105,25 @@ export function bindReplyThread(opts: {
     }
   };
 
+  /** Смена активного канала закрывает ветку; stub «закройте ветку» не показываем. */
+  const dismissIfChannelMismatch = (): boolean => {
+    if (modal.hidden || !current || channelMatches()) {
+      return false;
+    }
+    close();
+    return true;
+  };
+
   const syncComposer = (): void => {
+    if (dismissIfChannelMismatch()) {
+      return;
+    }
     const canSend = getCanSend() && channelMatches();
     input.disabled = !canSend || sending;
     sendBtn.disabled = !canSend || sending || !input.value.trim();
     const login = getSelfLogin();
     if (!getCanSend()) {
       input.placeholder = t("thread.placeholder.login");
-    } else if (!channelMatches()) {
-      input.placeholder = t("thread.placeholder.channelChanged");
     } else if (login) {
       input.placeholder = t("thread.placeholder.asUser", { login });
     } else {
@@ -235,6 +245,7 @@ export function bindReplyThread(opts: {
     threadMessages = [];
     pendingLive = [];
     loading = false;
+    sending = false;
     pinned = false;
     if (pinBtn) {
       pinBtn.classList.remove("is-pinned");
@@ -242,8 +253,20 @@ export function bindReplyThread(opts: {
       pinBtn.setAttribute("aria-label", t("thread.pin"));
     }
     input.value = "";
+    input.blur();
     view.replaceChildren();
-    syncComposer();
+    const canSend = getCanSend();
+    input.disabled = !canSend;
+    sendBtn.disabled = true;
+    const login = getSelfLogin();
+    if (!canSend) {
+      input.placeholder = t("thread.placeholder.login");
+    } else if (login) {
+      input.placeholder = t("thread.placeholder.asUser", { login });
+    } else {
+      input.placeholder = t("thread.placeholder");
+    }
+    syncPinVisibility();
   };
 
   const trap = bindFocusTrap(dialog, {
@@ -362,7 +385,7 @@ export function bindReplyThread(opts: {
   };
 
   const appendLive = (ev: Priv): void => {
-    if (!current || !channelMatches()) {
+    if (dismissIfChannelMismatch() || !current) {
       return;
     }
     if (threadMessages.some((m) => m.id === ev.id)) {
@@ -386,7 +409,7 @@ export function bindReplyThread(opts: {
   };
 
   const ingestLive = (events: ChatEvent[]): void => {
-    if (modal.hidden || !current || !channelMatches()) {
+    if (dismissIfChannelMismatch() || modal.hidden || !current) {
       return;
     }
     for (const ev of events) {
@@ -401,7 +424,7 @@ export function bindReplyThread(opts: {
       return;
     }
     if (!channelMatches()) {
-      onStatus?.(t("thread.status.channelChanged"));
+      close();
       return;
     }
     const text = input.value.trim();
