@@ -1,5 +1,5 @@
 //! Viewer poll vote and prediction bet via Twitch GQL.
-//! Helix exposes only broadcaster manage/read endpoints; participation matches Channel Points.
+//! Helix exposes only broadcaster manage/read endpoints; viewer vote/predict use Twitch GQL.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};

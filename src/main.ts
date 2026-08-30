@@ -82,7 +82,6 @@ import {
 } from "./shell/streamerMode";
 import { startLiveNotifyListener, stopLiveNotifyListener } from "./shell/liveNotify";
 import { bindMentionToast } from "./shell/mentionToast";
-import { bindChannelPoints } from "./shell/channelPoints";
 import { bindRaidToast } from "./shell/raidToast";
 import { bindGiftToast } from "./shell/giftToast";
 import { bindClipCardLayer } from "./shell/clipCards";
@@ -269,9 +268,6 @@ async function boot(): Promise<void> {
   const usercardModal = document.querySelector<HTMLElement>("#usercard-modal");
   const replythreadModal = document.querySelector<HTMLElement>("#replythread-modal");
   const emotepopupModal = document.querySelector<HTMLElement>("#emotepopup-modal");
-  const pointsModal = document.querySelector<HTMLElement>("#points-modal");
-  const channelPointsBtn = document.querySelector<HTMLButtonElement>("#channel-points-btn");
-  const channelPointsLabel = document.querySelector<HTMLElement>("#channel-points-label");
   const emoteOpen = document.querySelector<HTMLButtonElement>("#emote-open");
   const appRoot = document.querySelector<HTMLElement>("#app");
   if (
@@ -348,9 +344,6 @@ async function boot(): Promise<void> {
     !usercardModal ||
     !replythreadModal ||
     !emotepopupModal ||
-    !pointsModal ||
-    !channelPointsBtn ||
-    !channelPointsLabel ||
     !emoteOpen ||
     !appRoot
   ) {
@@ -1388,6 +1381,11 @@ async function boot(): Promise<void> {
 
   let headerAvatarLogin = "";
   const avatarUrlByLogin = new Map<string, string>();
+  const avatarFetchInFlight = new Set<string>();
+  /** Bound after channel tab list is created (avoids TDZ on `channels`). */
+  let syncTabAvatar: (login: string, url: string | null) => void = () => undefined;
+  let syncTabLive: (login: string, live: boolean) => void = () => undefined;
+  let ensureOpenChannelChrome: () => void = () => undefined;
 
   function paintHeaderAvatar(login: string): void {
     const key = login.trim().toLowerCase();
@@ -1426,22 +1424,34 @@ async function boot(): Promise<void> {
     if (!key) {
       return;
     }
-    if (avatarUrlByLogin.has(key)) {
-      paintHeaderAvatar(key);
+    const cached = avatarUrlByLogin.get(key);
+    if (cached) {
+      syncTabAvatar(key, cached);
+      if (headerAvatarLogin === key) {
+        paintHeaderAvatar(key);
+      }
       return;
     }
+    if (avatarFetchInFlight.has(key)) {
+      return;
+    }
+    avatarFetchInFlight.add(key);
     void invoke<{ login: string; url: string | null }>("chat_profile_image", {
       login: key,
     })
       .then((res) => {
         if (res.url) {
           avatarUrlByLogin.set(res.login, res.url);
+          syncTabAvatar(res.login, res.url);
         }
         if (headerAvatarLogin === res.login) {
           paintHeaderAvatar(res.login);
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        avatarFetchInFlight.delete(key);
+      });
   }
 
   headerAvatarImgEl.addEventListener("error", () => {
@@ -1454,6 +1464,7 @@ async function boot(): Promise<void> {
       return;
     }
     avatarUrlByLogin.delete(key);
+    syncTabAvatar(key, null);
     headerAvatarImgEl.hidden = true;
     headerAvatarImgEl.removeAttribute("src");
     headerAvatarImgEl.removeAttribute("data-expect");
@@ -1715,24 +1726,6 @@ async function boot(): Promise<void> {
   emoteOpen.addEventListener("click", () => {
     emotePopup.toggle();
   });
-  const channelPoints = bindChannelPoints({
-    button: channelPointsBtn,
-    label: channelPointsLabel,
-    modal: pointsModal,
-    activeChannel: () => ipc.active(),
-    getAuth: () => lastAuth,
-    startLogin: () => {
-      void startLogin();
-    },
-    onStatus: (message) => {
-      setStatus(message);
-    },
-  });
-  {
-    chainTeardown(() => {
-      channelPoints.stop();
-    });
-  }
   function dispatchHotkey(action: HotkeyAction): boolean {
     switch (action) {
       case "showSearch":
@@ -1816,6 +1809,20 @@ async function boot(): Promise<void> {
     },
   );
 
+  syncTabAvatar = (login, url) => {
+    channels.setAvatar(login, url);
+  };
+  syncTabLive = (login, live) => {
+    channels.setLive(login, live);
+  };
+  ensureOpenChannelChrome = (): void => {
+    for (const login of channels.joined()) {
+      const key = login.toLowerCase();
+      syncTabLive(key, streamByChannel.get(key)?.live === true);
+      requestChannelAvatar(key);
+    }
+  };
+
   const refreshLocaleChrome = (): void => {
     applyChromeIcons();
     headerMenuCtl?.relabel();
@@ -1831,7 +1838,6 @@ async function boot(): Promise<void> {
     replyThreadCtl?.relabelChrome();
     chatFindCtl.relabel();
     emotePopup.relabel();
-    channelPoints.relabel();
     ring.relocalizeSystemStrings();
     scrollChrome.refreshLocale();
     chatA11y.refreshLocale();
@@ -2460,6 +2466,7 @@ async function boot(): Promise<void> {
       return;
     }
     streamByChannel.set(ch, ev.payload);
+    syncTabLive(ch, ev.payload.live === true);
     if (ch !== ipc.active().toLowerCase()) {
       return;
     }
@@ -2500,6 +2507,7 @@ async function boot(): Promise<void> {
       return;
     }
     avatarUrlByLogin.set(login, url);
+    syncTabAvatar(login, url);
     if (headerAvatarLogin === login) {
       paintHeaderAvatar(login);
     }
@@ -2527,17 +2535,20 @@ async function boot(): Promise<void> {
     const open = Array.isArray(ev.payload.open) ? ev.payload.open : [];
     const focus = ev.payload.active || "";
     if (ev.payload.dropped) {
+      const droppedKey = ev.payload.dropped.toLowerCase();
       channels.remove(ev.payload.dropped);
-      sendWaitByChannel.delete(ev.payload.dropped.toLowerCase());
-      streamByChannel.delete(ev.payload.dropped.toLowerCase());
-      roomByChannel.delete(ev.payload.dropped.toLowerCase());
-      typingByChannel.delete(ev.payload.dropped.toLowerCase());
-      avatarUrlByLogin.delete(ev.payload.dropped.toLowerCase());
+      sendWaitByChannel.delete(droppedKey);
+      streamByChannel.delete(droppedKey);
+      roomByChannel.delete(droppedKey);
+      typingByChannel.delete(droppedKey);
+      avatarUrlByLogin.delete(droppedKey);
+      avatarFetchInFlight.delete(droppedKey);
       paintTypingStatus();
     }
     if (!channels.isReordering()) {
       channels.syncOpen(open, focus);
     }
+    ensureOpenChannelChrome();
     channelQueue.push({ kind: "sync", name: focus });
     if (!channelBusy) {
       drainChannelQueue();
@@ -2705,6 +2716,7 @@ async function boot(): Promise<void> {
         ? session.lastChannel
         : open[0] || session.lastChannel || "";
     channels.hydrate(recents, open, focus);
+    ensureOpenChannelChrome();
     const restore = open.length > 0 ? open : focus ? [focus] : [];
     for (const login of restore) {
       if (login === focus) {
@@ -2976,7 +2988,6 @@ async function boot(): Promise<void> {
       deviceEl.textContent = "";
     }
     syncComposer();
-    channelPoints.syncAuth();
     pollPanel.syncAuth();
   }
 
@@ -3394,6 +3405,7 @@ async function boot(): Promise<void> {
   function applyMounted(joined: string): void {
     replyThreadCtl?.close();
     channels.remember(joined);
+    ensureOpenChannelChrome();
     // Keep last Helix snapshot across tab focus; poller refreshes in place.
     ring.setChannelLive(streamByChannel.get(joined.toLowerCase())?.live ?? false);
     repaintChannelTitle();
@@ -3401,7 +3413,6 @@ async function boot(): Promise<void> {
     syncPlayerForLayout(joined);
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
-    channelPoints.onChannelChanged();
     pollPanel.sync();
     pinnedBanner.sync();
     paintTypingStatus();
@@ -3450,7 +3461,6 @@ async function boot(): Promise<void> {
         syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
-        channelPoints.onChannelChanged();
         pollPanel.sync();
         pinnedBanner.sync();
       }
@@ -3493,7 +3503,6 @@ async function boot(): Promise<void> {
         syncPlayerForLayout("");
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
-        channelPoints.onChannelChanged();
         pollPanel.sync();
         pinnedBanner.sync();
         paintTypingStatus();

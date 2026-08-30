@@ -12,9 +12,6 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
-// Channel Points balance/redeem use Twitch GQL as a signed-in viewer; Helix
-// channel:read/manage:redemptions scopes are broadcaster-only and are not needed.
-// If GQL returns 401/403, UI shows error.points.relogin (re-auth required).
 // moderator:read:chat_messages — Helix GET /chat/pins (pinned channel message banner).
 // moderator:manage:warnings — Helix POST /moderation/warnings (/warn).
 // Existing sessions need re-login after this scope is added.

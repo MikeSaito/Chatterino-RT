@@ -31,7 +31,6 @@ export type IconName =
   | "clock"
   | "heart"
   | "star"
-  | "points"
   | "user"
   | "bell"
   | "filter"
@@ -85,8 +84,6 @@ const PATHS: Record<IconName, string> = {
     '<path d="M12 21s-7-4.5-9.5-9A5.2 5.2 0 0 1 12 6.2 5.2 5.2 0 0 1 21.5 12C19 16.5 12 21 12 21z"/>',
   star:
     '<path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.3L12 15.8 6.2 17.8l.9-5.3L3.2 8.7l5.4-.8L12 3z"/>',
-  points:
-    '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   user:
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   bell:

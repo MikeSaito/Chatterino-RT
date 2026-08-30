@@ -7,7 +7,6 @@ pub mod bttv_badges;
 pub mod bttv_live;
 pub mod cache;
 pub mod channel;
-pub mod channel_points;
 pub mod chatterino1_import;
 pub mod chatterino_badges;
 pub mod chatters;
