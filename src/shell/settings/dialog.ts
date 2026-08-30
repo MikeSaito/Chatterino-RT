@@ -1664,6 +1664,7 @@ export function mountSettingsPanel(opts: {
       panelLocale = nextLocale;
       aboutGen += 1;
       accountsPainter = null;
+      statusEl.textContent = "";
       buildPages();
       paintValues(data);
       refreshCacheResolved();

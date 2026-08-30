@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { onLocaleChange, t } from "../i18n/index.ts";
+import { getLocale, onLocaleChange, t } from "../i18n/index.ts";
 import { iconEl, setButtonIcon } from "./icons.ts";
 
 export const CHAT_PINNED_EVENT = "chat:pinned";
@@ -122,6 +122,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
   let alwaysShow = opts.alwaysShow();
   let active: BannerState | null = null;
   let stopped = false;
+  let paintedLocale = getLocale();
   let unlistenEvent: UnlistenFn | null = null;
   const unlistenLocale = onLocaleChange(() => paint());
   const resize = new ResizeObserver(() => syncOffset());
@@ -304,6 +305,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     row.className = "pinned-banner-row";
     const pinIcon = iconEl("pin", 14);
     pinIcon.classList.add("pinned-banner-pin");
+    pinIcon.setAttribute("aria-hidden", "true");
     const text = document.createElement("p");
     text.className = "pinned-banner-text";
     text.innerHTML = formatPinnedBody(pin.messageText);
@@ -388,7 +390,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       active.pin.messageText === pin.messageText &&
       active.pin.pinnedByLogin === pin.pinnedByLogin;
 
-    if (same && active) {
+    if (same && active && paintedLocale === getLocale()) {
       active.pin = pin;
       scheduleHide(active, false);
       return;
@@ -403,6 +405,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     opts.host.hidden = false;
     opts.host.classList.remove("is-collapsed");
     const el = renderBanner(pin);
+    paintedLocale = getLocale();
     opts.host.append(el);
     const state: BannerState = {
       channel,

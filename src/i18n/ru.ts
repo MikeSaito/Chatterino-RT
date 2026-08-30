@@ -325,7 +325,7 @@ export const ru: Record<MessageKey, string> = {
   "polls.poll.cancelled": "Опрос отменён",
   "polls.prediction.cancelled": "Прогноз отменён",
   "polls.option.votes": "{count} · {percent}%",
-  "polls.option.points": "{count} · {points} очк. · {percent}%",
+  "polls.option.points": "{count} · {points} очков · {percent}%",
   "polls.option.winner": "Победитель",
   "polls.viewerHint": "Только просмотр. Действия на Twitch",
 
@@ -521,7 +521,7 @@ export const ru: Record<MessageKey, string> = {
     "Не удалось сохранить импортированные настройки загрузчика.",
   "settings.status.commandsImported": "Импортировано команд: {count}.",
   "settings.status.commandsImportedReplaced":
-    "Импортировано команд: {count}; дубликаты trigger заменены.",
+    "Импортировано команд: {count}; дубликаты триггеров заменены.",
   "settings.confirm.clearCache":
     "Очистить кэш? Эмодзи могут загружаться дольше при следующем запуске Chatterino RT.",
   "settings.confirm.overwriteUploader":
@@ -531,7 +531,7 @@ export const ru: Record<MessageKey, string> = {
     "Буфер обмена недоступен. Вставьте JSON настроек загрузчика изображений:",
   "settings.commands.import": "Импорт команд из Chatterino 1",
   "settings.commands.dupHint":
-    "Найдено несколько команд с одним trigger. Сработает только одна из них.",
+    "Найдено несколько команд с одним триггером. Сработает только одна из них.",
   "settings.hotkeys.searchLabel": "Поиск сочетания:",
   "settings.hotkeys.searchPlaceholder": "Нажмите комбинацию клавиш…",
 
