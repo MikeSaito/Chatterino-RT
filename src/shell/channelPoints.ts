@@ -260,8 +260,8 @@ export function bindChannelPoints(opts: {
         onStatus(errorText(err, "points.error.redeem"));
       }
     } finally {
+      redeeming = "";
       if (token === seq) {
-        redeeming = "";
         paintModal(last);
       }
     }
@@ -298,8 +298,8 @@ export function bindChannelPoints(opts: {
         onStatus(errorText(err, "points.error.claim"));
       }
     } finally {
+      claiming = false;
       if (token === seq) {
-        claiming = false;
         paintModal(last);
       }
     }
@@ -542,6 +542,7 @@ export function bindChannelPoints(opts: {
       seq += 1;
       last = null;
       redeeming = "";
+      claiming = false;
       window.clearTimeout(timer);
       paintButton();
       if (!modal.hidden) {
@@ -552,6 +553,8 @@ export function bindChannelPoints(opts: {
     onChannelChanged: () => {
       seq += 1;
       last = null;
+      redeeming = "";
+      claiming = false;
       paintButton();
       if (!modal.hidden) {
         paintModal(null);
@@ -563,6 +566,8 @@ export function bindChannelPoints(opts: {
       window.clearTimeout(timer);
       window.clearTimeout(cooldownTimer);
       seq += 1;
+      redeeming = "";
+      claiming = false;
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisible);
       trap.deactivate();

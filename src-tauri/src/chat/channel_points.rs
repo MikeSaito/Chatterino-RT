@@ -390,18 +390,24 @@ pub async fn claim(
     let payload = value
         .get("data")
         .and_then(|v| v.get("claimCommunityPoints"))
-        .unwrap_or(&Value::Null);
+        .filter(|v| !v.is_null());
+    let Some(payload) = payload else {
+        return Err(ChannelPointsError::coded(
+            "error.points.claim_missing",
+            "Channel points claim is unavailable",
+        ));
+    };
     let error_code = payload
         .get("error")
         .and_then(|v| v.get("code"))
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let balance = payload.get("currentPoints").and_then(as_u64).or(current.balance);
+    let balance = payload.get("currentPoints").and_then(as_u64);
     Ok(ChannelPointsClaimResult {
-        ok: error_code.is_none(),
+        ok: error_code.is_none() && balance.is_some(),
         error_code,
-        balance,
+        balance: balance.or(current.balance),
     })
 }
 
@@ -732,7 +738,10 @@ async fn post_gql(client_id: &str, token: &str, body: Value) -> Result<Value, Ch
                 let status = resp.status();
                 match resp.json::<Value>().await {
                     Ok(v) if status.is_success() => {
-                        if v.get("data").is_some() {
+                        let data_ok = v
+                            .get("data")
+                            .is_some_and(|d| !d.is_null() && d != &Value::Null);
+                        if data_ok {
                             return Ok(v);
                         }
                         if let Some(message) = gql_error_message(&v) {
