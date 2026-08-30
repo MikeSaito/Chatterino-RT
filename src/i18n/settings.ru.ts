@@ -13,7 +13,8 @@ export const settingsRu: Record<SettingsMessageKey, string> = {
   "settings.knob.alternate-messages": "Чередовать цвет фона сообщений",
   "settings.knob.always-include-broadcaster": "Всегда включать стримера в автодополнение пользователей",
   "settings.knob.always-on-top": "Поверх всех окон",
-  "settings.knob.always-show-pinned": "Всегда показывать закреплённое сообщение канала",
+  "settings.knob.always-show-pinned":
+    "Всегда показывать закреп (моды; нужен Helix scope)",
   "settings.knob.appdata-section": "Данные приложения",
   "settings.knob.attach-any-browser": "Подключаться к любому браузеру (могут быть проблемы)",
   "settings.knob.auto-close-thread": "Автоматически закрывать окно ветки ответа при потере фокуса",

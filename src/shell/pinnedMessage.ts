@@ -8,6 +8,8 @@ import { iconEl, setButtonIcon } from "./icons.ts";
 export const CHAT_PINNED_EVENT = "chat:pinned";
 export const PINNED_AUTO_HIDE_MS = 30_000;
 
+export type PinAccess = "ok" | "viewer" | "need_scope" | "anon";
+
 export type PinnedMessage = {
   messageId: string;
   messageText: string;
@@ -22,6 +24,7 @@ export type PinnedMessage = {
 export type PinnedPayload = {
   channel: string;
   pin?: PinnedMessage | null;
+  access?: PinAccess | null;
 };
 
 export type BindPinnedBannerOpts = {
@@ -118,6 +121,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
   stop: () => void;
 } {
   const byChannel = new Map<string, PinnedMessage>();
+  const accessByChannel = new Map<string, PinAccess>();
   const dismissedByChannel = new Map<string, string>();
   let alwaysShow = opts.alwaysShow();
   let active: BannerState | null = null;
@@ -136,6 +140,12 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     if (!channel) {
       return;
     }
+    const access = ev.payload.access ?? null;
+    if (access) {
+      accessByChannel.set(channel, access);
+    } else if (!(ev.payload.pin ?? null)) {
+      accessByChannel.delete(channel);
+    }
     const pin = ev.payload.pin ?? null;
     if (!pin || !pin.messageId || !pin.messageText.trim()) {
       byChannel.delete(channel);
@@ -143,6 +153,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     } else {
       const prev = byChannel.get(channel);
       byChannel.set(channel, pin);
+      accessByChannel.set(channel, "ok");
       if (prev && prev.messageId !== pin.messageId) {
         dismissedByChannel.delete(channel);
       }
@@ -334,17 +345,94 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
     return root;
   }
 
+  function renderScopeHint(): HTMLElement {
+    const root = document.createElement("section");
+    root.className = "pinned-banner is-hint";
+    root.setAttribute("role", "status");
+    root.dataset.hint = "need_scope";
+    const body = document.createElement("div");
+    body.className = "pinned-banner-body";
+    const text = document.createElement("p");
+    text.className = "pinned-banner-text";
+    text.textContent = t("pinned.need_scope");
+    body.append(text);
+    root.append(body);
+    return root;
+  }
+
+  function hideHost(): void {
+    if (active) {
+      clearTimers(active);
+      active = null;
+    }
+    opts.host.replaceChildren();
+    opts.host.hidden = true;
+    opts.host.classList.add("is-collapsed");
+    syncOffset();
+  }
+
   function paint(): void {
     const channel = normalizeChannel(opts.activeChannel());
     const pin = channel ? byChannel.get(channel) : undefined;
-    if (!channel || !pin) {
+    const access = channel ? accessByChannel.get(channel) : undefined;
+    if (!channel) {
+      hideHost();
+      return;
+    }
+
+    if (!pin && access === "need_scope") {
+      if (
+        active &&
+        !active.leaving &&
+        active.channel === channel &&
+        active.el.dataset.hint === "need_scope" &&
+        paintedLocale === getLocale()
+      ) {
+        return;
+      }
+      if (active) {
+        clearTimers(active);
+        active = null;
+      }
+      opts.host.replaceChildren();
+      opts.host.hidden = false;
+      opts.host.classList.remove("is-collapsed");
+      const el = renderScopeHint();
+      paintedLocale = getLocale();
+      opts.host.append(el);
+      const state: BannerState = {
+        channel,
+        pin: {
+          messageId: "__need_scope__",
+          messageText: "",
+          pinnedByLogin: "",
+          pinnedByName: "",
+          senderLogin: "",
+          senderName: "",
+        },
+        el,
+        hideTimer: null,
+        endsTimer: null,
+        leaveTimer: null,
+        leaving: false,
+        shownAt: Date.now(),
+      };
+      active = state;
+      requestAnimationFrame(() => {
+        if (active === state) {
+          el.classList.add("is-visible");
+          syncOffset();
+        }
+      });
+      syncOffset();
+      return;
+    }
+
+    if (!pin) {
       if (active) {
         collapse(active, true);
       } else {
-        opts.host.replaceChildren();
-        opts.host.hidden = true;
-        opts.host.classList.add("is-collapsed");
-        syncOffset();
+        hideHost();
       }
       return;
     }
@@ -375,6 +463,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       active &&
       !active.leaving &&
       active.channel === channel &&
+      active.el.dataset.hint !== "need_scope" &&
       active.pin.messageId === pin.messageId &&
       active.pin.messageText === pin.messageText &&
       active.pin.pinnedByLogin === pin.pinnedByLogin;
@@ -426,7 +515,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       if (alwaysShow) {
         dismissedByChannel.clear();
       }
-      if (active && !active.leaving) {
+      if (active && !active.leaving && active.el.dataset.hint !== "need_scope") {
         scheduleHide(active, true);
       } else {
         paint();
@@ -442,6 +531,7 @@ export function bindPinnedBanner(opts: BindPinnedBannerOpts): {
       }
       active = null;
       byChannel.clear();
+      accessByChannel.clear();
       dismissedByChannel.clear();
       opts.host.replaceChildren();
       opts.host.hidden = true;

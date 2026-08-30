@@ -339,6 +339,8 @@ export const ru: Record<MessageKey, string> = {
   "pinned.label": "Закреплено:",
   "pinned.dismiss": "Скрыть закреп",
   "pinned.moderator": "Модератор",
+  "pinned.need_scope":
+    "Для закрепа нужен повторный вход в Twitch (moderator:read:chat_messages). Только модераторы и стример.",
 
 
   "player.loading": "Загрузка…",

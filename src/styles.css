@@ -2195,6 +2195,15 @@ button:disabled {
   transform: translateY(-100%);
 }
 
+.pinned-banner.is-hint {
+  background: color-mix(in srgb, var(--c-surface-2) 70%, var(--c-split-bg));
+}
+
+.pinned-banner.is-hint .pinned-banner-text {
+  color: color-mix(in srgb, var(--c-window-text) 78%, transparent);
+  font-size: var(--font-sm);
+}
+
 .pinned-banner::before {
   content: "";
   flex: 0 0 3px;

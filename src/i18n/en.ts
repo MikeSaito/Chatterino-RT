@@ -337,6 +337,8 @@ export const en = {
   "pinned.label": "Pinned:",
   "pinned.dismiss": "Hide pinned message",
   "pinned.moderator": "Moderator",
+  "pinned.need_scope":
+    "Pinned messages need a Twitch re-login (moderator:read:chat_messages). Mods and broadcasters only.",
 
 
   "player.loading": "Loading…",

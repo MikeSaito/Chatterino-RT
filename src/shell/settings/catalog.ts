@@ -1615,7 +1615,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
       cb(
         "always-show-pinned",
         "behaviour.alwaysShowPinnedMessage",
-        "Always show pinned channel message",
+        "Always show pinned channel message (mods; Helix scope)",
         false,
       ),
       cb(

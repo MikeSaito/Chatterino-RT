@@ -219,6 +219,7 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let shared_chk = shared.clone();
     tauri::async_runtime::spawn(async move {
         verify_disk(app_chk.clone(), shared_chk.clone()).await;
+        let _ = ensure_twitch_user_id(&shared_chk).await;
         super::profile_images::spawn_refresh_current(app_chk, shared_chk);
     });
     Ok(())
@@ -338,11 +339,32 @@ pub fn set_cached_twitch_user_id(shared: &Shared, user_id: String) {
     if !valid_twitch_user_id(&user_id) {
         return;
     }
-    if let Ok(mut inner) = shared.auth.lock() {
-        inner.cached_user_id = Some(user_id.clone());
-        if let Some(disk) = current_creds_mut(&mut inner) {
-            disk.user_id = Some(user_id);
-        }
+    let Ok(mut inner) = shared.auth.lock() else {
+        return;
+    };
+    let already = inner.cached_user_id.as_deref() == Some(user_id.as_str())
+        && current_creds(&inner)
+            .and_then(|c| c.user_id.as_deref())
+            .is_some_and(|id| id == user_id);
+    inner.cached_user_id = Some(user_id.clone());
+    if let Some(disk) = current_creds_mut(&mut inner) {
+        disk.user_id = Some(user_id);
+    }
+    if already || env_login_token().is_some() || inner.accounts.is_empty() {
+        return;
+    }
+    if inner.path.as_os_str().is_empty() {
+        return;
+    }
+    let store = AuthStore {
+        accounts: inner.accounts.clone(),
+        current_login: inner.current_login.clone(),
+    };
+    let path = inner.path.clone();
+    // Persist while holding the auth lock so a concurrent login cannot be
+    // overwritten by a stale accounts clone written after unlock.
+    if let Err(e) = save_store(&path, &store) {
+        inner.last_message = Some(format!("failed to save user id: {e}"));
     }
 }
 
@@ -355,12 +377,25 @@ pub async fn ensure_twitch_user_id(shared: &Shared) -> Option<String> {
         return Some(id);
     }
     let token = oauth_token(shared)?;
-    let validated = validate_token(&http_client(), &token).await.ok()?;
-    if let Some(uid) = validated.user_id {
-        set_cached_twitch_user_id(shared, uid.clone());
-        return Some(uid);
+    let client_id = resolved_client_id(shared);
+    if client_id.trim().is_empty() || client_id == "YOUR_API_KEY_HERE" {
+        return None;
     }
-    None
+    let mut login_hint = resolved_login_token(shared).map(|(l, _)| l);
+    if let Ok(validated) = validate_token(&http_client(), &token).await {
+        if let Some(uid) = validated.user_id {
+            set_cached_twitch_user_id(shared, uid.clone());
+            return Some(uid);
+        }
+        login_hint = Some(validated.login);
+    }
+    let login = login_hint?;
+    let profile = super::helix::fetch_user_profile(&login, Some(&token), &client_id).await?;
+    if !valid_twitch_user_id(&profile.id) {
+        return None;
+    }
+    set_cached_twitch_user_id(shared, profile.id.clone());
+    Some(profile.id)
 }
 
 pub fn resolved_client_id(shared: &Shared) -> String {
@@ -476,20 +511,26 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
         .lock()
         .map_err(|_| AuthFail::internal("lock"))?
         .poll_gen;
-    let login = validate_login(&http_client(), &parsed.token)
+    let validated = validate_token(&http_client(), &parsed.token)
         .await
         .map_err(AuthFail::internal)?;
     if !still_current(&shared, gen) {
         return Err(AuthFail::coded("error.auth.cancelled", "login cancelled"));
     }
+    let user_id = validated
+        .user_id
+        .filter(|id| valid_twitch_user_id(id))
+        .or_else(|| {
+            valid_twitch_user_id(&parsed.user_id).then_some(parsed.user_id.clone())
+        });
     if !persist_and_relogin(
         &app,
         &shared,
         gen,
-        login,
+        validated.login,
         parsed.token,
         parsed.client_id,
-        Some(parsed.user_id),
+        user_id,
     )
     .await
     {
@@ -498,6 +539,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
             "failed to save login",
         ));
     }
+    let _ = ensure_twitch_user_id(&shared).await;
     Ok(())
 }
 
@@ -789,7 +831,10 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
 }
 
 async fn after_identity_change(shared: &Shared) {
+    let _ = ensure_twitch_user_id(shared).await;
     request_relogin(shared).await;
+    shared.notify_pins(super::pins::PinsCmd::Relogin);
+    shared.notify_polls(super::polls::PollsCmd::Relogin);
     super::provider_activity::clear_identity_cache(shared);
     super::twitch_blocks::clear_blocks(shared);
     super::shared_chat::clear(shared);
@@ -921,6 +966,7 @@ async fn persist_and_relogin(
 
 async fn verify_disk(app: AppHandle, shared: Shared) {
     if env_login_token().is_some() {
+        let _ = ensure_twitch_user_id(&shared).await;
         return;
     }
     let (token, gen, login) = match shared.auth.lock() {
@@ -930,13 +976,22 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
         },
         Err(_) => return,
     };
-    if validate_login(&http_client(), &token).await.is_err() {
-        let still = shared.auth.lock().ok().is_some_and(|inner| {
-            inner.poll_gen == gen
-                && current_creds(&inner).is_some_and(|c| c.login == login && c.token == token)
-        });
-        if still {
-            reject_session(app, shared, "saved login is invalid").await;
+    match validate_token(&http_client(), &token).await {
+        Ok(validated) => {
+            if let Some(uid) = validated.user_id {
+                set_cached_twitch_user_id(&shared, uid);
+            } else {
+                let _ = ensure_twitch_user_id(&shared).await;
+            }
+        }
+        Err(_) => {
+            let still = shared.auth.lock().ok().is_some_and(|inner| {
+                inner.poll_gen == gen
+                    && current_creds(&inner).is_some_and(|c| c.login == login && c.token == token)
+            });
+            if still {
+                reject_session(app, shared, "saved login is invalid").await;
+            }
         }
     }
 }
@@ -1072,10 +1127,6 @@ async fn request_token(client: &reqwest::Client, client_id: &str, device_code: &
             }
         }
     }
-}
-
-async fn validate_login(client: &reqwest::Client, token: &str) -> Result<String, String> {
-    validate_token(client, token).await.map(|v| v.login)
 }
 
 struct ValidatedToken {

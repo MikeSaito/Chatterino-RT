@@ -1271,10 +1271,6 @@ pub async fn auth_import(
     blob: String,
 ) -> Result<(), ApiError> {
     let out = auth::import_blob(app, state.inner().clone(), blob).await;
-    if out.is_ok() {
-        state.notify_polls(super::polls::PollsCmd::Relogin);
-        state.notify_pins(super::pins::PinsCmd::Relogin);
-    }
     Ok(out?)
 }
 
@@ -1286,10 +1282,6 @@ pub fn auth_status(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<Au
 #[tauri::command]
 pub async fn auth_logout(app: AppHandle, state: tauri::State<'_, Shared>) -> Result<(), ApiError> {
     let out = auth::logout(app, state.inner().clone()).await;
-    if out.is_ok() {
-        state.notify_polls(super::polls::PollsCmd::Relogin);
-        state.notify_pins(super::pins::PinsCmd::Relogin);
-    }
     Ok(out?)
 }
 
@@ -1300,10 +1292,6 @@ pub async fn auth_select(
     login: String,
 ) -> Result<(), ApiError> {
     let out = auth::select_account(app, state.inner().clone(), login).await;
-    if out.is_ok() {
-        state.notify_polls(super::polls::PollsCmd::Relogin);
-        state.notify_pins(super::pins::PinsCmd::Relogin);
-    }
     Ok(out?)
 }
 
@@ -1314,10 +1302,6 @@ pub async fn auth_remove(
     login: String,
 ) -> Result<(), ApiError> {
     let out = auth::remove_account(app, state.inner().clone(), login).await;
-    if out.is_ok() {
-        state.notify_polls(super::polls::PollsCmd::Relogin);
-        state.notify_pins(super::pins::PinsCmd::Relogin);
-    }
     Ok(out?)
 }
 

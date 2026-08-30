@@ -3,7 +3,10 @@
 //! Requires signed-in broadcaster/moderator and OAuth scope
 //! `moderator:read:chat_messages` (or manage). Anon and non-mod viewers get
 //! Helix 403 — no banner. Polls while the active channel grants mod rights.
+//! `behaviour.alwaysShowPinnedMessage` only skips the 30s UI auto-hide; it does
+//! not fetch pins for viewers.
 
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -16,11 +19,13 @@ use url::Url;
 use super::state::Shared;
 
 const HELIX: &str = "https://api.twitch.tv/helix";
+const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 const CHAT_PINNED_EVENT: &str = "chat:pinned";
 const ATTEMPTS: u32 = 3;
 const RETRY_BASE: Duration = Duration::from_millis(250);
 const POLL_WHEN_MOD: Duration = Duration::from_secs(5);
 const POLL_WAIT_ROLE: Duration = Duration::from_secs(4);
+const POLL_NEED_SCOPE: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub enum PinsCmd {
@@ -30,12 +35,23 @@ pub enum PinsCmd {
     Shutdown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PinAccess {
+    Ok,
+    Viewer,
+    NeedScope,
+    Anon,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PinnedPayload {
     pub channel: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pin: Option<PinnedMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access: Option<PinAccess>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -60,6 +76,12 @@ struct Wanted {
     client_id: String,
 }
 
+#[derive(Default)]
+struct ScopeCache {
+    token: String,
+    scopes_ok: bool,
+}
+
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
     let (tx, rx) = mpsc::unbounded_channel::<PinsCmd>();
     {
@@ -78,6 +100,18 @@ pub fn emit_clear(app: &AppHandle, channel: &str) {
         PinnedPayload {
             channel: channel.to_string(),
             pin: None,
+            access: None,
+        },
+    );
+}
+
+fn emit_access(app: &AppHandle, channel: &str, access: PinAccess) {
+    let _ = app.emit(
+        CHAT_PINNED_EVENT,
+        PinnedPayload {
+            channel: channel.to_string(),
+            pin: None,
+            access: Some(access),
         },
     );
 }
@@ -85,7 +119,9 @@ pub fn emit_clear(app: &AppHandle, channel: &str) {
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceiver<PinsCmd>) {
     let mut active: Option<String> = None;
     let mut last_emitted: Option<PinnedMessage> = None;
+    let mut last_access: Option<PinAccess> = None;
     let mut fail_streak: u32 = 0;
+    let mut scope_cache = ScopeCache::default();
     loop {
         if shared.pins_shutdown.load(Ordering::SeqCst) {
             break;
@@ -96,7 +132,9 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                 Some(PinsCmd::SetChannel(login)) => {
                     emit_clear(&app, &login);
                     last_emitted = None;
+                    last_access = None;
                     fail_streak = 0;
+                    scope_cache = ScopeCache::default();
                     active = Some(login);
                 }
                 Some(PinsCmd::ClearChannel) | Some(PinsCmd::Relogin) => {}
@@ -104,18 +142,64 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
             continue;
         };
 
-        match resolve_wanted(&shared, &login).await {
-            Resolve::NotEligible => {
-                if last_emitted.is_some() {
-                    emit_clear(&app, &login);
-                    last_emitted = None;
-                }
+        match resolve_wanted(&shared, &login, &mut scope_cache).await {
+            Resolve::Anon => {
+                clear_emitted(&app, &login, &mut last_emitted);
+                set_access(&app, &login, PinAccess::Anon, &mut last_access);
                 fail_streak = 0;
                 match wait_for_change(&mut rx, &mut active, &app, POLL_WAIT_ROLE).await {
                     WaitEnd::Shutdown => break,
                     WaitEnd::Changed => {
                         last_emitted = None;
+                        last_access = None;
                         fail_streak = 0;
+                        scope_cache = ScopeCache::default();
+                    }
+                    WaitEnd::Tick => {}
+                }
+            }
+            Resolve::Viewer => {
+                clear_emitted(&app, &login, &mut last_emitted);
+                set_access(&app, &login, PinAccess::Viewer, &mut last_access);
+                fail_streak = 0;
+                match wait_for_change(&mut rx, &mut active, &app, POLL_WAIT_ROLE).await {
+                    WaitEnd::Shutdown => break,
+                    WaitEnd::Changed => {
+                        last_emitted = None;
+                        last_access = None;
+                        fail_streak = 0;
+                        scope_cache = ScopeCache::default();
+                    }
+                    WaitEnd::Tick => {}
+                }
+            }
+            Resolve::NeedScope => {
+                clear_emitted(&app, &login, &mut last_emitted);
+                set_access(&app, &login, PinAccess::NeedScope, &mut last_access);
+                fail_streak = 0;
+                match wait_for_change(&mut rx, &mut active, &app, POLL_NEED_SCOPE).await {
+                    WaitEnd::Shutdown => break,
+                    WaitEnd::Changed => {
+                        last_emitted = None;
+                        last_access = None;
+                        fail_streak = 0;
+                        scope_cache = ScopeCache::default();
+                    }
+                    WaitEnd::Tick => {
+                        // Re-validate scopes after backoff (token may have been refreshed).
+                        scope_cache = ScopeCache::default();
+                    }
+                }
+            }
+            Resolve::Pending => {
+                fail_streak = 0;
+                match wait_for_change(&mut rx, &mut active, &app, POLL_WAIT_ROLE).await {
+                    WaitEnd::Shutdown => break,
+                    WaitEnd::Changed => {
+                        last_emitted = None;
+                        last_access = None;
+                        fail_streak = 0;
+                        scope_cache = ScopeCache::default();
                     }
                     WaitEnd::Tick => {}
                 }
@@ -132,26 +216,35 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                                 PinnedPayload {
                                     channel: login.clone(),
                                     pin: next,
+                                    access: Some(PinAccess::Ok),
                                 },
                             );
+                            last_access = Some(PinAccess::Ok);
                         } else if let Some(ref p) = last_emitted {
                             if pin_expired(p) {
                                 emit_clear(&app, &login);
                                 last_emitted = None;
+                                last_access = Some(PinAccess::Ok);
+                            } else if last_access != Some(PinAccess::Ok) {
+                                set_access(&app, &login, PinAccess::Ok, &mut last_access);
                             }
+                        } else if last_access != Some(PinAccess::Ok) {
+                            set_access(&app, &login, PinAccess::Ok, &mut last_access);
                         }
                     }
                     FetchPin::Forbidden => {
                         fail_streak = 0;
-                        if last_emitted.is_some() {
-                            emit_clear(&app, &login);
-                            last_emitted = None;
-                        }
-                        match wait_until_change(&mut rx, &mut active, &app).await {
+                        clear_emitted(&app, &login, &mut last_emitted);
+                        // Scopes already validated for Ready; 403 means not allowed on
+                        // this channel (stale IRC role), not a missing-scope trap.
+                        set_access(&app, &login, PinAccess::Viewer, &mut last_access);
+                        match wait_for_change(&mut rx, &mut active, &app, POLL_WAIT_ROLE).await {
                             WaitEnd::Shutdown => break,
                             WaitEnd::Changed => {
                                 last_emitted = None;
+                                last_access = None;
                                 fail_streak = 0;
+                                scope_cache = ScopeCache::default();
                             }
                             WaitEnd::Tick => {}
                         }
@@ -159,14 +252,14 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                     }
                     FetchPin::Unauthorized => {
                         fail_streak = 0;
-                        if last_emitted.is_some() {
-                            emit_clear(&app, &login);
-                            last_emitted = None;
-                        }
-                        match wait_until_change(&mut rx, &mut active, &app).await {
+                        clear_emitted(&app, &login, &mut last_emitted);
+                        set_access(&app, &login, PinAccess::Anon, &mut last_access);
+                        scope_cache = ScopeCache::default();
+                        match wait_for_change(&mut rx, &mut active, &app, POLL_NEED_SCOPE).await {
                             WaitEnd::Shutdown => break,
                             WaitEnd::Changed => {
                                 last_emitted = None;
+                                last_access = None;
                                 fail_streak = 0;
                             }
                             WaitEnd::Tick => {}
@@ -176,8 +269,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                     FetchPin::Fail => {
                         fail_streak = fail_streak.saturating_add(1);
                         if fail_streak >= 3 && last_emitted.is_some() {
-                            emit_clear(&app, &login);
-                            last_emitted = None;
+                            clear_emitted(&app, &login, &mut last_emitted);
                         }
                     }
                 }
@@ -185,7 +277,9 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                     WaitEnd::Shutdown => break,
                     WaitEnd::Changed => {
                         last_emitted = None;
+                        last_access = None;
                         fail_streak = 0;
+                        scope_cache = ScopeCache::default();
                     }
                     WaitEnd::Tick => {}
                 }
@@ -194,28 +288,52 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
     }
 }
 
+fn clear_emitted(app: &AppHandle, channel: &str, last: &mut Option<PinnedMessage>) {
+    if last.is_some() {
+        emit_clear(app, channel);
+        *last = None;
+    }
+}
+
+fn set_access(
+    app: &AppHandle,
+    channel: &str,
+    access: PinAccess,
+    last: &mut Option<PinAccess>,
+) {
+    if *last == Some(access) {
+        return;
+    }
+    *last = Some(access);
+    emit_access(app, channel, access);
+}
+
 enum Resolve {
-    NotEligible,
+    Anon,
+    Viewer,
+    NeedScope,
+    /// Network/validate unknown — retry soon without alarming NeedScope UI.
+    Pending,
     Ready(Wanted),
 }
 
-async fn resolve_wanted(shared: &Shared, login: &str) -> Resolve {
+async fn resolve_wanted(shared: &Shared, login: &str, scope_cache: &mut ScopeCache) -> Resolve {
     let token = match super::auth::oauth_token(shared) {
         Some(t) => {
             let t = t.trim().trim_start_matches("oauth:").to_string();
             if t.is_empty() || t == "YOUR_API_KEY_HERE" {
-                return Resolve::NotEligible;
+                return Resolve::Anon;
             }
             t
         }
-        None => return Resolve::NotEligible,
+        None => return Resolve::Anon,
     };
     let client_id = super::auth::resolved_client_id(shared);
     if client_id.trim().is_empty() || client_id == "YOUR_API_KEY_HERE" {
-        return Resolve::NotEligible;
+        return Resolve::Anon;
     }
-    let Some(moderator_id) = super::auth::resolved_twitch_user_id(shared) else {
-        return Resolve::NotEligible;
+    let Some(moderator_id) = super::auth::ensure_twitch_user_id(shared).await else {
+        return Resolve::Pending;
     };
     let role = shared
         .hub
@@ -223,10 +341,15 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Resolve {
         .ok()
         .map(|hub| hub.viewer_role(login, Some(moderator_id.as_str())));
     let Some(role) = role else {
-        return Resolve::NotEligible;
+        return Resolve::Viewer;
     };
     if !(role.is_mod || role.is_broadcaster) {
-        return Resolve::NotEligible;
+        return Resolve::Viewer;
+    }
+    match pin_scopes_ok(&token, scope_cache).await {
+        ScopeCheck::Ok => {}
+        ScopeCheck::Missing => return Resolve::NeedScope,
+        ScopeCheck::Unknown => return Resolve::Pending,
     }
     let broadcaster_id = shared
         .hub
@@ -237,7 +360,7 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Resolve {
         Some(id) if !id.is_empty() => id,
         _ => match super::helix::fetch_user_profile(login, Some(&token), &client_id).await {
             Some(p) => p.id,
-            None => return Resolve::NotEligible,
+            None => return Resolve::Pending,
         },
     };
     Resolve::Ready(Wanted {
@@ -246,6 +369,70 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Resolve {
         token,
         client_id,
     })
+}
+
+enum ScopeCheck {
+    Ok,
+    Missing,
+    Unknown,
+}
+
+async fn pin_scopes_ok(token: &str, cache: &mut ScopeCache) -> ScopeCheck {
+    if cache.token == token {
+        return if cache.scopes_ok {
+            ScopeCheck::Ok
+        } else {
+            ScopeCheck::Missing
+        };
+    }
+    let client = super::http_client::build(Duration::from_secs(12));
+    let mut delay = RETRY_BASE;
+    for attempt in 0..ATTEMPTS {
+        match client
+            .get(VALIDATE_URL)
+            .header("Authorization", format!("OAuth {token}"))
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                let Ok(v) = resp.json::<Value>().await else {
+                    return ScopeCheck::Unknown;
+                };
+                let scopes: HashSet<&str> = v
+                    .get("scopes")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                let scopes_ok = scopes.contains("moderator:read:chat_messages")
+                    || scopes.contains("moderator:manage:chat_messages");
+                *cache = ScopeCache {
+                    token: token.to_string(),
+                    scopes_ok,
+                };
+                return if scopes_ok {
+                    ScopeCheck::Ok
+                } else {
+                    ScopeCheck::Missing
+                };
+            }
+            Ok(resp) if resp.status().as_u16() == 401 => {
+                *cache = ScopeCache {
+                    token: token.to_string(),
+                    scopes_ok: false,
+                };
+                return ScopeCheck::Missing;
+            }
+            _ => {}
+        }
+        if attempt + 1 < ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+        }
+    }
+    ScopeCheck::Unknown
 }
 
 enum WaitEnd {
@@ -264,14 +451,6 @@ async fn wait_for_change(
         _ = tokio::time::sleep(delay) => WaitEnd::Tick,
         cmd = rx.recv() => apply_cmd(active, app, cmd),
     }
-}
-
-async fn wait_until_change(
-    rx: &mut mpsc::UnboundedReceiver<PinsCmd>,
-    active: &mut Option<String>,
-    app: &AppHandle,
-) -> WaitEnd {
-    apply_cmd(active, app, rx.recv().await)
 }
 
 fn apply_cmd(active: &mut Option<String>, app: &AppHandle, cmd: Option<PinsCmd>) -> WaitEnd {
@@ -414,6 +593,7 @@ fn pin_expired(pin: &PinnedMessage) -> bool {
         Err(_) => false,
     }
 }
+
 fn helix_query(path: &str, params: &[(&str, &str)]) -> String {
     let mut url = Url::parse(&format!("{HELIX}{path}")).expect("helix url");
     {
@@ -516,5 +696,16 @@ mod tests {
             ..pin.clone()
         };
         assert!(!pin_expired(&open));
+    }
+
+    #[test]
+    fn access_serializes_snake_case() {
+        let payload = PinnedPayload {
+            channel: "x".into(),
+            pin: None,
+            access: Some(PinAccess::NeedScope),
+        };
+        let v = serde_json::to_value(&payload).unwrap();
+        assert_eq!(v["access"], "need_scope");
     }
 }

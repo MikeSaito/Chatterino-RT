@@ -12,7 +12,8 @@ export const settingsEn = {
   "settings.knob.alternate-messages": "Alternate background color",
   "settings.knob.always-include-broadcaster": "Always include broadcaster in user completions",
   "settings.knob.always-on-top": "Always on top",
-  "settings.knob.always-show-pinned": "Always show pinned channel message",
+  "settings.knob.always-show-pinned":
+    "Always show pinned channel message (mods; Helix scope)",
   "settings.knob.appdata-section": "Application Data",
   "settings.knob.attach-any-browser": "Attach to any browser (may cause issues)",
   "settings.knob.auto-close-thread": "Automatically close reply thread popup when it loses focus",
