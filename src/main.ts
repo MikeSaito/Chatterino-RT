@@ -1928,9 +1928,30 @@ async function boot(): Promise<void> {
     },
   });
 
-  canvas.addEventListener("contextmenu", (ev) => {
+  // Pixi opens our menu on pointerup/rightclick before the DOM contextmenu event.
+  // By then the hit target is often #chat-context (under the cursor), not the canvas —
+  // a canvas-only preventDefault misses it and WebView2 shows its native menu too.
+  const suppressNativeContextMenu = (ev: Event): void => {
     ev.preventDefault();
-  });
+    ev.stopPropagation();
+  };
+  for (const surface of [canvasHost, pane, contextMenuEl, modTimeoutPopupEl]) {
+    surface.addEventListener("contextmenu", suppressNativeContextMenu, true);
+  }
+  document.addEventListener(
+    "contextmenu",
+    (ev) => {
+      if (contextMenuEl.hidden && modTimeoutPopupEl.hidden) {
+        return;
+      }
+      // Keep native paste/cut menu on composer if somehow still open (e.g. Shift+F10).
+      if (isEditableTarget(ev.target)) {
+        return;
+      }
+      suppressNativeContextMenu(ev);
+    },
+    true,
+  );
 
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
