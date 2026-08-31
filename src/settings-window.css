@@ -68,6 +68,11 @@
   padding: 6px 8px;
 }
 
+#settings-root .editable-table input[type="checkbox"]:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 #settings-root #settings-dialog-foot {
   padding: var(--space-3) var(--space-4);
   gap: var(--space-2);

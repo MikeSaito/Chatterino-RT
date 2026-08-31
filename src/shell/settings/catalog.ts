@@ -44,6 +44,8 @@ export type TableColumn = {
   label: string;
   type: "text" | "checkbox" | "color" | "select";
   options?: { label: string; value: string }[];
+  /** Display-only (stock Filter "Valid"): not a user setting. */
+  readonly?: boolean;
 };
 
 export type TableDef = {
@@ -489,7 +491,6 @@ const HIGHLIGHT_MESSAGES_TABLE: TableDef = {
   path: "highlightMessages",
   columns: [
     { key: "pattern", label: "Pattern", type: "text" },
-    { key: "showInMentions", label: "Show in Mentions", type: "checkbox" },
     { key: "flashTaskbar", label: "Flash taskbar", type: "checkbox" },
     { key: "regex", label: "Enable regex", type: "checkbox" },
     { key: "caseSensitive", label: "Case-sensitive", type: "checkbox" },
@@ -514,7 +515,6 @@ const HIGHLIGHT_USERS_TABLE: TableDef = {
   path: "highlightUsers",
   columns: [
     { key: "username", label: "Username", type: "text" },
-    { key: "showInMentions", label: "Show in Mentions", type: "checkbox" },
     { key: "flashTaskbar", label: "Flash taskbar", type: "checkbox" },
     { key: "playSound", label: "Play sound", type: "checkbox" },
     { key: "customSound", label: "Custom sound", type: "text" },
@@ -535,7 +535,6 @@ const HIGHLIGHT_BADGES_TABLE: TableDef = {
   path: "highlightBadges",
   columns: [
     { key: "name", label: "Name", type: "text" },
-    { key: "showInMentions", label: "Show In Mentions", type: "checkbox" },
     { key: "flashTaskbar", label: "Flash taskbar", type: "checkbox" },
     { key: "playSound", label: "Play sound", type: "checkbox" },
     { key: "customSound", label: "Custom sound", type: "text" },
@@ -596,7 +595,7 @@ const FILTERS_TABLE: TableDef = {
   columns: [
     { key: "name", label: "Name", type: "text" },
     { key: "filter", label: "Filter", type: "text" },
-    { key: "valid", label: "Valid", type: "checkbox" },
+    { key: "valid", label: "Valid", type: "checkbox", readonly: true },
   ],
   blankRow: { name: "", filter: "", valid: true },
 };
@@ -634,10 +633,7 @@ const LOG_CHANNELS_TABLE: TableDef = {
 const MOD_ACTIONS_TABLE: TableDef = {
   id: "mod-actions",
   path: "modActions",
-  columns: [
-    { key: "action", label: "Action", type: "text" },
-    { key: "icon", label: "Icon", type: "text" },
-  ],
+  columns: [{ key: "action", label: "Action", type: "text" }],
   blankRow: { action: "", icon: "" },
 };
 

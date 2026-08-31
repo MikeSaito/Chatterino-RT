@@ -8,6 +8,8 @@ export type TableColumn = {
   label: string;
   type: "text" | "checkbox" | "color" | "select";
   options?: { label: string; value: string }[];
+  /** Display-only (stock Filter "Valid"): not a user setting. */
+  readonly?: boolean;
 };
 
 export type TableModel = {
@@ -111,13 +113,18 @@ export function mountEditableTable(
           const input = document.createElement("input");
           input.type = "checkbox";
           input.checked = Boolean(value);
-          input.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-          });
-          input.addEventListener("change", () => {
-            row[col.key] = input.checked;
-            onChange();
-          });
+          if (col.readonly) {
+            input.disabled = true;
+            input.setAttribute("aria-readonly", "true");
+          } else {
+            input.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+            });
+            input.addEventListener("change", () => {
+              row[col.key] = input.checked;
+              onChange();
+            });
+          }
           td.append(input);
         } else if (col.type === "color") {
           const input = document.createElement("input");
