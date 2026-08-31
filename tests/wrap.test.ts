@@ -652,4 +652,69 @@ if (extreme.w > 384 || extreme.w !== 144) {
   throw new Error(`extreme aspect must clamp, got ${JSON.stringify(extreme)}`);
 }
 
+const loneZwText = "cvHazmat extra";
+const loneZwEmotes = [
+  { start: 0, end: 8, zeroWidth: true, displayWidth: 8, displayHeight: 5 },
+];
+const loneZwOpts = { measureAdvance: adv, emoteMinPx: 5 } as const;
+const loneZwLines = wrapBody(loneZwText, 80, loneZwEmotes, loneZwOpts);
+const loneZwExtra = indexToLineCol(loneZwText, loneZwLines, 9, loneZwEmotes, loneZwOpts);
+if (!loneZwExtra || loneZwExtra.col !== 9) {
+  throw new Error(
+    `ZW without a base must occupy emote width, extra at col 9, got ${JSON.stringify(loneZwExtra)}`,
+  );
+}
+const loneZwMask = renderWrapped(loneZwText, loneZwLines, loneZwEmotes, loneZwOpts);
+if (loneZwMask.includes("cvHazmat")) {
+  throw new Error("lone ZW with images on still masks the code");
+}
+
+const gapZwText = "Kappa hello cvHazmat";
+const gapZwEmotes = [
+  { start: 0, end: 5, zeroWidth: false, displayWidth: 5, displayHeight: 5 },
+  { start: 12, end: 20, zeroWidth: true, displayWidth: 8, displayHeight: 5 },
+];
+const gapZwOpts = { measureAdvance: adv, emoteMinPx: 5 } as const;
+const gapZwLines = wrapBody(gapZwText, 80, gapZwEmotes, gapZwOpts);
+const gapHello = indexToLineCol(gapZwText, gapZwLines, 6, gapZwEmotes, gapZwOpts);
+if (!gapHello || gapHello.col !== 6) {
+  throw new Error(
+    `text between emotes must keep columns, hello at col 6, got ${JSON.stringify(gapHello)}`,
+  );
+}
+const gapZwPos = indexToLineCol(gapZwText, gapZwLines, 12, gapZwEmotes, gapZwOpts);
+if (!gapZwPos || gapZwPos.col !== 12) {
+  throw new Error(
+    `gapped ZW must occupy its own columns, got ${JSON.stringify(gapZwPos)}`,
+  );
+}
+
+const maskThenZwText = "Kappa x cvHazmat";
+const maskThenZwEmotes = [
+  { start: 0, end: 5, zeroWidth: false, displayWidth: 5, displayHeight: 5 },
+  {
+    start: 6,
+    end: 7,
+    zeroWidth: false,
+    provider: "cheer-mask",
+    displayWidth: 1,
+    displayHeight: 1,
+  },
+  { start: 8, end: 16, zeroWidth: true, displayWidth: 8, displayHeight: 5 },
+];
+const maskThenZwOpts = { measureAdvance: adv, emoteMinPx: 5 } as const;
+const maskThenZwLines = wrapBody(maskThenZwText, 80, maskThenZwEmotes, maskThenZwOpts);
+const maskZwPos = indexToLineCol(
+  maskThenZwText,
+  maskThenZwLines,
+  8,
+  maskThenZwEmotes,
+  maskThenZwOpts,
+);
+if (!maskZwPos || maskZwPos.col !== 12) {
+  throw new Error(
+    `ZW after cheer-mask must keep its own width, got ${JSON.stringify(maskZwPos)}`,
+  );
+}
+
 console.log("wrap tests ok");

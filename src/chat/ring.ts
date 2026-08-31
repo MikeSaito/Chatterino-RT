@@ -117,6 +117,28 @@ import {
   type WrapOptions,
 } from "./wrap";
 
+function onlyAsciiSpaces(text: string, start: number, end: number): boolean {
+  if (start > end) {
+    return false;
+  }
+  for (let i = start; i < end; i += 1) {
+    if (text.charCodeAt(i) !== 32) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function stacksZeroWidth(
+  text: string,
+  prevEnd: number,
+  spanStart: number,
+  zw: boolean,
+  hasPrev: boolean,
+): boolean {
+  return zw && hasPrev && onlyAsciiSpaces(text, prevEnd, spanStart);
+}
+
 const TIME_GAP = 8;
 const BADGE_GAP = 2;
 /** Chatterino MessageLayoutContainer MARGIN.top/bottom (once per message). */
@@ -849,6 +871,7 @@ export class MessageRing {
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
+    let prevEnd = 0;
     let bitsLabelShown = false;
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
@@ -859,7 +882,8 @@ export class MessageRing {
       }
       const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
-      if (zw && hasPrev) {
+      // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
+      if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
         spr.visible = true;
         spr.x = prevX;
         spr.y = prevY;
@@ -889,6 +913,7 @@ export class MessageRing {
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
+      prevEnd = span.end;
       if (
         !bitsLabelShown &&
         this.stackBits &&
@@ -3443,6 +3468,7 @@ export class MessageRing {
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
+    let prevEnd = 0;
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
       const span = slot.spansRaw[i];
@@ -3452,7 +3478,8 @@ export class MessageRing {
       }
       const paint = this.emotePaintSize(span, cloudFontSize);
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
-      if (zw && hasPrev) {
+      // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
+      if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
         spr.visible = true;
         spr.x = prevX;
         spr.y = prevY;
@@ -3484,6 +3511,7 @@ export class MessageRing {
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
+      prevEnd = span.end;
     }
     slot.bitsLabel.visible = false;
     slot.bitsLabel.text = "";
@@ -3702,6 +3730,7 @@ export class MessageRing {
     let prevX = 0;
     let prevY = 0;
     let hasPrev = false;
+    let prevEnd = 0;
     let bitsLabelShown = false;
     for (let i = 0; i < slot.emotes.length; i += 1) {
       const spr = slot.emotes[i];
@@ -3712,7 +3741,8 @@ export class MessageRing {
       }
       const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
-      if (zw && hasPrev) {
+      // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
+      if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
         spr.visible = true;
         spr.x = prevX;
         spr.y = prevY;
@@ -3742,6 +3772,7 @@ export class MessageRing {
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
+      prevEnd = span.end;
       if (
         !bitsLabelShown &&
         this.stackBits &&

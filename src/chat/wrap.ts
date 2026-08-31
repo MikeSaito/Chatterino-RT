@@ -9,6 +9,8 @@ export type WrapEmote = {
   zeroWidth?: boolean;
   displayWidth?: number;
   displayHeight?: number;
+  /** Bits digit mask; not an overlay host. */
+  provider?: string;
   /** Stacked bits label width reserve (emotes.stackBits). */
   bitsAmount?: number;
 };
@@ -379,7 +381,7 @@ function wrapParagraph(
     const width = Math.max(1, widthForNext());
     let end = takeWidth(text, i, to, width, emotes, ctx);
     if (end < to) {
-      end = snapBeforeEmote(i, end, emotes, ctx);
+      end = snapBeforeEmote(text, i, end, emotes, ctx);
       end = snapBeforeMention(i, end, ctx.maskMentions);
       end = snapWord(text, i, end, emotes, ctx);
     }
@@ -607,7 +609,7 @@ function maskSlice(
       i = nextUtf16(text, i);
       continue;
     }
-    const span = emoteAt(emotes, i, ctx);
+    const span = emoteAt(text, emotes, i, ctx);
     if (span && i === span.start) {
       kept.push(spacesForPx(emoteIdealPx(span, text, ctx), ctx));
       i = span.end;
@@ -643,14 +645,16 @@ function mentionAt(
 }
 
 function snapBeforeEmote(
+  text: string,
   lineStart: number,
   end: number,
   emotes: readonly WrapEmote[],
   ctx: WrapCtx,
 ): number {
   let snapped = end;
-  for (const span of emotes) {
-    if (isZeroWidth(span, ctx)) {
+  for (let i = 0; i < emotes.length; i += 1) {
+    const span = emotes[i];
+    if (isOverlayLayer(emotes, i, ctx, text)) {
       continue;
     }
     if (span.start > lineStart && span.start < snapped && span.end > snapped) {
@@ -713,7 +717,7 @@ function advanceUnit(
   if (collapsed(text, emotes, i, ctx, budget)) {
     return { next: Math.min(limit, nextUtf16(text, i)), width: 0 };
   }
-  const span = emoteAt(emotes, i, ctx);
+  const span = emoteAt(text, emotes, i, ctx);
   if (span && i === span.start) {
     return {
       next: Math.min(limit, span.end),
@@ -731,12 +735,14 @@ function advanceUnit(
 }
 
 function emoteAt(
+  text: string,
   emotes: readonly WrapEmote[],
   index: number,
   ctx: WrapCtx,
 ): WrapEmote | undefined {
-  for (const span of emotes) {
-    if (isZeroWidth(span, ctx)) {
+  for (let i = 0; i < emotes.length; i += 1) {
+    const span = emotes[i];
+    if (isOverlayLayer(emotes, i, ctx, text)) {
       continue;
     }
     if (index >= span.start && index < span.end) {
@@ -785,12 +791,45 @@ function isZeroWidth(span: WrapEmote, ctx: WrapCtx): boolean {
   return ctx.enableZeroWidth && span.zeroWidth === true;
 }
 
+/** ZW stacked on the previous layout span (host or overlay), not cheer-mask. */
+function isOverlayLayer(
+  emotes: readonly WrapEmote[],
+  index: number,
+  ctx: WrapCtx,
+  text: string,
+): boolean {
+  if (index <= 0 || !isZeroWidth(emotes[index], ctx)) {
+    return false;
+  }
+  const prev = emotes[index - 1];
+  if (prev.provider === "cheer-mask") {
+    return false;
+  }
+  return onlySpacesUtf16(text, prev.end, emotes[index].start);
+}
+
+function onlySpacesUtf16(text: string, start: number, end: number): boolean {
+  if (start > end) {
+    return false;
+  }
+  for (let i = start; i < end; i += 1) {
+    if (text.charCodeAt(i) !== 32) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function hugPrevNonZw(
   emotes: readonly WrapEmote[],
   spaceIndex: number,
   ctx: WrapCtx,
+  text: string,
 ): WrapEmote | undefined {
   for (const span of emotes) {
+    if (span.provider === "cheer-mask") {
+      continue;
+    }
     if (!isZeroWidth(span, ctx) && span.end === spaceIndex) {
       return span;
     }
@@ -800,11 +839,14 @@ function hugPrevNonZw(
   }
   for (let i = 0; i < emotes.length; i += 1) {
     const span = emotes[i];
-    if (span.zeroWidth !== true || span.end !== spaceIndex) {
+    if (!isOverlayLayer(emotes, i, ctx, text) || span.end !== spaceIndex) {
       continue;
     }
     for (let j = i - 1; j >= 0; j -= 1) {
-      if (!isZeroWidth(emotes[j], ctx)) {
+      if (emotes[j].provider === "cheer-mask") {
+        continue;
+      }
+      if (!isOverlayLayer(emotes, j, ctx, text)) {
         return emotes[j];
       }
     }
@@ -857,7 +899,7 @@ function hugSpace(
   if (index < 0 || index >= text.length || text.charCodeAt(index) !== 32) {
     return false;
   }
-  const prev = hugPrevNonZw(emotes, index, ctx);
+  const prev = hugPrevNonZw(emotes, index, ctx, text);
   const next = hugNextNonZw(emotes, index, ctx);
   if (!prev || !next) {
     return false;
@@ -889,10 +931,10 @@ function collapsed(
   }
   for (let i = 0; i < emotes.length; i += 1) {
     const span = emotes[i];
-    if (span.zeroWidth !== true) {
+    if (!isOverlayLayer(emotes, i, ctx, text)) {
       continue;
     }
-    const from = i > 0 ? emotes[i - 1].end : span.start;
+    const from = emotes[i - 1].end;
     if (index >= from && index < span.end) {
       return true;
     }
