@@ -95,11 +95,10 @@ CI on `main` / PRs: `rustfmt`, Rust tests, JS typecheck + unit tests, production
 
 ## Community
 
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-Chatterino 2 is also MIT. Protocol and UX logic follow that project; C++/Qt code and assets are not included.
+MIT. See [LICENSE](LICENSE). Chatterino 2 attribution: [NOTICE](NOTICE).
