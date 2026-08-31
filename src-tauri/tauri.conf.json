@@ -81,7 +81,7 @@
   "plugins": {
     "updater": {
       "dangerousInsecureTransportProtocol": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5MTRGQkFEMzE1MDkwNDIKUldSQ2tGQXhyZnNVcVdEbEg4MTZRVWhLY3FNU1hiWWRCZ29oNy9EeXVUSzZ0K1BiZlJaNnFSRisK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZEODg1RDQwRTJDMzIwNjEKUldSaElNUGlRRjJJL2NnRmppNnpTOEh0ZHZKODdtQm1CeitGKzZ5RGJpYkM5VzQ4eCsxUnl2UXQK",
       "endpoints": [
         "https://github.com/MikeSaito/Chatterino-RT/releases/latest/download/latest.json"
       ],
