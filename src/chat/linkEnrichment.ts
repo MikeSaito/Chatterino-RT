@@ -1,17 +1,24 @@
 /** Resolve link titles / Twitch clip cards and push into MessageRing. */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatEvent } from "./types";
+import type { ChatEvent, EmoteSpan, LinkSpan, MentionSpan } from "./types";
 import type { MessageRing } from "./ring";
 import {
   applyLinkTitlesToBody,
   hostLabelFromUrl,
   isTwitchClipUrl,
   titleFromLinkTooltip,
+  type HostSpanRange,
   type LinkTitleSpec,
 } from "./linkDisplay";
 import { rememberResolvedUrl } from "../shell/emoteTooltip";
 import { t } from "../i18n";
+import {
+  createLinkEnrichmentPump,
+  LINK_ENRICH_MAX_INFLIGHT,
+} from "./linkEnrichmentPump";
+
+export { LINK_ENRICH_MAX_INFLIGHT } from "./linkEnrichmentPump";
 
 export type ClipCardInfo = {
   clipId: string;
@@ -45,6 +52,32 @@ type ClipInfoResponse = {
   broadcasterName: string;
   gameName?: string | null;
   createdAt?: string | null;
+};
+
+/** Minimal ring surface for enrichment (MessageRing satisfies this). */
+export type LinkEnrichmentRing = {
+  peekLinkEnrichment(msgId: string): {
+    bodySource: string;
+    links: LinkSpan[];
+    spans: EmoteSpan[];
+    mentions: MentionSpan[];
+  } | null;
+  applyLinkEnrichment(
+    msgId: string,
+    payload: {
+      body: string;
+      links: LinkSpan[];
+      hosts: HostSpanRange[];
+      spans: EmoteSpan[];
+      mentions: MentionSpan[];
+      clip: ClipCardInfo | null;
+    },
+  ): void;
+};
+
+export type LinkEnrichmentIo = {
+  resolveTitle: (url: string) => Promise<LinkTitleSpec | null>;
+  resolveClip: (url: string) => Promise<ClipCardInfo | null>;
 };
 
 const titleCache = new Map<string, LinkTitleSpec>();
@@ -156,15 +189,24 @@ function eventHasLinks(event: ChatEvent): string | null {
   return null;
 }
 
+const defaultIo: LinkEnrichmentIo = {
+  resolveTitle,
+  resolveClip,
+};
+
 export function bindLinkEnrichment(
-  ring: MessageRing,
+  ring: LinkEnrichmentRing | MessageRing,
+  io: LinkEnrichmentIo = defaultIo,
 ): {
   afterBatch: (events: ChatEvent[]) => void;
   stop: () => void;
+  pendingCount: () => number;
+  inflightCount: () => number;
 } {
-  let generation = 0;
-
-  const enrichOne = async (msgId: string, gen: number): Promise<void> => {
+  const enrichOne = async (
+    msgId: string,
+    isCurrent: () => boolean,
+  ): Promise<void> => {
     const target = ring.peekLinkEnrichment(msgId);
     if (!target || target.links.length === 0) {
       return;
@@ -173,7 +215,7 @@ export function bindLinkEnrichment(
     let clip: ClipCardInfo | null = null;
     await Promise.all(
       target.links.map(async (link) => {
-        const spec = await resolveTitle(link.url);
+        const spec = await io.resolveTitle(link.url);
         if (spec) {
           titles.push(spec);
         }
@@ -181,13 +223,18 @@ export function bindLinkEnrichment(
     );
     for (const link of target.links) {
       if (isTwitchClipUrl(link.url)) {
-        clip = await resolveClip(link.url);
+        clip = await io.resolveClip(link.url);
         if (clip) {
           break;
         }
       }
     }
-    if (gen !== generation) {
+    if (!isCurrent()) {
+      return;
+    }
+    // Re-read after await: channel reset / already enriched / body rewritten.
+    const latest = ring.peekLinkEnrichment(msgId);
+    if (!latest) {
       return;
     }
     if (titles.length === 0 && !clip) {
@@ -195,32 +242,32 @@ export function bindLinkEnrichment(
     }
     if (titles.length === 0) {
       ring.applyLinkEnrichment(msgId, {
-        body: target.bodySource,
-        links: target.links,
+        body: latest.bodySource,
+        links: latest.links,
         hosts: [],
-        spans: target.spans,
-        mentions: target.mentions,
+        spans: latest.spans,
+        mentions: latest.mentions,
         clip,
       });
       return;
     }
     const remap = [
-      ...target.spans.map((s) => ({ start: s.start, end: s.end })),
-      ...target.mentions.map((s) => ({ start: s.start, end: s.end })),
+      ...latest.spans.map((s) => ({ start: s.start, end: s.end })),
+      ...latest.mentions.map((s) => ({ start: s.start, end: s.end })),
     ];
     const applied = applyLinkTitlesToBody(
-      target.bodySource,
-      target.links,
+      latest.bodySource,
+      latest.links,
       titles,
       remap,
     );
-    const spanCount = target.spans.length;
-    const spans = target.spans.map((s, i) => ({
+    const spanCount = latest.spans.length;
+    const spans = latest.spans.map((s, i) => ({
       ...s,
       start: remap[i].start,
       end: remap[i].end,
     }));
-    const mentions = target.mentions.map((s, i) => ({
+    const mentions = latest.mentions.map((s, i) => ({
       ...s,
       start: remap[spanCount + i].start,
       end: remap[spanCount + i].end,
@@ -235,23 +282,28 @@ export function bindLinkEnrichment(
     });
   };
 
+  const pump = createLinkEnrichmentPump({
+    maxInflight: LINK_ENRICH_MAX_INFLIGHT,
+    isEligible: (id) => ring.peekLinkEnrichment(id) !== null,
+    enrich: enrichOne,
+  });
+
   return {
     afterBatch: (events) => {
-      generation += 1;
-      const gen = generation;
-      const seen = new Set<string>();
+      const ids: string[] = [];
       for (const event of events) {
         const id = eventHasLinks(event);
-        if (!id || seen.has(id)) {
-          continue;
+        if (id) {
+          ids.push(id);
         }
-        seen.add(id);
-        void enrichOne(id, gen);
       }
+      pump.afterIds(ids);
     },
     stop: () => {
-      generation += 1;
+      pump.stop();
     },
+    pendingCount: () => pump.pendingCount(),
+    inflightCount: () => pump.inflightCount(),
   };
 }
 

@@ -1274,6 +1274,9 @@ async function boot(): Promise<void> {
       replyThreadLive?.(events);
       linkEnrichment.afterBatch(events);
     },
+    onMountReset: () => {
+      linkEnrichment.stop();
+    },
   });
   chatIpc = ipc;
   {

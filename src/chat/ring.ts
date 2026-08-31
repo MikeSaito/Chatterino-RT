@@ -468,7 +468,12 @@ export class MessageRing {
     mentions: MentionSpan[];
   } | null {
     const slot = this.findSlotByMsgId(msgId);
-    if (!slot || !slot.bodySource || slot.linkSpans.length === 0) {
+    if (
+      !slot ||
+      slot.linkEnriched ||
+      !slot.bodySource ||
+      slot.linkSpans.length === 0
+    ) {
       return null;
     }
     return {

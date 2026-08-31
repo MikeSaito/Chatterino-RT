@@ -6,6 +6,7 @@ import type { ChatBatch, ChatEvent } from "./types";
 import type { MessageRing } from "./ring";
 import { notifyHighlightSounds } from "../shell/highlightSound";
 import { notifyHighlightFlash } from "../shell/highlightFlash";
+import { createMountBootstrapGate, liveBatchAction } from "./ipcMountGate";
 
 export type ChatIpc = {
   join: (channel: string, focus?: boolean) => Promise<string>;
@@ -37,18 +38,39 @@ type Op =
       reject: (e: unknown) => void;
     };
 
-export type BindChatIpcOpts = {
-  afterBatch?: (events: ChatEvent[]) => void;
+/** Ring surface used by IPC (MessageRing satisfies this). */
+export type ChatIpcRing = {
+  reset(): void;
+  applySnapshot(events: ChatEvent[]): void;
+  pushMany(events: ChatEvent[]): void;
 };
 
-export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc {
+export type BindChatIpcOpts = {
+  afterBatch?: (events: ChatEvent[]) => void;
+  /** Cancel in-flight link enrichment / similar work on channel mount reset. */
+  onMountReset?: () => void;
+  /** Optional platform hooks for unit tests. */
+  invoke?: typeof invoke;
+  listen?: typeof listen;
+  Channel?: typeof Channel;
+};
+
+export function bindChatIpc(
+  ring: ChatIpcRing | MessageRing,
+  opts?: BindChatIpcOpts,
+): ChatIpc {
   const afterBatch = opts?.afterBatch;
+  const onMountReset = opts?.onMountReset;
+  const invokeFn = opts?.invoke ?? invoke;
+  const listenFn = opts?.listen ?? listen;
+  const ChannelCtor = opts?.Channel ?? Channel;
   let lastSeq = 0;
   let active = "";
   let epoch = 0;
   let pipeEpoch = 0;
   let stopped = false;
   let handling = false;
+  const mountGate = createMountBootstrapGate();
   let snapshotQueued = false;
   let retryTimer: number | undefined;
   let resubscribing = false;
@@ -64,7 +86,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     if (stopped || expected !== epoch) {
       return false;
     }
-    const snap = await invoke<ChatBatch>("chat_snapshot", { channel });
+    const snap = await invokeFn<ChatBatch>("chat_snapshot", { channel });
     if (expected !== epoch || channel !== active || stopped) {
       return false;
     }
@@ -92,11 +114,11 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     if (batch.channelId !== active) {
       return;
     }
-    if (batch.seq <= lastSeq) {
+    const action = liveBatchAction(lastSeq, batch.seq, batch.dropped);
+    if (action === "stale") {
       return;
     }
-    const gapped = lastSeq !== 0 && batch.seq !== lastSeq + 1;
-    if (gapped || batch.dropped > 0) {
+    if (action === "gap") {
       queued.length = 0;
       const ok = await applySnapshot(active, expected);
       if (!ok && expected === epoch) {
@@ -132,6 +154,11 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     while (queued.length > 0 || snapshotQueued) {
       if (stopped) {
         break;
+      }
+      // Hold live batches until mount bootstrap snapshot finishes (P1 race).
+      if (mountGate.isHolding()) {
+        handling = false;
+        return;
       }
       if (snapshotQueued) {
         queued.length = 0;
@@ -194,7 +221,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
   };
 
   const unsubscribePipe = (generation: number | null): void => {
-    void invoke("chat_unsubscribe", { generation }).catch(() => undefined);
+    void invokeFn("chat_unsubscribe", { generation }).catch(() => undefined);
   };
 
   const attachChannel = async (): Promise<void> => {
@@ -206,7 +233,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
       activePipe.onmessage = () => undefined;
       activePipe = null;
     }
-    const channel = new Channel<unknown>();
+    const channel = new ChannelCtor<unknown>();
     activePipe = channel;
     channel.onmessage = (payload) => {
       if (my !== pipeEpoch || stopped) {
@@ -221,7 +248,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     };
     let generation: number;
     try {
-      generation = await invoke<number>("chat_subscribe", { channel });
+      generation = await invokeFn<number>("chat_subscribe", { channel });
     } catch (err) {
       if (my === pipeEpoch && activePipe === channel) {
         activePipe.onmessage = () => undefined;
@@ -267,14 +294,22 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     ring.reset();
     queued.length = 0;
     snapshotQueued = false;
+    onMountReset?.();
+    mountGate.begin();
     try {
       const applied = await applySnapshot(joined, expected);
       if (!applied && expected === epoch) {
         lastSeq = 0;
+        snapshotQueued = true;
       }
     } catch {
       if (expected === epoch) {
         lastSeq = 0;
+        snapshotQueued = true;
+      }
+    } finally {
+      if (expected === epoch) {
+        mountGate.end();
       }
     }
     void pump();
@@ -285,9 +320,11 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     epoch += 1;
     active = "";
     lastSeq = 0;
+    mountGate.clear();
     queued.length = 0;
     snapshotQueued = false;
     ring.reset();
+    onMountReset?.();
   };
 
   const rejectQueuedOps = (): void => {
@@ -314,7 +351,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
             op.reject(new Error("chat ipc stopped"));
             break;
           }
-          const joined = await invoke<string>("chat_join", {
+          const joined = await invokeFn<string>("chat_join", {
             channel: op.channel,
             focus: op.focus,
           });
@@ -327,7 +364,9 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
           }
           op.resolve(joined);
         } else if (op.kind === "leave") {
-          const next = await invoke<string | null>("chat_leave", { channel: op.channel });
+          const next = await invokeFn<string | null>("chat_leave", {
+            channel: op.channel,
+          });
           if (stopped) {
             op.reject(new Error("chat ipc stopped"));
             break;
@@ -374,7 +413,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     }
   };
 
-  void listen(CHAT_PIPE_EVENT, () => {
+  void listenFn(CHAT_PIPE_EVENT, () => {
     onBadPipe();
   }).then((unlisten) => {
     if (stopped) {
@@ -384,7 +423,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
     unlistenPipe = unlisten;
   });
 
-  void listen<{ channelId: string }>(CHAT_HISTORY_LOADED_EVENT, (ev) => {
+  void listenFn<{ channelId: string }>(CHAT_HISTORY_LOADED_EVENT, (ev) => {
     if (stopped || ev.payload.channelId !== active) {
       return;
     }
@@ -431,7 +470,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
         return;
       }
       clearActive();
-      await invoke("chat_part");
+      await invokeFn("chat_part");
     },
     stop() {
       if (stopped) {
@@ -439,6 +478,7 @@ export function bindChatIpc(ring: MessageRing, opts?: BindChatIpcOpts): ChatIpc 
       }
       stopped = true;
       epoch += 1;
+      mountGate.clear();
       const generation = pipeGeneration;
       pipeGeneration = null;
       dropPipe();
