@@ -1,13 +1,13 @@
 import { Texture } from "pixi.js";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
+import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 import { resolveEmoteUrl } from "./emoteUrl";
 
 export { resolveEmoteUrl } from "./emoteUrl";
+export { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 
 const ATTEMPTS = 3;
-/** Как Chatterino GIF_FRAME_LENGTH (мс). */
-export const GIF_FRAME_LENGTH = 20;
 
 export type EmoteFrameSet = {
   frames: Texture[];
@@ -18,7 +18,7 @@ export type EmoteFrameSet = {
 type ImageDecoderInstance = {
   decode: (options: { frameIndex: number }) => Promise<{
     image: VideoFrame;
-    duration?: number;
+    complete?: boolean;
   }>;
   tracks: {
     ready: Promise<void>;
@@ -417,16 +417,17 @@ async function decodeAnimated(
     const frameCount = Math.min(track.frameCount, MAX_GIF_FRAMES);
     let total = 0;
     for (let i = 0; i < frameCount; i += 1) {
-      const { image, duration } = await decoder.decode({ frameIndex: i });
+      const { image } = await decoder.decode({ frameIndex: i });
+      // VideoFrame.duration is µs (WebCodecs); ImageDecodeResult has no duration.
+      const ms = gifFrameDelayMs(image.duration);
       try {
         const bitmap = await createImageBitmap(image);
         frames.push(Texture.from(bitmap));
+        delays.push(ms);
+        total += ms;
       } finally {
         image.close();
       }
-      const ms = Math.max(GIF_FRAME_LENGTH, Math.round((duration ?? 0) / 1000));
-      delays.push(ms);
-      total += ms;
     }
     if (frames.length <= 1) {
       destroyFrameSet({ frames, delays, total: GIF_FRAME_LENGTH }, null);
