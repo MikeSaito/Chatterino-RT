@@ -1453,10 +1453,20 @@ fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
     let json =
         serde_json::to_string(&DiskMultiOut { current, accounts }).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json).map_err(|e| e.to_string())?;
-    restrict_auth_file_permissions(&tmp)?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-    // Re-apply after rename: some FS replace the final ACL from the destination.
+    if let Err(e) = fs::write(&tmp, &json) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = restrict_auth_file_permissions(&tmp) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    // Committed on rename. Re-apply if the destination inherited a wider DACL.
+    // Do not return Err: RAM/disk would diverge (callers roll back memory).
     let _ = restrict_auth_file_permissions(path);
     Ok(())
 }
@@ -1654,6 +1664,35 @@ mod tests {
         missing.retain(|s| s != "moderator:manage:warnings");
         assert!(!scopes_cover_device(&missing));
         assert!(!scopes_cover_device(&[]));
+    }
+
+    #[test]
+    fn save_store_removes_tmp_after_success() {
+        let dir = std::env::temp_dir().join(format!(
+            "chatterino-rt-auth-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("twitch-auth.json");
+        let leftover = path.with_extension("json.tmp");
+        fs::write(&leftover, "stale-token").unwrap();
+        let store = AuthStore {
+            current_login: Some("alice".into()),
+            accounts: vec![StoredCreds {
+                login: "alice".into(),
+                token: "tok".into(),
+                client_id: "cid".into(),
+                user_id: Some("1".into()),
+            }],
+        };
+        save_store(&path, &store).unwrap();
+        assert!(path.is_file());
+        assert!(!leftover.exists());
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
     }
 
     #[test]
