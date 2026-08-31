@@ -141,6 +141,20 @@ pub fn allowed_clip_thumbnail_url(raw: &str) -> Option<String> {
     if !CLIP_THUMB_HOSTS.iter().any(|h| *h == host) {
         return None;
     }
+    let path = parsed.path();
+    if path.contains("..") || path.is_empty() || path == "/" {
+        return None;
+    }
+    let lower = path.to_ascii_lowercase();
+    // Clip thumbs are image paths (often `*-preview-*.jpg`); reject bare/non-image trees.
+    if !(lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".png")
+        || lower.ends_with(".webp")
+        || lower.contains("-preview-"))
+    {
+        return None;
+    }
     Some(parsed.as_str().to_string())
 }
 

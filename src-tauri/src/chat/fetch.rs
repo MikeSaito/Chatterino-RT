@@ -627,10 +627,17 @@ pub(crate) fn allowed_bttv_url(raw: &str) -> Option<String> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return None;
     }
-    match parsed.host_str() {
-        Some("cdn.betterttv.net") => Some(parsed.as_str().to_string()),
-        _ => None,
+    if parsed.host_str() != Some("cdn.betterttv.net") {
+        return None;
     }
+    let path = parsed.path();
+    if path.contains("..") {
+        return None;
+    }
+    if !path.starts_with("/emote/") && !path.starts_with("/badge/") {
+        return None;
+    }
+    Some(parsed.as_str().to_string())
 }
 
 pub(crate) fn allowed_chatterino_badge_url(raw: &str) -> Option<String> {
@@ -672,7 +679,18 @@ pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     }
     match parsed.host_str() {
         Some("cdn.frankerfacez.com") | Some("cdn.frankerfacez.net") => {
-            Some(parsed.as_str().to_string())
+            let path = parsed.path();
+            if path.contains("..") {
+                return None;
+            }
+            if path.starts_with("/emote/")
+                || path.starts_with("/badge/")
+                || path.starts_with("/room-badge/")
+            {
+                Some(parsed.as_str().to_string())
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -709,6 +727,7 @@ fn allowed_7tv_cdn_url(raw: &str) -> Option<String> {
     Some(parsed.as_str().to_string())
 }
 
+/// Canonical emoji PNG path: `/npm/emoji-datasource-{set}@15.1.2/img/{set}/64/{unified}.png`
 fn allowed_jsdelivr_emoji_url(raw: &str) -> Option<String> {
     let composed = abs_url(raw);
     let parsed = Url::parse(&composed).ok()?;
@@ -721,10 +740,28 @@ fn allowed_jsdelivr_emoji_url(raw: &str) -> Option<String> {
     if parsed.host_str() != Some("cdn.jsdelivr.net") {
         return None;
     }
-    if !parsed.path().starts_with("/npm/emoji-datasource-") {
+    let path = parsed.path();
+    if path.contains("..") {
         return None;
     }
-    Some(parsed.as_str().to_string())
+    const SETS: &[&str] = &["twitter", "facebook", "apple", "google"];
+    for set in SETS {
+        let prefix = format!("/npm/emoji-datasource-{set}@15.1.2/img/{set}/64/");
+        if let Some(rest) = path.strip_prefix(&prefix) {
+            if rest.is_empty() || !rest.ends_with(".png") || rest.contains('/') {
+                return None;
+            }
+            if !rest
+                .trim_end_matches(".png")
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == '-')
+            {
+                return None;
+            }
+            return Some(parsed.as_str().to_string());
+        }
+    }
+    None
 }
 
 pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), String> {
@@ -949,6 +986,16 @@ mod tests {
             )
         );
         assert!(allowed_emote_cdn_url("https://evil.example/emote/x.png").is_none());
+        assert!(allowed_emote_cdn_url(
+            "https://cdn.jsdelivr.net/npm/emoji-datasource-twitter@15.1.2/package.json"
+        )
+        .is_none());
+        assert!(allowed_emote_cdn_url(
+            "https://cdn.jsdelivr.net/npm/emoji-datasource-evil@1.0.0/img/evil/64/1f600.png"
+        )
+        .is_none());
+        assert!(allowed_emote_cdn_url("https://cdn.betterttv.net/other/x.png").is_none());
+        assert!(allowed_emote_cdn_url("https://cdn.frankerfacez.com/other/x.png").is_none());
         assert_eq!(
             allowed_emote_cdn_url("https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"),
             Some("https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg".to_string())

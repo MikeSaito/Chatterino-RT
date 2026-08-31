@@ -307,11 +307,30 @@ pub fn helix_creds(token: Option<&str>, client_id: &str) -> Option<(String, Stri
 }
 
 pub fn allowed_badge_url(raw: &str) -> Option<String> {
-    allowed_https_host(raw, BADGE_HOSTS)
+    let parsed = allowed_https_host(raw, BADGE_HOSTS)?;
+    let path = Url::parse(&parsed).ok()?.path().to_string();
+    if path.contains("..") {
+        return None;
+    }
+    // Twitch badges + emote CDN (same host); reject profile pics and other trees.
+    if path.starts_with("/badges/") || path.starts_with("/emoticons/") {
+        Some(parsed)
+    } else {
+        None
+    }
 }
 
 pub fn allowed_cheer_url(raw: &str) -> Option<String> {
-    allowed_https_host(raw, CHEER_HOSTS)
+    let parsed = allowed_https_host(raw, CHEER_HOSTS)?;
+    let path = Url::parse(&parsed).ok()?.path().to_string();
+    if path.contains("..") {
+        return None;
+    }
+    if path.starts_with("/actions/") {
+        Some(parsed)
+    } else {
+        None
+    }
 }
 
 pub fn parse_streams_live(value: &Value) -> bool {
@@ -1688,6 +1707,14 @@ mod tests {
         assert!(allowed_badge_url("http://static-cdn.jtvnw.net/x").is_none());
         assert!(allowed_badge_url("https://static-cdn.jtvnw.net/badges/v1/x").is_some());
         assert!(allowed_badge_url(
+            "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0"
+        )
+        .is_some());
+        assert!(allowed_badge_url(
+            "https://static-cdn.jtvnw.net/jtv_user_pictures/x.png"
+        )
+        .is_none());
+        assert!(allowed_badge_url(
             "https://d3aqoihi2n8ty8.cloudfront.net/actions/cheer/dark/static/1/1.gif"
         )
         .is_none());
@@ -1696,6 +1723,7 @@ mod tests {
             "https://d3aqoihi2n8ty8.cloudfront.net/actions/cheer/dark/static/1/1.gif"
         )
         .is_some());
+        assert!(allowed_cheer_url("https://d3aqoihi2n8ty8.cloudfront.net/other/1.gif").is_none());
     }
 
     #[test]

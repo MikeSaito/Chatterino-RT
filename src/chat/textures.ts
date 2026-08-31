@@ -1,6 +1,7 @@
 import { Texture } from "pixi.js";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
+import { isAllowedEmoteCdnUrl } from "./emoteCdnAllowlist";
 import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 import { resolveEmoteUrl } from "./emoteUrl";
 
@@ -224,6 +225,12 @@ export class TextureLru {
         const prevSet = this.frameSets.get(id);
         if (!this.set(id, set.frames[0])) {
           destroyFrameSet(set, null);
+          // Cap full under pin: drop meta so retries cannot leak Map entries.
+          if (this.generation.get(id) === token) {
+            this.urls.delete(id);
+            this.modes.delete(id);
+            this.generation.delete(id);
+          }
           return null;
         }
         this.frameSets.set(id, set);
@@ -337,6 +344,9 @@ async function fetchCdnViaInvoke(url: string): Promise<{ buf: ArrayBuffer; mime:
 async function fetchEmoteBytes(
   url: string,
 ): Promise<{ buf: ArrayBuffer; mime: string }> {
+  if (!isAllowedEmoteCdnUrl(url)) {
+    throw new Error("cdn url not allowed");
+  }
   if (isTauri()) {
     return fetchCdnViaInvoke(url);
   }

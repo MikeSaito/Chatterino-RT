@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde_json::Value;
 use url::Url;
 
+use super::spans::allowed_chat_url;
 use super::state::Shared;
 
 pub const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -402,19 +403,37 @@ pub async fn post_image(
         }
         return Err(msg);
     }
-    let link = link_from_response(&body, &cfg.link_pattern);
-    if link.trim().is_empty() {
-        return Err("Upload succeeded but no image link was returned.".into());
-    }
+    let link_raw = normalize_upload_link(&link_from_response(&body, &cfg.link_pattern));
+    let link = allowed_chat_url(link_raw.trim())
+        .map_err(|_| "Upload succeeded but returned an invalid image link.".to_string())?;
     let deletion_link = if cfg.deletion_pattern.trim().is_empty() {
         String::new()
     } else {
-        link_from_response(&body, &cfg.deletion_pattern)
+        let raw = normalize_upload_link(&link_from_response(&body, &cfg.deletion_pattern));
+        allowed_chat_url(raw.trim()).unwrap_or_default()
     };
     Ok(UploadResult {
-        link: link.trim().to_string(),
-        deletion_link: deletion_link.trim().to_string(),
+        link,
+        deletion_link,
     })
+}
+
+fn normalize_upload_link(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if t.starts_with("//") {
+        return format!("https:{t}");
+    }
+    if !t.contains("://")
+        && t.contains('.')
+        && !t.contains(' ')
+        && !t.starts_with('/')
+    {
+        return format!("https://{t}");
+    }
+    t.to_string()
 }
 
 pub fn decode_bytes(base64: &str) -> Result<Vec<u8>, String> {
@@ -445,6 +464,22 @@ pub fn success_notice(link: &str, deletion: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn normalize_schemeless_upload_link() {
+        assert_eq!(
+            normalize_upload_link("//cdn.example/a.png"),
+            "https://cdn.example/a.png"
+        );
+        assert_eq!(
+            normalize_upload_link("cdn.example/a.png"),
+            "https://cdn.example/a.png"
+        );
+        assert_eq!(
+            normalize_upload_link("https://cdn.example/a.png"),
+            "https://cdn.example/a.png"
+        );
+    }
 
     #[test]
     fn headers_parse() {

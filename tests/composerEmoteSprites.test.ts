@@ -11,10 +11,11 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
-assert(isSafeEmoteCdnUrl("https://cdn.example/emote/1x"), "https ok");
-assert(!isSafeEmoteCdnUrl("http://cdn.example/emote/1x"), "http blocked");
-assert(!isSafeEmoteCdnUrl("https://user:pass@cdn.example/x"), "userinfo blocked");
+assert(isSafeEmoteCdnUrl("https://cdn.betterttv.net/emote/abc/1x"), "https ok");
+assert(!isSafeEmoteCdnUrl("http://cdn.betterttv.net/emote/abc/1x"), "http blocked");
+assert(!isSafeEmoteCdnUrl("https://user:pass@cdn.betterttv.net/emote/abc/1x"), "userinfo blocked");
 assert(!isSafeEmoteCdnUrl("javascript:alert(1)"), "js blocked");
+assert(!isSafeEmoteCdnUrl("https://cdn.example/emote/1x"), "foreign host blocked");
 
 assert(
   JSON.stringify(splitComposerParts("Kappa Hello")) ===

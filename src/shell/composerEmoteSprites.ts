@@ -1,6 +1,7 @@
 /** Inline emote sprites in composer: mirror under transparent textarea + URL cache. */
 
 import { invoke } from "@tauri-apps/api/core";
+import { isAllowedEmoteCdnUrl } from "../chat/emoteCdnAllowlist.ts";
 import { resolveEmoteUrl } from "../chat/emoteUrl.ts";
 
 export type EmoteIconHit = {
@@ -55,18 +56,7 @@ function codeUnitLen(s: string): number {
 }
 
 export function isSafeEmoteCdnUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "https:") {
-      return false;
-    }
-    if (u.username || u.password) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return isAllowedEmoteCdnUrl(url);
 }
 
 /** Whitespace-aware split; keeps separators for faithful mirror layout. */
