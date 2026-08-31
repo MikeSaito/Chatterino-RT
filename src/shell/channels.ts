@@ -141,7 +141,6 @@ export function bindChannelList(
     /** Tab boxes in content coords at arm time. */
     frozenBoxes: TabLayoutBox[];
     armed: boolean;
-    row: HTMLElement;
   } | null = null;
 
   const clearDragChrome = (): void => {
@@ -162,10 +161,10 @@ export function bindChannelList(
       clearDragChrome();
       return;
     }
-    drag.row.removeEventListener("lostpointercapture", onLostPointerCapture);
+    list.removeEventListener("lostpointercapture", onLostPointerCapture);
     try {
-      if (drag.row.hasPointerCapture(drag.pointerId)) {
-        drag.row.releasePointerCapture(drag.pointerId);
+      if (list.hasPointerCapture(drag.pointerId)) {
+        list.releasePointerCapture(drag.pointerId);
       }
     } catch {
       /* released */
@@ -323,11 +322,13 @@ export function bindChannelList(
       drag.startOpen = [...open];
       drag.frozenBoxes = readTabBoxes();
       try {
-        drag.row.setPointerCapture(ev.pointerId);
+        // Capture on the list, not the row: syncDomToOpen reorders <li> nodes and
+        // row pointer-events:none used to fire lostpointercapture mid-gesture.
+        list.setPointerCapture(ev.pointerId);
       } catch {
         /* optional */
       }
-      drag.row.addEventListener("lostpointercapture", onLostPointerCapture);
+      list.addEventListener("lostpointercapture", onLostPointerCapture);
       ev.preventDefault();
     }
     autoScroll(ev.clientX);
@@ -363,7 +364,6 @@ export function bindChannelList(
 
   const onTabPointerDown = (
     ev: PointerEvent,
-    item: HTMLElement,
     login: string,
   ): void => {
     if (ev.button !== 0 || showRecents || drag) {
@@ -387,9 +387,9 @@ export function bindChannelList(
       startOpen: [...open],
       frozenBoxes: [],
       armed: false,
-      row: item,
     };
-    // Do not capture yet — capture + pointer-events:none kill the click path.
+    // Capture arms on #channel-list (not the row) so DOM reorder + opacity chrome
+    // cannot drop pointer capture mid-gesture.
     window.addEventListener("pointermove", onWindowPointerMove);
     window.addEventListener("pointerup", onWindowPointerUp);
     window.addEventListener("pointercancel", onWindowPointerCancel);
@@ -488,7 +488,7 @@ export function bindChannelList(
         });
         item.appendChild(leave);
         item.addEventListener("pointerdown", (ev) => {
-          onTabPointerDown(ev, item, login);
+          onTabPointerDown(ev, login);
         });
       }
       list.appendChild(item);

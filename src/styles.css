@@ -329,8 +329,10 @@ body,
   opacity: 0.85;
   z-index: 2;
   position: relative;
-  pointer-events: none;
   cursor: grabbing;
+  /* Do not set pointer-events:none: capture is on #channel-list; hit-tests use
+     frozen geometry + clientX. pointer-events:none on the row drops capture in
+     WebView2 and aborts the reorder (release builds). */
 }
 
 .channel-row.is-dragging .channel-item {
