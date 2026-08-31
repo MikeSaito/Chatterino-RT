@@ -28,7 +28,7 @@ url = "2"
 emojis = "0.9"
 unicode-segmentation = "1"
 base64 = "0.23"
-rfd = "0.15"
+rfd = "0.17"
 regex = "1.13.1"
 chrono = { version = "0.4.45", features = ["clock"] }
 
