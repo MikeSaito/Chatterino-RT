@@ -20,7 +20,7 @@ rmp-serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "native-tls"] }
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
