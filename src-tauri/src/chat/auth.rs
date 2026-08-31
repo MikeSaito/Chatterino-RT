@@ -12,15 +12,13 @@ use super::state::{IrcCmd, Shared};
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
-// moderator:read:chat_messages — Helix GET /chat/pins (mod banner snapshot).
-// moderator:manage:chat_messages — Helix PUT/DELETE /chat/pins (context Pin/Unpin).
-// moderator:manage:warnings — Helix POST /moderation/warnings (/warn).
-// moderator:read|manage:suspicious_users — Low Trust EventSub + Helix treat/untreat.
-// moderator:read:{blocked_terms,chat_settings,unban_requests,banned_users,moderators,vips}
-//   — EventSub channel.moderate (shared chat ban/timeout awareness).
+// Must match scopes Chatterino client_login can grant (same Client ID).
+// Twitch uses `chat:edit` (not `chat:write`). Prefer `moderator:manage:*` where
+// Chatterino login does not issue the corresponding `read` scope — Helix/EventSub
+// accept manage for pins, warn, AutoMod, shared channel.moderate.
 // Existing sessions need re-login after scopes are added.
 const DEVICE_SCOPES: &str =
-    "chat:read chat:write user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:read:chat_messages moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings moderator:read:suspicious_users moderator:manage:suspicious_users moderator:read:blocked_terms moderator:read:chat_settings moderator:read:unban_requests moderator:read:banned_users moderator:read:moderators moderator:read:vips";
+    "chat:read chat:edit user:read:blocked_users user:manage:blocked_users channel:read:polls channel:read:predictions channel:manage:raids channel:moderate moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings moderator:read:suspicious_users moderator:manage:suspicious_users moderator:manage:blocked_terms moderator:manage:chat_settings moderator:manage:unban_requests moderator:manage:banned_users moderator:read:moderators moderator:read:vips";
 const GRANT_DEVICE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OAUTH_HOSTS: &[&str] = &["id.twitch.tv", "www.twitch.tv"];
 const CHATTERINO_LOGIN: &str = "https://chatterino.com/client_login";
@@ -1156,12 +1154,30 @@ fn device_scope_list() -> Vec<&'static str> {
     DEVICE_SCOPES.split_whitespace().collect()
 }
 
+/// True when `need` is present, or a known equivalent Twitch/Chatterino grants.
+fn scope_satisfied(have: &std::collections::HashSet<&str>, need: &str) -> bool {
+    if have.contains(need) {
+        return true;
+    }
+    // Legacy alias / manage-covers-read for banner completeness only.
+    match need {
+        "chat:write" => have.contains("chat:edit"),
+        "chat:edit" => have.contains("chat:write"),
+        "moderator:read:chat_messages" => have.contains("moderator:manage:chat_messages"),
+        "moderator:read:blocked_terms" => have.contains("moderator:manage:blocked_terms"),
+        "moderator:read:chat_settings" => have.contains("moderator:manage:chat_settings"),
+        "moderator:read:unban_requests" => have.contains("moderator:manage:unban_requests"),
+        "moderator:read:banned_users" => have.contains("moderator:manage:banned_users"),
+        _ => false,
+    }
+}
+
 /// Returns true when every DEVICE_SCOPES entry is present in the validate response.
 fn scopes_cover_device(have: &[String]) -> bool {
     let have_set: std::collections::HashSet<&str> = have.iter().map(String::as_str).collect();
     device_scope_list()
         .iter()
-        .all(|need| have_set.contains(need))
+        .all(|need| scope_satisfied(&have_set, need))
 }
 
 fn apply_scope_check(shared: &Shared, scopes: &[String]) {
@@ -1498,5 +1514,21 @@ mod tests {
         missing.retain(|s| s != "moderator:manage:warnings");
         assert!(!scopes_cover_device(&missing));
         assert!(!scopes_cover_device(&[]));
+    }
+
+    #[test]
+    fn scopes_cover_accepts_chat_edit_and_manage_equivalents() {
+        let mut scopes: Vec<String> = device_scope_list()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        // Replace chat:edit with legacy chat:write — still complete.
+        scopes.retain(|s| s != "chat:edit");
+        scopes.push("chat:write".into());
+        assert!(scopes_cover_device(&scopes));
+        assert!(scope_satisfied(
+            &["moderator:manage:chat_messages"].into_iter().collect(),
+            "moderator:read:chat_messages"
+        ));
     }
 }
