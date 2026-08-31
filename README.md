@@ -93,6 +93,12 @@ npm run build
 
 CI on `main` / PRs: `rustfmt`, Rust tests, JS typecheck + unit tests, production build.
 
+## Community
+
+- [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

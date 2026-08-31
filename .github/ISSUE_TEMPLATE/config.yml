@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/MikeSaito/Chatterino-RT/security/advisories/new
+    about: Report security issues privately (do not open a public issue).
+  - name: Discussions / questions
+    url: https://github.com/MikeSaito/Chatterino-RT/issues
+    about: For non-security questions, open a Feature request or Bug report with clear detail.
