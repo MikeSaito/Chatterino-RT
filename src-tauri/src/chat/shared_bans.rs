@@ -527,7 +527,8 @@ fn publish_shared_mod(
         SharedAction::Unban { user_login } => {
             // English `text` is search/log fallback; UI localizes via `msg_id` payload.
             let text = format!("{moderator} unbanned {user_login} in {source}.");
-            let msg_id = shared_notice_msg_id("shared_chat_unban", &moderator, &user_login, &source);
+            let msg_id =
+                shared_notice_msg_id("shared_chat_unban", &moderator, &user_login, &source);
             ingest_event(app, shared, channel, shared_mod_notice(text, msg_id));
         }
         SharedAction::Untimeout { user_login } => {
