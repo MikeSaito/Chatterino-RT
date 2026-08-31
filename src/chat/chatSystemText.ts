@@ -316,12 +316,40 @@ export function usernoticeFormatted(opts: {
   return { text, mentions };
 }
 
+/** Parse `kind|mod|login|source` from shared bans EventSub notices. */
+export function parseSharedBanNoticeMsgId(
+  msgId: string,
+): { kind: "unban" | "untimeout"; mod: string; login: string; source: string } | null {
+  const parts = msgId.split("|");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const kindRaw = parts[0].toLowerCase();
+  const kind =
+    kindRaw === "shared_chat_unban"
+      ? "unban"
+      : kindRaw === "shared_chat_untimeout"
+        ? "untimeout"
+        : null;
+  if (!kind) {
+    return null;
+  }
+  const mod = parts[1].trim();
+  const login = parts[2].trim();
+  const source = parts[3].trim();
+  if (!mod || !login || !source) {
+    return null;
+  }
+  return { kind, mod, login, source };
+}
+
 export function noticeFormatted(opts: {
   text: string;
   msgId?: string;
   timeoutRemainingSec?: number;
 }): FormattedSystemLine {
-  const msgId = (opts.msgId ?? "").toLowerCase();
+  const rawMsgId = opts.msgId ?? "";
+  const msgId = rawMsgId.toLowerCase();
   if (msgId === "msg_timedout") {
     const sec = opts.timeoutRemainingSec;
     if (sec !== undefined) {
@@ -330,6 +358,21 @@ export function noticeFormatted(opts: {
         mentions: [],
       };
     }
+  }
+  const shared = parseSharedBanNoticeMsgId(rawMsgId);
+  if (shared) {
+    const key =
+      shared.kind === "unban" ? "chat.sharedBan.unban" : "chat.sharedBan.untimeout";
+    const text = t(key, {
+      mod: shared.mod,
+      login: shared.login,
+      source: shared.source,
+    });
+    const mentions: MentionSpan[] = [];
+    pushMention(mentions, text, shared.mod, shared.mod);
+    pushMention(mentions, text, shared.login, shared.login);
+    pushMention(mentions, text, shared.source, shared.source);
+    return { text, mentions };
   }
   return { text: opts.text, mentions: [] };
 }

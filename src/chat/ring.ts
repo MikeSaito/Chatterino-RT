@@ -39,8 +39,8 @@ import {
   rasterizeNickPaint,
 } from "./nickPaint";
 
-/** Stock Chatterino low-trust / restricted row tint (ARGB-ish hex for Pixi fill). */
-const LOW_TRUST_HIGHLIGHT = "#ff4f4d55";
+/** Stock Chatterino low-trust / restricted row tint (`MessageLayout.cpp` `#404040`). */
+const LOW_TRUST_HIGHLIGHT = "#404040";
 import {
   clearchatFormatted,
   deletionNoticeText,

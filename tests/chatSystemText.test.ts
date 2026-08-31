@@ -35,6 +35,37 @@ assert(
   "notice timedout",
 );
 
+assert(
+  noticeFormatted({
+    text: "mod unbanned bob in src.",
+    msgId: "shared_chat_unban|mod|bob|src",
+  }).text === "mod unbanned bob in src.",
+  "shared unban en",
+);
+assert(
+  noticeFormatted({
+    text: "mod untimedout bob in src.",
+    msgId: "shared_chat_untimeout|mod|bob|src",
+  }).text === "mod untimedout bob in src.",
+  "shared untimeout en",
+);
+setLocale("ru");
+assert(
+  noticeFormatted({
+    text: "mod unbanned bob in src.",
+    msgId: "shared_chat_unban|mod|bob|src",
+  }).text === "mod разбанил bob в src.",
+  "shared unban ru",
+);
+assert(
+  noticeFormatted({
+    text: "mod untimedout bob in src.",
+    msgId: "shared_chat_untimeout|mod|bob|src",
+  }).text === "mod снял тайм-аут с bob в src.",
+  "shared untimeout ru",
+);
+setLocale("en");
+
 const gift = usernoticeFormatted({
   systemText: "fallback",
   login: "gifter",

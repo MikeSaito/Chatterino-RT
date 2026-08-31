@@ -525,18 +525,16 @@ fn publish_shared_mod(
             ingest_event(app, shared, channel, event);
         }
         SharedAction::Unban { user_login } => {
-            shared.post_channel_notice(
-                app,
-                channel,
-                format!("{moderator} unbanned {user_login} in {source}."),
-            );
+            // English `text` is search/log fallback; UI localizes via `msg_id` payload.
+            let text = format!("{moderator} unbanned {user_login} in {source}.");
+            let msg_id = shared_notice_msg_id("shared_chat_unban", &moderator, &user_login, &source);
+            ingest_event(app, shared, channel, shared_mod_notice(text, msg_id));
         }
         SharedAction::Untimeout { user_login } => {
-            shared.post_channel_notice(
-                app,
-                channel,
-                format!("{moderator} untimedout {user_login} in {source}."),
-            );
+            let text = format!("{moderator} untimedout {user_login} in {source}.");
+            let msg_id =
+                shared_notice_msg_id("shared_chat_untimeout", &moderator, &user_login, &source);
+            ingest_event(app, shared, channel, shared_mod_notice(text, msg_id));
         }
         // Shared delete: IRC CLEARMSG already yields the deletion row; skip duplicate notice.
         SharedAction::Delete { .. } => {}
@@ -564,6 +562,36 @@ fn clearchat_event(
         stack_count: 1,
         source_login,
         moderator_login,
+    }
+}
+
+/// `kind|mod|login|source` — Twitch logins are [a-z0-9_], so `|` is a safe delimiter.
+fn shared_notice_msg_id(kind: &str, moderator: &str, login: &str, source: &str) -> String {
+    let clean = |s: &str| {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>()
+    };
+    format!(
+        "{kind}|{}|{}|{}",
+        clean(moderator),
+        clean(login),
+        clean(source)
+    )
+}
+
+fn shared_mod_notice(text: String, msg_id: String) -> ChatEvent {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
+    ChatEvent::Notice {
+        id: format!("sb-{ts}-{seq}"),
+        timestamp_ms: ts,
+        text,
+        msg_id: Some(msg_id),
+        timeout_remaining_sec: None,
     }
 }
 
@@ -671,10 +699,11 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Option<Wanted> {
     if client_id.trim().is_empty() || client_id == "YOUR_API_KEY_HERE" {
         return None;
     }
+    // Same Relogin gate as pins/low_trust: token-login may lack cached user_id.
+    let moderator_id = auth::ensure_twitch_user_id(shared).await?;
     if !scopes_ok(&token, &client_id).await {
         return None;
     }
-    let moderator_id = auth::resolved_twitch_user_id(shared)?;
     let profile = super::helix::fetch_user_profile(login, Some(&token), &client_id).await?;
     Some(Wanted {
         login: login.to_string(),
@@ -767,5 +796,17 @@ mod tests {
             "ban": { "user_login": "bad" }
         });
         assert!(parse_shared_moderation(&event, "host").is_none());
+    }
+
+    #[test]
+    fn shared_notice_msg_id_pipe_payload() {
+        assert_eq!(
+            shared_notice_msg_id("shared_chat_unban", "mod", "bob", "src"),
+            "shared_chat_unban|mod|bob|src"
+        );
+        assert_eq!(
+            shared_notice_msg_id("shared_chat_untimeout", "mod", "bob", "src"),
+            "shared_chat_untimeout|mod|bob|src"
+        );
     }
 }
