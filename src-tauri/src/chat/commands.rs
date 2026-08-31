@@ -128,7 +128,9 @@ pub async fn chat_join(
     if do_focus {
         super::session::emit_roomstate(&app, &state, &normalized);
         state.notify_polls(super::polls::PollsCmd::SetChannel(normalized.clone()));
-        state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(normalized.clone()));
+        state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(
+            normalized.clone(),
+        ));
         state.notify_pins(super::pins::PinsCmd::SetChannel(normalized.clone()));
         state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(
             normalized.clone(),

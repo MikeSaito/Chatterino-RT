@@ -430,9 +430,7 @@ fn event_message_text(event: &ChatEvent) -> String {
         ChatEvent::AutomodStatus { status, .. } => status.clone(),
         ChatEvent::LowTrustHeader { detail, .. } => format!("Suspicious User: {detail}"),
         ChatEvent::LowTrustMessage {
-            display_name,
-            text,
-            ..
+            display_name, text, ..
         } => format!("{display_name}: {text}"),
     }
 }
@@ -510,13 +508,9 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
                 f.highlighted |= inner_f.highlighted;
             }
         }
-        ChatEvent::Clearchat {
-            source_login, ..
-        } => {
+        ChatEvent::Clearchat { source_login, .. } => {
             f.timeout = true;
-            f.shared = source_login
-                .as_deref()
-                .is_some_and(|s| !s.is_empty());
+            f.shared = source_login.as_deref().is_some_and(|s| !s.is_empty());
         }
         ChatEvent::Notice { .. } | ChatEvent::Roomstate { .. } => {
             f.system = true;
@@ -828,8 +822,8 @@ mod tests {
             target_login: Some("ann".into()),
             duration_sec: Some(60),
             stack_count: 1,
-        source_login: None,
-        moderator_login: None,
+            source_login: None,
+            moderator_login: None,
         };
         assert!(!applies_all(&parse_predicates("is:system"), &to, "c", None));
         assert!(applies_all(&parse_predicates("is:timeout"), &to, "c", None));

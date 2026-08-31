@@ -323,9 +323,7 @@ fn message_content(event: &ChatEvent) -> String {
         ChatEvent::Usernotice { system_text, .. } => system_text.clone(),
         ChatEvent::LowTrustHeader { detail, .. } => format!("Suspicious User: {detail}"),
         ChatEvent::LowTrustMessage {
-            display_name,
-            text,
-            ..
+            display_name, text, ..
         } => format!("{display_name}: {text}"),
         _ => String::new(),
     }
