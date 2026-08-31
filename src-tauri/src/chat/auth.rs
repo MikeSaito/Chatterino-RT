@@ -47,6 +47,8 @@ pub struct AuthInner {
     pub pending_paste: bool,
     pub poll_gen: u64,
     pub last_message: Option<String>,
+    /// Token scopes missing vs DEVICE_SCOPES (pins/automod/warn/shared).
+    pub scopes_incomplete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +76,8 @@ pub struct AuthInfo {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_image_url: Option<String>,
+    /// True when validate scopes are missing vs DEVICE_SCOPES — UI prompts re-login.
+    pub scopes_incomplete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -234,7 +238,7 @@ pub fn emit(app: &AppHandle, shared: &Shared) {
 }
 
 pub fn snapshot(app: &AppHandle, shared: &Shared) -> AuthInfo {
-    let (pending, pending_paste, account_logins, current_login, last_message) =
+    let (pending, pending_paste, account_logins, current_login, last_message, scopes_incomplete) =
         match shared.auth.lock() {
             Ok(inner) => (
                 inner.pending_user_code.clone(),
@@ -246,8 +250,9 @@ pub fn snapshot(app: &AppHandle, shared: &Shared) -> AuthInfo {
                     .collect::<Vec<_>>(),
                 inner.current_login.clone(),
                 inner.last_message.clone(),
+                inner.scopes_incomplete,
             ),
-            Err(_) => (None, false, Vec::new(), None, None),
+            Err(_) => (None, false, Vec::new(), None, None, false),
         };
     let env_pair = env_login_token();
     let from_env = env_pair.is_some();
@@ -283,6 +288,7 @@ pub fn snapshot(app: &AppHandle, shared: &Shared) -> AuthInfo {
         pending_paste,
         message: last_message,
         profile_image_url,
+        scopes_incomplete,
     }
 }
 
@@ -387,6 +393,7 @@ pub async fn ensure_twitch_user_id(shared: &Shared) -> Option<String> {
     }
     let mut login_hint = resolved_login_token(shared).map(|(l, _)| l);
     if let Ok(validated) = validate_token(&http_client(), &token).await {
+        apply_scope_check(shared, &validated.scopes);
         if let Some(uid) = validated.user_id {
             set_cached_twitch_user_id(shared, uid.clone());
             return Some(uid);
@@ -521,6 +528,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
     if !still_current(&shared, gen) {
         return Err(AuthFail::coded("error.auth.cancelled", "login cancelled"));
     }
+    apply_scope_check(&shared, &validated.scopes);
     let user_id = validated
         .user_id
         .filter(|id| valid_twitch_user_id(id))
@@ -883,6 +891,7 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
             TokenPoll::Ok(token) => {
                 match validate_token(&client, &token).await {
                     Ok(validated) => {
+                        apply_scope_check(&shared, &validated.scopes);
                         if persist_and_relogin(
                             &app,
                             &shared,
@@ -982,11 +991,13 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
     };
     match validate_token(&http_client(), &token).await {
         Ok(validated) => {
+            apply_scope_check(&shared, &validated.scopes);
             if let Some(uid) = validated.user_id {
                 set_cached_twitch_user_id(&shared, uid);
             } else {
                 let _ = ensure_twitch_user_id(&shared).await;
             }
+            emit(&app, &shared);
         }
         Err(_) => {
             let still = shared.auth.lock().ok().is_some_and(|inner| {
@@ -1136,6 +1147,38 @@ async fn request_token(client: &reqwest::Client, client_id: &str, device_code: &
 struct ValidatedToken {
     login: String,
     user_id: Option<String>,
+    scopes: Vec<String>,
+}
+
+fn device_scope_list() -> Vec<&'static str> {
+    DEVICE_SCOPES.split_whitespace().collect()
+}
+
+/// Returns true when every DEVICE_SCOPES entry is present in the validate response.
+fn scopes_cover_device(have: &[String]) -> bool {
+    let have_set: std::collections::HashSet<&str> = have.iter().map(String::as_str).collect();
+    device_scope_list()
+        .iter()
+        .all(|need| have_set.contains(need))
+}
+
+fn apply_scope_check(shared: &Shared, scopes: &[String]) {
+    let incomplete = !scopes_cover_device(scopes);
+    if let Ok(mut inner) = shared.auth.lock() {
+        inner.scopes_incomplete = incomplete;
+        if incomplete {
+            inner.last_message = Some(
+                "Sign in again to unlock pins, AutoMod, warnings, and shared chat moderation."
+                    .into(),
+            );
+        } else if inner
+            .last_message
+            .as_deref()
+            .is_some_and(|m| m.contains("unlock pins, AutoMod"))
+        {
+            inner.last_message = None;
+        }
+    }
 }
 
 async fn validate_token(client: &reqwest::Client, token: &str) -> Result<ValidatedToken, String> {
@@ -1167,7 +1210,20 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                             .and_then(serde_json::Value::as_str)
                             .filter(|s| valid_twitch_user_id(s))
                             .map(str::to_string);
-                        return Ok(ValidatedToken { login, user_id });
+                        let scopes = v
+                            .get("scopes")
+                            .and_then(serde_json::Value::as_array)
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|x| x.as_str().map(str::to_string))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        return Ok(ValidatedToken {
+                            login,
+                            user_id,
+                            scopes,
+                        });
                     }
                     Ok(v) => {
                         last = v
@@ -1430,5 +1486,18 @@ mod tests {
         .unwrap();
         assert!(!json.contains("token"));
         assert!(json.contains("alice"));
+    }
+
+    #[test]
+    fn scopes_cover_device_requires_all_device_scopes() {
+        let full: Vec<String> = device_scope_list()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert!(scopes_cover_device(&full));
+        let mut missing = full.clone();
+        missing.retain(|s| s != "moderator:manage:warnings");
+        assert!(!scopes_cover_device(&missing));
+        assert!(!scopes_cover_device(&[]));
     }
 }

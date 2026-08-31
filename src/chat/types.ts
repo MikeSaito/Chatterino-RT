@@ -268,6 +268,8 @@ export type AuthInfo = {
   pendingPaste?: boolean;
   message?: string;
   profileImageUrl?: string;
+  /** Missing OAuth scopes vs DEVICE_SCOPES — prompt sign-in again. */
+  scopesIncomplete?: boolean;
 };
 
 export type Filters = {

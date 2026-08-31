@@ -878,7 +878,7 @@ async function boot(): Promise<void> {
   let imageUploadKnobs: ImageUploadKnobs = parseImageUploadKnobs(bootKnobs);
   let modActionBtns: ModActionBtn[] = bootModActions;
   let modSendBusy = false;
-  let lastAuth: AuthInfo = { canSend: false, fromEnv: false };
+  let lastAuth: AuthInfo = { canSend: false, fromEnv: false, scopesIncomplete: false };
   let authOp: "idle" | "start" | "import" | "logout" = "idle";
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
@@ -3121,8 +3121,10 @@ async function boot(): Promise<void> {
       authMenuCtl?.hide();
     }
     // Idle unsigned → только «Войти» + настройки; любой pending скрывает «Войти».
-    signinBtn.hidden = signed || pending;
+    const scopesGap = Boolean(info.scopesIncomplete) && signed && !pending;
+    signinBtn.hidden = (signed && !scopesGap) || pending;
     signinBtn.disabled = pending || authOp === "start";
+    signinBtn.textContent = scopesGap ? t("auth.scopes.reloginBtn") : t("auth.signin");
     // Настройки: рядом с «Войти» без сессии; в меню chip когда вошли.
     settingsBtn.hidden = showChip;
     // Pending: «Отмена»; signed idle — logout только через chip-меню.
@@ -3141,6 +3143,9 @@ async function boot(): Promise<void> {
       deviceEl.hidden = false;
       deviceEl.textContent =
         info.message || t("auth.device.pasteHint");
+    } else if (scopesGap) {
+      deviceEl.hidden = false;
+      deviceEl.textContent = info.message?.trim() || t("auth.scopes.relogin");
     } else if (info.message && !signed) {
       deviceEl.hidden = false;
       deviceEl.textContent = info.message;
