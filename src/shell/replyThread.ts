@@ -434,7 +434,7 @@ export function bindReplyThread(opts: {
     sending = true;
     syncComposer();
     try {
-      await invoke("chat_send", { text, replyToId: replyTarget.id });
+      await invoke("chat_send", { text, replyToId: replyTarget.id, channel: openChannel });
       input.value = "";
       onStatus?.("");
       input.focus();

@@ -921,7 +921,7 @@ async fn handle_warn_slash(
         return Ok(());
     };
 
-    let Some((mod_login, token)) = auth::resolved_login_token(state) else {
+    let Some((_mod_login, token)) = auth::resolved_login_token(state) else {
         state.post_channel_notice(
             app,
             channel,
@@ -998,16 +998,7 @@ async fn handle_warn_slash(
         .await
         {
             super::helix::HelixWarnOutcome::Ok => {
-                // Stock shows this via EventSub channel.moderate; until that lands,
-                // emit the same system line locally so the moderator gets feedback.
-                state.post_channel_notice(
-                    app,
-                    channel,
-                    format!(
-                        "{mod_login} has warned {}: {reason}",
-                        target_profile.display_name
-                    ),
-                );
+                // System line comes from EventSub channel.moderate `warn` (shared_bans).
             }
             super::helix::HelixWarnOutcome::Failed(msg) => {
                 // Notice for chat history; Err after the loop so UserCard/composer

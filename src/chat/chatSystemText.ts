@@ -343,6 +343,42 @@ export function parseSharedBanNoticeMsgId(
   return { kind, mod, login, source };
 }
 
+/** Local `warn|mod|login|reason…` or shared `shared_chat_warn|mod|login|source|reason…`. */
+export function parseWarnNoticeMsgId(
+  msgId: string,
+):
+  | { kind: "warn"; mod: string; login: string; reason: string }
+  | { kind: "shared_warn"; mod: string; login: string; source: string; reason: string }
+  | null {
+  const parts = msgId.split("|");
+  if (parts.length < 3) {
+    return null;
+  }
+  const kindRaw = parts[0].toLowerCase();
+  const mod = parts[1].trim();
+  const login = parts[2].trim();
+  if (!mod || !login) {
+    return null;
+  }
+  if (kindRaw === "warn") {
+    return { kind: "warn", mod, login, reason: parts.slice(3).join("|") };
+  }
+  if (kindRaw === "shared_chat_warn" && parts.length >= 4) {
+    const source = parts[3].trim();
+    if (!source) {
+      return null;
+    }
+    return {
+      kind: "shared_warn",
+      mod,
+      login,
+      source,
+      reason: parts.slice(4).join("|"),
+    };
+  }
+  return null;
+}
+
 /** Parse live/offline system notices: `stream_*|channel` / `stream_live_title|channel|title`. */
 export function parseStreamStatusNoticeMsgId(
   msgId: string,
@@ -412,6 +448,37 @@ export function noticeFormatted(opts: {
       text: t("chat.stream.live", { channel: stream.channel }),
       mentions: [],
     };
+  }
+  const warn = parseWarnNoticeMsgId(rawMsgId);
+  if (warn) {
+    const text =
+      warn.kind === "shared_warn"
+        ? warn.reason
+          ? t("chat.warn.sharedReason", {
+              mod: warn.mod,
+              login: warn.login,
+              source: warn.source,
+              reason: warn.reason,
+            })
+          : t("chat.warn.shared", {
+              mod: warn.mod,
+              login: warn.login,
+              source: warn.source,
+            })
+        : warn.reason
+          ? t("chat.warn.reason", {
+              mod: warn.mod,
+              login: warn.login,
+              reason: warn.reason,
+            })
+          : t("chat.warn.plain", { mod: warn.mod, login: warn.login });
+    const mentions: MentionSpan[] = [];
+    pushMention(mentions, text, warn.mod, warn.mod);
+    pushMention(mentions, text, warn.login, warn.login);
+    if (warn.kind === "shared_warn") {
+      pushMention(mentions, text, warn.source, warn.source);
+    }
+    return { text, mentions };
   }
   const shared = parseSharedBanNoticeMsgId(rawMsgId);
   if (shared) {

@@ -92,6 +92,13 @@ enum SharedAction {
     Delete {
         user_login: String,
     },
+    Warn {
+        user_login: String,
+        user_name: String,
+        reason: String,
+        /// Shared-chat source login; `None` for local-channel warn.
+        source: Option<String>,
+    },
 }
 
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
@@ -430,11 +437,14 @@ fn parse_shared_moderation(
             | "shared_chat_unban"
             | "shared_chat_untimeout"
             | "shared_chat_delete"
+            | "shared_chat_warn"
     );
-    let source = match (is_shared, shared_forced) {
-        (Some(s), _) => s,
-        (None, true) => source_login.unwrap_or_else(|| broadcaster.clone()),
-        (None, false) => return None,
+    let allow_local_warn = matches!(action, "warn");
+    let source = match (is_shared, shared_forced, allow_local_warn) {
+        (Some(s), _, _) => Some(s),
+        (None, true, _) => Some(source_login.unwrap_or_else(|| broadcaster.clone())),
+        (None, false, true) => None,
+        (None, false, false) => return None,
     };
 
     let parsed = match action {
@@ -477,9 +487,42 @@ fn parse_shared_moderation(
                 user_login: obj_login(obj)?,
             }
         }
+        "warn" | "shared_chat_warn" => {
+            let obj = event
+                .get("warn")
+                .or_else(|| event.get("shared_chat_warn"))?;
+            let user_login = obj_login(obj)?;
+            let user_name = obj
+                .get("user_name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(user_login.as_str())
+                .to_string();
+            let reason = obj
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .chars()
+                .filter(|c| *c != '\0' && *c != '\r' && *c != '\n')
+                .take(500)
+                .collect::<String>();
+            SharedAction::Warn {
+                user_login,
+                user_name,
+                reason,
+                source: source.clone(),
+            }
+        }
         _ => return None,
     };
-    Some((parsed, source, moderator))
+    // Ban/timeout/… require shared source; warn stores Option on the action.
+    let source_out = match &parsed {
+        SharedAction::Warn { .. } => String::new(),
+        _ => source?,
+    };
+    Some((parsed, source_out, moderator))
 }
 
 fn obj_login(obj: &Value) -> Option<String> {
@@ -537,6 +580,29 @@ fn publish_shared_mod(
                 shared_notice_msg_id("shared_chat_untimeout", &moderator, &user_login, &source);
             ingest_event(app, shared, channel, shared_mod_notice(text, msg_id));
         }
+        SharedAction::Warn {
+            user_login,
+            user_name,
+            reason,
+            source: warn_source,
+        } => {
+            let display = if user_name.is_empty() {
+                user_login.as_str()
+            } else {
+                user_name.as_str()
+            };
+            let text = match (&warn_source, reason.is_empty()) {
+                (Some(src), false) => {
+                    format!("{moderator} has warned {display} in {src}: {reason}")
+                }
+                (Some(src), true) => format!("{moderator} has warned {display} in {src}."),
+                (None, false) => format!("{moderator} has warned {display}: {reason}"),
+                (None, true) => format!("{moderator} has warned {display}."),
+            };
+            let msg_id =
+                warn_notice_msg_id(&moderator, &user_login, warn_source.as_deref(), &reason);
+            ingest_event(app, shared, channel, shared_mod_notice(text, msg_id));
+        }
         // Shared delete: IRC CLEARMSG already yields the deletion row; skip duplicate notice.
         SharedAction::Delete { .. } => {}
     }
@@ -579,6 +645,28 @@ fn shared_notice_msg_id(kind: &str, moderator: &str, login: &str, source: &str) 
         clean(login),
         clean(source)
     )
+}
+
+/// Local: `warn|mod|login|reason…` — Shared: `shared_chat_warn|mod|login|source|reason…`
+/// (reason may contain `|`; UI joins remainder).
+fn warn_notice_msg_id(moderator: &str, login: &str, source: Option<&str>, reason: &str) -> String {
+    let clean = |s: &str| {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>()
+    };
+    let mod_c = clean(moderator);
+    let login_c = clean(login);
+    match source {
+        Some(src) => format!(
+            "shared_chat_warn|{}|{}|{}|{}",
+            mod_c,
+            login_c,
+            clean(src),
+            reason
+        ),
+        None => format!("warn|{mod_c}|{login_c}|{reason}"),
+    }
 }
 
 fn shared_mod_notice(text: String, msg_id: String) -> ChatEvent {
@@ -797,6 +885,69 @@ mod tests {
             "ban": { "user_login": "bad" }
         });
         assert!(parse_shared_moderation(&event, "host").is_none());
+    }
+
+    #[test]
+    fn parse_local_warn() {
+        let event = json!({
+            "broadcaster_user_id": "1",
+            "broadcaster_user_login": "host",
+            "moderator_user_login": "mod",
+            "action": "warn",
+            "warn": {
+                "user_id": "9",
+                "user_login": "bob",
+                "user_name": "Bob",
+                "reason": "be nice",
+                "chat_rules_cited": null
+            }
+        });
+        let (action, _, moderator) = parse_shared_moderation(&event, "host").expect("parsed");
+        assert_eq!(moderator, "mod");
+        match action {
+            SharedAction::Warn {
+                user_login,
+                user_name,
+                reason,
+                source,
+            } => {
+                assert_eq!(user_login, "bob");
+                assert_eq!(user_name, "Bob");
+                assert_eq!(reason, "be nice");
+                assert!(source.is_none());
+            }
+            _ => panic!("warn"),
+        }
+        assert_eq!(
+            warn_notice_msg_id("mod", "bob", None, "be|nice"),
+            "warn|mod|bob|be|nice"
+        );
+    }
+
+    #[test]
+    fn parse_shared_warn() {
+        let event = json!({
+            "broadcaster_user_id": "1",
+            "broadcaster_user_login": "host",
+            "source_broadcaster_user_id": "2",
+            "source_broadcaster_user_login": "srcchan",
+            "moderator_user_login": "mod",
+            "action": "warn",
+            "warn": {
+                "user_login": "bob",
+                "user_name": "Bob",
+                "reason": "spam"
+            }
+        });
+        let (action, _, _) = parse_shared_moderation(&event, "host").expect("parsed");
+        match action {
+            SharedAction::Warn { source, .. } => assert_eq!(source.as_deref(), Some("srcchan")),
+            _ => panic!("shared warn"),
+        }
+        assert_eq!(
+            warn_notice_msg_id("mod", "bob", Some("src"), "spam"),
+            "shared_chat_warn|mod|bob|src|spam"
+        );
     }
 
     #[test]

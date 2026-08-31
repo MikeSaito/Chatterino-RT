@@ -109,6 +109,29 @@ assert(
   "stream offline ru",
 );
 setLocale("en");
+assert(
+  noticeFormatted({
+    text: "mod has warned bob: spam",
+    msgId: "warn|mod|bob|spam",
+  }).text === "mod has warned bob: spam",
+  "warn local en",
+);
+assert(
+  noticeFormatted({
+    text: "mod has warned bob in src: be|nice",
+    msgId: "shared_chat_warn|mod|bob|src|be|nice",
+  }).text === "mod has warned bob in src: be|nice",
+  "warn shared pipe en",
+);
+setLocale("ru");
+assert(
+  noticeFormatted({
+    text: "mod has warned bob: spam",
+    msgId: "warn|mod|bob|spam",
+  }).text === "mod выдал варн bob: spam",
+  "warn local ru",
+);
+setLocale("en");
 
 const gift = usernoticeFormatted({
   systemText: "fallback",
