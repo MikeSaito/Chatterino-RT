@@ -1239,6 +1239,7 @@ async function boot(): Promise<void> {
         playerChatSplit = parsePlayerChatSplit(data.knobs["appearance.playerChatSplit"]);
       }
       channels.setShowRecents(false);
+      channels.setShowTabLive(data.knobs["appearance.showTabLive"] !== false);
       if (uiLayout === "Classic") {
         syncPlayerForLayout(readActiveChannel());
         applyUiLayout(appRoot, uiLayout, {

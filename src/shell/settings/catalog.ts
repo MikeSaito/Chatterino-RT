@@ -791,13 +791,11 @@ const GENERAL_SECTIONS: SectionDef[] = [
           true,
         ),
       ),
-      vx(
-        cb(
-          "show-tab-live",
-          "appearance.showTabLive",
-          "Mark tabs with live channels",
-          true,
-        ),
+      cb(
+        "show-tab-live",
+        "appearance.showTabLive",
+        "Mark tabs with live channels",
+        true,
       ),
     ],
   },

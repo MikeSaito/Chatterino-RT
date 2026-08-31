@@ -6,7 +6,7 @@ import {
   orderAtDragTarget,
   type TabLayoutBox,
 } from "./channelTabOrder";
-import { normalizeTabLive, tabAvatarLetter } from "./channelTabChrome";
+import { tabLiveVisible, tabAvatarLetter } from "./channelTabChrome";
 import { t } from "../i18n";
 
 export { moveOpenTab, indexAtContentX, orderAtDragTarget } from "./channelTabOrder";
@@ -28,6 +28,8 @@ export type ChannelList = {
   paint: (active: string) => void;
   joined: () => string[];
   setShowRecents: (show: boolean) => void;
+  /** Stock `appearance.showTabLive` — live ring on tab avatars. */
+  setShowTabLive: (show: boolean) => void;
   isReordering: () => boolean;
   reorderOpen: (fromIndex: number, toIndex: number) => string[] | null;
   /** Profile image URL for a tab avatar (CDN). Null clears to letter fallback. */
@@ -62,7 +64,7 @@ function paintTabAvatarHost(
     letter.hidden = false;
     letter.textContent = tabAvatarLetter(login);
   }
-  host.classList.toggle("is-live", normalizeTabLive(live));
+  host.classList.toggle("is-live", live);
 }
 
 function buildTabAvatar(
@@ -120,6 +122,7 @@ export function bindChannelList(
   const open: string[] = [];
   let activeLogin = "";
   let showRecents = false;
+  let showTabLive = true;
   let suppressNextClick = false;
   const avatarUrlByLogin = new Map<string, string>();
   const liveByLogin = new Map<string, boolean>();
@@ -128,6 +131,9 @@ export function bindChannelList(
     const key = login.toLowerCase();
     return open.some((row) => row.toLowerCase() === key);
   };
+
+  const liveMark = (login: string): boolean =>
+    tabLiveVisible(liveByLogin.get(login.toLowerCase()) === true, showTabLive);
 
   let drag: {
     pointerId: number;
@@ -450,7 +456,7 @@ export function bindChannelList(
         buildTabAvatar(
           key,
           avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
+          liveMark(key),
           hooks?.onAvatarBroken,
           clearCachedAvatarUrl,
         ),
@@ -578,6 +584,14 @@ export function bindChannelList(
       showRecents = show;
       paint(activeLogin);
     },
+    setShowTabLive(show) {
+      const next = show === true;
+      if (next === showTabLive) {
+        return;
+      }
+      showTabLive = next;
+      paint(activeLogin);
+    },
     isReordering: () => drag?.armed === true,
     reorderOpen(fromIndex, toIndex) {
       const next = moveOpenTab(open, fromIndex, toIndex);
@@ -606,7 +620,7 @@ export function bindChannelList(
           host,
           key,
           avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
+          liveMark(key),
         );
       }
     },
@@ -626,7 +640,7 @@ export function bindChannelList(
           host,
           key,
           avatarUrlByLogin.get(key),
-          liveByLogin.get(key) === true,
+          liveMark(key),
         );
       }
     },

@@ -8,3 +8,11 @@ export function tabAvatarLetter(login: string): string {
 export function normalizeTabLive(live: boolean | null | undefined): boolean {
   return live === true;
 }
+
+/** Stock `showTabLive`: live chrome only when the channel is live and the knob is on. */
+export function tabLiveVisible(
+  live: boolean | null | undefined,
+  showTabLive: boolean,
+): boolean {
+  return normalizeTabLive(live) && showTabLive === true;
+}
