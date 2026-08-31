@@ -95,10 +95,7 @@ impl LowTrustStatus {
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
     let (tx, rx) = mpsc::unbounded_channel::<LowTrustCmd>();
     {
-        let mut slot = shared
-            .low_trust_tx
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut slot = shared.low_trust_tx.lock().map_err(|e| e.to_string())?;
         *slot = Some(tx);
     }
     tauri::async_runtime::spawn(async move {
@@ -186,9 +183,11 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Option<Wanted> {
     if !scopes_ok(&token).await {
         return None;
     }
-    let role = shared.hub.lock().ok().map(|hub| {
-        hub.viewer_role(login, Some(moderator_id.as_str()))
-    })?;
+    let role = shared
+        .hub
+        .lock()
+        .ok()
+        .map(|hub| hub.viewer_role(login, Some(moderator_id.as_str())))?;
     if !role.is_mod && !role.is_broadcaster {
         return None;
     }
@@ -228,11 +227,7 @@ async fn scopes_ok(token: &str) -> bool {
     let scopes: HashSet<&str> = v
         .get("scopes")
         .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .collect::<HashSet<_>>()
-        })
+        .map(|arr| arr.iter().filter_map(Value::as_str).collect::<HashSet<_>>())
         .unwrap_or_default();
     scopes.contains(READ_SCOPE) || scopes.contains(MANAGE_SCOPE)
 }
@@ -380,9 +375,7 @@ async fn handle_eventsub_text(
         .unwrap_or("");
     match msg_type {
         "session_welcome" => {
-            let Some(session_id) = value
-                .pointer("/payload/session/id")
-                .and_then(Value::as_str)
+            let Some(session_id) = value.pointer("/payload/session/id").and_then(Value::as_str)
             else {
                 return EventAction::Reconnect;
             };
@@ -674,7 +667,11 @@ fn build_header_detail(status: LowTrustStatus, event: &Value) -> String {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_ascii_lowercase();
-        let label = if eval == "likely" { "likely" } else { "possible" };
+        let label = if eval == "likely" {
+            "likely"
+        } else {
+            "possible"
+        };
         detail.push_str(&format!(". Detected as {label} ban evader"));
     }
     let has_shared = types.iter().any(|t| {
@@ -849,11 +846,7 @@ pub fn parse_low_trust_slash(text: &str) -> Option<LowTrustSlash> {
 }
 
 fn valid_login(raw: &str) -> bool {
-    !raw.is_empty()
-        && raw.len() <= 25
-        && raw
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !raw.is_empty() && raw.len() <= 25 && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 pub async fn handle_low_trust_slash(
@@ -891,7 +884,8 @@ pub async fn handle_low_trust_slash(
             state.post_channel_notice(
                 app,
                 channel,
-                r#"Usage: "/unmonitor <username>" - Remove a user from suspicious treatment."#.into(),
+                r#"Usage: "/unmonitor <username>" - Remove a user from suspicious treatment."#
+                    .into(),
             );
             Ok(())
         }
@@ -899,7 +893,8 @@ pub async fn handle_low_trust_slash(
             state.post_channel_notice(
                 app,
                 channel,
-                r#"Usage: "/unrestrict <username>" - Remove a user from suspicious treatment."#.into(),
+                r#"Usage: "/unrestrict <username>" - Remove a user from suspicious treatment."#
+                    .into(),
             );
             Ok(())
         }
@@ -919,17 +914,32 @@ pub async fn handle_low_trust_slash(
                 }
             };
             let url = format!("https://www.twitch.tv/popout/moderator/{login}/low-trust-users");
-            let allowed = super::spans::allowed_chat_url(&url).map_err(|message| {
-                ApiError::coded("error.url.invalid", message)
-            })?;
+            let allowed = super::spans::allowed_chat_url(&url)
+                .map_err(|message| ApiError::coded("error.url.invalid", message))?;
             tauri_plugin_opener::open_url(&allowed, None::<&str>)
                 .map_err(|e| ApiError::internal(&e.to_string()))
         }
         LowTrustSlash::Monitor { login } => {
-            treat_user(app, state, channel, &login, LowTrustStatus::Monitored, "monitor").await
+            treat_user(
+                app,
+                state,
+                channel,
+                &login,
+                LowTrustStatus::Monitored,
+                "monitor",
+            )
+            .await
         }
         LowTrustSlash::Restrict { login } => {
-            treat_user(app, state, channel, &login, LowTrustStatus::Restricted, "restrict").await
+            treat_user(
+                app,
+                state,
+                channel,
+                &login,
+                LowTrustStatus::Restricted,
+                "restrict",
+            )
+            .await
         }
         LowTrustSlash::Unmonitor { login } => {
             untreating_user(app, state, channel, &login, "unmonitor").await
@@ -981,11 +991,7 @@ async fn treat_user(
     let Some(profile) =
         super::helix::fetch_user_profile(target_login, Some(&token), &client_id).await
     else {
-        state.post_channel_notice(
-            app,
-            channel,
-            format!("Failed to query user to {command}"),
-        );
+        state.post_channel_notice(app, channel, format!("Failed to query user to {command}"));
         return Ok(());
     };
     let helix_status = status.helix_treat().unwrap_or("ACTIVE_MONITORING");
@@ -1047,22 +1053,10 @@ async fn untreating_user(
     let Some(profile) =
         super::helix::fetch_user_profile(target_login, Some(&token), &client_id).await
     else {
-        state.post_channel_notice(
-            app,
-            channel,
-            format!("Failed to query user to {command}"),
-        );
+        state.post_channel_notice(app, channel, format!("Failed to query user to {command}"));
         return Ok(());
     };
-    match remove_suspicious_user(
-        &room_id,
-        &moderator_id,
-        &profile.id,
-        &token,
-        &client_id,
-    )
-    .await
-    {
+    match remove_suspicious_user(&room_id, &moderator_id, &profile.id, &token, &client_id).await {
         Ok(()) => Ok(()),
         Err(msg) => {
             state.post_channel_notice(app, channel, format!("Failed to {command} user - {msg}"));
@@ -1106,11 +1100,7 @@ async fn add_suspicious_user(
                     .json::<Value>()
                     .await
                     .ok()
-                    .and_then(|v| {
-                        v.get("message")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                    })
+                    .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_string))
                     .unwrap_or_else(|| format!("http {code}"));
                 if (400..500).contains(&code) {
                     return Err(message);
@@ -1160,11 +1150,7 @@ async fn remove_suspicious_user(
                     .json::<Value>()
                     .await
                     .ok()
-                    .and_then(|v| {
-                        v.get("message")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                    })
+                    .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_string))
                     .unwrap_or_else(|| format!("http {code}"));
                 if (400..500).contains(&code) {
                     return Err(message);

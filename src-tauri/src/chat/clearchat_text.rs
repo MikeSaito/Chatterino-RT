@@ -46,10 +46,7 @@ mod tests {
 
     #[test]
     fn cleared_timeout_ban_stack() {
-        assert_eq!(
-            clearchat_text_en(None, None, 1, None, None),
-            "Chat cleared"
-        );
+        assert_eq!(clearchat_text_en(None, None, 1, None, None), "Chat cleared");
         assert_eq!(
             clearchat_text_en(Some("bob"), Some(60), 1, None, None),
             "bob timed out for 1m"

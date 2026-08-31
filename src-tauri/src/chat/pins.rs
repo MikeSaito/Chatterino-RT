@@ -154,9 +154,8 @@ pub async fn pin_message(
     message_id: &str,
     duration_seconds: Option<u32>,
 ) -> Result<(), ApiError> {
-    let message_id = clean_id(message_id).ok_or_else(|| {
-        ApiError::coded("error.pin.invalid_message", "invalid message id")
-    })?;
+    let message_id = clean_id(message_id)
+        .ok_or_else(|| ApiError::coded("error.pin.invalid_message", "invalid message id"))?;
     if let Some(d) = duration_seconds {
         if !(PIN_DURATION_MIN..=PIN_DURATION_MAX).contains(&d) {
             return Err(ApiError::coded(
@@ -212,9 +211,8 @@ pub async fn unpin_message(
     channel: &str,
     message_id: &str,
 ) -> Result<(), ApiError> {
-    let message_id = clean_id(message_id).ok_or_else(|| {
-        ApiError::coded("error.pin.invalid_message", "invalid message id")
-    })?;
+    let message_id = clean_id(message_id)
+        .ok_or_else(|| ApiError::coded("error.pin.invalid_message", "invalid message id"))?;
     let wanted = manage_wanted(shared, channel).await?;
     let url = helix_query(
         "/chat/pins",
@@ -251,7 +249,10 @@ pub async fn unpin_message(
             delay *= 2;
         }
     }
-    Err(ApiError::coded("error.pin.unpin_failed", "failed to unpin message"))
+    Err(ApiError::coded(
+        "error.pin.unpin_failed",
+        "failed to unpin message",
+    ))
 }
 
 fn map_pin_http_error(status: u16, body: &Value, pin: bool) -> ApiError {
@@ -299,10 +300,7 @@ async fn manage_wanted(shared: &Shared, channel: &str) -> Result<Wanted, ApiErro
     {
         let hub = shared.hub.lock().map_err(|_| ApiError::internal("lock"))?;
         if !hub.has_channel(&channel) && !hub.is_joined(&channel) {
-            return Err(ApiError::coded(
-                "error.pin.channel",
-                "channel not open",
-            ));
+            return Err(ApiError::coded("error.pin.channel", "channel not open"));
         }
     }
     let token = super::auth::oauth_token(shared)
@@ -402,9 +400,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                     active = Some(login);
                     backoff = Duration::from_secs(1);
                 }
-                Some(PinsCmd::ClearChannel)
-                | Some(PinsCmd::Relogin)
-                | Some(PinsCmd::Nudge) => {}
+                Some(PinsCmd::ClearChannel) | Some(PinsCmd::Relogin) | Some(PinsCmd::Nudge) => {}
             }
             continue;
         };
@@ -466,25 +462,23 @@ async fn run_channel_session(
 ) -> SessionEnd {
     let channel_id = match resolve_channel_id(shared, login).await {
         Some(id) => id,
-        None => {
-            match wait_cmd(rx, Duration::from_secs(2)).await {
-                WaitCmd::Shutdown => return SessionEnd::Shutdown,
-                WaitCmd::Clear => {
-                    emit_clear(app, login);
-                    return SessionEnd::Idle;
-                }
-                WaitCmd::Set(next) => {
-                    if next != login {
-                        emit_clear(app, login);
-                        emit_clear(app, &next);
-                    }
-                    return SessionEnd::Changed(Some(next));
-                }
-                WaitCmd::Relogin | WaitCmd::Nudge | WaitCmd::Tick => {
-                    return SessionEnd::Continue;
-                }
+        None => match wait_cmd(rx, Duration::from_secs(2)).await {
+            WaitCmd::Shutdown => return SessionEnd::Shutdown,
+            WaitCmd::Clear => {
+                emit_clear(app, login);
+                return SessionEnd::Idle;
             }
-        }
+            WaitCmd::Set(next) => {
+                if next != login {
+                    emit_clear(app, login);
+                    emit_clear(app, &next);
+                }
+                return SessionEnd::Changed(Some(next));
+            }
+            WaitCmd::Relogin | WaitCmd::Nudge | WaitCmd::Tick => {
+                return SessionEnd::Continue;
+            }
+        },
     };
 
     let cfg = WebSocketConfig::default()
@@ -498,16 +492,7 @@ async fn run_channel_session(
     .await
     else {
         // PubSub down: still allow Helix path for mods.
-        return helix_only_tick(
-            app,
-            shared,
-            login,
-            rx,
-            live,
-            last_access,
-            scope_cache,
-        )
-        .await;
+        return helix_only_tick(app, shared, login, rx, live, last_access, scope_cache).await;
     };
     let (mut write, mut read) = stream.split();
     if listen_pins(&mut write, &channel_id).await.is_err() {
@@ -620,9 +605,7 @@ async fn helix_only_tick(
     last_access: &mut Option<PinAccess>,
     scope_cache: &mut ScopeCache,
 ) -> SessionEnd {
-    if let Some(end) =
-        helix_poll_once(app, shared, login, live, last_access, scope_cache).await
-    {
+    if let Some(end) = helix_poll_once(app, shared, login, live, last_access, scope_cache).await {
         return end;
     }
     match wait_cmd(rx, POLL_WAIT_ROLE).await {
@@ -682,7 +665,7 @@ async fn helix_poll_once(
         Resolve::Pending => None,
         Resolve::Ready(wanted) => match fetch_pin(&wanted).await {
             FetchPin::Ok(pin) => {
-                    let next = pin.filter(|p| !pin_expired(p));
+                let next = pin.filter(|p| !pin_expired(p));
                 match next {
                     Some(p) => {
                         apply_helix_pin(app, login, live, last_access, p);
@@ -703,21 +686,19 @@ async fn helix_poll_once(
                 None
             }
             FetchPin::Forbidden => {
-                    if live.is_none() {
+                if live.is_none() {
                     set_access(app, login, PinAccess::Viewer, last_access);
                 }
                 None
             }
             FetchPin::Unauthorized => {
-                    *scope_cache = ScopeCache::default();
+                *scope_cache = ScopeCache::default();
                 if live.is_none() {
                     set_access(app, login, PinAccess::Anon, last_access);
                 }
                 None
             }
-            FetchPin::Fail => {
-                None
-            }
+            FetchPin::Fail => None,
         },
     }
 }
@@ -906,9 +887,8 @@ async fn resolve_channel_id(shared: &Shared, login: &str) -> Option<String> {
     {
         return Some(id);
     }
-    let token = super::auth::oauth_token(shared).map(|t| {
-        t.trim().trim_start_matches("oauth:").to_string()
-    });
+    let token =
+        super::auth::oauth_token(shared).map(|t| t.trim().trim_start_matches("oauth:").to_string());
     let client_id = super::auth::resolved_client_id(shared);
     if client_id.trim().is_empty() || client_id == "YOUR_API_KEY_HERE" {
         return None;
@@ -1107,7 +1087,10 @@ fn apply_pubsub_inner(
         }
         "unpin-message" => {
             let pin_id = data.get("id").and_then(Value::as_str);
-            let matches = match (pin_id, live.as_ref().and_then(|lp| lp.pubsub_pin_id.as_deref())) {
+            let matches = match (
+                pin_id,
+                live.as_ref().and_then(|lp| lp.pubsub_pin_id.as_deref()),
+            ) {
                 (Some(id), Some(cur)) => id == cur,
                 (Some(_), None) => true,
                 (None, _) => true,
@@ -1171,13 +1154,8 @@ fn parse_pubsub_pin(data: &Value) -> Option<(String, PinnedMessage)> {
         .chars()
         .take(40)
         .collect::<String>();
-    let starts_at = millis_to_rfc3339(
-        message
-            .get("startsAt")
-            .or_else(|| message.get("starts_at")),
-    );
-    let ends_at =
-        millis_to_rfc3339(message.get("endsAt").or_else(|| message.get("ends_at")));
+    let starts_at = millis_to_rfc3339(message.get("startsAt").or_else(|| message.get("starts_at")));
+    let ends_at = millis_to_rfc3339(message.get("endsAt").or_else(|| message.get("ends_at")));
     Some((
         pin_id.to_string(),
         PinnedMessage {
@@ -1457,7 +1435,10 @@ mod tests {
         assert_eq!(pin.sender_login, "viewer1");
         assert_eq!(pin.pinned_by_name, "ModName");
         assert!(pin.message_text.contains("t.me"));
-        assert!(pin.starts_at.as_ref().is_some_and(|s| s.contains("2023") || s.contains("2024")));
+        assert!(pin
+            .starts_at
+            .as_ref()
+            .is_some_and(|s| s.contains("2023") || s.contains("2024")));
     }
 
     #[test]

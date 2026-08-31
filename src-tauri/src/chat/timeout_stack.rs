@@ -293,7 +293,12 @@ mod tests {
     #[test]
     fn stacks_same_user_timeouts() {
         let mut items = VecDeque::new();
-        let _ = push_clearchat(&mut items, timeout("a", 1000, "bob", 60), TimeoutStackStyle::Stack, 100);
+        let _ = push_clearchat(
+            &mut items,
+            timeout("a", 1000, "bob", 60),
+            TimeoutStackStyle::Stack,
+            100,
+        );
         let out = push_clearchat(
             &mut items,
             timeout("b", 1500, "bob", 60),
@@ -360,10 +365,7 @@ mod tests {
 
     #[test]
     fn stack_until_user_message_breaks() {
-        let mut items = VecDeque::from([
-            timeout("a", 1000, "bob", 60),
-            privmsg("p", 1200, "bob"),
-        ]);
+        let mut items = VecDeque::from([timeout("a", 1000, "bob", 60), privmsg("p", 1200, "bob")]);
         let out = push_clearchat(
             &mut items,
             timeout("b", 1300, "bob", 60),

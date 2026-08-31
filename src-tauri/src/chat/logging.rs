@@ -756,8 +756,8 @@ mod tests {
             target_login: Some("bob".into()),
             duration_sec: Some(60),
             stack_count: 1,
-        source_login: None,
-        moderator_login: None,
+            source_login: None,
+            moderator_login: None,
         };
         let line = format_log_line(&ev, &cfg).unwrap();
         assert_eq!(line, "bob timed out for 1m");

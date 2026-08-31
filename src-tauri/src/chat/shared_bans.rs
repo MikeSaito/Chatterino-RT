@@ -29,11 +29,26 @@ const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 
 /// Scopes required for channel.moderate (read OR manage pairs accepted by Twitch).
 const REQUIRED_SCOPE_GROUPS: &[&[&str]] = &[
-    &["moderator:read:blocked_terms", "moderator:manage:blocked_terms"],
-    &["moderator:read:chat_settings", "moderator:manage:chat_settings"],
-    &["moderator:read:unban_requests", "moderator:manage:unban_requests"],
-    &["moderator:read:banned_users", "moderator:manage:banned_users"],
-    &["moderator:read:chat_messages", "moderator:manage:chat_messages"],
+    &[
+        "moderator:read:blocked_terms",
+        "moderator:manage:blocked_terms",
+    ],
+    &[
+        "moderator:read:chat_settings",
+        "moderator:manage:chat_settings",
+    ],
+    &[
+        "moderator:read:unban_requests",
+        "moderator:manage:unban_requests",
+    ],
+    &[
+        "moderator:read:banned_users",
+        "moderator:manage:banned_users",
+    ],
+    &[
+        "moderator:read:chat_messages",
+        "moderator:manage:chat_messages",
+    ],
     &["moderator:read:warnings", "moderator:manage:warnings"],
     &["moderator:read:moderators"],
     &["moderator:read:vips"],
@@ -81,9 +96,7 @@ enum SharedAction {
 
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
     SHUTDOWN.store(false, Ordering::SeqCst);
-    shared
-        .shared_bans_shutdown
-        .store(false, Ordering::SeqCst);
+    shared.shared_bans_shutdown.store(false, Ordering::SeqCst);
     let (tx, rx) = mpsc::unbounded_channel::<SharedBansCmd>();
     {
         let mut slot = shared.shared_bans_tx.lock().map_err(|e| e.to_string())?;
@@ -360,7 +373,9 @@ async fn handle_eventsub_text(
             }
             let event = value.pointer("/payload/event").unwrap_or(&Value::Null);
             parse_shared_moderation(event, &wanted.login)
-                .map(|(action, source, moderator)| EventAction::SharedMod(action, source, moderator))
+                .map(|(action, source, moderator)| {
+                    EventAction::SharedMod(action, source, moderator)
+                })
                 .unwrap_or(EventAction::None)
         }
         "revocation" => EventAction::Reconnect,
@@ -478,10 +493,7 @@ fn duration_from_expires(obj: &Value) -> Option<u32> {
     let expires = obj.get("expires_at").and_then(Value::as_str)?;
     let end = chrono::DateTime::parse_from_rfc3339(expires).ok()?;
     let now = chrono::Utc::now();
-    let secs = end
-        .signed_duration_since(now)
-        .num_seconds()
-        .max(0) as u32;
+    let secs = end.signed_duration_since(now).num_seconds().max(0) as u32;
     Some(secs.max(1))
 }
 
@@ -495,7 +507,8 @@ fn publish_shared_mod(
 ) {
     match action {
         SharedAction::Ban { user_login } => {
-            let event = clearchat_event(None, Some(user_login), None, Some(source), Some(moderator));
+            let event =
+                clearchat_event(None, Some(user_login), None, Some(source), Some(moderator));
             ingest_event(app, shared, channel, event);
         }
         SharedAction::Timeout {
@@ -734,8 +747,7 @@ mod tests {
                 "expires_at": "2099-01-01T00:00:00Z"
             }
         });
-        let (action, source, moderator) =
-            parse_shared_moderation(&event, "host").expect("parsed");
+        let (action, source, moderator) = parse_shared_moderation(&event, "host").expect("parsed");
         assert_eq!(source, "srcchan");
         assert_eq!(moderator, "mod");
         match action {
