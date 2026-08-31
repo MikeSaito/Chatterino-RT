@@ -1396,12 +1396,94 @@ fn save_store(path: &Path, store: &AuthStore) -> Result<(), String> {
         serde_json::to_string(&DiskMultiOut { current, accounts }).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    restrict_auth_file_permissions(&tmp)?;
+    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    // Re-apply after rename: some FS replace the final ACL from the destination.
+    let _ = restrict_auth_file_permissions(path);
+    Ok(())
+}
+
+/// Owner-only access for OAuth token at rest (Unix 0600 / Windows DACL).
+fn restrict_auth_file_permissions(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     }
-    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        restrict_auth_file_acl_windows(path)?;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn restrict_auth_file_acl_windows(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HLOCAL;
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    };
+
+    // Protected DACL: full access for Owner + SYSTEM only (no inherited Everyone).
+    const SDDL: windows::core::PCWSTR = windows::core::w!("D:P(A;;FA;;;OW)(A;;FA;;;SY)");
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        let mut sd_size = 0u32;
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            SDDL,
+            SDDL_REVISION_1,
+            &mut sd,
+            Some(&mut sd_size),
+        )
+        .map_err(|e| format!("auth acl sddl: {e}"))?;
+
+        let mut dacl_present = windows::core::BOOL(0);
+        let mut dacl_defaulted = windows::core::BOOL(0);
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        GetSecurityDescriptorDacl(sd, &mut dacl_present, &mut dacl, &mut dacl_defaulted).map_err(
+            |e| {
+                let _ = windows::Win32::Foundation::LocalFree(Some(HLOCAL(sd.0 as _)));
+                format!("auth acl dacl: {e}")
+            },
+        )?;
+
+        if dacl_present.as_bool() && !dacl.is_null() {
+            let result = SetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(dacl),
+                None,
+            );
+            let _ = windows::Win32::Foundation::LocalFree(Some(HLOCAL(sd.0 as _)));
+            if result.is_err() {
+                return Err(format!("auth acl set: {result:?}"));
+            }
+        } else {
+            let _ = windows::Win32::Foundation::LocalFree(Some(HLOCAL(sd.0 as _)));
+            return Err("auth acl: missing DACL".into());
+        }
+    }
     Ok(())
 }
 

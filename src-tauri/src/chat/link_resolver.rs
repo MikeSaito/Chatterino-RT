@@ -16,6 +16,8 @@ use super::spans::allowed_chat_url;
 
 const CACHE_LIMIT: usize = 200;
 const TIMEOUT_SECS: u64 = 30;
+/// Stock Chatterino resolver host only (env may change path/template, not host).
+const ALLOWED_RESOLVER_HOSTS: &[&str] = &["braize.pajlada.com"];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LinkInfoResponse {
@@ -103,6 +105,9 @@ fn validate_resolver_base_url(raw: &str) -> Result<String, String> {
     if resolver_host_blocked(&host) {
         return Err("link resolver base url host is not allowed".into());
     }
+    if !resolver_host_allowlisted(&host) {
+        return Err("link resolver base url host is not allowlisted".into());
+    }
     // Normalize trailing slash for path append mode.
     let mut out = parsed.as_str().to_string();
     if !out.contains("%1") && !out.ends_with('/') {
@@ -111,8 +116,18 @@ fn validate_resolver_base_url(raw: &str) -> Result<String, String> {
     Ok(out)
 }
 
+fn resolver_host_allowlisted(host: &url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(name) => {
+            let n = name.trim_end_matches('.').to_ascii_lowercase();
+            ALLOWED_RESOLVER_HOSTS.iter().any(|h| *h == n)
+        }
+        url::Host::Ipv4(_) | url::Host::Ipv6(_) => false,
+    }
+}
+
 fn resolver_host_blocked(host: &url::Host<&str>) -> bool {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::Ipv6Addr;
     match host {
         url::Host::Domain(name) => {
             let n = name.trim_end_matches('.').to_ascii_lowercase();
@@ -401,6 +416,11 @@ mod tests {
         assert!(validate_resolver_base_url("https://[::ffff:127.0.0.1]/x/").is_err());
         assert!(validate_resolver_base_url("https://user:pass@example.com/x/").is_err());
         assert!(validate_resolver_base_url("https://localhost./x/").is_err());
+        assert!(validate_resolver_base_url("https://evil.example/link_resolver/").is_err());
+        assert!(validate_resolver_base_url(
+            "https://braize.pajlada.com/chatterino/link_resolver/%1"
+        )
+        .is_ok());
     }
 
     #[test]

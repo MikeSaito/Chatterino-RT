@@ -4,7 +4,7 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-const USER_AGENT: &str = "Chatterino-RT/0.1";
+const USER_AGENT: &str = concat!("Chatterino-RT/", env!("CARGO_PKG_VERSION"));
 
 /// Default API client (JSON Helix / emote lists / OAuth).
 ///
@@ -16,10 +16,12 @@ pub fn build(timeout: Duration) -> reqwest::Client {
         .user_agent(USER_AGENT)
         .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("reqwest HTTPS client")
 }
 
 /// Same as [`build`], but never follows redirects (CDN / IVR probes).
+///
+/// Must not fall back to [`reqwest::Client::new`]: that follows redirects by default.
 pub fn build_no_redirect(timeout: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(timeout)
@@ -27,7 +29,7 @@ pub fn build_no_redirect(timeout: Duration) -> reqwest::Client {
         .user_agent(USER_AGENT)
         .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("reqwest no-redirect HTTPS client")
 }
 
 /// Short class for UI / IPC (no OS dump, no URL).

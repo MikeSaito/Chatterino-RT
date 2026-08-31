@@ -187,7 +187,14 @@ pub fn validate_upload_url(raw: &str) -> Result<Url, String> {
     }
     let url = Url::parse(s).map_err(|_| "Image uploader Request URL is invalid.".to_string())?;
     match url.scheme() {
-        "https" => {}
+        "https" => {
+            if upload_host_is_non_public(&url) {
+                return Err(
+                    "Image uploader HTTPS must target a public host (not loopback/private IP)."
+                        .into(),
+                );
+            }
+        }
         "http" => {
             let host = url.host_str().unwrap_or("");
             if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
@@ -204,6 +211,36 @@ pub fn validate_upload_url(raw: &str) -> Result<Url, String> {
         return Err("Image uploader Request URL must not contain userinfo.".into());
     }
     Ok(url)
+}
+
+fn upload_host_is_non_public(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            if ip.is_loopback() || ip.is_unspecified() {
+                return true;
+            }
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast();
+            }
+            (ip.segments()[0] & 0xfe00) == 0xfc00
+        }
+        Some(url::Host::Domain(name)) => {
+            let n = name.trim_end_matches('.').to_ascii_lowercase();
+            n == "localhost" || n.ends_with(".localhost") || n.ends_with(".local")
+        }
+        None => true,
+    }
 }
 
 pub fn normalize_format(raw: &str) -> Result<&'static str, String> {
@@ -386,6 +423,8 @@ mod tests {
         assert!(validate_upload_url("https://i.imgur.com/upload").is_ok());
         assert!(validate_upload_url("http://127.0.0.1:8080/up").is_ok());
         assert!(validate_upload_url("http://example.com/up").is_err());
+        assert!(validate_upload_url("https://127.0.0.1/up").is_err());
+        assert!(validate_upload_url("https://10.0.0.1/up").is_err());
         assert!(validate_upload_url("ftp://x").is_err());
         assert!(validate_upload_url("https://user:pass@evil/").is_err());
         assert!(validate_upload_url("").is_err());
