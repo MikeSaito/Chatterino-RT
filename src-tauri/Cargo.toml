@@ -27,7 +27,7 @@ tauri-plugin-updater = "2"
 url = "2"
 emojis = "0.6"
 unicode-segmentation = "1"
-base64 = "0.22"
+base64 = "0.23"
 rfd = "0.15"
 regex = "1.13.1"
 chrono = { version = "0.4.45", features = ["clock"] }
