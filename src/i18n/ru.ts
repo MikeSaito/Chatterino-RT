@@ -364,6 +364,7 @@ export const ru: Record<MessageKey, string> = {
   "error.polls.outcome_id": "Некорректный id исхода",
   "auth.scopes.relogin": "Войдите снова, чтобы разблокировать пины, AutoMod, варны и shared-модерацию.",
   "auth.scopes.reloginBtn": "Войти снова",
+  "auth.scopes.env": "В TWITCH_OAUTH_TOKEN не хватает scope. Обновите токен в env и перезапустите.",
 
   "pinned.host.aria": "Закреплённое сообщение канала",
   "pinned.label": "Закреплено:",

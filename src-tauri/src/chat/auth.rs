@@ -980,6 +980,8 @@ async fn persist_and_relogin(
 async fn verify_disk(app: AppHandle, shared: Shared) {
     if env_login_token().is_some() {
         let _ = ensure_twitch_user_id(&shared).await;
+        // ensure_twitch_user_id may set scopesIncomplete; push to UI.
+        emit(&app, &shared);
         return;
     }
     let (token, gen, login) = match shared.auth.lock() {
@@ -1166,15 +1168,12 @@ fn apply_scope_check(shared: &Shared, scopes: &[String]) {
     let incomplete = !scopes_cover_device(scopes);
     if let Ok(mut inner) = shared.auth.lock() {
         inner.scopes_incomplete = incomplete;
-        if incomplete {
-            inner.last_message = Some(
-                "Sign in again to unlock pins, AutoMod, warnings, and shared chat moderation."
-                    .into(),
-            );
-        } else if inner
-            .last_message
-            .as_deref()
-            .is_some_and(|m| m.contains("unlock pins, AutoMod"))
+        // Do not stash English copy in last_message — UI uses t("auth.scopes.relogin").
+        if !incomplete
+            && inner
+                .last_message
+                .as_deref()
+                .is_some_and(|m| m.contains("unlock pins, AutoMod"))
         {
             inner.last_message = None;
         }

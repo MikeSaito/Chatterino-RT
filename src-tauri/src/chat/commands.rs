@@ -921,7 +921,7 @@ async fn handle_warn_slash(
         return Ok(());
     };
 
-    let Some((_mod_login, token)) = auth::resolved_login_token(state) else {
+    let Some((mod_login, token)) = auth::resolved_login_token(state) else {
         state.post_channel_notice(
             app,
             channel,
@@ -998,7 +998,36 @@ async fn handle_warn_slash(
         .await
         {
             super::helix::HelixWarnOutcome::Ok => {
-                // System line comes from EventSub channel.moderate `warn` (shared_bans).
+                // Immediate feedback; EventSub may also deliver (same English fallback).
+                // UI localizes via msg_id; skip if EventSub already painted identical line later.
+                let display = if target_profile.display_name.trim().is_empty() {
+                    target_profile.login.as_str()
+                } else {
+                    target_profile.display_name.as_str()
+                };
+                let text = if reason.is_empty() {
+                    format!("{mod_login} has warned {display}.")
+                } else {
+                    format!("{mod_login} has warned {display}: {reason}")
+                };
+                let msg_id = format!(
+                    "warn|{}|{}|{}",
+                    mod_login
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect::<String>(),
+                    target_profile
+                        .login
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect::<String>(),
+                    reason
+                        .chars()
+                        .filter(|c| *c != '\0' && *c != '\r' && *c != '\n')
+                        .take(500)
+                        .collect::<String>()
+                );
+                state.post_channel_notice_ex(app, channel, text, Some(msg_id));
             }
             super::helix::HelixWarnOutcome::Failed(msg) => {
                 // Notice for chat history; Err after the loop so UserCard/composer

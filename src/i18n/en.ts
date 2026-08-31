@@ -362,6 +362,7 @@ export const en = {
   "error.polls.outcome_id": "Invalid outcome id",
   "auth.scopes.relogin": "Sign in again to unlock pins, AutoMod, warnings, and shared chat moderation.",
   "auth.scopes.reloginBtn": "Sign in again",
+  "auth.scopes.env": "TWITCH_OAUTH_TOKEN is missing required scopes. Update the env token and restart.",
 
   "pinned.host.aria": "Pinned channel message",
   "pinned.label": "Pinned:",

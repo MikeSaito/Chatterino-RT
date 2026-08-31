@@ -586,6 +586,16 @@ fn publish_shared_mod(
             reason,
             source: warn_source,
         } => {
+            // Local warn by this account already emits a Helix success notice; skip EventSub dup.
+            if warn_source.is_none() {
+                let self_login = auth::resolved_login_token(shared).map(|(l, _)| l);
+                if self_login
+                    .as_deref()
+                    .is_some_and(|me| me.eq_ignore_ascii_case(&moderator))
+                {
+                    return;
+                }
+            }
             let display = if user_name.is_empty() {
                 user_login.as_str()
             } else {

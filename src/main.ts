@@ -3122,9 +3122,11 @@ async function boot(): Promise<void> {
     }
     // Idle unsigned → только «Войти» + настройки; любой pending скрывает «Войти».
     const scopesGap = Boolean(info.scopesIncomplete) && signed && !pending;
-    signinBtn.hidden = (signed && !scopesGap) || pending;
+    const scopesGapEnv = scopesGap && info.fromEnv;
+    const scopesGapDevice = scopesGap && !info.fromEnv;
+    signinBtn.hidden = (signed && !scopesGapDevice) || pending;
     signinBtn.disabled = pending || authOp === "start";
-    signinBtn.textContent = scopesGap ? t("auth.scopes.reloginBtn") : t("auth.signin");
+    signinBtn.textContent = scopesGapDevice ? t("auth.scopes.reloginBtn") : t("auth.signin");
     // Настройки: рядом с «Войти» без сессии; в меню chip когда вошли.
     settingsBtn.hidden = showChip;
     // Pending: «Отмена»; signed idle — logout только через chip-меню.
@@ -3143,9 +3145,12 @@ async function boot(): Promise<void> {
       deviceEl.hidden = false;
       deviceEl.textContent =
         info.message || t("auth.device.pasteHint");
-    } else if (scopesGap) {
+    } else if (scopesGapEnv) {
       deviceEl.hidden = false;
-      deviceEl.textContent = info.message?.trim() || t("auth.scopes.relogin");
+      deviceEl.textContent = t("auth.scopes.env");
+    } else if (scopesGapDevice) {
+      deviceEl.hidden = false;
+      deviceEl.textContent = t("auth.scopes.relogin");
     } else if (info.message && !signed) {
       deviceEl.hidden = false;
       deviceEl.textContent = info.message;

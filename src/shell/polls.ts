@@ -77,6 +77,7 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
   let needsRelogin = false;
   let needsUnavailable = false;
   let unavailableUntil = 0;
+  let unavailableTimer = 0;
   let raf = 0;
   let pruneTimer = 0;
   let stopped = false;
@@ -745,13 +746,41 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       needsRelogin = true;
       needsUnavailable = false;
       unavailableUntil = 0;
+      clearUnavailableTimer();
       return;
     }
     if (code === "error.polls.unavailable" || code === "error.polls.gql") {
       // Cooldown so repeated clicks do not spam status lines.
       needsUnavailable = true;
       unavailableUntil = Date.now() + 15_000;
+      scheduleUnavailableClear();
     }
+  }
+
+  function clearUnavailableTimer(): void {
+    if (unavailableTimer) {
+      window.clearTimeout(unavailableTimer);
+      unavailableTimer = 0;
+    }
+  }
+
+  function scheduleUnavailableClear(): void {
+    clearUnavailableTimer();
+    const delay = Math.max(250, unavailableUntil - Date.now());
+    unavailableTimer = window.setTimeout(() => {
+      unavailableTimer = 0;
+      if (!needsUnavailable) {
+        return;
+      }
+      if (Date.now() < unavailableUntil) {
+        scheduleUnavailableClear();
+        return;
+      }
+      needsUnavailable = false;
+      if (!stopped) {
+        paint();
+      }
+    }, delay);
   }
 
   function updateTimers(): void {
@@ -817,6 +846,7 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       needsRelogin = false;
       needsUnavailable = false;
       unavailableUntil = 0;
+      clearUnavailableTimer();
       opts.host.replaceChildren();
       opts.host.hidden = true;
       syncOffset();
