@@ -95,7 +95,6 @@ CI on `main` / PRs: `rustfmt`, Rust tests, JS typecheck + unit tests, production
 
 ## Community
 
-- [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 
