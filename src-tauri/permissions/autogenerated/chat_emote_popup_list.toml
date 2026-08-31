@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-emote-popup-list"
+description = "Enables the chat_emote_popup_list command without any pre-configured scope."
+commands.allow = ["chat_emote_popup_list"]
+
+[[permission]]
+identifier = "deny-chat-emote-popup-list"
+description = "Denies the chat_emote_popup_list command without any pre-configured scope."
+commands.deny = ["chat_emote_popup_list"]

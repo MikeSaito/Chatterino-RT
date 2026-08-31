@@ -1738,7 +1738,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Split message scrollback limit (requires restart)",
         1000,
         100,
-        100000,
+        10000,
         100,
       ),
       num(
@@ -1747,7 +1747,7 @@ const GENERAL_SECTIONS: SectionDef[] = [
         "Usercard scrollback limit",
         1000,
         100,
-        100000,
+        10000,
         100,
       ),
       vx(

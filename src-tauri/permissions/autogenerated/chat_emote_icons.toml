@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-emote-icons"
+description = "Enables the chat_emote_icons command without any pre-configured scope."
+commands.allow = ["chat_emote_icons"]
+
+[[permission]]
+identifier = "deny-chat-emote-icons"
+description = "Denies the chat_emote_icons command without any pre-configured scope."
+commands.deny = ["chat_emote_icons"]

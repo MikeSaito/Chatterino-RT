@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chatterino1-commands-available"
+description = "Enables the chatterino1_commands_available command without any pre-configured scope."
+commands.allow = ["chatterino1_commands_available"]
+
+[[permission]]
+identifier = "deny-chatterino1-commands-available"
+description = "Denies the chatterino1_commands_available command without any pre-configured scope."
+commands.deny = ["chatterino1_commands_available"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-user-followers"
+description = "Enables the chat_user_followers command without any pre-configured scope."
+commands.allow = ["chat_user_followers"]
+
+[[permission]]
+identifier = "deny-chat-user-followers"
+description = "Denies the chat_user_followers command without any pre-configured scope."
+commands.deny = ["chat_user_followers"]

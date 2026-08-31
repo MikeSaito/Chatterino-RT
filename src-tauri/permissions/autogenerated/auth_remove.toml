@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-auth-remove"
+description = "Enables the auth_remove command without any pre-configured scope."
+commands.allow = ["auth_remove"]
+
+[[permission]]
+identifier = "deny-auth-remove"
+description = "Denies the auth_remove command without any pre-configured scope."
+commands.deny = ["auth_remove"]

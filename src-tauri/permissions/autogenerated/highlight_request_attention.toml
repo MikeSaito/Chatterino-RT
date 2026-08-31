@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-highlight-request-attention"
+description = "Enables the highlight_request_attention command without any pre-configured scope."
+commands.allow = ["highlight_request_attention"]
+
+[[permission]]
+identifier = "deny-highlight-request-attention"
+description = "Denies the highlight_request_attention command without any pre-configured scope."
+commands.deny = ["highlight_request_attention"]

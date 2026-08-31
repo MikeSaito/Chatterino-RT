@@ -1,5 +1,6 @@
 //! Image paste upload (Chatterino ImageUploader; reimplementation, not a port).
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -215,32 +216,83 @@ pub fn validate_upload_url(raw: &str) -> Result<Url, String> {
 
 fn upload_host_is_non_public(url: &Url) -> bool {
     match url.host() {
-        Some(url::Host::Ipv4(ip)) => {
-            ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_unspecified()
-                || ip.is_broadcast()
-        }
-        Some(url::Host::Ipv6(ip)) => {
-            if ip.is_loopback() || ip.is_unspecified() {
-                return true;
-            }
-            if let Some(v4) = ip.to_ipv4_mapped() {
-                return v4.is_private()
-                    || v4.is_loopback()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_broadcast();
-            }
-            (ip.segments()[0] & 0xfe00) == 0xfc00
-        }
+        Some(url::Host::Ipv4(ip)) => ipv4_upload_blocked(ip),
+        Some(url::Host::Ipv6(ip)) => ipv6_upload_blocked(ip),
         Some(url::Host::Domain(name)) => {
             let n = name.trim_end_matches('.').to_ascii_lowercase();
             n == "localhost" || n.ends_with(".localhost") || n.ends_with(".local")
         }
         None => true,
     }
+}
+
+fn ipv4_upload_blocked(ip: Ipv4Addr) -> bool {
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ipv4_is_cgnat(ip)
+        || ip.octets()[0] == 0
+}
+
+/// RFC 6598 shared address space (CGNAT) 100.64.0.0/10.
+fn ipv4_is_cgnat(ip: Ipv4Addr) -> bool {
+    let o = ip.octets();
+    o[0] == 100 && (o[1] & 0xc0) == 64
+}
+
+fn ipv6_upload_blocked(ip: Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_unicast_link_local() {
+        return true;
+    }
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return ipv4_upload_blocked(v4);
+    }
+    // Unique local fc00::/7
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
+fn ip_addr_upload_blocked(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => ipv4_upload_blocked(v4),
+        IpAddr::V6(v6) => ipv6_upload_blocked(v6),
+    }
+}
+
+/// After literal/host checks: resolve DNS and reject private/loopback/link-local/CGNAT.
+pub async fn assert_upload_resolved_public(url: &Url) -> Result<(), String> {
+    if url.scheme() == "http" {
+        // HTTP already limited to localhost / 127.0.0.1 literals.
+        return Ok(());
+    }
+    if upload_host_is_non_public(url) {
+        return Err(
+            "Image uploader HTTPS must target a public host (not loopback/private IP).".into(),
+        );
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Image uploader Request URL is invalid.".to_string())?;
+    // Literal IPs already gated above; still resolve domains (and re-check literals).
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| "Image uploader could not resolve Request URL host.".to_string())?;
+    let mut any = false;
+    for addr in addrs {
+        any = true;
+        if ip_addr_upload_blocked(addr.ip()) {
+            return Err(
+                "Image uploader HTTPS must not resolve to a private, loopback, link-local, or CGNAT address."
+                    .into(),
+            );
+        }
+    }
+    if !any {
+        return Err("Image uploader could not resolve Request URL host.".into());
+    }
+    Ok(())
 }
 
 pub fn normalize_format(raw: &str) -> Result<&'static str, String> {
@@ -307,6 +359,8 @@ pub async fn post_image(
             MAX_IMAGE_BYTES / (1024 * 1024)
         ));
     }
+    let url = validate_upload_url(&cfg.url)?;
+    assert_upload_resolved_public(&url).await?;
     let mime = format!("image/{format}");
     let filename = format!("control_v.{format}");
     let part = Part::bytes(bytes)
@@ -314,7 +368,7 @@ pub async fn post_image(
         .mime_str(&mime)
         .map_err(|e| e.to_string())?;
     let form = Form::new().part(cfg.form_field.clone(), part);
-    let mut req = http_client().post(&cfg.url).multipart(form);
+    let mut req = http_client().post(url.as_str()).multipart(form);
     for (name, value) in &cfg.headers {
         req = req.header(name.as_str(), value.as_str());
     }
@@ -425,9 +479,21 @@ mod tests {
         assert!(validate_upload_url("http://example.com/up").is_err());
         assert!(validate_upload_url("https://127.0.0.1/up").is_err());
         assert!(validate_upload_url("https://10.0.0.1/up").is_err());
+        assert!(validate_upload_url("https://100.64.1.1/up").is_err());
+        assert!(validate_upload_url("https://[fe80::1]/up").is_err());
         assert!(validate_upload_url("ftp://x").is_err());
         assert!(validate_upload_url("https://user:pass@evil/").is_err());
         assert!(validate_upload_url("").is_err());
+    }
+
+    #[test]
+    fn cgnat_and_link_local_blocked() {
+        assert!(ipv4_is_cgnat(Ipv4Addr::new(100, 64, 0, 1)));
+        assert!(ipv4_is_cgnat(Ipv4Addr::new(100, 127, 255, 255)));
+        assert!(!ipv4_is_cgnat(Ipv4Addr::new(100, 63, 255, 255)));
+        assert!(ipv6_upload_blocked("fe80::1".parse().unwrap()));
+        assert!(ipv6_upload_blocked("fc00::1".parse().unwrap()));
+        assert!(!ipv6_upload_blocked("2606:4700:4700::1111".parse().unwrap()));
     }
 
     #[test]

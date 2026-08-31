@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-auth-import"
+description = "Enables the auth_import command without any pre-configured scope."
+commands.allow = ["auth_import"]
+
+[[permission]]
+identifier = "deny-auth-import"
+description = "Denies the auth_import command without any pre-configured scope."
+commands.deny = ["auth_import"]

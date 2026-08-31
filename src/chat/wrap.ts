@@ -28,6 +28,11 @@ export type EmoteAspect = {
 };
 
 /** Paint/wrap size: height = row emote box; width follows author aspect (Chatterino stretch). */
+/** Cap extreme 7TV aspects so mask `" ".repeat` / measure cannot freeze the UI. */
+const MAX_EMOTE_ASPECT = 8;
+const MAX_EMOTE_LAYOUT_WIDTH_PX = 384;
+const MAX_MASK_SPACES = 512;
+
 export function emoteDisplaySize(
   span: EmoteAspect,
   emoteMinPx: number,
@@ -41,10 +46,12 @@ export function emoteDisplaySize(
     dw > 0 &&
     dh > 0
   ) {
-    return {
-      w: Math.max(1, Math.round((min * dw) / dh)),
-      h: min,
-    };
+    const aspect = Math.min(MAX_EMOTE_ASPECT, dw / dh);
+    const w = Math.min(
+      MAX_EMOTE_LAYOUT_WIDTH_PX,
+      Math.max(1, Math.round(min * aspect)),
+    );
+    return { w, h: min };
   }
   return { w: min, h: min };
 }
@@ -451,18 +458,22 @@ function visualWidth(
 }
 
 function spacesForPx(px: number, ctx: WrapCtx): string {
-  const target = Math.max(1, px);
+  const target = Math.min(MAX_EMOTE_LAYOUT_WIDTH_PX, Math.max(1, px));
   const sw = ctx.measureAdvance(" ");
   if (!(sw > 0)) {
-    return " ".repeat(Math.max(1, Math.round(target)));
+    return " ".repeat(Math.min(MAX_MASK_SPACES, Math.max(1, Math.round(target))));
   }
   const widthOf = (n: number): number =>
     ctx.measureAdvance(" ".repeat(Math.max(0, n)));
   let n = Math.max(1, Math.round(target / sw));
+  n = Math.min(MAX_MASK_SPACES, n);
   while (n > 1 && Math.abs(widthOf(n - 1) - target) <= Math.abs(widthOf(n) - target)) {
     n -= 1;
   }
-  while (Math.abs(widthOf(n + 1) - target) < Math.abs(widthOf(n) - target)) {
+  while (
+    n < MAX_MASK_SPACES &&
+    Math.abs(widthOf(n + 1) - target) < Math.abs(widthOf(n) - target)
+  ) {
     n += 1;
   }
   return " ".repeat(Math.max(1, n));
@@ -471,12 +482,15 @@ function spacesForPx(px: number, ctx: WrapCtx): string {
 /** Mask spaces whose advance is never below the ideal (mention holes). */
 function spacesForPxAtLeast(px: number, ctx: WrapCtx): string {
   let spaces = spacesForPx(px, ctx);
-  const target = Math.max(1, px);
+  const target = Math.min(MAX_EMOTE_LAYOUT_WIDTH_PX, Math.max(1, px));
   const sw = ctx.measureAdvance(" ");
   if (!(sw > 0)) {
     return spaces;
   }
-  while (ctx.measureAdvance(spaces) + 1e-6 < target) {
+  while (
+    spaces.length < MAX_MASK_SPACES &&
+    ctx.measureAdvance(spaces) + 1e-6 < target
+  ) {
     spaces += " ";
   }
   return spaces;

@@ -646,5 +646,10 @@ if (emoteDisplaySize({ displayWidth: 0, displayHeight: 28 }, 18).w !== 18) {
 if (emoteDisplaySize({ displayWidth: 56 }, 18).w !== 18) {
   throw new Error("partial aspect should fall back to square");
 }
+const extreme = emoteDisplaySize({ displayWidth: 65535, displayHeight: 1 }, 18);
+if (extreme.w > 384 || extreme.w !== 144) {
+  // 18 * min(8, 65535) = 144, then capped by MAX_EMOTE_LAYOUT_WIDTH_PX
+  throw new Error(`extreme aspect must clamp, got ${JSON.stringify(extreme)}`);
+}
 
 console.log("wrap tests ok");

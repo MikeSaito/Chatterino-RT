@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-filters-get"
+description = "Enables the filters_get command without any pre-configured scope."
+commands.allow = ["filters_get"]
+
+[[permission]]
+identifier = "deny-filters-get"
+description = "Denies the filters_get command without any pre-configured scope."
+commands.deny = ["filters_get"]

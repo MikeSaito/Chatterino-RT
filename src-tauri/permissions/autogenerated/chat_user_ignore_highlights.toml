@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-user-ignore-highlights"
+description = "Enables the chat_user_ignore_highlights command without any pre-configured scope."
+commands.allow = ["chat_user_ignore_highlights"]
+
+[[permission]]
+identifier = "deny-chat-user-ignore-highlights"
+description = "Denies the chat_user_ignore_highlights command without any pre-configured scope."
+commands.deny = ["chat_user_ignore_highlights"]

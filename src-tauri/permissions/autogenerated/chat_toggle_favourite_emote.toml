@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-toggle-favourite-emote"
+description = "Enables the chat_toggle_favourite_emote command without any pre-configured scope."
+commands.allow = ["chat_toggle_favourite_emote"]
+
+[[permission]]
+identifier = "deny-chat-toggle-favourite-emote"
+description = "Denies the chat_toggle_favourite_emote command without any pre-configured scope."
+commands.deny = ["chat_toggle_favourite_emote"]

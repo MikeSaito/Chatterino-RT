@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Main chat window: full invoke + process lifecycle",
-  "windows": ["main"],
+  "identifier": "settings",
+  "description": "Settings window: narrow invoke allowlist; no chat send/subscribe/mod or process exit",
+  "windows": ["settings"],
   "permissions": [
     "core:default",
     "core:webview:deny-create-webview",
@@ -18,8 +18,6 @@
     "core:window:allow-is-visible",
     "core:event:allow-emit",
     "core:event:allow-listen",
-    "process:allow-restart",
-    "process:allow-exit",
-    "main-commands"
+    "settings-surface"
   ]
 }

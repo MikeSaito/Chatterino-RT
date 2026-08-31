@@ -797,8 +797,15 @@ async function boot(): Promise<void> {
       }
       void (async () => {
         importBtn.disabled = true;
+        const blob = pasteEl.value;
         try {
-          await invoke("auth_import", { blob: pasteEl.value });
+          await invoke("auth_import", { blob });
+          pasteEl.value = "";
+          try {
+            await navigator.clipboard.writeText("");
+          } catch {
+            /* clipboard may be denied */
+          }
           setStatus(t("status.authCodeAccepted"));
         } catch (err) {
           setStatus(formatError(err));

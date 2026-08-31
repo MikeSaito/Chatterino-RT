@@ -72,6 +72,7 @@ export function bindChatIpc(
   let handling = false;
   const mountGate = createMountBootstrapGate();
   let snapshotQueued = false;
+  let overflowDuringSnapshot = false;
   let retryTimer: number | undefined;
   let resubscribing = false;
   let opBusy = false;
@@ -161,10 +162,15 @@ export function bindChatIpc(
         return;
       }
       if (snapshotQueued) {
-        queued.length = 0;
+        // Keep buffered live; after snapshot, handle() applies or gap→resnapshot.
         const ok = await recoverSnapshot();
         if (ok) {
           snapshotQueued = false;
+          if (overflowDuringSnapshot) {
+            overflowDuringSnapshot = false;
+            queued.length = 0;
+            snapshotQueued = true;
+          }
           continue;
         }
         snapshotQueued = true;
@@ -190,6 +196,13 @@ export function bindChatIpc(
       return;
     }
     if (snapshotQueued) {
+      // Buffer live (incl. CLEARCHAT/CLEARMSG) during recover — do not drop silently.
+      if (queued.length >= IPC_QUEUE_MAX) {
+        queued.length = 0;
+        overflowDuringSnapshot = true;
+      } else {
+        queued.push(batch);
+      }
       void pump();
       return;
     }
@@ -294,6 +307,7 @@ export function bindChatIpc(
     ring.reset();
     queued.length = 0;
     snapshotQueued = false;
+    overflowDuringSnapshot = false;
     onMountReset?.();
     mountGate.begin();
     try {
@@ -323,6 +337,7 @@ export function bindChatIpc(
     mountGate.clear();
     queued.length = 0;
     snapshotQueued = false;
+    overflowDuringSnapshot = false;
     ring.reset();
     onMountReset?.();
   };

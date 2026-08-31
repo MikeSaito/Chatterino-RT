@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-leave"
+description = "Enables the chat_leave command without any pre-configured scope."
+commands.allow = ["chat_leave"]
+
+[[permission]]
+identifier = "deny-chat-leave"
+description = "Denies the chat_leave command without any pre-configured scope."
+commands.deny = ["chat_leave"]

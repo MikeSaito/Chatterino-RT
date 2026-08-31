@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-user-profile"
+description = "Enables the chat_user_profile command without any pre-configured scope."
+commands.allow = ["chat_user_profile"]
+
+[[permission]]
+identifier = "deny-chat-user-profile"
+description = "Denies the chat_user_profile command without any pre-configured scope."
+commands.deny = ["chat_user_profile"]

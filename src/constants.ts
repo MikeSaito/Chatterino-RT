@@ -3,7 +3,8 @@ export const SCROLLBACK_LIMIT = DEFAULT_SCROLLBACK_LIMIT;
 export const MESSAGE_POOL_SIZE = DEFAULT_SCROLLBACK_LIMIT;
 
 const SCROLLBACK_MIN = 100;
-const SCROLLBACK_MAX = 100_000;
+/** GPU Pixi slot pool hard cap (not Rust history alone — avoids OOM on knob). */
+const SCROLLBACK_MAX = 10_000;
 
 type KnobMap = Record<string, boolean | string | number | null>;
 

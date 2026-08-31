@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-supports-incognito-links"
+description = "Enables the supports_incognito_links command without any pre-configured scope."
+commands.allow = ["supports_incognito_links"]
+
+[[permission]]
+identifier = "deny-supports-incognito-links"
+description = "Denies the supports_incognito_links command without any pre-configured scope."
+commands.deny = ["supports_incognito_links"]

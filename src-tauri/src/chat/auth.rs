@@ -215,6 +215,10 @@ pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(AUTH_FILE);
     let store = load_file(&path);
+    // Harden ACL on existing file (not only on save): copies / pre-ACL installs.
+    if path.is_file() {
+        let _ = restrict_auth_file_permissions(&path);
+    }
     {
         let mut inner = shared.auth.lock().map_err(|e| e.to_string())?;
         inner.path = path;
@@ -522,7 +526,7 @@ pub async fn import_blob(app: AppHandle, shared: Shared, blob: String) -> Result
         .poll_gen;
     let validated = validate_token(&http_client(), &parsed.token)
         .await
-        .map_err(AuthFail::internal)?;
+        .map_err(|e| AuthFail::internal(e.to_string()))?;
     if !still_current(&shared, gen) {
         return Err(AuthFail::coded("error.auth.cancelled", "login cancelled"));
     }
@@ -904,8 +908,8 @@ async fn poll_token(app: AppHandle, shared: Shared, mut job: PollJob) {
                             return;
                         }
                     }
-                    Err(msg) => {
-                        finish_pending(&app, &shared, job.gen, Some(&msg));
+                    Err(e) => {
+                        finish_pending(&app, &shared, job.gen, Some(&e.to_string()));
                     }
                 }
                 return;
@@ -999,7 +1003,7 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
             }
             emit(&app, &shared);
         }
-        Err(_) => {
+        Err(ValidateError::Invalid(_)) => {
             let still = shared.auth.lock().ok().is_some_and(|inner| {
                 inner.poll_gen == gen
                     && current_creds(&inner).is_some_and(|c| c.login == login && c.token == token)
@@ -1007,6 +1011,10 @@ async fn verify_disk(app: AppHandle, shared: Shared) {
             if still {
                 reject_session(app, shared, "saved login is invalid").await;
             }
+        }
+        Err(ValidateError::Transient(_)) => {
+            // Offline / DNS / 5xx must not wipe a saved OAuth session.
+            emit(&app, &shared);
         }
     }
 }
@@ -1196,9 +1204,28 @@ fn apply_scope_check(shared: &Shared, scopes: &[String]) {
     }
 }
 
-async fn validate_token(client: &reqwest::Client, token: &str) -> Result<ValidatedToken, String> {
+#[derive(Debug, Clone)]
+enum ValidateError {
+    /// Token rejected by Twitch (401/403) or malformed validate payload.
+    Invalid(String),
+    /// Network / timeout / 5xx — must not wipe disk session.
+    Transient(String),
+}
+
+impl std::fmt::Display for ValidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(m) | Self::Transient(m) => write!(f, "{m}"),
+        }
+    }
+}
+
+async fn validate_token(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<ValidatedToken, ValidateError> {
     let mut delay = Duration::from_millis(200);
-    let mut last = String::from("no response");
+    let mut last = ValidateError::Transient("no response".into());
     for attempt in 0..HTTP_ATTEMPTS {
         match client
             .get(VALIDATE_URL)
@@ -1218,7 +1245,7 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                             .trim()
                             .to_lowercase();
                         if !valid_login(&login) {
-                            return Err("validate: invalid login".into());
+                            return Err(ValidateError::Invalid("validate: invalid login".into()));
                         }
                         let user_id = v
                             .get("user_id")
@@ -1241,23 +1268,47 @@ async fn validate_token(client: &reqwest::Client, token: &str) -> Result<Validat
                         });
                     }
                     Ok(v) => {
-                        last = v
+                        let msg = v
                             .get("message")
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or("validate error")
                             .to_string();
+                        last = if status.as_u16() == 401
+                            || status.as_u16() == 403
+                            || status.is_client_error()
+                        {
+                            ValidateError::Invalid(format!("validate: {msg}"))
+                        } else {
+                            ValidateError::Transient(format!("validate: {msg}"))
+                        };
                     }
-                    Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
+                    Err(e) => {
+                        let brief = super::http_client::format_reqwest_error_brief(&e);
+                        last = if status.as_u16() == 401 || status.as_u16() == 403 {
+                            ValidateError::Invalid(format!("validate: {brief}"))
+                        } else if status.is_server_error() || status.as_u16() == 429 {
+                            ValidateError::Transient(format!("validate: {brief}"))
+                        } else if status.is_client_error() {
+                            ValidateError::Invalid(format!("validate: {brief}"))
+                        } else {
+                            ValidateError::Transient(format!("validate: {brief}"))
+                        };
+                    }
                 }
             }
-            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
+            Err(e) => {
+                last = ValidateError::Transient(format!(
+                    "validate: {}",
+                    super::http_client::format_reqwest_error_brief(&e)
+                ));
+            }
         }
         if attempt + 1 < HTTP_ATTEMPTS {
             tokio::time::sleep(delay).await;
             delay *= 2;
         }
     }
-    Err(format!("validate: {last}"))
+    Err(last)
 }
 
 pub(crate) fn env_secret(name: &str) -> Option<String> {

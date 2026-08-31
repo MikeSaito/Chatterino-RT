@@ -13,6 +13,8 @@ use super::state::Shared;
 
 const ATTEMPTS: u32 = 3;
 const FETCH_LOG_COOLDOWN_MS: u64 = 30_000;
+/// Hard cap for `fetch_emote_cdn` body (IPC as number[] must stay bounded).
+const MAX_CDN_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 
 static LAST_EMOTE_FAIL_LOG_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -742,12 +744,20 @@ pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), Str
                         .get(reqwest::header::CONTENT_TYPE)
                         .and_then(|v| v.to_str().ok())
                         .map(str::to_string);
-                    match resp.bytes().await {
+                    if let Some(len) = resp.content_length() {
+                        if len as usize > MAX_CDN_IMAGE_BYTES {
+                            return Err(format!(
+                                "response too large (max {} bytes)",
+                                MAX_CDN_IMAGE_BYTES
+                            ));
+                        }
+                    }
+                    match read_body_capped(resp, MAX_CDN_IMAGE_BYTES).await {
                         Ok(bytes) if !bytes.is_empty() => {
-                            return Ok((bytes.to_vec(), content_type));
+                            return Ok((bytes, content_type));
                         }
                         Ok(_) => last = "empty body".to_string(),
-                        Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
+                        Err(e) => last = e,
                     }
                 } else {
                     last = format!("http {status}");
@@ -761,6 +771,23 @@ pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), Str
         }
     }
     Err(last)
+}
+
+async fn read_body_capped(
+    resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    use futures_util::StreamExt;
+    let mut out = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| super::http_client::format_reqwest_error_brief(&e))?;
+        if out.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(format!("response too large (max {max_bytes} bytes)"));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

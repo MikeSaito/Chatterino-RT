@@ -6,7 +6,8 @@ use serde_json::Value;
 
 pub const DEFAULT_SCROLLBACK_LIMIT: usize = 1000;
 const MIN: usize = 100;
-const MAX: usize = 100_000;
+/// Upper bound for UI pool / split limit (GPU slots); keep well below 100k.
+const MAX: usize = 10_000;
 
 fn clamp_limit(raw: usize) -> usize {
     raw.clamp(MIN, MAX)
@@ -49,6 +50,6 @@ mod tests {
         let low = knobs(&[("misc.scrollbackSplitLimit", json!(50))]);
         assert_eq!(scrollback_split_limit(&low), 100);
         let high = knobs(&[("misc.scrollbackUsercardLimit", json!(999_999))]);
-        assert_eq!(scrollback_usercard_limit(&high), 100_000);
+        assert_eq!(scrollback_usercard_limit(&high), 10_000);
     }
 }

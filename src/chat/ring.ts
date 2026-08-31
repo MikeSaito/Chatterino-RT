@@ -2252,6 +2252,25 @@ export class MessageRing {
     this.layout(undefined, undefined, false);
   }
 
+  /** Bound live id set to ~2× pool so long sessions cannot grow without bound. */
+  private rememberLiveMsgId(msgId: string): void {
+    this.liveMsgIds.add(msgId);
+    const cap = Math.max(256, this.poolSize * 2);
+    if (this.liveMsgIds.size <= cap) {
+      return;
+    }
+    this.liveMsgIds.clear();
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const id = this.slots[(start + i) % this.poolSize]?.msgId;
+      if (id) {
+        this.liveMsgIds.add(id);
+      }
+    }
+    // Current write may not be in occupied yet — keep the id we just recorded.
+    this.liveMsgIds.add(msgId);
+  }
+
   setChannelLive(live: boolean): void {
     if (this.channelLive === live) {
       return;
@@ -2700,7 +2719,7 @@ export class MessageRing {
     } else {
       slot.fromHistory = false;
       if (slot.msgId) {
-        this.liveMsgIds.add(slot.msgId);
+        this.rememberLiveMsgId(slot.msgId);
       }
     }
     const drawn = this.line(event);

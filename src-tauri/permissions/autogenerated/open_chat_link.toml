@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-chat-link"
+description = "Enables the open_chat_link command without any pre-configured scope."
+commands.allow = ["open_chat_link"]
+
+[[permission]]
+identifier = "deny-open-chat-link"
+description = "Denies the open_chat_link command without any pre-configured scope."
+commands.deny = ["open_chat_link"]

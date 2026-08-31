@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-polls-vote"
+description = "Enables the polls_vote command without any pre-configured scope."
+commands.allow = ["polls_vote"]
+
+[[permission]]
+identifier = "deny-polls-vote"
+description = "Denies the polls_vote command without any pre-configured scope."
+commands.deny = ["polls_vote"]

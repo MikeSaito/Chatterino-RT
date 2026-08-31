@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-profile-image"
+description = "Enables the chat_profile_image command without any pre-configured scope."
+commands.allow = ["chat_profile_image"]
+
+[[permission]]
+identifier = "deny-chat-profile-image"
+description = "Denies the chat_profile_image command without any pre-configured scope."
+commands.deny = ["chat_profile_image"]

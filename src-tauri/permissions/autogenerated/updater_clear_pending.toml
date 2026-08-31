@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-updater-clear-pending"
+description = "Enables the updater_clear_pending command without any pre-configured scope."
+commands.allow = ["updater_clear_pending"]
+
+[[permission]]
+identifier = "deny-updater-clear-pending"
+description = "Denies the updater_clear_pending command without any pre-configured scope."
+commands.deny = ["updater_clear_pending"]

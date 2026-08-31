@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-polls-predict"
+description = "Enables the polls_predict command without any pre-configured scope."
+commands.allow = ["polls_predict"]
+
+[[permission]]
+identifier = "deny-polls-predict"
+description = "Denies the polls_predict command without any pre-configured scope."
+commands.deny = ["polls_predict"]

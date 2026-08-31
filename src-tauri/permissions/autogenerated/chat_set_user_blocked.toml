@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-set-user-blocked"
+description = "Enables the chat_set_user_blocked command without any pre-configured scope."
+commands.allow = ["chat_set_user_blocked"]
+
+[[permission]]
+identifier = "deny-chat-set-user-blocked"
+description = "Denies the chat_set_user_blocked command without any pre-configured scope."
+commands.deny = ["chat_set_user_blocked"]

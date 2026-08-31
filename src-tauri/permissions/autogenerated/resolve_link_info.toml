@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-link-info"
+description = "Enables the resolve_link_info command without any pre-configured scope."
+commands.allow = ["resolve_link_info"]
+
+[[permission]]
+identifier = "deny-resolve-link-info"
+description = "Denies the resolve_link_info command without any pre-configured scope."
+commands.deny = ["resolve_link_info"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cache-info"
+description = "Enables the cache_info command without any pre-configured scope."
+commands.allow = ["cache_info"]
+
+[[permission]]
+identifier = "deny-cache-info"
+description = "Denies the cache_info command without any pre-configured scope."
+commands.deny = ["cache_info"]

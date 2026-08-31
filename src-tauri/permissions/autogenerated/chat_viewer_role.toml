@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-viewer-role"
+description = "Enables the chat_viewer_role command without any pre-configured scope."
+commands.allow = ["chat_viewer_role"]
+
+[[permission]]
+identifier = "deny-chat-viewer-role"
+description = "Denies the chat_viewer_role command without any pre-configured scope."
+commands.deny = ["chat_viewer_role"]
