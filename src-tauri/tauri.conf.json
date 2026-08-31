@@ -81,9 +81,9 @@
   "plugins": {
     "updater": {
       "dangerousInsecureTransportProtocol": false,
-      "pubkey": "YOUR_TAURI_UPDATER_PUBKEY_HERE",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5MTRGQkFEMzE1MDkwNDIKUldSQ2tGQXhyZnNVcVdEbEg4MTZRVWhLY3FNU1hiWWRCZ29oNy9EeXVUSzZ0K1BiZlJaNnFSRisK",
       "endpoints": [
-        "https://github.com/YOUR_GITHUB_ORG/YOUR_GITHUB_REPO/releases/latest/download/latest.json"
+        "https://github.com/MikeSaito/Chatterino-RT/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

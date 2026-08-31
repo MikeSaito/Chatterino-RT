@@ -18,7 +18,7 @@ export type UpdaterCheckResult = {
 
 /**
  * Check for updates; optionally download, install, and relaunch.
- * While pubkey/endpoints are stubs, returns without applying an update.
+ * If updater is not ready (missing pubkey/endpoint), returns without applying an update.
  * Startup (`quiet`) still prompts via confirm when an update is found.
  */
 export async function checkForUpdates(

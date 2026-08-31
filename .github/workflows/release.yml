@@ -22,6 +22,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Require updater signing secrets
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY repository secret is required for signed updater artifacts."
+            exit 1
+          fi
+
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -52,16 +62,34 @@ jobs:
       - name: JavaScript tests
         run: npm test
 
+      - name: Assert tag matches package version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          CONF="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          CARGO="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          if [ "$TAG" != "$PKG" ] || [ "$TAG" != "$CONF" ] || [ "$TAG" != "$CARGO" ]; then
+            echo "Tag version ($TAG) must match package.json ($PKG), tauri.conf.json ($CONF), and Cargo.toml ($CARGO)."
+            exit 1
+          fi
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Chatterino RT v__VERSION__"
           releaseBody: |
             Windows installer (NSIS). WebView2 bootstrapper is embedded for machines without the runtime.
 
+            Updater assets (`latest.json`, `.sig`) are signed for in-app updates.
+            Publish this draft so `releases/latest/download/latest.json` is reachable by clients.
+
             See the repository README for login and validation notes.
           releaseDraft: true
-          prerelease: false
-          args: --target x86_64-pc-windows-msvc
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          updaterJsonPreferNsis: true
+          args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.release.conf.json
