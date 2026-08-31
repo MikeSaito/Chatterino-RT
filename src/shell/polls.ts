@@ -75,6 +75,8 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
   let statusMsg = "";
   let statusPanelId = "";
   let needsRelogin = false;
+  let needsUnavailable = false;
+  let unavailableUntil = 0;
   let raf = 0;
   let pruneTimer = 0;
   let stopped = false;
@@ -290,6 +292,9 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
   }
 
   function canAct(): boolean {
+    if (needsUnavailable && Date.now() < unavailableUntil) {
+      return false;
+    }
     return hasAccount() && !needsRelogin;
   }
 
@@ -350,6 +355,8 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     const interactive = canInteract(panel);
     const loggedIn = canAct();
     const showLogin = !hasAccount() || needsRelogin;
+    const showUnavailable =
+      needsUnavailable && Date.now() < unavailableUntil && hasAccount() && !needsRelogin;
     const voted = panel.kind === "poll" && votedPolls.has(panel.id);
     const predicted = panel.kind === "prediction" && predictedEvents.has(panel.id);
 
@@ -392,6 +399,9 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       login.textContent = t("auth.signin");
       login.addEventListener("click", () => opts.startLogin());
       root.append(hint, login);
+    } else if (showUnavailable) {
+      hint.textContent = t("polls.hint.unavailable");
+      root.append(hint);
     } else if (voted) {
       hint.textContent = t("polls.hint.voted");
       root.append(hint);
@@ -733,6 +743,14 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
     const code = (err as { code?: unknown }).code;
     if (code === "error.polls.relogin" || code === "error.auth.required") {
       needsRelogin = true;
+      needsUnavailable = false;
+      unavailableUntil = 0;
+      return;
+    }
+    if (code === "error.polls.unavailable" || code === "error.polls.gql") {
+      // Cooldown so repeated clicks do not spam status lines.
+      needsUnavailable = true;
+      unavailableUntil = Date.now() + 15_000;
     }
   }
 
@@ -777,6 +795,9 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       if (login) {
         needsRelogin = false;
       }
+      if (needsUnavailable && Date.now() >= unavailableUntil) {
+        needsUnavailable = false;
+      }
       paint();
     },
     stop() {
@@ -794,6 +815,8 @@ export function bindPollPanel(opts: BindPollPanelOpts): {
       statusMsg = "";
       statusPanelId = "";
       needsRelogin = false;
+      needsUnavailable = false;
+      unavailableUntil = 0;
       opts.host.replaceChildren();
       opts.host.hidden = true;
       syncOffset();

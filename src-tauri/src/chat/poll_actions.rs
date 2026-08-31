@@ -249,6 +249,7 @@ async fn post_gql(client_id: &str, token: &str, body: Value) -> Result<Value, Po
     let client = super::http_client::build(Duration::from_secs(12));
     let mut delay = Duration::from_millis(200);
     let mut last = String::from("no response");
+    let mut saw_server_or_parse = false;
     for attempt in 0..ATTEMPTS {
         match client
             .post(GQL_URL)
@@ -262,39 +263,55 @@ async fn post_gql(client_id: &str, token: &str, body: Value) -> Result<Value, Po
         {
             Ok(resp) => {
                 let status = resp.status();
-                match resp.json::<Value>().await {
-                    Ok(v) if status.is_success() => {
-                        let data_ok = v
-                            .get("data")
-                            .is_some_and(|d| !d.is_null() && d != &Value::Null);
-                        if data_ok {
-                            return Ok(v);
+                let code = status.as_u16();
+                if code == 401 || code == 403 {
+                    // Auth failures are not retryable — force UI re-login CTA.
+                    let _ = resp.bytes().await;
+                    return Err(PollActionsError::coded(
+                        "error.polls.relogin",
+                        "Re-login with Twitch to use polls and predictions",
+                    ));
+                }
+                if code == 429 || status.is_server_error() {
+                    saw_server_or_parse = true;
+                    last = format!("http {code}");
+                    let _ = resp.bytes().await;
+                } else {
+                    match resp.json::<Value>().await {
+                        Ok(v) if status.is_success() => {
+                            let data_ok = v
+                                .get("data")
+                                .is_some_and(|d| !d.is_null() && d != &Value::Null);
+                            if data_ok {
+                                return Ok(v);
+                            }
+                            saw_server_or_parse = true;
+                            if let Some(message) = gql_error_message(&v) {
+                                last = message;
+                            } else {
+                                last = "empty GraphQL data".into();
+                            }
                         }
-                        if let Some(message) = gql_error_message(&v) {
-                            last = message;
-                        } else {
-                            last = "empty GraphQL data".into();
+                        Ok(v) => {
+                            let message = gql_error_message(&v).unwrap_or_else(|| {
+                                v.get("message")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("GraphQL error")
+                                    .to_string()
+                            });
+                            last = format!("http {code}: {message}");
+                        }
+                        Err(e) => {
+                            saw_server_or_parse = true;
+                            last = super::http_client::format_reqwest_error(&e);
                         }
                     }
-                    Ok(v) => {
-                        let message = gql_error_message(&v).unwrap_or_else(|| {
-                            v.get("message")
-                                .and_then(Value::as_str)
-                                .unwrap_or("GraphQL error")
-                                .to_string()
-                        });
-                        if status.as_u16() == 401 || status.as_u16() == 403 {
-                            return Err(PollActionsError::coded(
-                                "error.polls.relogin",
-                                "Re-login with Twitch to use polls and predictions",
-                            ));
-                        }
-                        last = format!("http {status}: {message}");
-                    }
-                    Err(e) => last = super::http_client::format_reqwest_error(&e),
                 }
             }
-            Err(e) => last = super::http_client::format_reqwest_error(&e),
+            Err(e) => {
+                saw_server_or_parse = true;
+                last = super::http_client::format_reqwest_error(&e);
+            }
         }
         if attempt + 1 < ATTEMPTS {
             tokio::time::sleep(delay).await;
@@ -307,6 +324,12 @@ async fn post_gql(client_id: &str, token: &str, body: Value) -> Result<Value, Po
         &format!("after {ATTEMPTS} attempts: {last}"),
         GQL_URL,
     );
+    if saw_server_or_parse {
+        return Err(PollActionsError::coded(
+            "error.polls.unavailable",
+            "Polls and predictions are temporarily unavailable",
+        ));
+    }
     Err(PollActionsError::coded(
         "error.polls.gql",
         "Could not reach Twitch for polls or predictions",
