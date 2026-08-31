@@ -270,7 +270,7 @@ export function bindReplyThread(opts: {
   };
 
   const trap = bindFocusTrap(dialog, {
-    isActive: () => !modal.hidden,
+    isActive: () => modal.hidden === false,
     onEscape: () => {
       if (pinned) {
         return false;

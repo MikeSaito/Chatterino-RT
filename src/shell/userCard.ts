@@ -959,7 +959,7 @@ export function bindUserCard(opts: {
   };
 
   const cardTrap = bindFocusTrap(dialog, {
-    isActive: () => !modal.hidden && notesModal.hidden,
+    isActive: () => modal.hidden === false && notesModal.hidden !== false,
     onEscape: () => {
       if (pinned) {
         return false;
@@ -969,7 +969,7 @@ export function bindUserCard(opts: {
     },
   });
   const notesTrap = bindFocusTrap(notesDialog, {
-    isActive: () => !notesModal.hidden,
+    isActive: () => notesModal.hidden === false,
     onEscape: () => {
       if (notesBusy) {
         return false;

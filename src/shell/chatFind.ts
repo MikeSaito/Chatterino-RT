@@ -241,7 +241,7 @@ export function bindSearchPopup(opts: {
   };
 
   const trap = bindFocusTrap(dialog, {
-    isActive: () => !modal.hidden,
+    isActive: () => modal.hidden === false,
     onEscape: () => {
       close();
       return true;

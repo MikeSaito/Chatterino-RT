@@ -66,7 +66,7 @@ export function bindComposerChrome(opts: {
     const cfg = getOpts();
     const text = input.value;
     const empty = text.length === 0;
-    const hideComposer = !cfg.showEmptyInput && empty && replyBar.hidden;
+    const hideComposer = !cfg.showEmptyInput && empty && replyBar.hidden !== false;
     form.hidden = hideComposer;
     form.classList.toggle("is-hidden-empty", hideComposer);
     if (hideComposer && document.activeElement === input) {
