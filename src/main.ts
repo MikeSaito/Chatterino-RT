@@ -2077,7 +2077,7 @@ async function boot(): Promise<void> {
   ring.setOnModAction((action, ctx) => {
     hideContextMenu();
     modTimeoutPopup.hide();
-    const channel = snapshotModChannel(ipc.active() || "");
+    const channel = snapshotModChannel(ctx.channel || ipc.active() || "");
     if (!channel) {
       return;
     }
@@ -2102,13 +2102,13 @@ async function boot(): Promise<void> {
     }
     sendModCommand(text, channel);
   });
-  ring.setOnAutomodAction((action, messageId) => {
+  ring.setOnAutomodAction((action, messageId, ctx) => {
     hideContextMenu();
     modTimeoutPopup.hide();
     if (modSendBusy) {
       return;
     }
-    const channel = (ipc.active() || "").trim();
+    const channel = snapshotModChannel(ctx.channel || ipc.active() || "");
     if (!channel) {
       return;
     }
@@ -2207,6 +2207,7 @@ async function boot(): Promise<void> {
     if (customTrigger) {
       void invoke("chat_exec_custom_command", {
         trigger: customTrigger,
+        channel: contextMenuChannel || null,
         messageLogin: target.login || null,
         messageDisplay: target.nick || target.login || null,
         messageId: target.msgId || null,
@@ -2924,7 +2925,7 @@ async function boot(): Promise<void> {
   function openContextMenu(ctx: SlotContext): void {
     headerMenuCtl?.hide();
     contextTarget = ctx;
-    contextMenuChannel = snapshotModChannel(ipc.active() || "");
+    contextMenuChannel = snapshotModChannel(ctx.channel || ipc.active() || "");
     if (contextCustomHost && contextCustomSep) {
       contextCustomHost.replaceChildren();
       const cmds = menuCommands.filter(

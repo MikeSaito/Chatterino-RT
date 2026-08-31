@@ -742,6 +742,8 @@ pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Re
         inner.pending_user_code = None;
         inner.pending_paste = false;
         inner.last_message = None;
+        // Drop previous account's scopes banner until validate finishes.
+        inner.scopes_incomplete = false;
         inner.current_login = Some(login.clone());
         inner.cached_user_id = current_creds(&inner).and_then(|c| c.user_id.clone());
         let store = AuthStore {
@@ -754,6 +756,7 @@ pub async fn select_account(app: AppHandle, shared: Shared, login: String) -> Re
             return Err(AuthFail::internal(e));
         }
     }
+    emit(&app, &shared);
     after_identity_change(&shared).await;
     emit(&app, &shared);
     super::profile_images::spawn_refresh(app.clone(), shared.clone(), login);
@@ -843,6 +846,10 @@ pub async fn reject_session(app: AppHandle, shared: Shared, message: &str) {
 }
 
 async fn after_identity_change(shared: &Shared) {
+    if let Ok(mut inner) = shared.auth.lock() {
+        // Clear until validate/apply_scope_check; avoids stale banner across accounts.
+        inner.scopes_incomplete = false;
+    }
     let _ = ensure_twitch_user_id(shared).await;
     request_relogin(shared).await;
     shared.notify_pins(super::pins::PinsCmd::Relogin);

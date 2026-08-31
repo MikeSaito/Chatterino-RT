@@ -535,7 +535,9 @@ export function bindChannelList(
       paint(activeLogin === login ? "" : activeLogin);
     },
     syncOpen(nextOpen, active) {
-      if (drag) {
+      // Only block while an armed reorder is in progress (match isReordering).
+      // A live drag object before arm must not drop room sync.
+      if (drag?.armed === true) {
         return;
       }
       const same =

@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { t } from "../i18n/index.ts";
+import { onLocaleChange, t } from "../i18n/index.ts";
 import { isStreamerModeActive, streamerModeState } from "./streamerMode.ts";
 
 export const CHAT_RAID_EVENT = "chat:raid";
@@ -24,6 +24,9 @@ type ActiveCard = {
   el: HTMLElement;
   timer: ReturnType<typeof setTimeout> | null;
   leaving: boolean;
+  payload: RaidToastPayload;
+  labelEl: HTMLElement;
+  viewersEl: HTMLElement | null;
 };
 
 export function raidToastPayloadFromEvent(
@@ -156,6 +159,7 @@ export function bindRaidToast(
 
     card.append(avatarWrap, meta);
 
+    let viewersEl: HTMLElement | null = null;
     if (!hideCount) {
       const count = document.createElement("span");
       count.className = "raid-toast-count";
@@ -167,6 +171,7 @@ export function bindRaidToast(
       viewers.textContent = t("raidToast.viewers");
       count.append(plus, viewers);
       card.append(count);
+      viewersEl = viewers;
     }
 
     host.append(card);
@@ -176,6 +181,9 @@ export function bindRaidToast(
       el: card,
       timer: null,
       leaving: false,
+      payload,
+      labelEl: label,
+      viewersEl,
     };
     active.push(item);
     trimVisible();
@@ -204,6 +212,29 @@ export function bindRaidToast(
     });
   };
 
+  const relocalize = (): void => {
+    for (const card of active) {
+      if (card.leaving) {
+        continue;
+      }
+      const { payload } = card;
+      const hideCount =
+        isStreamerModeActive() && streamerModeState().hideViewerCountAndDuration;
+      card.labelEl.textContent = t("raidToast.raid");
+      if (card.viewersEl) {
+        card.viewersEl.textContent = t("raidToast.viewers");
+      }
+      card.el.setAttribute(
+        "aria-label",
+        hideCount
+          ? `${t("raidToast.raid")} ${payload.displayName} #${payload.channel}`
+          : `${t("raidToast.raid")} ${payload.displayName} +${payload.viewerCount} #${payload.channel}`,
+      );
+    }
+  };
+
+  const unlistenLocale = onLocaleChange(relocalize);
+
   void listen<RaidToastPayload>(CHAT_RAID_EVENT, (ev) => {
     void show(ev.payload);
   }).then((fn) => {
@@ -217,6 +248,7 @@ export function bindRaidToast(
   return {
     stop: () => {
       stopped = true;
+      unlistenLocale();
       for (const card of [...active]) {
         dismiss(card);
       }

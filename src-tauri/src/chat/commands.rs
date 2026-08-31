@@ -381,6 +381,7 @@ pub async fn chat_exec_custom_command(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
     trigger: String,
+    channel: Option<String>,
     #[allow(non_snake_case)] messageLogin: Option<String>,
     #[allow(non_snake_case)] messageDisplay: Option<String>,
     #[allow(non_snake_case)] messageId: Option<String>,
@@ -408,7 +409,7 @@ pub async fn chat_exec_custom_command(
         Some(id) => Some(validate_msg_id(id)?),
         None => None,
     };
-    let channel = active_send_channel(&state)?;
+    let channel = resolve_send_channel(&state, channel.as_deref())?;
     ensure_can_send(&state)?;
     let menu = MenuExpand {
         trigger: invoke.trigger.trim(),
