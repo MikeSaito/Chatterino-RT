@@ -1706,14 +1706,13 @@ mod tests {
         assert!(allowed_badge_url("https://user:pass@static-cdn.jtvnw.net/x").is_none());
         assert!(allowed_badge_url("http://static-cdn.jtvnw.net/x").is_none());
         assert!(allowed_badge_url("https://static-cdn.jtvnw.net/badges/v1/x").is_some());
-        assert!(allowed_badge_url(
-            "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0"
-        )
-        .is_some());
-        assert!(allowed_badge_url(
-            "https://static-cdn.jtvnw.net/jtv_user_pictures/x.png"
-        )
-        .is_none());
+        assert!(
+            allowed_badge_url("https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+                .is_some()
+        );
+        assert!(
+            allowed_badge_url("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png").is_none()
+        );
         assert!(allowed_badge_url(
             "https://d3aqoihi2n8ty8.cloudfront.net/actions/cheer/dark/static/1/1.gif"
         )

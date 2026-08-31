@@ -62,8 +62,7 @@ fn is_allowed_http_shell_host(url: &Url) -> bool {
 
     // Windows/Android custom protocols with useHttpsScheme: https://tauri.localhost
     // (default port only — *.localhost resolves to loopback, so :PORT would open local services).
-    if host.eq_ignore_ascii_case("tauri.localhost")
-        || host.eq_ignore_ascii_case("asset.localhost")
+    if host.eq_ignore_ascii_case("tauri.localhost") || host.eq_ignore_ascii_case("asset.localhost")
     {
         return url.scheme() == "https" && url.port().is_none();
     }
@@ -165,8 +164,12 @@ mod tests {
     #[test]
     fn allows_about_blank_and_app_protocols() {
         assert!(is_allowed_shell_navigation(&parse("about:blank")));
-        assert!(is_allowed_shell_navigation(&parse("tauri://localhost/index.html")));
-        assert!(is_allowed_shell_navigation(&parse("asset://localhost/x.png")));
+        assert!(is_allowed_shell_navigation(&parse(
+            "tauri://localhost/index.html"
+        )));
+        assert!(is_allowed_shell_navigation(&parse(
+            "asset://localhost/x.png"
+        )));
         assert!(is_allowed_shell_navigation(&parse(
             "https://tauri.localhost/"
         )));
@@ -180,7 +183,9 @@ mod tests {
 
     #[test]
     fn denies_arbitrary_http_https() {
-        assert!(!is_allowed_shell_navigation(&parse("https://evil.example/phish")));
+        assert!(!is_allowed_shell_navigation(&parse(
+            "https://evil.example/phish"
+        )));
         assert!(!is_allowed_shell_navigation(&parse("http://evil.example/")));
         assert!(!is_allowed_shell_navigation(&parse("file:///etc/passwd")));
         assert!(!is_allowed_shell_navigation(&parse("javascript:alert(1)")));

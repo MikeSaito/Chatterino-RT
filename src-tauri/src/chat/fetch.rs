@@ -810,10 +810,7 @@ pub async fn fetch_cdn_image(url: &str) -> Result<(Vec<u8>, Option<String>), Str
     Err(last)
 }
 
-async fn read_body_capped(
-    resp: reqwest::Response,
-    max_bytes: usize,
-) -> Result<Vec<u8>, String> {
+async fn read_body_capped(resp: reqwest::Response, max_bytes: usize) -> Result<Vec<u8>, String> {
     use futures_util::StreamExt;
     let mut out = Vec::new();
     let mut stream = resp.bytes_stream();

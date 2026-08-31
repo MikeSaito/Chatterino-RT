@@ -426,11 +426,7 @@ fn normalize_upload_link(raw: &str) -> String {
     if t.starts_with("//") {
         return format!("https:{t}");
     }
-    if !t.contains("://")
-        && t.contains('.')
-        && !t.contains(' ')
-        && !t.starts_with('/')
-    {
+    if !t.contains("://") && t.contains('.') && !t.contains(' ') && !t.starts_with('/') {
         return format!("https://{t}");
     }
     t.to_string()
@@ -528,7 +524,9 @@ mod tests {
         assert!(!ipv4_is_cgnat(Ipv4Addr::new(100, 63, 255, 255)));
         assert!(ipv6_upload_blocked("fe80::1".parse().unwrap()));
         assert!(ipv6_upload_blocked("fc00::1".parse().unwrap()));
-        assert!(!ipv6_upload_blocked("2606:4700:4700::1111".parse().unwrap()));
+        assert!(!ipv6_upload_blocked(
+            "2606:4700:4700::1111".parse().unwrap()
+        ));
     }
 
     #[test]
