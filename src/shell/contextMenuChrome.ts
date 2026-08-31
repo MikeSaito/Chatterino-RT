@@ -17,6 +17,8 @@ const ACTION_ICONS: Record<string, IconName> = {
   thread: "reply",
   user: "user",
   "web-search": "search",
+  pin: "pin",
+  unpin: "pin-off",
 };
 
 const ACTION_SHORTCUTS: Record<string, string> = {
@@ -39,6 +41,7 @@ const ACTION_LABELS: Record<string, MessageKey> = {
   "open-twitch": "context.openTwitch",
   "open-streamlink": "context.openStreamlink",
   "open-custom-player": "context.openCustomPlayer",
+  unpin: "context.unpin",
 };
 
 export function setContextMenuLabel(btn: HTMLButtonElement, label: string): void {
@@ -103,6 +106,32 @@ function applyStaticLabels(menu: HTMLElement): void {
   );
   if (copyLab) {
     setContextMenuLabel(copyLab, t("context.copy"));
+  }
+  const moderateLab = menu.querySelector<HTMLButtonElement>(
+    "#chat-context-moderate > .chat-context-submenu-label",
+  );
+  if (moderateLab) {
+    setContextMenuLabel(moderateLab, t("context.moderate"));
+  }
+  const pinLab = menu.querySelector<HTMLButtonElement>(
+    "#chat-context-pin > .chat-context-submenu-label",
+  );
+  if (pinLab) {
+    setContextMenuLabel(pinLab, t("context.pin"));
+  }
+  const pinDurationLabels: Array<[string, MessageKey]> = [
+    ["", "context.pinUntilEnd"],
+    ["60", "context.pin1m"],
+    ["600", "context.pin10m"],
+    ["1800", "context.pin30m"],
+  ];
+  for (const [duration, key] of pinDurationLabels) {
+    const btn = menu.querySelector<HTMLButtonElement>(
+      `button[data-action="pin"][data-duration="${duration}"]`,
+    );
+    if (btn) {
+      setContextMenuLabel(btn, t(key));
+    }
   }
 }
 

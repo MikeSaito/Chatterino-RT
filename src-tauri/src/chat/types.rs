@@ -316,6 +316,12 @@ pub enum ChatEvent {
             skip_serializing_if = "stack_count_is_one"
         )]
         stack_count: u32,
+        /// Shared-chat source channel login (`source_broadcaster` / shared_chat_*).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_login: Option<String>,
+        /// Moderator who issued the action (EventSub channel.moderate).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        moderator_login: Option<String>,
     },
     #[serde(rename = "clearmsg", rename_all = "camelCase")]
     Clearmsg {
@@ -412,6 +418,34 @@ pub enum ChatEvent {
         target_id: String,
         status: String,
     },
+    /// Low Trust restricted-user header (EventSub suspicious_user.message).
+    #[serde(rename = "lowTrustHeader", rename_all = "camelCase")]
+    LowTrustHeader {
+        id: String,
+        timestamp_ms: u64,
+        /// `restricted` | `monitored`
+        status: String,
+        /// Detail after "Suspicious User:" (e.g. "Restricted. Detected as likely ban evader").
+        detail: String,
+    },
+    /// Low Trust restricted-user message body.
+    #[serde(rename = "lowTrustMessage", rename_all = "camelCase")]
+    LowTrustMessage {
+        id: String,
+        timestamp_ms: u64,
+        message_id: String,
+        user_id: String,
+        login: String,
+        display_name: String,
+        text: String,
+        /// `restricted` | `monitored`
+        status: String,
+        channel_login: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        link_spans: Vec<LinkSpan>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mention_spans: Vec<MentionSpan>,
+    },
 }
 
 fn default_stack_count() -> u32 {
@@ -433,7 +467,9 @@ impl ChatEvent {
             | ChatEvent::Userstate { id, .. }
             | ChatEvent::Notice { id, .. }
             | ChatEvent::AutomodHeld { id, .. }
-            | ChatEvent::AutomodStatus { id, .. } => id,
+            | ChatEvent::AutomodStatus { id, .. }
+            | ChatEvent::LowTrustHeader { id, .. }
+            | ChatEvent::LowTrustMessage { id, .. } => id,
         }
     }
 
@@ -447,7 +483,9 @@ impl ChatEvent {
             | ChatEvent::Userstate { timestamp_ms, .. }
             | ChatEvent::Notice { timestamp_ms, .. }
             | ChatEvent::AutomodHeld { timestamp_ms, .. }
-            | ChatEvent::AutomodStatus { timestamp_ms, .. } => *timestamp_ms,
+            | ChatEvent::AutomodStatus { timestamp_ms, .. }
+            | ChatEvent::LowTrustHeader { timestamp_ms, .. }
+            | ChatEvent::LowTrustMessage { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -520,6 +558,23 @@ impl ChatEvent {
                         .is_some_and(|v| contains_ci(v, needle_lower))
                     || contains_ci(status, needle_lower)
             }
+            ChatEvent::LowTrustHeader { detail, status, .. } => {
+                contains_ci(detail, needle_lower)
+                    || contains_ci(status, needle_lower)
+                    || contains_ci("suspicious user", needle_lower)
+            }
+            ChatEvent::LowTrustMessage {
+                login,
+                display_name,
+                text,
+                status,
+                ..
+            } => {
+                contains_ci(login, needle_lower)
+                    || contains_ci(display_name, needle_lower)
+                    || contains_ci(text, needle_lower)
+                    || contains_ci(status, needle_lower)
+            }
             ChatEvent::Clearchat { target_login, .. } => target_login
                 .as_deref()
                 .is_some_and(|v| contains_ci(v, needle_lower)),
@@ -571,6 +626,10 @@ pub struct SearchHit {
     pub clear_duration_sec: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clear_stack_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_source_login: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_moderator_login: Option<String>,
 }
 
 impl ChatEvent {
@@ -593,6 +652,8 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::Usernotice {
                 timestamp_ms,
@@ -621,6 +682,8 @@ impl ChatEvent {
                             clear_login: None,
                             clear_duration_sec: None,
                             clear_stack_count: None,
+                            clear_source_login: None,
+                            clear_moderator_login: None,
                         };
                     }
                 }
@@ -634,6 +697,8 @@ impl ChatEvent {
                     clear_login: None,
                     clear_duration_sec: None,
                     clear_stack_count: None,
+                    clear_source_login: None,
+                    clear_moderator_login: None,
                 }
             }
             ChatEvent::Notice {
@@ -648,6 +713,8 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::AutomodHeld {
                 timestamp_ms,
@@ -665,18 +732,24 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::Clearchat {
                 timestamp_ms,
                 target_login,
                 duration_sec,
                 stack_count,
+                source_login,
+                moderator_login,
                 ..
             } => {
                 let text = super::clearchat_text::clearchat_text_en(
                     target_login.as_deref(),
                     duration_sec.map(u64::from),
                     *stack_count,
+                    source_login.as_deref(),
+                    moderator_login.as_deref(),
                 );
                 SearchHit {
                     id: self.search_jump_id().to_string(),
@@ -688,6 +761,8 @@ impl ChatEvent {
                     clear_login: target_login.clone(),
                     clear_duration_sec: duration_sec.map(u64::from),
                     clear_stack_count: Some(*stack_count),
+                    clear_source_login: source_login.clone(),
+                    clear_moderator_login: moderator_login.clone(),
                 }
             }
             ChatEvent::Roomstate {
@@ -707,6 +782,8 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::Clearmsg { .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
@@ -718,6 +795,8 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::Userstate { timestamp_ms, .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
@@ -729,6 +808,8 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
             ChatEvent::AutomodStatus { timestamp_ms, .. } => SearchHit {
                 id: self.search_jump_id().to_string(),
@@ -740,6 +821,44 @@ impl ChatEvent {
                 clear_login: None,
                 clear_duration_sec: None,
                 clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
+            },
+            ChatEvent::LowTrustHeader {
+                timestamp_ms,
+                detail,
+                ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: "Suspicious User".into(),
+                login: String::new(),
+                text: detail.clone(),
+                color: "#0000ff".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
+            },
+            ChatEvent::LowTrustMessage {
+                timestamp_ms,
+                login,
+                display_name,
+                text,
+                ..
+            } => SearchHit {
+                id: self.search_jump_id().to_string(),
+                timestamp_ms: *timestamp_ms,
+                nick: display_name.clone(),
+                login: login.clone(),
+                text: text.clone(),
+                color: "#adadc0".into(),
+                clear_login: None,
+                clear_duration_sec: None,
+                clear_stack_count: None,
+                clear_source_login: None,
+                clear_moderator_login: None,
             },
         }
     }

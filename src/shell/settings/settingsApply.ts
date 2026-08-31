@@ -190,6 +190,7 @@ export function applySettingsDisplay(
     mode: String(data.knobs["streamerMode.enabled"] ?? "DetectStreamingSoftware"),
     muteMentions: data.knobs["streamerMode.muteMentions"] !== false,
     hideModActions: data.knobs["streamerMode.hideModActions"] !== false,
+    hideRestrictedUsers: data.knobs["streamerMode.hideRestrictedUsers"] !== false,
     hideViewerCountAndDuration:
       data.knobs["streamerMode.hideViewerCountAndDuration"] === true,
   });
@@ -198,6 +199,7 @@ export function applySettingsDisplay(
   const hideMod =
     data.knobs["appearance.hideModerationActions"] === true ||
     (sm.active && sm.hideModActions);
+  const hideRestricted = sm.active && sm.hideRestrictedUsers;
   const hideDel = data.knobs["appearance.hideDeletionActions"] === true;
   const delLenRaw = Number(data.knobs["behaviour.deletedMessageLengthLimit"] ?? 50);
   const delLen = Number.isFinite(delLenRaw) ? delLenRaw : 50;
@@ -233,6 +235,7 @@ export function applySettingsDisplay(
     hideTsLive,
     data.knobs["appearance.showReplyButton"] !== false,
     data.knobs["links.linksDoubleClickOnly"] === true,
+    hideRestricted,
     {
       scale: Number.isFinite(scaleRaw) ? scaleRaw : 1,
       images: data.knobs["emotes.enableEmoteImages"] !== false,

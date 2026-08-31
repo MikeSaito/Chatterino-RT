@@ -3,27 +3,33 @@
 
 mod chat;
 mod security;
+mod updater;
 
 use chat::clips::resolve_clip_info;
 use chat::commands::{
     about_info, auth_import, auth_logout, auth_remove, auth_select, auth_start, auth_status,
     cache_clear, cache_info, cache_pick_directory, chat_automod_manage, chat_blocked_users,
     chat_complete, chat_emote_icons, chat_emote_popup_list, chat_exec_custom_command, chat_join,
-    chat_leave, chat_part, chat_profile_image, chat_search, chat_send, chat_set_user_blocked,
-    chat_set_user_ignore_highlights, chat_set_user_notes, chat_snapshot, chat_subscribe,
-    chat_toggle_favourite_emote, chat_typing, chat_unsubscribe, chat_user_blocked,
-    chat_user_followers, chat_user_ignore_highlights, chat_user_notes, chat_user_profile,
-    chat_user_pronouns, chat_user_subage, chat_viewer_role, chatterino1_commands_available,
-    fetch_emote_cdn, filters_get, filters_set, highlight_cancel_attention,
-    highlight_request_attention, highlight_sound_pick, highlight_sound_read, image_upload,
-    logging_pick_directory, open_chat_link, open_in_custom_player, open_in_streamlink,
-    open_settings_directory, open_settings_window, polls_predict, polls_vote,
-    read_chatterino1_commands, session_get, session_reorder_open, settings_get, settings_set,
-    streamer_mode_detect, supports_incognito_links,
+    chat_leave, chat_part, chat_pin_message, chat_profile_image, chat_search, chat_send,
+    chat_set_user_blocked, chat_set_user_ignore_highlights, chat_set_user_notes, chat_snapshot,
+    chat_subscribe, chat_toggle_favourite_emote, chat_typing, chat_unpin_message, chat_unsubscribe,
+    chat_user_blocked, chat_user_followers, chat_user_ignore_highlights, chat_user_notes,
+    chat_user_profile, chat_user_pronouns, chat_user_subage, chat_viewer_role,
+    chatterino1_commands_available, fetch_emote_cdn, filters_get, filters_set,
+    highlight_cancel_attention, highlight_request_attention, highlight_sound_pick,
+    highlight_sound_read, image_upload, logging_pick_directory, open_chat_link,
+    open_in_custom_player, open_in_streamlink, open_settings_directory, open_settings_window,
+    polls_predict, polls_vote, read_chatterino1_commands, session_get, session_reorder_open,
+    settings_get, settings_set, streamer_mode_detect, supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
+use updater::{
+    updater_check, updater_clear_pending, updater_install, updater_status, PendingUpdate,
+    UpdaterGate,
+};
 
 /// Остановить фоновые IRC/7TV/BTTV/poll задачи перед выходом.
 fn shutdown_background(app: &AppHandle) {
@@ -36,7 +42,9 @@ fn shutdown_background(app: &AppHandle) {
         state.notify_event(EventCmd::Shutdown);
         state.notify_bttv(BttvCmd::Shutdown);
         state.notify_polls(chat::polls::PollsCmd::Shutdown);
+        state.notify_low_trust(chat::low_trust::LowTrustCmd::Shutdown);
         state.notify_pins(chat::pins::PinsCmd::Shutdown);
+        state.notify_shared_bans(chat::shared_bans::SharedBansCmd::Shutdown);
         chat::automod::shutdown();
         chat::live_status::shutdown();
         chat::live_notifications::shutdown();
@@ -58,8 +66,12 @@ pub fn run() {
     let shared = Shared::new();
     tauri::Builder::default()
         .plugin(security::freeze_app_prototype())
+        .plugin(tauri_plugin_process::init())
         .manage(shared.clone())
+        .manage(PendingUpdate(Mutex::new(None)))
+        .manage(UpdaterGate::default())
         .setup(move |app| {
+            app.handle().plugin(updater::plugin_builder().build())?;
             chat::auth::init(app.handle(), &shared)?;
             chat::filters::init(app.handle(), &shared)?;
             chat::session::init(app.handle(), &shared)?;
@@ -69,11 +81,13 @@ pub fn run() {
             chat::eventapi::start(shared.clone())?;
             chat::bttv_live::start(shared.clone())?;
             chat::polls::start(app.handle().clone(), shared.clone())?;
+            chat::low_trust::start(app.handle().clone(), shared.clone())?;
             chat::pins::start(app.handle().clone(), shared.clone())?;
             chat::automod::start(app.handle().clone(), shared.clone())?;
             chat::live_status::start(app.handle().clone(), shared.clone());
             chat::live_notifications::start(app.handle().clone(), shared.clone());
             chat::shared_chat::start(shared.clone());
+            chat::shared_bans::start(app.handle().clone(), shared.clone())?;
             chat::irc::start(app.handle().clone(), shared)?;
             security::allow_embed_storage(app);
             Ok(())
@@ -96,6 +110,8 @@ pub fn run() {
             chat_send,
             chat_typing,
             chat_automod_manage,
+            chat_pin_message,
+            chat_unpin_message,
             chat_exec_custom_command,
             chat_complete,
             chat_emote_icons,
@@ -150,7 +166,11 @@ pub fn run() {
             highlight_request_attention,
             highlight_cancel_attention,
             image_upload,
-            streamer_mode_detect
+            streamer_mode_detect,
+            updater_status,
+            updater_check,
+            updater_clear_pending,
+            updater_install
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

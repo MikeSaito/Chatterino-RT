@@ -428,6 +428,10 @@ fn event_message_text(event: &ChatEvent) -> String {
         ChatEvent::Clearmsg { .. } | ChatEvent::Userstate { .. } => String::new(),
         ChatEvent::AutomodHeld { text, .. } => text.clone(),
         ChatEvent::AutomodStatus { status, .. } => status.clone(),
+        ChatEvent::LowTrustHeader { detail, .. } => format!("Suspicious User: {detail}"),
+        ChatEvent::LowTrustMessage {
+            display_name, text, ..
+        } => format!("{display_name}: {text}"),
     }
 }
 
@@ -504,8 +508,9 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
                 f.highlighted |= inner_f.highlighted;
             }
         }
-        ChatEvent::Clearchat { .. } => {
+        ChatEvent::Clearchat { source_login, .. } => {
             f.timeout = true;
+            f.shared = source_login.as_deref().is_some_and(|s| !s.is_empty());
         }
         ChatEvent::Notice { .. } | ChatEvent::Roomstate { .. } => {
             f.system = true;
@@ -513,6 +518,23 @@ fn event_flag_bits(event: &ChatEvent, room_id: Option<&str>) -> FlagWant {
         ChatEvent::Clearmsg { .. } | ChatEvent::Userstate { .. } => {}
         ChatEvent::AutomodHeld { .. } | ChatEvent::AutomodStatus { .. } => {
             f.system = true;
+        }
+        ChatEvent::LowTrustHeader { status, .. } => {
+            f.system = true;
+            if status.eq_ignore_ascii_case("restricted") {
+                f.restricted = true;
+            }
+            if status.eq_ignore_ascii_case("monitored") {
+                f.monitored = true;
+            }
+        }
+        ChatEvent::LowTrustMessage { status, .. } => {
+            if status.eq_ignore_ascii_case("restricted") {
+                f.restricted = true;
+            }
+            if status.eq_ignore_ascii_case("monitored") {
+                f.monitored = true;
+            }
         }
     }
     f
@@ -800,6 +822,8 @@ mod tests {
             target_login: Some("ann".into()),
             duration_sec: Some(60),
             stack_count: 1,
+            source_login: None,
+            moderator_login: None,
         };
         assert!(!applies_all(&parse_predicates("is:system"), &to, "c", None));
         assert!(applies_all(&parse_predicates("is:timeout"), &to, "c", None));

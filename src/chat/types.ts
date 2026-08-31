@@ -126,6 +126,8 @@ export type ChatEvent =
       targetLogin?: string;
       durationSec?: number;
       stackCount?: number;
+      sourceLogin?: string;
+      moderatorLogin?: string;
     }
   | {
       kind: "clearmsg";
@@ -191,6 +193,27 @@ export type ChatEvent =
       timestampMs: number;
       targetId: string;
       status: string;
+    }
+  | {
+      kind: "lowTrustHeader";
+      id: string;
+      timestampMs: number;
+      status: string;
+      detail: string;
+    }
+  | {
+      kind: "lowTrustMessage";
+      id: string;
+      timestampMs: number;
+      messageId: string;
+      userId: string;
+      login: string;
+      displayName: string;
+      text: string;
+      status: string;
+      channelLogin: string;
+      linkSpans?: LinkSpan[];
+      mentionSpans?: MentionSpan[];
     };
 
 export type ChatBatch = {

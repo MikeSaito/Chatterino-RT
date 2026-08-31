@@ -34,7 +34,16 @@ export function formatInvokeError(
   fallbackKey: "status.error" | "status.bootError" = "status.error",
 ): string {
   if (typeof err === "string" && err.trim()) {
-    return err;
+    const raw = err.trim();
+    const code = raw.split(":")[0]!.trim();
+    if (code.startsWith("error.")) {
+      const translated = t(code);
+      if (translated !== code) {
+        const detail = raw.slice(code.length).replace(/^:\s*/, "");
+        return detail ? `${translated}: ${detail}` : translated;
+      }
+    }
+    return raw;
   }
   if (!err || typeof err !== "object") {
     return t(fallbackKey);

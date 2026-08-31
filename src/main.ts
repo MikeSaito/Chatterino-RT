@@ -43,6 +43,7 @@ import { bindAuthMenu } from "./shell/authMenu";
 import { bindChatQuickActions } from "./shell/chatQuickActions";
 import { bindSettingsBridge } from "./shell/settings/settingsMainBridge";
 import { isSettingsWindowOpen, requestOpenSettingsWindow } from "./shell/settings/settingsWindowState";
+import { checkForUpdates } from "./shell/updater";
 import {
   actionAllowsEditable,
   resolveAction,
@@ -96,6 +97,7 @@ import {
   parseModActions,
   type ModActionBtn,
 } from "./shell/modActions";
+import { snapshotModChannel } from "./shell/modChannelBind";
 import { bindModTimeoutPopup } from "./shell/modTimeoutPopup";
 import {
   bindImageUpload,
@@ -1333,36 +1335,111 @@ async function boot(): Promise<void> {
   };
   if (moderationModeBtn) {
     moderationModeBtn.hidden = true;
+    let syncModRoleSeq = 0;
+    let modModeToggleBusy = false;
+    const paintModModeBtn = (on: boolean): void => {
+      moderationModeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      moderationModeBtn.classList.toggle("is-active", on);
+    };
     syncModerationModeBtn = (): void => {
       const channel = ipc.active().trim();
+      const seq = ++syncModRoleSeq;
       if (!channel) {
+        ring.setCanModerate(false);
+        if (ring.moderationModeOn()) {
+          ring.setModerationMode(false);
+          paintModModeBtn(false);
+        }
         moderationModeBtn.hidden = true;
         return;
       }
       const seqChannel = channel.toLowerCase();
       void invoke<ViewerRole>("chat_viewer_role", { channel })
         .then((role) => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
           if (ipc.active().trim().toLowerCase() !== seqChannel) {
             return;
           }
-          // Stock SplitHeader: show only with mod rights, or while mode already on.
-          const show =
-            role.isMod || role.isBroadcaster || ring.moderationModeOn();
-          moderationModeBtn.hidden = !show;
+          const canMod = role.isMod || role.isBroadcaster;
+          ring.setCanModerate(canMod);
+          if (!canMod && ring.moderationModeOn()) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+          }
+          moderationModeBtn.hidden = !canMod && !ring.moderationModeOn();
         })
         .catch(() => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
           if (ipc.active().trim().toLowerCase() !== seqChannel) {
             return;
           }
-          moderationModeBtn.hidden = !ring.moderationModeOn();
+          ring.setCanModerate(false);
+          if (ring.moderationModeOn()) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+          }
+          moderationModeBtn.hidden = true;
         });
     };
     moderationModeBtn.addEventListener("click", () => {
+      if (modModeToggleBusy) {
+        return;
+      }
       const next = !ring.moderationModeOn();
-      ring.setModerationMode(next);
-      moderationModeBtn.setAttribute("aria-pressed", next ? "true" : "false");
-      moderationModeBtn.classList.toggle("is-active", next);
-      syncModerationModeBtn();
+      if (!next) {
+        ring.setModerationMode(false);
+        paintModModeBtn(false);
+        syncModerationModeBtn();
+        return;
+      }
+      const channel = ipc.active().trim();
+      if (!channel) {
+        return;
+      }
+      const seqChannel = channel.toLowerCase();
+      const seq = ++syncModRoleSeq;
+      modModeToggleBusy = true;
+      moderationModeBtn.disabled = true;
+      void invoke<ViewerRole>("chat_viewer_role", { channel })
+        .then((role) => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          const canMod = role.isMod || role.isBroadcaster;
+          ring.setCanModerate(canMod);
+          if (!canMod) {
+            ring.setModerationMode(false);
+            paintModModeBtn(false);
+            moderationModeBtn.hidden = true;
+            return;
+          }
+          ring.setModerationMode(true);
+          paintModModeBtn(true);
+          moderationModeBtn.hidden = false;
+        })
+        .catch(() => {
+          if (seq !== syncModRoleSeq) {
+            return;
+          }
+          if (ipc.active().trim().toLowerCase() !== seqChannel) {
+            return;
+          }
+          ring.setCanModerate(false);
+          ring.setModerationMode(false);
+          paintModModeBtn(false);
+          moderationModeBtn.hidden = true;
+        })
+        .finally(() => {
+          modModeToggleBusy = false;
+          moderationModeBtn.disabled = false;
+        });
     });
   }
 
@@ -1763,6 +1840,8 @@ async function boot(): Promise<void> {
   let copyJsonSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
   let contextTarget: SlotContext | null = null;
+  /** Channel snapshot at menu open (pin/unpin must not follow tab switch). */
+  let contextMenuChannel = "";
   let channelBusy = false;
   const channelQueue: {
     kind: "join" | "leave" | "sync";
@@ -1956,14 +2035,15 @@ async function boot(): Promise<void> {
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
   });
-  const sendModCommand = (text: string): void => {
-    if (modSendBusy) {
+  const sendModCommand = (text: string, channelRaw: string): void => {
+    const channel = snapshotModChannel(channelRaw);
+    if (!channel || modSendBusy) {
       return;
     }
     modSendBusy = true;
     void (async () => {
       try {
-        await invoke("chat_send", { text, replyToId: null });
+        await invoke("chat_send", { text, replyToId: null, channel });
       } catch (err) {
         setStatus(formatError(err));
       } finally {
@@ -1980,21 +2060,22 @@ async function boot(): Promise<void> {
         void requestOpenSettingsWindow();
         return;
       }
-      const active = (ipc.active() || "").trim().toLowerCase();
-      if (action.channel && action.channel !== active) {
-        return;
-      }
-      sendModCommand(action.text);
+      // Channel snapshot from popup open — Rust sends to that join, not hub.active.
+      sendModCommand(action.text, action.channel);
     },
   });
   ring.setOnModAction((action, ctx) => {
     hideContextMenu();
     modTimeoutPopup.hide();
+    const channel = snapshotModChannel(ipc.active() || "");
+    if (!channel) {
+      return;
+    }
     if (action === MOD_GUTTER_TIMEOUT_ACTION) {
       modTimeoutPopup.open({
         login: ctx.login,
         msgId: ctx.msgId,
-        channel: ipc.active() || "",
+        channel,
         clientX: ctx.clientX,
         clientY: ctx.clientY,
       });
@@ -2003,13 +2084,13 @@ async function boot(): Promise<void> {
     const text = expandModAction(action, {
       userName: ctx.login,
       msgId: ctx.msgId,
-      channel: ipc.active() || "",
+      channel,
     });
     if (!text) {
       setStatus(t("status.modBuildFailed"));
       return;
     }
-    sendModCommand(text);
+    sendModCommand(text, channel);
   });
   ring.setOnAutomodAction((action, messageId) => {
     hideContextMenu();
@@ -2228,6 +2309,44 @@ async function boot(): Promise<void> {
           private: searchIncognito,
         }).catch(() => undefined);
       }
+      return;
+    }
+    if ((action === "pin" || action === "unpin") && target.msgId) {
+      const channel = snapshotModChannel(contextMenuChannel);
+      if (!channel) {
+        setStatus(t("status.noChannel"));
+        return;
+      }
+      if (!ring.canModerateOn()) {
+        setStatus(t("error.pin.forbidden"));
+        return;
+      }
+      const messageId = target.msgId;
+      void (async () => {
+        try {
+          if (action === "unpin") {
+            await invoke("chat_unpin_message", { channel, messageId });
+          } else {
+            const rawDuration = btn.dataset.duration?.trim() ?? "";
+            const durationSeconds =
+              rawDuration === "" ? null : Number.parseInt(rawDuration, 10);
+            if (
+              durationSeconds !== null &&
+              (!Number.isFinite(durationSeconds) || durationSeconds <= 0)
+            ) {
+              setStatus(t("error.pin.invalid_duration"));
+              return;
+            }
+            await invoke("chat_pin_message", {
+              channel,
+              messageId,
+              durationSeconds,
+            });
+          }
+        } catch (err) {
+          setStatus(formatError(err));
+        }
+      })();
       return;
     }
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
@@ -2613,6 +2732,12 @@ async function boot(): Promise<void> {
     return;
   }
 
+  // Как Chatterino: тихая проверка при старте (no-op, пока stub-конфиг).
+  void checkForUpdates({
+    beta: bootKnobs["misc.betaUpdates"] === true,
+    quiet: true,
+  });
+
   composer.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void sendMessage();
@@ -2789,6 +2914,7 @@ async function boot(): Promise<void> {
   function openContextMenu(ctx: SlotContext): void {
     headerMenuCtl?.hide();
     contextTarget = ctx;
+    contextMenuChannel = snapshotModChannel(ipc.active() || "");
     if (contextCustomHost && contextCustomSep) {
       contextCustomHost.replaceChildren();
       const cmds = menuCommands.filter(
@@ -2813,6 +2939,7 @@ async function boot(): Promise<void> {
     );
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
+    const moderateMenu = contextMenuEl.querySelector<HTMLElement>("#chat-context-moderate");
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
     const streamlinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-streamlink"]',
@@ -2839,6 +2966,9 @@ async function boot(): Promise<void> {
     }
     if (userBtn) {
       userBtn.hidden = !ctx.login;
+    }
+    if (moderateMenu) {
+      moderateMenu.hidden = !(ctx.msgId && !ctx.disabled && ring.canModerateOn());
     }
     if (twitchBtn) {
       twitchBtn.hidden = !ctx.login;
@@ -2918,6 +3048,7 @@ async function boot(): Promise<void> {
   function hideContextMenu(): void {
     contextMenuEl.hidden = true;
     contextTarget = null;
+    contextMenuChannel = "";
     headerMenuCtl?.hide();
     authMenuCtl?.hide();
     joinPopoverCtl?.hide();

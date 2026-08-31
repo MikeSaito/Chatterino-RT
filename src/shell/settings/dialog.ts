@@ -44,6 +44,7 @@ import {
   tTableCol,
   tTableColOption,
 } from "../../i18n/settingsT";
+import { checkForUpdates } from "../updater";
 import { settingsNavIcon } from "./navIcons";
 import {
   applySettingsDisplay,
@@ -967,7 +968,31 @@ export function mountSettingsPanel(opts: {
           });
       });
       dirRow.append(dirLabel, dirPath, openDirBtn);
-      versionBlock.append(versionTitle, versionLine, dirRow);
+      const updateRow = document.createElement("div");
+      updateRow.className = "settings-about-dir";
+      updateRow.dataset.search = [
+        t("settings.about.checkUpdates"),
+        "update check beta",
+      ].join(" ");
+      const updateBtn = document.createElement("button");
+      updateBtn.type = "button";
+      updateBtn.className = "settings-action-btn";
+      updateBtn.textContent = t("settings.about.checkUpdates");
+      updateBtn.addEventListener("click", () => {
+        const beta = baseline.knobs["misc.betaUpdates"] === true;
+        updateBtn.disabled = true;
+        void checkForUpdates({
+          beta,
+          quiet: false,
+          onStatus: (message) => {
+            statusEl.textContent = message;
+          },
+        }).finally(() => {
+          updateBtn.disabled = false;
+        });
+      });
+      updateRow.append(updateBtn);
+      versionBlock.append(versionTitle, versionLine, dirRow, updateRow);
 
       const chatterinoBlock = document.createElement("div");
       chatterinoBlock.className = "settings-about-block";

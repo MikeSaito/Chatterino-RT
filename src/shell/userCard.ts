@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatEvent, ViewerRole } from "../chat/types";
 import { t } from "../i18n";
+import { formatInvokeError } from "../i18n/formatError";
 import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import {
   closeModal,
@@ -8,6 +9,10 @@ import {
   prepareModalOpen,
 } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
+import {
+  snapshotModChannel,
+  userCardModChannelMatches,
+} from "./modChannelBind";
 import {
   moderationSlashCommand,
   warnSlashCommand,
@@ -160,6 +165,8 @@ export function bindUserCard(opts: {
 
   let currentLogin = "";
   let currentName = "";
+  /** Channel login the card was opened on; mod actions bind to this only. */
+  let openChannel = "";
   let pinned = false;
   let modBusy = false;
   let currentUserId = "";
@@ -700,8 +707,8 @@ export function bindUserCard(opts: {
       hideModRow();
       return;
     }
-    const channel = activeChannel().trim();
-    if (!channel) {
+    const channel = openChannel;
+    if (!channel || !userCardModChannelMatches(channel, activeChannel())) {
       hideModRow();
       return;
     }
@@ -713,7 +720,8 @@ export function bindUserCard(opts: {
         if (
           seq !== modRowSeq ||
           loginAtStart !== currentLogin ||
-          activeChannel().trim() !== channel
+          openChannel !== channel ||
+          !userCardModChannelMatches(channel, activeChannel())
         ) {
           return;
         }
@@ -767,6 +775,16 @@ export function bindUserCard(opts: {
       return;
     }
     const loginAtSend = currentLogin;
+    const channel = openChannel;
+    if (!channel) {
+      setStatus(t("usercard.empty.noChannel"));
+      return;
+    }
+    if (!userCardModChannelMatches(channel, activeChannel())) {
+      hideModRow();
+      setStatus(t("usercard.empty.noChannel"));
+      return;
+    }
     const text = moderationSlashCommand(kind, loginAtSend, seconds);
     if (!text) {
       setStatus(t("usercard.error.invalidUser"));
@@ -775,16 +793,20 @@ export function bindUserCard(opts: {
     setStatus("");
     setModBusy(true);
     try {
-      await invoke("chat_send", { text, replyToId: null });
+      if (
+        !userCardModChannelMatches(channel, activeChannel()) ||
+        openChannel !== channel
+      ) {
+        hideModRow();
+        setStatus(t("usercard.empty.noChannel"));
+        return;
+      }
+      await invoke("chat_send", { text, replyToId: null, channel });
     } catch (e) {
       if (modal.hidden || currentLogin !== loginAtSend) {
         return;
       }
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: unknown }).message)
-          : t("usercard.error.modSend");
-      setStatus(msg);
+      setStatus(formatInvokeError(e));
     } finally {
       if (!modal.hidden && currentLogin === loginAtSend) {
         setModBusy(false);
@@ -799,11 +821,26 @@ export function bindUserCard(opts: {
       return;
     }
     const loginAtSend = currentLogin;
+    const channel = openChannel;
+    if (!channel) {
+      setStatus(t("usercard.empty.noChannel"));
+      return;
+    }
+    if (!userCardModChannelMatches(channel, activeChannel())) {
+      hideModRow();
+      setStatus(t("usercard.empty.noChannel"));
+      return;
+    }
     const raw = window.prompt(t("usercard.warn.prompt"));
     if (raw === null) {
       return;
     }
     if (modal.hidden || currentLogin !== loginAtSend || modBusy) {
+      return;
+    }
+    if (!userCardModChannelMatches(channel, activeChannel()) || openChannel !== channel) {
+      hideModRow();
+      setStatus(t("usercard.empty.noChannel"));
       return;
     }
     const reason = raw.trim();
@@ -824,16 +861,20 @@ export function bindUserCard(opts: {
     setStatus("");
     setModBusy(true);
     try {
-      await invoke("chat_send", { text, replyToId: null });
+      if (
+        !userCardModChannelMatches(channel, activeChannel()) ||
+        openChannel !== channel
+      ) {
+        hideModRow();
+        setStatus(t("usercard.empty.noChannel"));
+        return;
+      }
+      await invoke("chat_send", { text, replyToId: null, channel });
     } catch (e) {
       if (modal.hidden || currentLogin !== loginAtSend) {
         return;
       }
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: unknown }).message)
-          : t("usercard.error.modSend");
-      setStatus(msg);
+      setStatus(formatInvokeError(e));
     } finally {
       if (!modal.hidden && currentLogin === loginAtSend) {
         setModBusy(false);
@@ -878,6 +919,7 @@ export function bindUserCard(opts: {
     currentLogin = "";
     currentUserId = "";
     currentName = "";
+    openChannel = "";
     pinned = false;
     modBusy = false;
     if (pinBtn) {
@@ -981,7 +1023,7 @@ export function bindUserCard(opts: {
       return;
     }
     const seq = ++subageSeq;
-    const channel = activeChannel().trim();
+    const channel = openChannel;
     hideSubage();
     if (!channel || !login) {
       return;
@@ -992,7 +1034,11 @@ export function bindUserCard(opts: {
         followageAgo: string | null;
         subage: string | null;
       }>("chat_user_subage", { login, channel });
-      if (seq !== subageSeq || login !== currentLogin || activeChannel().trim() !== channel) {
+      if (
+        seq !== subageSeq ||
+        login !== currentLogin ||
+        openChannel !== channel
+      ) {
         return;
       }
       const followText = result.followage?.trim() ?? "";
@@ -1101,6 +1147,7 @@ export function bindUserCard(opts: {
     currentLogin = info.login.toLowerCase();
     currentUserId = "";
     currentName = info.nick || info.login;
+    openChannel = snapshotModChannel(activeChannel());
     subageSeq += 1;
     notesSeq += 1;
     cachedNotes = "";
@@ -1128,7 +1175,7 @@ export function bindUserCard(opts: {
   };
 
   const loadRecent = async (login: string): Promise<void> => {
-    const channel = activeChannel();
+    const channel = openChannel;
     if (!channel) {
       recent.replaceChildren();
       const empty = document.createElement("p");
@@ -1139,7 +1186,7 @@ export function bindUserCard(opts: {
     }
     try {
       const snap = await invoke<{ events: ChatEvent[] }>("chat_snapshot", { channel });
-      if (login !== currentLogin) {
+      if (login !== currentLogin || openChannel !== channel) {
         return;
       }
       recent.replaceChildren();

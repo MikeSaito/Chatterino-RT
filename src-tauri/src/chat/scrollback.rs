@@ -458,6 +458,8 @@ mod tests {
                     target_login: None,
                     duration_sec: None,
                     stack_count: 1,
+                    source_login: None,
+                    moderator_login: None,
                 },
                 TimeoutStackStyle::Stack,
             );
@@ -481,6 +483,8 @@ mod tests {
                 target_login: Some("dev".into()),
                 duration_sec: Some(60),
                 stack_count: 3,
+                source_login: None,
+                moderator_login: None,
             },
             TimeoutStackStyle::DontStack,
         );

@@ -21,6 +21,7 @@ use super::helix::BadgeCatalog;
 use super::hub::Hub;
 use super::live_notifications::LiveNotifyState;
 use super::logging::Logging;
+use super::low_trust::LowTrustCmd;
 use super::membership_batch::MembershipBatcher;
 use super::pins::PinsCmd;
 use super::polls::PollsCmd;
@@ -28,6 +29,7 @@ use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
 use super::seventv_paints::SeventvPaintCatalog;
+use super::shared_bans::SharedBansCmd;
 use super::shared_chat::SharedChatState;
 use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
@@ -159,8 +161,12 @@ pub struct Shared {
     pub bttv_shutdown: Arc<AtomicBool>,
     pub polls_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PollsCmd>>>>,
     pub polls_shutdown: Arc<AtomicBool>,
+    pub low_trust_tx: Arc<Mutex<Option<mpsc::UnboundedSender<LowTrustCmd>>>>,
+    pub low_trust_shutdown: Arc<AtomicBool>,
     pub pins_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PinsCmd>>>>,
     pub pins_shutdown: Arc<AtomicBool>,
+    pub shared_bans_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SharedBansCmd>>>>,
+    pub shared_bans_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
     pub filters: Arc<Mutex<FiltersInner>>,
     pub chatters: Arc<Mutex<Chatters>>,
@@ -234,8 +240,12 @@ impl Shared {
             bttv_shutdown: Arc::new(AtomicBool::new(false)),
             polls_tx: Arc::new(Mutex::new(None)),
             polls_shutdown: Arc::new(AtomicBool::new(false)),
+            low_trust_tx: Arc::new(Mutex::new(None)),
+            low_trust_shutdown: Arc::new(AtomicBool::new(false)),
             pins_tx: Arc::new(Mutex::new(None)),
             pins_shutdown: Arc::new(AtomicBool::new(false)),
+            shared_bans_tx: Arc::new(Mutex::new(None)),
+            shared_bans_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
             filters: Arc::new(Mutex::new(FiltersInner::default())),
             chatters: Arc::new(Mutex::new(Chatters::default())),
@@ -480,11 +490,34 @@ impl Shared {
         }
     }
 
+    pub fn notify_low_trust(&self, cmd: LowTrustCmd) {
+        if matches!(cmd, LowTrustCmd::Shutdown) {
+            self.low_trust_shutdown.store(true, Ordering::SeqCst);
+        }
+        if let Ok(guard) = self.low_trust_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
     pub fn notify_pins(&self, cmd: PinsCmd) {
         if matches!(cmd, PinsCmd::Shutdown) {
             self.pins_shutdown.store(true, Ordering::SeqCst);
         }
         if let Ok(guard) = self.pins_tx.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(cmd);
+            }
+        }
+    }
+
+    pub fn notify_shared_bans(&self, cmd: SharedBansCmd) {
+        if matches!(cmd, SharedBansCmd::Shutdown) {
+            self.shared_bans_shutdown.store(true, Ordering::SeqCst);
+            super::shared_bans::shutdown();
+        }
+        if let Ok(guard) = self.shared_bans_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }

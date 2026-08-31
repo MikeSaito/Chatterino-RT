@@ -233,6 +233,21 @@
       <button type="button" role="menuitem" data-action="reply-original" hidden>Reply to original thread</button>
       <button type="button" role="menuitem" data-action="thread">View thread</button>
       <button type="button" role="menuitem" data-action="user">User card</button>
+      <div id="chat-context-moderate" class="chat-context-submenu" hidden>
+        <button type="button" class="chat-context-submenu-label" tabindex="-1">Moderate</button>
+        <div class="chat-context-submenu-items">
+          <div id="chat-context-pin" class="chat-context-submenu chat-context-submenu-nested">
+            <button type="button" class="chat-context-submenu-label" tabindex="-1">Pin</button>
+            <div class="chat-context-submenu-items">
+              <button type="button" role="menuitem" data-action="pin" data-duration="">Until stream ends</button>
+              <button type="button" role="menuitem" data-action="pin" data-duration="60">1 minute</button>
+              <button type="button" role="menuitem" data-action="pin" data-duration="600">10 minutes</button>
+              <button type="button" role="menuitem" data-action="pin" data-duration="1800">30 minutes</button>
+            </div>
+          </div>
+          <button type="button" role="menuitem" data-action="unpin">Unpin</button>
+        </div>
+      </div>
       <button type="button" role="menuitem" data-action="open-twitch">Open in browser</button>
       <button type="button" role="menuitem" data-action="open-streamlink">Open in Streamlink</button>
       <button type="button" role="menuitem" data-action="open-custom-player">Open in custom player</button>

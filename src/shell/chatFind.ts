@@ -18,6 +18,8 @@ export type SearchHit = {
   clearLogin?: string | null;
   clearDurationSec?: number | null;
   clearStackCount?: number | null;
+  clearSourceLogin?: string | null;
+  clearModeratorLogin?: string | null;
 };
 
 function hitDisplayText(hit: SearchHit): string {
@@ -26,6 +28,8 @@ function hitDisplayText(hit: SearchHit): string {
       hit.clearLogin ?? undefined,
       hit.clearDurationSec ?? undefined,
       hit.clearStackCount,
+      hit.clearSourceLogin ?? undefined,
+      hit.clearModeratorLogin ?? undefined,
     );
   }
   return hit.text;
