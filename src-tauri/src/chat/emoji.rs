@@ -133,11 +133,11 @@ pub fn emoji_cdn_url(grapheme: &str, set: &str) -> Option<String> {
 
 fn lookup_emoji(grapheme: &str) -> Option<&'static emojis::Emoji> {
     if let Some(found) = emojis::get(grapheme) {
-        return Some(found);
+        return accept_emoji(found, grapheme);
     }
     if let Some(stripped) = grapheme.strip_suffix('\u{fe0f}') {
         if let Some(found) = emojis::get(stripped) {
-            return Some(found);
+            return accept_emoji(found, grapheme);
         }
     }
     if !needs_vs16_retry(grapheme) {
@@ -146,7 +146,23 @@ fn lookup_emoji(grapheme: &str) -> Option<&'static emojis::Emoji> {
     let mut qualified = String::with_capacity(grapheme.len() + 3);
     qualified.push_str(grapheme);
     qualified.push('\u{fe0f}');
-    emojis::get(&qualified)
+    let found = emojis::get(&qualified)?;
+    accept_emoji(found, grapheme)
+}
+
+/// `emojis` crate may map `"1\u{fe0f}"` → keycap `"1\u{fe0f}\u{20e3}"`. Reject longer matches.
+/// Chatterino accepts unified and nonQualified (FE0F may be absent mid-sequence); compare after
+/// stripping all VS16 so `1\u{20e3}` still matches keycap while bare `1` does not.
+fn accept_emoji(found: &'static emojis::Emoji, grapheme: &str) -> Option<&'static emojis::Emoji> {
+    let emoji = found.as_str();
+    if emoji == grapheme || strip_vs16(emoji) == strip_vs16(grapheme) {
+        return Some(found);
+    }
+    None
+}
+
+fn strip_vs16(s: &str) -> String {
+    s.chars().filter(|&c| c != '\u{fe0f}').collect()
 }
 
 fn needs_vs16_retry(grapheme: &str) -> bool {
@@ -157,7 +173,11 @@ fn needs_vs16_retry(grapheme: &str) -> bool {
     if chars.next().is_some() {
         return false;
     }
-    matches!(c, '#' | '*' | '0'..='9') || (!c.is_alphabetic() && c as u32 >= 0xa9)
+    // Keycaps (# * 0-9) need U+FE0F U+20E3 as one grapheme. Bare ASCII stays text.
+    if matches!(c, '#' | '*' | '0'..='9') {
+        return false;
+    }
+    !c.is_alphabetic() && c as u32 >= 0xa9
 }
 
 fn overlaps(spans: &[EmoteSpan], start: u32, end: u32) -> bool {
@@ -269,5 +289,25 @@ mod tests {
         assert_eq!(extra.len(), 1);
         assert!(extra[0].url.contains("/facebook/64/"));
         assert!(extra[0].url.ends_with("/1f600.png"), "{}", extra[0].url);
+    }
+
+    #[test]
+    fn plain_digits_hash_star_stay_text() {
+        assert!(attach_emoji("score 123", &[], "Twitter").is_empty());
+        assert!(attach_emoji("1", &[], "Twitter").is_empty());
+        assert!(attach_emoji("#*", &[], "Twitter").is_empty());
+        assert!(attach_emoji("1\u{fe0f}", &[], "Twitter").is_empty());
+    }
+
+    #[test]
+    fn keycap_digit_still_attaches() {
+        let key = "1\u{fe0f}\u{20e3}";
+        let extra = attach_emoji(key, &[], "Twitter");
+        assert_eq!(extra.len(), 1);
+        assert_eq!(extra[0].emote_id, "0031-fe0f-20e3");
+        assert!(extra[0].url.ends_with("/0031-fe0f-20e3.png"));
+        let non_qualified = attach_emoji("1\u{20e3}", &[], "Twitter");
+        assert_eq!(non_qualified.len(), 1);
+        assert_eq!(non_qualified[0].emote_id, "0031-fe0f-20e3");
     }
 }
