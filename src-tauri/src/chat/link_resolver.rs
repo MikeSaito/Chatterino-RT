@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+use url::Url;
+
 use super::commands::ApiError;
 use super::spans::allowed_chat_url;
 
@@ -72,9 +74,81 @@ fn state() -> &'static Mutex<LinkResolverState> {
     STATE.get_or_init(|| Mutex::new(LinkResolverState::new()))
 }
 
-fn resolver_base_url() -> String {
-    std::env::var("CHATTERINO2_LINK_RESOLVER_URL")
-        .unwrap_or_else(|_| "https://braize.pajlada.com/chatterino/link_resolver/".to_string())
+fn resolver_base_url() -> Result<String, String> {
+    let raw = std::env::var("CHATTERINO2_LINK_RESOLVER_URL")
+        .unwrap_or_else(|_| "https://braize.pajlada.com/chatterino/link_resolver/".to_string());
+    validate_resolver_base_url(&raw)
+}
+
+/// HTTPS service base for link resolver; blocks userinfo and private/loopback hosts (SSRF guard).
+fn validate_resolver_base_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("link resolver base url is empty".into());
+    }
+    if trimmed.len() > 512 {
+        return Err("link resolver base url is too long".into());
+    }
+    let parsed =
+        Url::parse(trimmed).map_err(|_| "link resolver base url is invalid".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("link resolver base url must use https".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("link resolver base url must not contain userinfo".into());
+    }
+    let Some(host) = parsed.host() else {
+        return Err("link resolver base url missing host".into());
+    };
+    if resolver_host_blocked(&host) {
+        return Err("link resolver base url host is not allowed".into());
+    }
+    // Normalize trailing slash for path append mode.
+    let mut out = parsed.as_str().to_string();
+    if !out.contains("%1") && !out.ends_with('/') {
+        out.push('/');
+    }
+    Ok(out)
+}
+
+fn resolver_host_blocked(host: &url::Host<&str>) -> bool {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    match host {
+        url::Host::Domain(name) => {
+            let n = name.trim_end_matches('.').to_ascii_lowercase();
+            n == "localhost" || n.ends_with(".localhost") || n.ends_with(".local")
+        }
+        url::Host::Ipv4(ip) => ipv4_resolver_blocked(*ip),
+        url::Host::Ipv6(ip) => {
+            if ip.is_loopback() || ip.is_unspecified() || *ip == Ipv6Addr::LOCALHOST {
+                return true;
+            }
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return ipv4_resolver_blocked(v4);
+            }
+            (ip.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+fn ipv4_resolver_blocked(ip: std::net::Ipv4Addr) -> bool {
+    use std::net::Ipv4Addr;
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip == Ipv4Addr::LOCALHOST
+}
+
+fn sanitize_resolver_text(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| {
+            !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+        })
+        .filter(|c| !matches!(*c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}'))
+        .take(4096)
+        .collect()
 }
 
 /// Qt QUrl::toPercentEncoding(url, {}, "/:")
@@ -95,13 +169,13 @@ fn encode_link_path_segment(raw: &str) -> String {
     out
 }
 
-fn build_resolver_url(original: &str) -> String {
-    let base = resolver_base_url();
+fn build_resolver_url(original: &str) -> Result<String, String> {
+    let base = resolver_base_url()?;
     let encoded = encode_link_path_segment(original);
     if base.contains("%1") {
-        base.replace("%1", &encoded)
+        Ok(base.replace("%1", &encoded))
     } else {
-        format!("{base}{encoded}")
+        Ok(format!("{base}{encoded}"))
     }
 }
 
@@ -139,6 +213,7 @@ pub fn parse_resolver_json(body: &Value) -> LinkInfoResponse {
             .get("tooltip")
             .and_then(Value::as_str)
             .map(percent_decode)
+            .map(|s| sanitize_resolver_text(&s))
             .unwrap_or_default();
         let thumbnail_url = body
             .get("thumbnail")
@@ -160,6 +235,7 @@ pub fn parse_resolver_json(body: &Value) -> LinkInfoResponse {
         .get("message")
         .and_then(Value::as_str)
         .map(percent_decode)
+        .map(|s| sanitize_resolver_text(&s))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "No link info found".to_string());
     LinkInfoResponse {
@@ -170,23 +246,40 @@ pub fn parse_resolver_json(body: &Value) -> LinkInfoResponse {
 }
 
 fn http_client() -> reqwest::Client {
-    super::http_client::build(Duration::from_secs(TIMEOUT_SECS))
+    super::http_client::build_no_redirect(Duration::from_secs(TIMEOUT_SECS))
 }
 
 async fn fetch_link_info(url: &str) -> Result<LinkInfoResponse, ApiError> {
     let allowed = allowed_chat_url(url).map_err(ApiError::invalid)?;
-    let request_url = build_resolver_url(&allowed);
+    let request_url = build_resolver_url(&allowed).map_err(ApiError::invalid)?;
     let client = http_client();
     let resp = client
         .get(&request_url)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| ApiError::internal(&format!("link resolver: {e}")))?;
+        .map_err(|e| {
+            ApiError::coded(
+                "error.link_resolver.network",
+                super::http_client::format_reqwest_error_brief(&e),
+            )
+        })?;
+    if resp.status().is_redirection() {
+        return Err(ApiError::coded(
+            "error.link_resolver.redirect",
+            "link resolver redirected",
+        ));
+    }
+    if !resp.status().is_success() {
+        return Err(ApiError::coded(
+            "error.link_resolver.http",
+            format!("link resolver HTTP {}", resp.status().as_u16()),
+        ));
+    }
     let body = resp
         .json::<Value>()
         .await
-        .map_err(|e| ApiError::internal(&format!("link resolver json: {e}")))?;
+        .map_err(|_| ApiError::coded("error.link_resolver.parse", "link resolver invalid json"))?;
     Ok(parse_resolver_json(&body))
 }
 
@@ -294,5 +387,25 @@ mod tests {
     #[test]
     fn allowed_url_rejects_javascript_for_resolver() {
         assert!(allowed_chat_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn validate_resolver_base_url_https_only() {
+        assert!(
+            validate_resolver_base_url("https://braize.pajlada.com/chatterino/link_resolver/")
+                .is_ok()
+        );
+        assert!(validate_resolver_base_url("http://braize.pajlada.com/x/").is_err());
+        assert!(validate_resolver_base_url("https://127.0.0.1/x/").is_err());
+        assert!(validate_resolver_base_url("https://[::1]/x/").is_err());
+        assert!(validate_resolver_base_url("https://[::ffff:127.0.0.1]/x/").is_err());
+        assert!(validate_resolver_base_url("https://user:pass@example.com/x/").is_err());
+        assert!(validate_resolver_base_url("https://localhost./x/").is_err());
+    }
+
+    #[test]
+    fn sanitize_resolver_text_strips_controls() {
+        assert_eq!(sanitize_resolver_text("a\u{0001}b"), "ab");
+        assert_eq!(sanitize_resolver_text("ok\nline").lines().count(), 2);
     }
 }

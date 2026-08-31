@@ -113,7 +113,12 @@ export function titleFromLinkTooltip(tooltip: string, fallbackHost: string): str
     return null;
   }
   const clipped = first.length > 160 ? first.slice(0, 160) : first;
-  const lower = clipped.toLowerCase();
+  // Drop bidirectional / zero-width chars that could spoof titles in Pixi text.
+  const safe = clipped.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
+  if (!safe) {
+    return null;
+  }
+  const lower = safe.toLowerCase();
   if (
     lower === fallbackHost.toLowerCase() ||
     lower.startsWith("http://") ||
@@ -121,7 +126,7 @@ export function titleFromLinkTooltip(tooltip: string, fallbackHost: string): str
   ) {
     return null;
   }
-  return clipped;
+  return safe;
 }
 
 export type LinkTitleApplyResult = {

@@ -9,6 +9,7 @@ use super::types::{EmoteSpan, LinkSpan, MentionSpan};
 use url::Url;
 
 const TRAILING: &[char] = &['>', '?', '!', '.', ',', ':', '*', '~', ')'];
+const MAX_CHAT_URL_LEN: usize = 8192;
 /// Stock allUsernamesMentionRegex trailing: [.,!?;:]*
 const BARE_TRAILING: &[char] = &['.', ',', '!', '?', ';', ':'];
 
@@ -47,7 +48,10 @@ pub fn decorate_text_spans_ex(
 
 pub fn allowed_chat_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.bytes().any(|b| b < 0x20 || b == b'\\') {
+    if trimmed.is_empty()
+        || trimmed.len() > MAX_CHAT_URL_LEN
+        || trimmed.bytes().any(|b| b < 0x20 || b == b'\\')
+    {
         return Err("invalid url".into());
     }
     let parsed = Url::parse(trimmed).map_err(|_| "invalid url".to_string())?;
@@ -413,5 +417,11 @@ mod tests {
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(&text[hits[0].start as usize..hits[0].end as usize], "@bob");
+    }
+
+    #[test]
+    fn rejects_oversized_url() {
+        let long = format!("https://example.com/{}", "a".repeat(9000));
+        assert!(allowed_chat_url(&long).is_err());
     }
 }
