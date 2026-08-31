@@ -1,5 +1,9 @@
 # Automated dependency updates for Chatterino RT (Tauri desktop app).
 # No secrets; Dependabot uses GitHub's built-in token.
+#
+# Known: security alert on transitive `glib` (Linux gtk/webkit2gtk under Tauri)
+# cannot be fixed until Tauri leaves gtk 0.18; GHSA needs glib >=0.20. Dismissed
+# as not_used for Windows shipping. Do not force a major gtk bump here.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -32,6 +36,7 @@ updates:
     labels:
       - dependencies
       - cargo
+    # Avoid one giant PR that fails when a single crate (e.g. glib→0.20) cannot resolve.
     groups:
       cargo-minor-and-patch:
         patterns:
@@ -39,6 +44,18 @@ updates:
         update-types:
           - minor
           - patch
+        exclude-patterns:
+          - "glib"
+          - "glib-*"
+          - "gtk"
+          - "gtk-*"
+          - "webkit2gtk*"
+    ignore:
+      # Transitive Linux-only; bump requires gtk beyond Tauri v2's 0.18 line.
+      - dependency-name: "glib"
+        versions: [">=0.19.0"]
+      - dependency-name: "gtk"
+        versions: [">=0.19.0"]
 
   - package-ecosystem: github-actions
     directory: /
