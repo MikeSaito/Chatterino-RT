@@ -57,7 +57,8 @@ const RUST_FIXTURE_HEX =
     dropped: Number.POSITIVE_INFINITY,
     events: [],
   });
-  assert(decodeBatch(packedInf) === null, "inf dropped");
+  const infBatch = decodeBatch(packedInf);
+  assert(infBatch !== null && infBatch.dropped === 0, "inf dropped coerced");
 }
 
 console.log("batch decode tests ok");

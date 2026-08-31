@@ -116,15 +116,18 @@ pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool
     let self_login = auth::resolved_login_token(shared).map(|(login, _)| login);
     let filters = match shared.filters.lock() {
         Ok(inner) => inner.data.clone(),
-        Err(_) => return false,
+        Err(_) => return true,
     };
     let ignore_blocks = match shared.ignore_block_rules.lock() {
         Ok(inner) => inner.clone(),
-        Err(_) => Vec::new(),
+        Err(_) => {
+            // Poisoned ignore lock: fail-closed (drop traffic).
+            return true;
+        }
     };
     let ignore_users = match shared.ignore_user_rules.lock() {
         Ok(inner) => inner.clone(),
-        Err(_) => Vec::new(),
+        Err(_) => return true,
     };
     if should_drop(
         &filters,
@@ -138,7 +141,7 @@ pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool
     if auth::oauth_token(shared).is_some() {
         let blocks = match shared.twitch_blocks.lock() {
             Ok(inner) => inner.clone(),
-            Err(_) => TwitchBlockSet::default(),
+            Err(_) => return true,
         };
         let (blocks_enabled, show) = twitch_block_knobs(shared);
         let viewer = shared
@@ -187,7 +190,7 @@ pub fn gate_event(shared: &Shared, channel: &str, event: &mut ChatEvent) -> bool
     }
     let ignore_replaces = match shared.ignore_replace_rules.lock() {
         Ok(inner) => inner.clone(),
-        Err(_) => Vec::new(),
+        Err(_) => return true,
     };
     apply_ignore_replacements(event, &ignore_replaces);
     let sound_ctx = match shared.highlight_sound.lock() {

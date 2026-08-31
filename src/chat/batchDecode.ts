@@ -28,8 +28,10 @@ export function decodeBatch(raw: unknown): ChatBatch | null {
     if (!Number.isFinite(batch.seq) || batch.seq < 0) {
       return null;
     }
-    if (typeof batch.dropped === "number" && !Number.isFinite(batch.dropped)) {
-      return null;
+    if (typeof batch.dropped !== "number" || !Number.isFinite(batch.dropped) || batch.dropped < 0) {
+      batch.dropped = 0;
+    } else {
+      batch.dropped = Math.floor(batch.dropped);
     }
     if (!Array.isArray(batch.events)) {
       return null;

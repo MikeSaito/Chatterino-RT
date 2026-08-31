@@ -230,9 +230,10 @@ fn parse_argb(v: Option<&Value>) -> Option<u32> {
 
 fn parse_stops(stops: Option<&Value>) -> Option<Vec<NickPaintStop>> {
     let arr = stops?.as_array()?;
+    const MAX_STOPS: usize = 16;
     let mut out = Vec::new();
     let mut last_at: i32 = -1;
-    for stop in arr {
+    for stop in arr.iter().take(MAX_STOPS) {
         let color = parse_argb(stop.get("color"))?;
         let mut at_f = stop.get("at").and_then(Value::as_f64).unwrap_or(0.0);
         at_f = at_f.clamp(0.0, 1.0);

@@ -613,8 +613,16 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
             if !safe_twitch_emote_id(id) {
                 continue;
             }
+            let text_u16 = utf16_units(text) as u32;
             let start = scalar_to_utf16(text, start_cp) as u32;
             let end = scalar_to_utf16(text, end_cp.saturating_add(1)) as u32;
+            if start >= end || start >= text_u16 {
+                continue;
+            }
+            let end = end.min(text_u16);
+            if start >= end {
+                continue;
+            }
             spans.push(EmoteSpan {
                 start,
                 end,

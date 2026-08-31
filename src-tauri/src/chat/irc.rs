@@ -339,8 +339,19 @@ async fn connect_session(
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
+                        // Cap websocket text frames before split/parse alloc.
+                        const MAX_IRC_FRAME_BYTES: usize = 64 * 1024;
+                        if text.len() > MAX_IRC_FRAME_BYTES {
+                            continue;
+                        }
                         for raw in text.as_str().replace('\r', "").split('\n') {
-                            if raw.is_empty() { continue; }
+                            if raw.is_empty() {
+                                continue;
+                            }
+                            const MAX_IRC_LINE_BYTES: usize = 8192;
+                            if raw.len() > MAX_IRC_LINE_BYTES {
+                                continue;
+                            }
                             match dispatch_line(app, shared, raw, wanted, &nick, &mut loaded_room) {
                                 LineAction::None => {}
                                 LineAction::Pong(pong) => {

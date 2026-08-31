@@ -41,6 +41,7 @@ type Op =
 /** Ring surface used by IPC (MessageRing satisfies this). */
 export type ChatIpcRing = {
   reset(): void;
+  setBoundChannel?(channel: string): void;
   applySnapshot(events: ChatEvent[]): void;
   pushMany(events: ChatEvent[]): void;
 };
@@ -92,6 +93,7 @@ export function bindChatIpc(
       return false;
     }
     lastSeq = snap.seq;
+    ring.setBoundChannel?.(channel);
     ring.applySnapshot(snap.events);
     afterBatch?.(snap.events);
     return true;
@@ -305,6 +307,7 @@ export function bindChatIpc(
     active = joined;
     lastSeq = 0;
     ring.reset();
+    ring.setBoundChannel?.(joined);
     queued.length = 0;
     snapshotQueued = false;
     overflowDuringSnapshot = false;

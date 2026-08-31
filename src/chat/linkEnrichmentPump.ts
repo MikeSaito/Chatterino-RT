@@ -5,6 +5,8 @@
 
 /** Cap concurrent Helix/title resolves so batches coalesce without stampede. */
 export const LINK_ENRICH_MAX_INFLIGHT = 4;
+/** Hard cap FIFO depth so snapshot/burst cannot grow pending without bound. */
+export const LINK_ENRICH_MAX_PENDING = 256;
 
 export type LinkEnrichmentPump = {
   afterIds: (ids: readonly string[]) => void;
@@ -15,6 +17,7 @@ export type LinkEnrichmentPump = {
 
 export type LinkEnrichmentPumpOpts = {
   maxInflight?: number;
+  maxPending?: number;
   /** Return true if id still needs enrichment (in ring, not yet done). */
   isEligible: (id: string) => boolean;
   /**
@@ -28,6 +31,7 @@ export function createLinkEnrichmentPump(
   opts: LinkEnrichmentPumpOpts,
 ): LinkEnrichmentPump {
   const maxInflight = opts.maxInflight ?? LINK_ENRICH_MAX_INFLIGHT;
+  const maxPending = opts.maxPending ?? LINK_ENRICH_MAX_PENDING;
   let generation = 0;
   const pending: string[] = [];
   const pendingSet = new Set<string>();
@@ -56,12 +60,22 @@ export function createLinkEnrichmentPump(
     }
   };
 
+  const dropOldestPending = (): void => {
+    while (pending.length >= maxPending) {
+      const dropped = pending.shift();
+      if (dropped !== undefined) {
+        pendingSet.delete(dropped);
+      }
+    }
+  };
+
   const enqueue = (msgId: string): void => {
     if (pendingSet.has(msgId)) {
       return;
     }
     // Keep a follow-up slot even while inflight (stop()+re-enqueue must not starve).
     if (inflight.has(msgId)) {
+      dropOldestPending();
       pendingSet.add(msgId);
       pending.push(msgId);
       return;
@@ -69,6 +83,7 @@ export function createLinkEnrichmentPump(
     if (!opts.isEligible(msgId)) {
       return;
     }
+    dropOldestPending();
     pendingSet.add(msgId);
     pending.push(msgId);
   };

@@ -147,6 +147,8 @@ export type ImageHit = {
 
 export type SlotContext = {
   msgId: string;
+  /** Painted channel login (snapshot at open time for mod actions). */
+  channel: string;
   login: string;
   /** Автор сообщения (для Reply); = login на клике по нику. */
   authorLogin: string;
@@ -365,6 +367,17 @@ export class MessageRing {
   private mediaRepaintRaf = 0;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
+  /**
+   * CLEARMSG arrived before the target row was in the ring (local-echo / recover).
+   * Applied when the matching msgId is written; capped + pruned on reset.
+   */
+  private deferredClearMsg = new Map<
+    string,
+    Extract<ChatEvent, { kind: "clearmsg" }>
+  >();
+  private static readonly DEFERRED_CLEAR_CAP = 64;
+  /** Channel login this ring is painting (mod/AutoMod channel bind). */
+  private boundChannel = "";
   private showReplyButton = true;
   private moderationMode = false;
   /** IRC/Helix viewer is mod or broadcaster on the painted channel. */
@@ -2246,10 +2259,20 @@ export class MessageRing {
   reset(): void {
     this.cancelLayoutSettle();
     this.liveMsgIds.clear();
+    this.deferredClearMsg.clear();
+    this.boundChannel = "";
     this.channelLive = false;
     this.resetSlots();
     this.markLayoutFullPaint();
     this.layout(undefined, undefined, false);
+  }
+
+  setBoundChannel(channel: string): void {
+    this.boundChannel = channel.trim().replace(/^#/, "").toLowerCase();
+  }
+
+  boundChannelLogin(): string {
+    return this.boundChannel;
   }
 
   /** Bound live id set to ~2× pool so long sessions cannot grow without bound. */
@@ -2407,41 +2430,7 @@ export class MessageRing {
 
   private pushOne(event: ChatEvent): { slot?: Slot; needFullLayout: boolean } {
     if (event.kind === "clearmsg") {
-      const target = this.findSlotByMsgId(event.targetId);
-      if (!target) {
-        return { needFullLayout: false };
-      }
-      this.disableById(event.targetId);
-      if (this.hideDeletionActions || this.hideModerationActions) {
-        return { needFullLayout: true };
-      }
-      const login = target.nickLogin || target.login || "";
-      const deletedBody = target.copyText;
-      const notice: ChatEvent = {
-        kind: "notice",
-        id: `${event.id}:del`,
-        timestampMs: event.timestampMs,
-        text: deletionNoticeText(
-          login || t("chat.reply.unknown"),
-          deletedBody,
-          this.deletedMessageLengthLimit,
-        ),
-      };
-      const slot = this.slots[this.head];
-      this.write(slot, notice);
-      slot.systemTextKind = "clearmsg";
-      slot.clearLogin = login;
-      slot.clearmsgBody = deletedBody;
-      slot.clearDurationSec = undefined;
-      slot.clearStackCount = 0;
-      slot.clearSourceLogin = "";
-      slot.clearModeratorLogin = "";
-      this.head = (this.head + 1) % this.poolSize;
-      if (this.occupied < this.poolSize) {
-        this.occupied += 1;
-      }
-      this.bumpHighlightMarks();
-      return { slot, needFullLayout: true };
+      return this.applyClearMsg(event);
     }
     if (event.kind === "clearchat") {
       const existing = this.findSlotByMsgId(event.id);
@@ -2458,6 +2447,10 @@ export class MessageRing {
       if (existing) {
         this.write(existing, event);
         this.bumpHighlightMarks();
+        const deferred = this.applyDeferredClearFor(existing.msgId);
+        if (deferred) {
+          return deferred;
+        }
         return { slot: existing, needFullLayout: true };
       }
       // Fall through: timeout/ban notice is a new ring row (stock Channel).
@@ -2472,6 +2465,10 @@ export class MessageRing {
       if (existing) {
         this.write(existing, event);
         this.bumpHighlightMarks();
+        const deferred = this.applyDeferredClearFor(existing.msgId);
+        if (deferred) {
+          return deferred;
+        }
         return { slot: existing, needFullLayout: true };
       }
     } else if (event.kind === "automodStatus") {
@@ -2502,10 +2499,86 @@ export class MessageRing {
       this.pendingBelow += 1;
     }
     this.bumpHighlightMarks();
+    const deferred = this.applyDeferredClearFor(slot.msgId);
+    if (deferred) {
+      return deferred;
+    }
     return {
       slot,
       needFullLayout: event.kind === "clearchat",
     };
+  }
+
+  private queueDeferredClearMsg(
+    event: Extract<ChatEvent, { kind: "clearmsg" }>,
+  ): void {
+    const id = event.targetId?.trim();
+    if (!id) {
+      return;
+    }
+    while (this.deferredClearMsg.size >= MessageRing.DEFERRED_CLEAR_CAP) {
+      const oldest = this.deferredClearMsg.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.deferredClearMsg.delete(oldest);
+    }
+    this.deferredClearMsg.set(id, event);
+  }
+
+  private applyDeferredClearFor(
+    msgId: string,
+  ): { slot?: Slot; needFullLayout: boolean } | null {
+    if (!msgId) {
+      return null;
+    }
+    const event = this.deferredClearMsg.get(msgId);
+    if (!event) {
+      return null;
+    }
+    this.deferredClearMsg.delete(msgId);
+    return this.applyClearMsg(event);
+  }
+
+  private applyClearMsg(
+    event: Extract<ChatEvent, { kind: "clearmsg" }>,
+  ): { slot?: Slot; needFullLayout: boolean } {
+    const target = this.findSlotByMsgId(event.targetId);
+    if (!target) {
+      this.queueDeferredClearMsg(event);
+      return { needFullLayout: false };
+    }
+    this.disableById(event.targetId);
+    if (this.hideDeletionActions || this.hideModerationActions) {
+      return { needFullLayout: true };
+    }
+    const login = target.nickLogin || target.login || "";
+    const deletedBody = target.copyText;
+    const notice: ChatEvent = {
+      kind: "notice",
+      id: `${event.id}:del`,
+      timestampMs: event.timestampMs,
+      text: deletionNoticeText(
+        login || t("chat.reply.unknown"),
+        deletedBody,
+        this.deletedMessageLengthLimit,
+      ),
+    };
+    const slot = this.slots[this.head];
+    this.write(slot, notice);
+    slot.systemTextKind = "clearmsg";
+    slot.clearLogin = login;
+    slot.clearmsgBody = deletedBody;
+    slot.clearDurationSec = undefined;
+    slot.clearStackCount = 0;
+    slot.clearSourceLogin = "";
+    slot.clearModeratorLogin = "";
+    this.head = (this.head + 1) % this.poolSize;
+    if (this.occupied < this.poolSize) {
+      this.occupied += 1;
+    }
+    this.bumpHighlightMarks();
+    return { slot, needFullLayout: true };
   }
 
   /** Soft-delete: MessageFlag::Disabled, слот остаётся (Chatterino Channel). */
@@ -4567,6 +4640,7 @@ export class MessageRing {
   ): SlotContext {
     return {
       msgId: slot.msgId,
+      channel: this.boundChannel,
       login: opts?.login ?? slot.login,
       authorLogin: slot.login,
       nick: opts?.nick ?? this.contextNick(slot),
@@ -5325,6 +5399,7 @@ export class MessageRing {
     }
     return {
       msgId: slot.msgId,
+      channel: this.boundChannel,
       login: slot.login,
       authorLogin: slot.login,
       nick: this.contextNick(slot),

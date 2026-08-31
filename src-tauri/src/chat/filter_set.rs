@@ -48,8 +48,8 @@ pub fn compile_filter_rows(rows: &[FilterRow]) -> (ExpressionFilterSet, Vec<bool
     for row in rows {
         let text = row.filter.trim();
         if text.is_empty() {
+            // Empty row is a no-op placeholder — do not mute the whole chat.
             valid_flags.push(false);
-            has_invalid = true;
             continue;
         }
         match CompiledFilter::from_string(text) {
@@ -109,6 +109,30 @@ pub fn expression_filter_passes(
 mod tests {
     use super::*;
     use crate::chat::types::ChatEvent;
+
+    #[test]
+    fn empty_row_does_not_mute_chat() {
+        let rows = vec![FilterRow {
+            name: "blank".into(),
+            filter: "   ".into(),
+            valid: true,
+        }];
+        let (set, flags) = compile_filter_rows(&rows);
+        assert_eq!(flags, vec![false]);
+        assert!(!set.has_invalid());
+        assert!(set.is_empty());
+        assert!(set.passes(&RunContext {
+            event: &ChatEvent::Notice {
+                id: "1".into(),
+                timestamp_ms: 0,
+                text: "hi".into(),
+                msg_id: None,
+                timeout_remaining_sec: None,
+            },
+            channel: "xqc",
+            channel_live: false,
+        }));
+    }
 
     #[test]
     fn invalid_row_blocks_all() {

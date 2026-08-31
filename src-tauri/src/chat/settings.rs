@@ -807,6 +807,17 @@ pub fn sanitize(mut raw: AppSettings) -> Result<AppSettings, ApiError> {
         trim_cell(&mut row.name)?;
         trim_cell(&mut row.filter)?;
     }
+    sync_filter_valid_flags(&mut raw.filters);
+    if raw
+        .filters
+        .iter()
+        .any(|row| !row.filter.is_empty() && !row.valid)
+    {
+        return Err(ApiError::coded(
+            "error.settings.filter_invalid",
+            "invalid filter expression",
+        ));
+    }
     for row in &mut raw.hotkeys {
         trim_cell(&mut row.action)?;
         trim_cell(&mut row.name)?;

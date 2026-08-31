@@ -30,10 +30,11 @@ impl Pending {
     }
 
     pub fn would_exceed(&self, event: &ChatEvent) -> bool {
-        if self.events.is_empty() {
-            return false;
-        }
         let extra = Self::event_bytes(event);
+        if self.events.is_empty() {
+            // Reject a single oversized event instead of shipping > BATCH_MAX_BYTES.
+            return extra > BATCH_MAX_BYTES;
+        }
         self.events.len() >= BATCH_MAX_MESSAGES || self.bytes + extra > BATCH_MAX_BYTES
     }
 
@@ -100,6 +101,21 @@ mod tests {
 
             timeout_remaining_sec: None,
         }
+    }
+
+    #[test]
+    fn oversized_first_event_is_dropped() {
+        let mut p = Pending::new("xqc");
+        let huge = ChatEvent::Notice {
+            id: "big".into(),
+            timestamp_ms: 1,
+            text: "x".repeat(BATCH_MAX_BYTES + 64),
+            msg_id: None,
+            timeout_remaining_sec: None,
+        };
+        assert!(p.would_exceed(&huge));
+        assert!(!p.push(huge));
+        assert!(p.take_batch().is_none());
     }
 
     #[test]

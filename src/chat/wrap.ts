@@ -180,10 +180,7 @@ export function wrapBody(
   if (lines.length === 0) {
     return [{ start: 0, end: 0 }];
   }
-  const last = lines[lines.length - 1];
-  if (last.end < n && lines.length >= WRAP_MAX_LINES) {
-    last.end = n;
-  }
+  // Past WRAP_MAX_LINES: leave remainder unpainted (do not dump into one BitmapText).
   return lines;
 }
 

@@ -101,7 +101,8 @@ pub fn cfg_from_knobs(knobs: &BTreeMap<String, Value>) -> SimilarityCfg {
         knob_bool(knobs, "similarity.shownSimilarTriggerHighlights", false);
     cfg.percentage = knob_f32(knobs, "similarity.similarityPercentage", 0.9).clamp(0.0, 1.0);
     cfg.max_delay_sec = knob_u64(knobs, "similarity.hideSimilarMaxDelay", 5);
-    cfg.max_check = knob_usize(knobs, "similarity.hideSimilarMaxMessagesToCheck", 3).max(1);
+    cfg.max_check = knob_usize(knobs, "similarity.hideSimilarMaxMessagesToCheck", 3)
+        .clamp(1, 32);
     cfg
 }
 

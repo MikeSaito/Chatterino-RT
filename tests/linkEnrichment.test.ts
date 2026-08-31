@@ -162,6 +162,25 @@ async function main(): Promise<void> {
     pump.stop();
   }
 
+  {
+    // Cap pending FIFO depth under burst.
+    const pump = createLinkEnrichmentPump({
+      maxInflight: 1,
+      maxPending: 3,
+      isEligible: () => true,
+      enrich: async (_id, isCurrent) => {
+        await sleep(40);
+        if (!isCurrent()) {
+          return;
+        }
+      },
+    });
+    pump.afterIds(["a", "b", "c", "d", "e", "f"]);
+    assert(pump.pendingCount() <= 3, "pending capped");
+    assert(pump.inflightCount() <= 1, "inflight capped");
+    pump.stop();
+  }
+
   console.log("linkEnrichment tests ok");
 }
 
