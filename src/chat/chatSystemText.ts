@@ -343,6 +343,38 @@ export function parseSharedBanNoticeMsgId(
   return { kind, mod, login, source };
 }
 
+/** Parse live/offline system notices: `stream_*|channel` / `stream_live_title|channel|title`. */
+export function parseStreamStatusNoticeMsgId(
+  msgId: string,
+):
+  | { kind: "offline" | "live"; channel: string }
+  | { kind: "live_title"; channel: string; title: string }
+  | null {
+  const parts = msgId.split("|");
+  if (parts.length < 2) {
+    return null;
+  }
+  const kindRaw = parts[0].toLowerCase();
+  const channel = parts[1].trim();
+  if (!channel) {
+    return null;
+  }
+  if (kindRaw === "stream_offline") {
+    return { kind: "offline", channel };
+  }
+  if (kindRaw === "stream_live") {
+    return { kind: "live", channel };
+  }
+  if (kindRaw === "stream_live_title" && parts.length >= 3) {
+    const title = parts.slice(2).join("|").trim();
+    if (!title) {
+      return { kind: "live", channel };
+    }
+    return { kind: "live_title", channel, title };
+  }
+  return null;
+}
+
 export function noticeFormatted(opts: {
   text: string;
   msgId?: string;
@@ -358,6 +390,28 @@ export function noticeFormatted(opts: {
         mentions: [],
       };
     }
+  }
+  const stream = parseStreamStatusNoticeMsgId(rawMsgId);
+  if (stream) {
+    if (stream.kind === "offline") {
+      return {
+        text: t("chat.stream.offline", { channel: stream.channel }),
+        mentions: [],
+      };
+    }
+    if (stream.kind === "live_title") {
+      return {
+        text: t("chat.stream.liveTitle", {
+          channel: stream.channel,
+          title: stream.title,
+        }),
+        mentions: [],
+      };
+    }
+    return {
+      text: t("chat.stream.live", { channel: stream.channel }),
+      mentions: [],
+    };
   }
   const shared = parseSharedBanNoticeMsgId(rawMsgId);
   if (shared) {

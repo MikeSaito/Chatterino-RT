@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { t } from "../i18n/index.ts";
 import { playLiveNotifySound } from "./highlightSound";
 
 export type LiveNotifyPayload = {
@@ -42,10 +43,11 @@ async function showToast(payload: LiveNotifyPayload): Promise<void> {
     if (perm !== "granted") {
       return;
     }
-    const title = payload.title?.trim()
-      ? `${payload.channel} is live`
-      : `${payload.channel} is live!`;
-    const body = payload.title?.trim() || "Twitch stream started";
+    const streamTitle = payload.title?.trim() || "";
+    const title = streamTitle
+      ? t("liveNotify.titleWithStream", { channel: payload.channel })
+      : t("liveNotify.title", { channel: payload.channel });
+    const body = streamTitle || t("liveNotify.body");
     const n = new Notification(title, { body, silent: true });
     n.onclick = () => {
       n.close();

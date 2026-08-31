@@ -446,7 +446,7 @@ fn flush_awaiting_buffers(app: &AppHandle, shared: &Shared, awaiting: &mut HashS
             .unwrap_or(false);
         let mut emit_tab_live = false;
         let mut close_stream_log = false;
-        let mut notice: Option<String> = None;
+        let mut notice: Option<(String, String)> = None;
         if let Ok(mut hub) = shared.hub.lock() {
             let is_active = hub
                 .active
@@ -457,8 +457,9 @@ fn flush_awaiting_buffers(app: &AppHandle, shared: &Shared, awaiting: &mut HashS
             }
             let changed = hub.set_channel_live(&ch, live);
             if changed {
-                notice = Some(super::live_status::stream_status_notice_text(
-                    &ch, live, None, show_title,
+                notice = Some((
+                    super::live_status::stream_status_notice_text(&ch, live, None, show_title),
+                    super::live_status::stream_status_notice_msg_id(&ch, live, None, show_title),
                 ));
                 if !live {
                     close_stream_log = true;
@@ -469,8 +470,8 @@ fn flush_awaiting_buffers(app: &AppHandle, shared: &Shared, awaiting: &mut HashS
         if close_stream_log {
             super::logging::close_stream_file(shared, &ch);
         }
-        if let Some(text) = notice {
-            shared.post_channel_notice(app, &ch, text);
+        if let Some((text, msg_id)) = notice {
+            shared.post_channel_notice_ex(app, &ch, text, Some(msg_id));
         }
         if emit_tab_live {
             let payload = super::live_status::channel_live_payload(
@@ -519,7 +520,7 @@ async fn poll_once(
         // on change or when the tab just opened (live may already be known from notify lists).
         let mut emit_tab_live = false;
         let mut close_stream_log = false;
-        let mut notice: Option<String> = None;
+        let mut notice: Option<(String, String)> = None;
         let mut saw_open_without_buffer = false;
         if let Ok(mut hub) = shared.hub.lock() {
             let is_active = hub
@@ -542,8 +543,11 @@ async fn poll_once(
                 }
                 hub_live_changed = hub.set_channel_live(ch, live);
                 if hub_live_changed {
-                    notice = Some(super::live_status::stream_status_notice_text(
-                        ch, live, title, show_title,
+                    notice = Some((
+                        super::live_status::stream_status_notice_text(ch, live, title, show_title),
+                        super::live_status::stream_status_notice_msg_id(
+                            ch, live, title, show_title,
+                        ),
                     ));
                     if !live {
                         close_stream_log = true;
@@ -564,8 +568,8 @@ async fn poll_once(
         if close_stream_log {
             super::logging::close_stream_file(shared, ch);
         }
-        if let Some(text) = notice {
-            shared.post_channel_notice(app, ch, text);
+        if let Some((text, msg_id)) = notice {
+            shared.post_channel_notice_ex(app, ch, text, Some(msg_id));
         }
         if emit_tab_live {
             let resolved = status.cloned().unwrap_or_else(helix::StreamStatus::offline);

@@ -115,7 +115,13 @@ async fn poll_channel(app: &AppHandle, shared: &Shared, channel: &str) {
             status.stream_title.as_deref(),
             show_title,
         );
-        shared.post_channel_notice(app, channel, text);
+        let msg_id = stream_status_notice_msg_id(
+            channel,
+            status.live,
+            status.stream_title.as_deref(),
+            show_title,
+        );
+        shared.post_channel_notice_ex(app, channel, text, Some(msg_id));
     }
     super::live_notifications::on_active_channel_status(
         shared,
@@ -145,7 +151,7 @@ fn show_title_in_live_message(shared: &Shared) -> bool {
         .unwrap_or(false)
 }
 
-/// Stock Chatterino live/offline system line (MessageBuilder makeLiveMessage).
+/// English search/log fallback (MessageBuilder makeLiveMessage). UI localizes via `msg_id`.
 pub fn stream_status_notice_text(
     channel: &str,
     live: bool,
@@ -163,6 +169,39 @@ pub fn stream_status_notice_text(
     format!("{channel} is live!")
 }
 
+fn clean_channel_login(channel: &str) -> String {
+    channel
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
+}
+
+/// `stream_offline|channel` / `stream_live|channel` / `stream_live_title|channel|title`
+/// (title may contain `|`; UI joins remainder after channel).
+pub fn stream_status_notice_msg_id(
+    channel: &str,
+    live: bool,
+    stream_title: Option<&str>,
+    show_title: bool,
+) -> String {
+    let ch = clean_channel_login(channel);
+    if !live {
+        return format!("stream_offline|{ch}");
+    }
+    if show_title {
+        if let Some(title) = stream_title.map(str::trim).filter(|s| !s.is_empty()) {
+            let safe_title = title
+                .chars()
+                .filter(|c| *c != '\0' && *c != '\r' && *c != '\n')
+                .collect::<String>();
+            if !safe_title.is_empty() {
+                return format!("stream_live_title|{ch}|{safe_title}");
+            }
+        }
+    }
+    format!("stream_live|{ch}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +212,10 @@ mod tests {
             stream_status_notice_text("xqc", true, Some("Ranked"), false),
             "xqc is live!"
         );
+        assert_eq!(
+            stream_status_notice_msg_id("xqc", true, Some("Ranked"), false),
+            "stream_live|xqc"
+        );
     }
 
     #[test]
@@ -180,6 +223,18 @@ mod tests {
         assert_eq!(
             stream_status_notice_text("xqc", true, Some("Ranked"), true),
             "xqc is live: Ranked"
+        );
+        assert_eq!(
+            stream_status_notice_msg_id("xqc", true, Some("Ranked"), true),
+            "stream_live_title|xqc|Ranked"
+        );
+    }
+
+    #[test]
+    fn live_title_preserves_pipe_in_msg_id() {
+        assert_eq!(
+            stream_status_notice_msg_id("xqc", true, Some("A|B"), true),
+            "stream_live_title|xqc|A|B"
         );
     }
 
@@ -193,6 +248,10 @@ mod tests {
             stream_status_notice_text("xqc", true, None, true),
             "xqc is live!"
         );
+        assert_eq!(
+            stream_status_notice_msg_id("xqc", true, Some("  "), true),
+            "stream_live|xqc"
+        );
     }
 
     #[test]
@@ -200,6 +259,10 @@ mod tests {
         assert_eq!(
             stream_status_notice_text("xqc", false, Some("Ranked"), true),
             "xqc is now offline."
+        );
+        assert_eq!(
+            stream_status_notice_msg_id("xqc", false, Some("Ranked"), true),
+            "stream_offline|xqc"
         );
     }
 }

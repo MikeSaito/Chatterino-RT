@@ -65,6 +65,50 @@ assert(
   "shared untimeout ru",
 );
 setLocale("en");
+assert(
+  noticeFormatted({
+    text: "xqc is live!",
+    msgId: "stream_live|xqc",
+  }).text === "xqc is live!",
+  "stream live en",
+);
+assert(
+  noticeFormatted({
+    text: "xqc is live: Ranked",
+    msgId: "stream_live_title|xqc|Ranked",
+  }).text === "xqc is live: Ranked",
+  "stream live title en",
+);
+assert(
+  noticeFormatted({
+    text: "xqc is live: A|B",
+    msgId: "stream_live_title|xqc|A|B",
+  }).text === "xqc is live: A|B",
+  "stream live title pipe en",
+);
+assert(
+  noticeFormatted({
+    text: "xqc is now offline.",
+    msgId: "stream_offline|xqc",
+  }).text === "xqc is now offline.",
+  "stream offline en",
+);
+setLocale("ru");
+assert(
+  noticeFormatted({
+    text: "xqc is live!",
+    msgId: "stream_live|xqc",
+  }).text === "xqc в эфире!",
+  "stream live ru",
+);
+assert(
+  noticeFormatted({
+    text: "xqc is now offline.",
+    msgId: "stream_offline|xqc",
+  }).text === "xqc оффлайн.",
+  "stream offline ru",
+);
+setLocale("en");
 
 const gift = usernoticeFormatted({
   systemText: "fallback",

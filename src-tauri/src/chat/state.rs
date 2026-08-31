@@ -527,6 +527,17 @@ impl Shared {
 
 impl Shared {
     pub fn post_channel_notice(&self, app: &tauri::AppHandle, channel: &str, text: String) {
+        self.post_channel_notice_ex(app, channel, text, None);
+    }
+
+    /// System notice with optional `msg_id` for UI i18n (English `text` remains search/log fallback).
+    pub fn post_channel_notice_ex(
+        &self,
+        app: &tauri::AppHandle,
+        channel: &str,
+        text: String,
+        msg_id: Option<String>,
+    ) {
         use std::sync::atomic::{AtomicU64, Ordering};
         use tauri::Emitter;
 
@@ -543,7 +554,7 @@ impl Shared {
             id: format!("mb-{ts}-{seq}-{}", text.len()),
             timestamp_ms: ts,
             text,
-            msg_id: None,
+            msg_id,
             timeout_remaining_sec: None,
         };
         let self_login = auth::resolved_login_token(self).map(|(l, _)| l);
