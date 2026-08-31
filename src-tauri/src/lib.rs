@@ -20,7 +20,8 @@ use chat::commands::{
     highlight_sound_read, image_upload, logging_pick_directory, open_chat_link,
     open_in_custom_player, open_in_streamlink, open_settings_directory, open_settings_window,
     polls_predict, polls_vote, read_chatterino1_commands, session_get, session_reorder_open,
-    settings_get, settings_set, streamer_mode_detect, supports_incognito_links,
+    settings_get, settings_set, settings_ui_closed, settings_ui_preview, settings_ui_saved,
+    streamer_mode_detect, supports_incognito_links,
 };
 use chat::link_resolver::resolve_link_info;
 use chat::state::{BttvCmd, EventCmd, IrcCmd, Shared};
@@ -158,6 +159,9 @@ pub fn run() {
             filters_set,
             settings_get,
             settings_set,
+            settings_ui_preview,
+            settings_ui_saved,
+            settings_ui_closed,
             chatterino1_commands_available,
             read_chatterino1_commands,
             highlight_sound_read,

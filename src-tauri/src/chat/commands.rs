@@ -1833,6 +1833,32 @@ pub fn settings_set(
     super::settings::replace(&state, settings)
 }
 
+/// Settings WebView notifies main via Rust emit (fixed event names; no frontend emit ACL).
+#[tauri::command]
+pub fn settings_ui_preview(app: AppHandle, settings: DisplaySettings) -> Result<(), ApiError> {
+    let clean = super::settings::sanitize(settings)?;
+    app.emit("settings-preview", clean)
+        .map_err(|e| ApiError::internal(&e.to_string()))
+}
+
+#[tauri::command]
+pub fn settings_ui_saved(app: AppHandle, settings: DisplaySettings) -> Result<(), ApiError> {
+    let clean = super::settings::sanitize(settings)?;
+    app.emit("settings-saved", clean)
+        .map_err(|e| ApiError::internal(&e.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SettingsClosedPayload {
+    restore: bool,
+}
+
+#[tauri::command]
+pub fn settings_ui_closed(app: AppHandle, restore: bool) -> Result<(), ApiError> {
+    app.emit("settings-closed", SettingsClosedPayload { restore })
+        .map_err(|e| ApiError::internal(&e.to_string()))
+}
+
 #[tauri::command]
 pub fn chatterino1_commands_available() -> bool {
     super::chatterino1_import::chatterino1_commands_available()
@@ -2199,6 +2225,8 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), ApiError> {
             .set_focus()
             .map_err(|e| ApiError::internal(&e.to_string()))?;
     }
+    app.emit("settings-opened", ())
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
     Ok(())
 }
 

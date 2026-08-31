@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settings-ui-closed"
+description = "Enables the settings_ui_closed command without any pre-configured scope."
+commands.allow = ["settings_ui_closed"]
+
+[[permission]]
+identifier = "deny-settings-ui-closed"
+description = "Denies the settings_ui_closed command without any pre-configured scope."
+commands.deny = ["settings_ui_closed"]

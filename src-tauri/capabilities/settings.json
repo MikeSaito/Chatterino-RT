@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Settings window: narrow invoke allowlist; no chat send/subscribe/mod or process exit",
+  "description": "Settings window: narrow invoke; no frontend emit (UI notify via Rust commands only)",
   "windows": ["settings"],
   "permissions": [
     "core:default",
@@ -16,7 +16,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-close",
     "core:window:allow-is-visible",
-    "core:event:allow-emit",
+    "core:event:deny-emit",
+    "core:event:deny-emit-to",
     "core:event:allow-listen",
     "settings-surface"
   ]

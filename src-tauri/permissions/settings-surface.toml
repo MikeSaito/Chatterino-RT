@@ -4,6 +4,9 @@ description = "Settings window allowlist: config/auth/filters/cache/about — no
 commands.allow = [
   "settings_get",
   "settings_set",
+  "settings_ui_preview",
+  "settings_ui_saved",
+  "settings_ui_closed",
   "filters_get",
   "filters_set",
   "auth_start",
