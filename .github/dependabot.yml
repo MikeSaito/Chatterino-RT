@@ -56,6 +56,12 @@ updates:
         versions: [">=0.19.0"]
       - dependency-name: "gtk"
         versions: [">=0.19.0"]
+      # wry/tauri pin webview2-com ^0.38 + windows-core ^0.61; solo bumps dual-version
+      # windows_core::Interface and break security.rs cast.
+      - dependency-name: "webview2-com"
+        versions: [">=0.39.0"]
+      - dependency-name: "windows-core"
+        versions: [">=0.62.0"]
 
   - package-ecosystem: github-actions
     directory: /
