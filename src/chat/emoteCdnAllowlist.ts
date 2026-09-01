@@ -91,5 +91,19 @@ export function isAllowedEmoteCdnUrl(raw: string): boolean {
       lower.includes("-preview-")
     );
   }
+  if (host.startsWith("media") && host.endsWith(".giphy.com")) {
+    const mid = host.slice("media".length, -".giphy.com".length);
+    if (/^[0-4]$/.test(mid) && path.startsWith("/media/")) {
+      const lower = path.toLowerCase();
+      return (
+        lower.endsWith(".gif") ||
+        lower.includes(".gif?") ||
+        lower.endsWith(".webp")
+      );
+    }
+  }
+  if (host === "i.giphy.com" && path.startsWith("/media/")) {
+    return true;
+  }
   return false;
 }

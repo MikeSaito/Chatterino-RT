@@ -717,4 +717,14 @@ if (!maskZwPos || maskZwPos.col !== 12) {
   );
 }
 
+const twitchGifSize = emoteDisplaySize(
+  { provider: "twitch-gif", displayWidth: 4, displayHeight: 3 },
+  20,
+);
+if (twitchGifSize.h !== 50 || twitchGifSize.w !== 67) {
+  throw new Error(
+    `twitch-gif display size expected 67x50, got ${JSON.stringify(twitchGifSize)}`,
+  );
+}
+
 console.log("wrap tests ok");

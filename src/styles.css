@@ -4487,6 +4487,15 @@ button.poll-panel-option-btn.is-selected {
   background: var(--c-surface-2);
 }
 
+.emotepopup-item.is-gif img {
+  max-height: 72px;
+  object-fit: contain;
+}
+
+.emotepopup-grid.is-gifs {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
 .emotepopup-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));

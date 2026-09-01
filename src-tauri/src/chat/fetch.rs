@@ -696,6 +696,48 @@ pub(crate) fn allowed_ffz_url(raw: &str) -> Option<String> {
     }
 }
 
+/// Allowlist Twitch chat GIF CDN URLs from IRC `gifs` tag (Giphy and previews).
+pub fn allowed_twitch_gif_url(raw: &str) -> Option<String> {
+    let composed = abs_url(raw);
+    let parsed = Url::parse(&composed).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    let path = parsed.path();
+    if path.contains("..") {
+        return None;
+    }
+    if host.starts_with("media") && host.ends_with(".giphy.com") {
+        let mid = host.strip_prefix("media")?.strip_suffix(".giphy.com")?;
+        if matches!(mid, "0" | "1" | "2" | "3" | "4") && path.starts_with("/media/") {
+            let lower = path.to_ascii_lowercase();
+            if lower.ends_with(".gif") || lower.contains(".gif?") || lower.ends_with(".webp") {
+                return Some(parsed.as_str().to_string());
+            }
+        }
+    }
+    if host == "i.giphy.com" && path.starts_with("/media/") {
+        let lower = path.to_ascii_lowercase();
+        if lower.ends_with(".gif") || lower.contains(".gif?") || lower.ends_with(".webp") {
+            return Some(parsed.as_str().to_string());
+        }
+    }
+    None
+}
+
+/// GIF id from Giphy must appear in the CDN path segment `/media/{id}/`.
+pub fn gif_url_matches_id(url: &str, gif_id: &str) -> bool {
+    if gif_id.is_empty() {
+        return false;
+    }
+    let needle = format!("/media/{gif_id}/");
+    url.contains(&needle)
+}
+
 /// Allowlist CDN картинок эмодзи/бейджей для `fetch_emote_cdn` (CORS fallback).
 pub fn allowed_emote_cdn_url(raw: &str) -> Option<String> {
     allowed_bttv_url(raw)
@@ -706,6 +748,7 @@ pub fn allowed_emote_cdn_url(raw: &str) -> Option<String> {
         .or_else(|| crate::chat::helix::allowed_cheer_url(raw))
         .or_else(|| allowed_jsdelivr_emoji_url(raw))
         .or_else(|| crate::chat::clips::allowed_clip_thumbnail_url(raw))
+        .or_else(|| allowed_twitch_gif_url(raw))
 }
 
 fn allowed_7tv_cdn_url(raw: &str) -> Option<String> {
@@ -1000,6 +1043,25 @@ mod tests {
         assert!(
             allowed_emote_cdn_url("https://evil.clips-media-assets2.twitch.tv/foo.jpg").is_none()
         );
+        assert_eq!(
+            allowed_twitch_gif_url(
+                "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc"
+            ),
+            Some(
+                "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc".into()
+            )
+        );
+        assert!(allowed_twitch_gif_url("https://evil.example/giphy.gif").is_none());
+        assert!(allowed_twitch_gif_url("https://media9.giphy.com/media/x/giphy.gif").is_none());
+        assert!(gif_url_matches_id(
+            "https://media4.giphy.com/media/abc/giphy.gif",
+            "abc"
+        ));
+        assert!(!gif_url_matches_id(
+            "https://media4.giphy.com/media/abc/giphy.gif",
+            "xyz"
+        ));
+        assert!(allowed_emote_cdn_url("https://media2.giphy.com/media/x/giphy.gif").is_some());
     }
 
     #[test]

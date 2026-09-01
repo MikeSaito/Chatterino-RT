@@ -36,10 +36,14 @@ const MAX_EMOTE_LAYOUT_WIDTH_PX = 384;
 const MAX_MASK_SPACES = 512;
 
 export function emoteDisplaySize(
-  span: EmoteAspect,
+  span: EmoteAspect & { provider?: string },
   emoteMinPx: number,
 ): { w: number; h: number } {
   const min = Math.max(1, emoteMinPx);
+  const isChatGif = span.provider === "twitch-gif";
+  const boxH = isChatGif
+    ? Math.min(MAX_EMOTE_LAYOUT_WIDTH_PX, Math.max(min, Math.round(min * 2.5)))
+    : min;
   const dw = span.displayWidth;
   const dh = span.displayHeight;
   if (
@@ -51,11 +55,11 @@ export function emoteDisplaySize(
     const aspect = Math.min(MAX_EMOTE_ASPECT, dw / dh);
     const w = Math.min(
       MAX_EMOTE_LAYOUT_WIDTH_PX,
-      Math.max(1, Math.round(min * aspect)),
+      Math.max(1, Math.round(boxH * aspect)),
     );
-    return { w, h: min };
+    return { w, h: boxH };
   }
-  return { w: min, h: min };
+  return { w: boxH, h: boxH };
 }
 
 /** Опции переноса: бюджет в px (Chatterino/Twitch proportional wrap). */

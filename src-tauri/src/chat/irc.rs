@@ -13,11 +13,13 @@ use super::emoji::attach_emoji;
 use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
 use super::helix::resolve_badge_urls;
+use super::gifs::build_outbound_privmsg_line;
 use super::parse::{
-    parse_line, shift_emote_spans_back, strip_leading_reply_mention, synthetic_id, ParsedLine,
+    emote_span_for_gif, parse_line, shift_emote_spans_back, strip_leading_reply_mention,
+    synthetic_id, ParsedLine,
 };
 use super::spans::{decorate_text_spans_ex, FindMentions};
-use super::state::{BttvCmd, EventCmd, IrcCmd, Shared};
+use super::state::{BttvCmd, EventCmd, IrcCmd, OutboundGif, OutboundPrivmsg, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatSendWait, ChatStatus, ChatTyping};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
@@ -67,7 +69,7 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
     let mut wanted: HashSet<String> = HashSet::new();
     let mut last_error: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
-    let mut pending_out: VecDeque<(String, String, Option<String>)> = VecDeque::new();
+    let mut pending_out: VecDeque<OutboundPrivmsg> = VecDeque::new();
     loop {
         match connect_session(
             &app,
@@ -122,12 +124,8 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::Receiver<IrcCmd>
                                 last_error = None;
                                 clear_pending_out(&mut pending_out, &shared);
                             }
-                            Some(IrcCmd::Privmsg {
-                                channel,
-                                text,
-                                reply_to,
-                            }) => {
-                                enqueue_pending_out(&mut pending_out, channel, text, reply_to);
+                            Some(IrcCmd::Privmsg(msg)) => {
+                                enqueue_pending_out(&mut pending_out, msg);
                             }
                             Some(IrcCmd::Typing { .. }) => {}
                             Some(IrcCmd::Relogin) => {
@@ -153,7 +151,7 @@ async fn connect_session(
     wanted: &mut HashSet<String>,
     last_error: &mut Option<String>,
     backoff: &mut Duration,
-    pending_out: &mut VecDeque<(String, String, Option<String>)>,
+    pending_out: &mut VecDeque<OutboundPrivmsg>,
 ) -> SessionEnd {
     let status_ch = status_channel(shared, wanted);
     emit_status(app, ChatConnState::Connecting, status_ch.as_deref(), None);
@@ -291,12 +289,8 @@ async fn connect_session(
                             return SessionEnd::Reconnect { wait: true };
                         }
                     }
-                    Some(IrcCmd::Privmsg {
-                        channel,
-                        text,
-                        reply_to,
-                    }) => {
-                        enqueue_pending_out(pending_out, channel, text, reply_to);
+                    Some(IrcCmd::Privmsg(msg)) => {
+                        enqueue_pending_out(pending_out, msg);
                         match flush_outgoing(
                             &mut write,
                             wanted,
@@ -308,8 +302,15 @@ async fn connect_session(
                         {
                             Err(()) => return SessionEnd::Reconnect { wait: true },
                             Ok(sent) => {
-                                for (ch, txt, reply) in sent {
-                                    echo_own_privmsg(app, shared, &ch, txt, reply);
+                                for item in sent {
+                                    echo_own_privmsg(
+                                        app,
+                                        shared,
+                                        &item.channel,
+                                        item.text,
+                                        item.reply_to,
+                                        item.gif,
+                                    );
                                 }
                             }
                         }
@@ -391,8 +392,15 @@ async fn connect_session(
                                             return SessionEnd::Reconnect { wait: true };
                                         }
                                         Ok(sent) => {
-                                            for (ch, txt, reply) in sent {
-                                                echo_own_privmsg(app, shared, &ch, txt, reply);
+                                            for item in sent {
+                                                echo_own_privmsg(
+                                                    app,
+                                                    shared,
+                                                    &item.channel,
+                                                    item.text,
+                                                    item.reply_to,
+                                                    item.gif,
+                                                );
                                             }
                                         }
                                     }
@@ -528,38 +536,41 @@ async fn flush_outgoing<S>(
     write: &mut S,
     wanted: &HashSet<String>,
     in_rooms: &HashSet<String>,
-    pending: &mut VecDeque<(String, String, Option<String>)>,
+    pending: &mut VecDeque<OutboundPrivmsg>,
     shared: &Shared,
-) -> Result<Vec<(String, String, Option<String>)>, ()>
+) -> Result<Vec<OutboundPrivmsg>, ()>
 where
     S: Sink<Message> + Unpin,
 {
-    let mut sent: Vec<(String, String, Option<String>)> = Vec::new();
+    let mut sent: Vec<OutboundPrivmsg> = Vec::new();
     let mut rest = VecDeque::new();
-    while let Some((channel, text, reply_to)) = pending.pop_front() {
-        if !wanted.contains(&channel) {
+    while let Some(msg) = pending.pop_front() {
+        if !wanted.contains(&msg.channel) {
             shared.release_outbound(1);
             continue;
         }
-        if !in_rooms.contains(&channel) {
-            rest.push_back((channel, text, reply_to));
+        if !in_rooms.contains(&msg.channel) {
+            rest.push_back(msg);
             continue;
         }
-        let line = match &reply_to {
-            Some(id) => format!("@reply-parent-msg-id={id} PRIVMSG #{channel} :{text}"),
-            None => format!("PRIVMSG #{channel} :{text}"),
-        };
+        let line = build_outbound_privmsg_line(
+            &msg.channel,
+            &msg.text,
+            msg.reply_to.as_deref(),
+            msg.gif.as_ref().map(|g| g.gif_id.as_str()),
+            msg.gif.as_ref().map(|g| g.url.as_str()),
+        );
         if send_line(write, &line).await.is_err() {
-            rest.push_back((channel, text, reply_to));
+            rest.push_back(msg);
             rest.append(pending);
             *pending = rest;
             return Err(());
         }
         shared.release_outbound(1);
         if let Ok(mut last) = shared.last_sent.lock() {
-            last.insert(channel.clone(), text.clone());
+            last.insert(msg.channel.clone(), msg.text.clone());
         }
-        sent.push((channel, text, reply_to));
+        sent.push(msg);
     }
     *pending = rest;
     Ok(sent)
@@ -1339,6 +1350,7 @@ pub(crate) fn echo_own_privmsg(
     channel: &str,
     text: String,
     reply_to: Option<String>,
+    gif: Option<OutboundGif>,
 ) {
     let Some((login, _)) = auth::resolved_login_token(shared) else {
         return;
@@ -1376,6 +1388,12 @@ pub(crate) fn echo_own_privmsg(
             },
         )
         .unwrap_or((None, None, None));
+    let mut emote_spans = Vec::new();
+    if let Some(g) = gif.as_ref() {
+        if let Some(span) = emote_span_for_gif(&text, &g.gif_id, &g.url) {
+            emote_spans.push(span);
+        }
+    }
     let mut event = ChatEvent::Privmsg {
         id: synthetic_id("l", now, &text),
         timestamp_ms: now,
@@ -1385,7 +1403,7 @@ pub(crate) fn echo_own_privmsg(
         color,
         badges,
         text,
-        emote_spans: Vec::new(),
+        emote_spans,
         link_spans: Vec::new(),
         mention_spans: Vec::new(),
         bits: None,
@@ -1436,32 +1454,24 @@ pub(crate) fn echo_own_privmsg(
     emit_send_waits(app, shared);
 }
 
-fn enqueue_pending_out(
-    pending_out: &mut VecDeque<(String, String, Option<String>)>,
-    channel: String,
-    text: String,
-    reply_to: Option<String>,
-) {
+fn enqueue_pending_out(pending_out: &mut VecDeque<OutboundPrivmsg>, msg: OutboundPrivmsg) {
     // Capacity reserved in chat_send via try_reserve_outbound.
-    pending_out.push_back((channel, text, reply_to));
+    pending_out.push_back(msg);
 }
 
-fn clear_pending_out(
-    pending_out: &mut VecDeque<(String, String, Option<String>)>,
-    shared: &Shared,
-) {
+fn clear_pending_out(pending_out: &mut VecDeque<OutboundPrivmsg>, shared: &Shared) {
     let n = pending_out.len();
     pending_out.clear();
     shared.release_outbound(n);
 }
 
 fn release_pending_channel(
-    pending_out: &mut VecDeque<(String, String, Option<String>)>,
+    pending_out: &mut VecDeque<OutboundPrivmsg>,
     channel: &str,
     shared: &Shared,
 ) {
     let before = pending_out.len();
-    pending_out.retain(|(c, _, _)| c != channel);
+    pending_out.retain(|m| m.channel != channel);
     shared.release_outbound(before.saturating_sub(pending_out.len()));
 }
 

@@ -9,8 +9,8 @@ const isTauriDev = Boolean(process.env.TAURI_ENV_PLATFORM);
 
 const DEV_CSP = [
   "default-src 'self' customprotocol: asset: http://localhost:1420",
-  "connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 ws://localhost:1421 https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.frankerfacez.net https://cdn.7tv.app https://cdn.jsdelivr.net https://fourtf.com https://clips-media-assets2.twitch.tv",
-  "img-src 'self' asset: http://asset.localhost blob: data: https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.frankerfacez.net https://cdn.7tv.app https://cdn.jsdelivr.net https://fourtf.com https://clips-media-assets2.twitch.tv",
+  "connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420 ws://localhost:1421 https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.frankerfacez.net https://cdn.7tv.app https://cdn.jsdelivr.net https://fourtf.com https://clips-media-assets2.twitch.tv https://media0.giphy.com https://media1.giphy.com https://media2.giphy.com https://media3.giphy.com https://media4.giphy.com https://i.giphy.com",
+  "img-src 'self' asset: http://asset.localhost blob: data: https://static-cdn.jtvnw.net https://d3aqoihi2n8ty8.cloudfront.net https://cdn.betterttv.net https://cdn.frankerfacez.com https://cdn.frankerfacez.net https://cdn.7tv.app https://cdn.jsdelivr.net https://fourtf.com https://clips-media-assets2.twitch.tv https://media0.giphy.com https://media1.giphy.com https://media2.giphy.com https://media3.giphy.com https://media4.giphy.com https://i.giphy.com",
   "frame-src https://player.twitch.tv https://embed.twitch.tv",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' http://localhost:1420 'unsafe-eval' 'wasm-unsafe-eval'",

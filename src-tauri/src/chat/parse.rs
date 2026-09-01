@@ -205,7 +205,9 @@ fn build_privmsg(
         .get("display-name")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| login.clone());
-    let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), &text);
+    let twitch_emotes = parse_twitch_emotes(tags.get("emotes").as_deref(), &text);
+    let gif_spans = parse_twitch_gifs(tags.get("gifs").as_deref(), &text);
+    let emote_spans = merge_emote_and_gif_spans(twitch_emotes, gif_spans);
     let (link_spans, mention_spans) = super::spans::decorate_text_spans(&text, &emote_spans);
     let id_prefix = if whisper { "w" } else { "p" };
     ChatEvent::Privmsg {
@@ -305,9 +307,11 @@ fn parse_usernotice(
         notice_params.as_ref(),
         &raw_system,
     );
-    let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
-        let emote_spans = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
-        let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
+        let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
+            let twitch_emotes = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
+            let gif_spans = parse_twitch_gifs(tags.get("gifs").as_deref(), text);
+            let emote_spans = merge_emote_and_gif_spans(twitch_emotes, gif_spans);
+            let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
         Box::new(ChatEvent::Privmsg {
             id: format!(
                 "{}-body",
@@ -641,6 +645,123 @@ pub fn parse_twitch_emotes(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
     spans
 }
 
+/// Twitch IRC `gifs` tag: comma-separated `start-end|id|url` entries (UTF-16 indices).
+pub fn parse_twitch_gifs(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
+    let Some(raw) = raw.filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    let text_u16 = utf16_units(text) as u32;
+    let mut spans = Vec::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let mut parts = entry.splitn(3, '|');
+        let range = parts.next().unwrap_or("");
+        let gif_id = parts.next().unwrap_or("");
+        let url = parts.next().unwrap_or("");
+        if gif_id.is_empty() || url.is_empty() {
+            continue;
+        }
+        if !safe_twitch_gif_id(gif_id) {
+            continue;
+        }
+        let Some(url) = super::fetch::allowed_twitch_gif_url(url) else {
+            continue;
+        };
+        if !super::fetch::gif_url_matches_id(&url, gif_id) {
+            continue;
+        }
+        let Some((a, b)) = range.split_once('-') else {
+            continue;
+        };
+        let Ok(start_cp) = a.parse::<usize>() else {
+            continue;
+        };
+        let Ok(end_cp) = b.parse::<usize>() else {
+            continue;
+        };
+        let start = scalar_to_utf16(text, start_cp) as u32;
+        let end = scalar_to_utf16(text, end_cp.saturating_add(1)) as u32;
+        if start >= end || start >= text_u16 {
+            continue;
+        }
+        let end = end.min(text_u16);
+        if start >= end {
+            continue;
+        }
+        spans.push(EmoteSpan {
+            start,
+            end,
+            emote_id: gif_id.to_string(),
+            provider: "twitch-gif".to_string(),
+            url,
+            zero_width: false,
+            bits_amount: None,
+            bits_color: None,
+            display_width: Some(4),
+            display_height: Some(3),
+        });
+    }
+    spans.sort_by_key(|s| s.start);
+    spans
+}
+
+pub fn emote_span_for_gif(text: &str, gif_id: &str, url: &str) -> Option<EmoteSpan> {
+    if text.is_empty() || !safe_twitch_gif_id(gif_id) {
+        return None;
+    }
+    let allowed = super::fetch::allowed_twitch_gif_url(url)?;
+    if !super::fetch::gif_url_matches_id(&allowed, gif_id) {
+        return None;
+    }
+    let end = utf16_units(text) as u32;
+    if end == 0 {
+        return None;
+    }
+    Some(EmoteSpan {
+        start: 0,
+        end,
+        emote_id: gif_id.to_string(),
+        provider: "twitch-gif".to_string(),
+        url: allowed,
+        zero_width: false,
+        bits_amount: None,
+        bits_color: None,
+        display_width: Some(4),
+        display_height: Some(3),
+    })
+}
+
+fn safe_twitch_gif_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+pub fn merge_emote_and_gif_spans(emotes: Vec<EmoteSpan>, gifs: Vec<EmoteSpan>) -> Vec<EmoteSpan> {
+    if gifs.is_empty() {
+        return emotes;
+    }
+    if emotes.is_empty() {
+        return gifs;
+    }
+    let mut out = gifs;
+    for emote in emotes {
+        if !out.iter().any(|g| spans_overlap(g, &emote)) {
+            out.push(emote);
+        }
+    }
+    out.sort_by_key(|s| s.start);
+    out
+}
+
+fn spans_overlap(a: &EmoteSpan, b: &EmoteSpan) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
 /// Stock stripLeadingReplyMention — UTF-16 offset of stripped `@displayName `.
 pub fn strip_leading_reply_mention(text: &str, display_name: &str) -> Option<(String, u32)> {
     if display_name.is_empty() {
@@ -672,7 +793,7 @@ pub fn shift_emote_spans_back(spans: &mut Vec<EmoteSpan>, offset: u32) {
     });
 }
 
-fn utf16_units(s: &str) -> usize {
+pub fn utf16_units(s: &str) -> usize {
     s.chars().map(|c| c.len_utf16()).sum()
 }
 
@@ -1313,5 +1434,96 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_yandy_placeholder_gif_via_gifs_tag() {
+        let url = "https://media2.giphy.com/media/xYz9AbCdEfGhIjKl/giphy.webp?cid=abc";
+        let text = "[Valentines Day Reaction GIF by Yandy.com]";
+        let end = text.chars().count().saturating_sub(1);
+        let line = format!(
+            "@display-name=Dev;emotes=;gifs=0-{end}|xYz9AbCdEfGhIjKl|{url};id=g2;user-id=1 :dev!dev@dev.tmi.twitch.tv PRIVMSG #twitch :{text}"
+        );
+        match parse_line(&line, 100) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Privmsg {
+                        text: body,
+                        emote_spans,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(body, text);
+                assert_eq!(emote_spans.len(), 1);
+                assert_eq!(emote_spans[0].provider, "twitch-gif");
+                assert_eq!(emote_spans[0].emote_id, "xYz9AbCdEfGhIjKl");
+                assert_eq!(emote_spans[0].url, url);
+                assert_eq!(emote_spans[0].start, 0);
+                assert_eq!(emote_spans[0].end, utf16_units(text) as u32);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_twitch_gifs_tag_on_privmsg() {
+        let url = "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc";
+        let text = "[Y A Y Yes GIF by Djemilah Birnie]";
+        let line = format!(
+            "@display-name=Dev;emotes=;gifs=0-33|joSNxeswxuc74Juo8X|{url};id=g1;user-id=1 :dev!dev@dev.tmi.twitch.tv PRIVMSG #twitch :{text}"
+        );
+        match parse_line(&line, 100) {
+            ParsedLine::Event {
+                event:
+                    ChatEvent::Privmsg {
+                        text: body,
+                        emote_spans,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(body, text);
+                assert_eq!(emote_spans.len(), 1);
+                assert_eq!(emote_spans[0].provider, "twitch-gif");
+                assert_eq!(emote_spans[0].emote_id, "joSNxeswxuc74Juo8X");
+                assert_eq!(emote_spans[0].url, url);
+                assert_eq!(emote_spans[0].start, 0);
+                assert_eq!(emote_spans[0].end, utf16_units(text) as u32);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn gif_spans_win_over_emote_overlap() {
+        let _text = "[GIF]";
+        let emotes = vec![EmoteSpan {
+            start: 0,
+            end: 5,
+            emote_id: "25".into(),
+            provider: "twitch".into(),
+            url: "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0".into(),
+            zero_width: false,
+            bits_amount: None,
+            bits_color: None,
+            display_width: None,
+            display_height: None,
+        }];
+        let gifs = vec![EmoteSpan {
+            start: 0,
+            end: 5,
+            emote_id: "abc".into(),
+            provider: "twitch-gif".into(),
+            url: "https://media1.giphy.com/media/abc/giphy.gif".into(),
+            zero_width: false,
+            bits_amount: None,
+            bits_color: None,
+            display_width: Some(4),
+            display_height: Some(3),
+        }];
+        let merged = merge_emote_and_gif_spans(emotes, gifs);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].provider, "twitch-gif");
     }
 }

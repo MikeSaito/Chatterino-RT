@@ -33,5 +33,23 @@ assert(
 );
 assert(!isAllowedEmoteCdnUrl("https://evil.example/emote/x.png"), "foreign host");
 assert(!isAllowedEmoteCdnUrl("http://cdn.betterttv.net/emote/abc/1x"), "http denied");
+assert(
+  isAllowedEmoteCdnUrl(
+    "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc",
+  ),
+  "twitch chat gif giphy",
+);
+assert(
+  isAllowedEmoteCdnUrl("https://i.giphy.com/media/xYz9AbCdEfGhIjKl/giphy.webp"),
+  "twitch chat gif i.giphy",
+);
+assert(
+  !isAllowedEmoteCdnUrl("https://media9.giphy.com/media/x/giphy.gif"),
+  "giphy media9 denied",
+);
+assert(
+  !isAllowedEmoteCdnUrl("https://yandy.com/gif/valentine.gif"),
+  "yandy host denied",
+);
 
 console.log("emoteCdnAllowlist.test.ts ok");
