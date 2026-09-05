@@ -180,10 +180,8 @@ fn parse_giphy_search(body: &Value) -> Vec<GifSearchHit> {
             .to_string();
         let images = item.get("images").and_then(Value::as_object);
         let url = pick_giphy_image_url(images, &["original", "downsized_medium", "downsized"]);
-        let preview_url = pick_giphy_image_url(
-            images,
-            &["fixed_height_small", "downsized", "preview_gif"],
-        );
+        let preview_url =
+            pick_giphy_image_url(images, &["fixed_height_small", "downsized", "preview_gif"]);
         let Some(url) = url.and_then(|u| allowed_twitch_gif_url(&u)) else {
             continue;
         };
@@ -203,7 +201,10 @@ fn parse_giphy_search(body: &Value) -> Vec<GifSearchHit> {
     out
 }
 
-fn pick_giphy_image_url(images: Option<&serde_json::Map<String, Value>>, keys: &[&str]) -> Option<String> {
+fn pick_giphy_image_url(
+    images: Option<&serde_json::Map<String, Value>>,
+    keys: &[&str],
+) -> Option<String> {
     let images = images?;
     for key in keys {
         if let Some(url) = images
@@ -224,10 +225,7 @@ mod tests {
 
     #[test]
     fn format_outgoing_gif_text_sanitizes_brackets() {
-        assert_eq!(
-            format_outgoing_gif_text("[wow]"),
-            "[(wow) GIF by Giphy]"
-        );
+        assert_eq!(format_outgoing_gif_text("[wow]"), "[(wow) GIF by Giphy]");
         assert_eq!(format_outgoing_gif_text(""), "[GIF by Giphy]");
     }
 

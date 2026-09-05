@@ -5,9 +5,12 @@ import {
   indexToLineCol,
   lineColToIndex,
   mentionIdealPx,
+  renderWrappedContinuation,
   renderWrapped,
   withCollapsedEllipsis,
   wrapBody,
+  wrapLineHeights,
+  wrapLineOffsetY,
   wrapLineOriginX,
 } from "../src/chat/wrap.ts";
 import { resolveEmojiUrl, resolveEmoteUrl } from "../src/chat/emoteUrl.ts";
@@ -721,9 +724,94 @@ const twitchGifSize = emoteDisplaySize(
   { provider: "twitch-gif", displayWidth: 4, displayHeight: 3 },
   20,
 );
-if (twitchGifSize.h !== 50 || twitchGifSize.w !== 67) {
+if (twitchGifSize.h !== 100 || twitchGifSize.w !== 133) {
   throw new Error(
-    `twitch-gif display size expected 67x50, got ${JSON.stringify(twitchGifSize)}`,
+    `twitch-gif display size expected 133x100, got ${JSON.stringify(twitchGifSize)}`,
+  );
+}
+
+const gifLineHeights = wrapLineHeights(
+  [{ start: 0, end: 42 }],
+  "[Valentines Day Reaction GIF by Yandy.com]",
+  [
+    {
+      start: 0,
+      end: 42,
+      provider: "twitch-gif",
+      displayWidth: 4,
+      displayHeight: 3,
+    },
+  ],
+  { measureAdvance: adv, emoteMinPx: 20, maskEmotes: true },
+  22,
+);
+if (gifLineHeights[0] !== 100) {
+  throw new Error(`GIF wrap line height expected 100, got ${gifLineHeights[0]}`);
+}
+if (wrapLineOffsetY(gifLineHeights, 1) !== 100) {
+  throw new Error("wrapLineOffsetY mismatch for single tall GIF line");
+}
+
+const gifOnlyText = "[GIF by X]";
+const gifOnlySpan = {
+  start: 0,
+  end: gifOnlyText.length,
+  provider: "twitch-gif",
+  displayWidth: 4,
+  displayHeight: 3,
+};
+const gifDeferOpts = {
+  measureAdvance: adv,
+  emoteMinPx: 20,
+  maskEmotes: true,
+  firstLineMaxWidthPx: 30,
+} as const;
+const gifDeferLines = wrapBody(gifOnlyText, 200, [gifOnlySpan], gifDeferOpts);
+if (gifDeferLines.length < 2) {
+  throw new Error(
+    "leading GIF wider than first line must defer to continuation row",
+  );
+}
+const gifDeferPos = indexToLineCol(
+  gifOnlyText,
+  gifDeferLines,
+  0,
+  [gifOnlySpan],
+  gifDeferOpts,
+);
+if (!gifDeferPos || gifDeferPos.line !== 1 || gifDeferPos.col !== 0) {
+  throw new Error(
+    `deferred GIF expected line 1 col 0, got ${JSON.stringify(gifDeferPos)}`,
+  );
+}
+
+const continuationText = "abcdef";
+const continuationLines = [
+  { start: 2, end: 4 },
+  { start: 4, end: 6 },
+];
+const normalContinuation = renderWrappedContinuation(
+  continuationText,
+  continuationLines,
+  [22, 22, 22],
+  22,
+  [],
+);
+if (normalContinuation !== "cd\nef") {
+  throw new Error(
+    `normal continuation must retain its row break, got ${JSON.stringify(normalContinuation)}`,
+  );
+}
+const tallContinuation = renderWrappedContinuation(
+  continuationText,
+  continuationLines,
+  [22, 100, 22],
+  22,
+  [],
+);
+if (tallContinuation !== "cd\n\n\n\n\nef") {
+  throw new Error(
+    `tall continuation must reserve complete GIF rows, got ${JSON.stringify(tallContinuation)}`,
   );
 }
 

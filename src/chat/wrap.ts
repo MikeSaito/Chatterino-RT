@@ -42,7 +42,7 @@ export function emoteDisplaySize(
   const min = Math.max(1, emoteMinPx);
   const isChatGif = span.provider === "twitch-gif";
   const boxH = isChatGif
-    ? Math.min(MAX_EMOTE_LAYOUT_WIDTH_PX, Math.max(min, Math.round(min * 2.5)))
+    ? Math.min(MAX_EMOTE_LAYOUT_WIDTH_PX, Math.max(min, Math.round(min * 5)))
     : min;
   const dw = span.displayWidth;
   const dh = span.displayHeight;
@@ -167,6 +167,18 @@ export function wrapBody(
     return [{ start: 0, end: 0 }];
   }
   const lines: WrapLine[] = [];
+  if (firstW < restW && ctx.maskEmotes) {
+    for (const span of emotes) {
+      if (span.provider !== "twitch-gif" || span.start !== 0) {
+        continue;
+      }
+      const { w } = emoteDisplaySize(span, ctx.emoteMinPx);
+      if (w > firstW && lines.length < WRAP_MAX_LINES) {
+        lines.push({ start: 0, end: 0 });
+      }
+      break;
+    }
+  }
   const widthForNext = (): number =>
     lines.length === 0 ? firstW : restW;
   for (const para of hardParagraphs(text)) {
@@ -303,6 +315,35 @@ export function withCollapsedEllipsis(rendered: string, collapsed: boolean): str
   }
   parts[parts.length - 1] = `${parts[parts.length - 1]}...`;
   return parts.join("\n");
+}
+
+/** Continuation lines with vertical padding when prior rows are taller than textLineHeight. */
+export function renderWrappedContinuation(
+  text: string,
+  restLines: readonly WrapLine[],
+  lineHeights: readonly number[],
+  textLineHeight: number,
+  emotes: readonly WrapEmote[],
+  opts?: WrapOptions,
+  collapsed = false,
+): string {
+  if (restLines.length === 0) {
+    return "";
+  }
+  const lh = Math.max(1, textLineHeight);
+  const parts: string[] = [];
+  for (let i = 0; i < restLines.length; i += 1) {
+    const wrapIdx = i + 1;
+    if (i > 0) {
+      const prevH = lineHeights[wrapIdx - 1] ?? lh;
+      // One newline moves to the next text row. Extra rows reserve space for
+      // tall media; round up so the following BitmapText cannot overlap it.
+      const rowBreaks = Math.max(1, Math.ceil(prevH / lh));
+      parts.push("\n".repeat(rowBreaks));
+    }
+    parts.push(renderWrapped(text, [restLines[i]], emotes, opts));
+  }
+  return withCollapsedEllipsis(parts.join(""), collapsed);
 }
 
 function trimLineVisualEnd(
@@ -944,4 +985,63 @@ function collapsed(
     }
   }
   return false;
+}
+
+/** Per-wrap-line row height: at least text lineHeight, expanded for tall emotes/GIFs. */
+export function wrapLineHeights(
+  lines: readonly WrapLine[],
+  text: string,
+  emotes: readonly WrapEmote[],
+  opts: WrapOptions | undefined,
+  textLineHeight: number,
+): number[] {
+  const ctx = ctxFrom(opts);
+  const base = Math.max(1, textLineHeight);
+  return lines.map((line) => {
+    let maxH = base;
+    for (let i = 0; i < emotes.length; i += 1) {
+      const span = emotes[i];
+      if (isOverlayLayer(emotes, i, ctx, text)) {
+        continue;
+      }
+      if (span.start >= line.end || span.end <= line.start) {
+        continue;
+      }
+      if (span.start >= span.end) {
+        continue;
+      }
+      const { h } = emoteDisplaySize(span, ctx.emoteMinPx);
+      maxH = Math.max(maxH, h);
+    }
+    return maxH;
+  });
+}
+
+/** Cumulative Y offset for wrap line index (sum of prior line heights). */
+export function wrapLineOffsetY(
+  lineHeights: readonly number[],
+  line: number,
+): number {
+  let y = 0;
+  const n = Math.min(line, lineHeights.length);
+  for (let i = 0; i < n; i += 1) {
+    y += lineHeights[i] ?? 0;
+  }
+  return y;
+}
+
+/** Wrap line index for a Y offset within the body block (inverse of wrapLineOffsetY). */
+export function wrapLineAtY(lineHeights: readonly number[], y: number): number {
+  if (lineHeights.length === 0 || y < 0) {
+    return 0;
+  }
+  let acc = 0;
+  for (let i = 0; i < lineHeights.length; i += 1) {
+    const h = lineHeights[i] ?? 0;
+    if (y < acc + h) {
+      return i;
+    }
+    acc += h;
+  }
+  return Math.max(0, lineHeights.length - 1);
 }

@@ -54,10 +54,7 @@ pub enum IrcCmd {
     Part,
     PartChannel(String),
     Privmsg(OutboundPrivmsg),
-    Typing {
-        channel: String,
-        active: bool,
-    },
+    Typing { channel: String, active: bool },
     Relogin,
     Shutdown,
 }

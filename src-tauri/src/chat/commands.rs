@@ -337,9 +337,8 @@ pub async fn chat_send_gif(
         return Err(ApiError::coded("error.gif.id", "invalid gif id"));
     }
     let url = url.trim().to_string();
-    let allowed = super::fetch::allowed_twitch_gif_url(&url).ok_or_else(|| {
-        ApiError::coded("error.gif.url", "gif url not allowed")
-    })?;
+    let allowed = super::fetch::allowed_twitch_gif_url(&url)
+        .ok_or_else(|| ApiError::coded("error.gif.url", "gif url not allowed"))?;
     if !super::fetch::gif_url_matches_id(&allowed, &gif_id) {
         return Err(ApiError::coded("error.gif.url", "gif url not allowed"));
     }

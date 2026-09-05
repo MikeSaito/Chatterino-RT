@@ -734,8 +734,10 @@ pub fn gif_url_matches_id(url: &str, gif_id: &str) -> bool {
     if gif_id.is_empty() {
         return false;
     }
-    let needle = format!("/media/{gif_id}/");
-    url.contains(&needle)
+    let url_lower = url.to_ascii_lowercase();
+    let id_lower = gif_id.to_ascii_lowercase();
+    let needle = format!("/media/{id_lower}/");
+    url_lower.contains(&needle)
 }
 
 /// Allowlist CDN картинок эмодзи/бейджей для `fetch_emote_cdn` (CORS fallback).
@@ -1047,9 +1049,7 @@ mod tests {
             allowed_twitch_gif_url(
                 "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc"
             ),
-            Some(
-                "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc".into()
-            )
+            Some("https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc".into())
         );
         assert!(allowed_twitch_gif_url("https://evil.example/giphy.gif").is_none());
         assert!(allowed_twitch_gif_url("https://media9.giphy.com/media/x/giphy.gif").is_none());

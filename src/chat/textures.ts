@@ -5,6 +5,9 @@ import { isAllowedEmoteCdnUrl } from "./emoteCdnAllowlist";
 import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 import { resolveEmoteUrl } from "./emoteUrl";
 
+import { isRenderableTexture } from "./textureGuards";
+
+export { isRenderableTexture } from "./textureGuards";
 export { resolveEmoteUrl } from "./emoteUrl";
 export { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 
@@ -15,6 +18,11 @@ export type EmoteFrameSet = {
   delays: number[];
   total: number;
 };
+
+export type TextureInvalidateListener = (
+  id: string,
+  textures: readonly Texture[],
+) => void;
 
 type ImageDecoderInstance = {
   decode: (options: { frameIndex: number }) => Promise<{
@@ -138,17 +146,34 @@ export class TextureLru {
   private readonly inflight = new Map<string, Promise<Texture | null>>();
   private readonly generation = new Map<string, number>();
   private readonly maxEntries: number;
+  private invalidateListener: TextureInvalidateListener | null = null;
 
   constructor(max = TEXTURE_LRU_LIMIT) {
     this.maxEntries = max;
   }
 
+  setInvalidateListener(listener: TextureInvalidateListener | null): void {
+    this.invalidateListener = listener;
+  }
+
+  private invalidateTextures(id: string, textures: readonly Texture[]): void {
+    if (textures.length === 0) {
+      return;
+    }
+    this.invalidateListener?.(id, textures);
+  }
+
   get(id: string): Texture | undefined {
     const hit = this.map.get(id);
-    if (hit) {
-      this.map.delete(id);
-      this.map.set(id, hit);
+    if (!hit) {
+      return undefined;
     }
+    if (!isRenderableTexture(hit)) {
+      this.purgeDeadEntry(id);
+      return undefined;
+    }
+    this.map.delete(id);
+    this.map.set(id, hit);
     return hit;
   }
 
@@ -165,10 +190,12 @@ export class TextureLru {
     for (let i = 0; i < set.frames.length; i += 1) {
       t -= set.delays[i];
       if (t < 0) {
-        return set.frames[i];
+        const frame = set.frames[i];
+        return isRenderableTexture(frame) ? frame : undefined;
       }
     }
-    return set.frames[0];
+    const frame = set.frames[0];
+    return isRenderableTexture(frame) ? frame : undefined;
   }
 
   isAnimated(id: string): boolean {
@@ -218,13 +245,13 @@ export class TextureLru {
           this.inflight.delete(id);
         }
         if (this.generation.get(id) !== token) {
-          destroyFrameSet(set, null);
+          destroyFrameSet(set, null, (texs) => this.invalidateTextures(id, texs));
           return null;
         }
         const prev = this.map.get(id);
         const prevSet = this.frameSets.get(id);
         if (!this.set(id, set.frames[0])) {
-          destroyFrameSet(set, null);
+          destroyFrameSet(set, null, (texs) => this.invalidateTextures(id, texs));
           // Cap full under pin: drop meta so retries cannot leak Map entries.
           if (this.generation.get(id) === token) {
             this.urls.delete(id);
@@ -234,13 +261,18 @@ export class TextureLru {
           return null;
         }
         this.frameSets.set(id, set);
-        if (prev && prev !== set.frames[0] && prev !== Texture.EMPTY) {
-          if (!prevSet || !prevSet.frames.includes(prev)) {
-            prev.destroy(true);
-          }
-        }
+        // Shared key reload: detach every sprite before destroying prev GPU.
         if (prevSet) {
-          destroyFrameSet(prevSet, set);
+          destroyFrameSet(prevSet, set, (texs) =>
+            this.invalidateTextures(id, texs),
+          );
+        } else if (prev && prev !== set.frames[0] && prev !== Texture.EMPTY) {
+          this.invalidateTextures(id, [prev]);
+          try {
+            prev.destroy(true);
+          } catch {
+            /* already gone */
+          }
         }
         return set.frames[0];
       })
@@ -260,6 +292,14 @@ export class TextureLru {
 
   clear(): void {
     for (const id of [...this.map.keys()]) {
+      const dropped = this.map.get(id);
+      const droppedSet = this.frameSets.get(id);
+      if (droppedSet) {
+        destroyFrameSet(droppedSet, null, (texs) => this.invalidateTextures(id, texs));
+      } else if (dropped && dropped !== Texture.EMPTY) {
+        this.invalidateTextures(id, [dropped]);
+        dropped.destroy(true);
+      }
       this.dropEntry(id);
     }
     this.inflight.clear();
@@ -291,11 +331,39 @@ export class TextureLru {
     this.modes.delete(victim);
     this.frameSets.delete(victim);
     this.generation.delete(victim);
+    // refs === 0 (evict only), but sprites may still hold Texture — invalidate first.
     if (droppedSet) {
-      destroyFrameSet(droppedSet, null);
+      destroyFrameSet(droppedSet, null, (texs) =>
+        this.invalidateTextures(victim, texs),
+      );
     } else if (dropped && dropped !== Texture.EMPTY) {
-      dropped.destroy(true);
+      this.invalidateTextures(victim, [dropped]);
+      try {
+        dropped.destroy(true);
+      } catch {
+        /* already gone */
+      }
     }
+  }
+
+  /** Drop LRU map entry for an already-destroyed texture without double-destroy. */
+  private purgeDeadEntry(id: string): void {
+    const set = this.frameSets.get(id);
+    if (set) {
+      // Frames already dead; detach sprites without destroyFrameSet GPU pass.
+      this.invalidateTextures(id, set.frames.filter((t) => t !== Texture.EMPTY));
+    } else {
+      const dropped = this.map.get(id);
+      if (dropped && dropped !== Texture.EMPTY) {
+        this.invalidateTextures(id, [dropped]);
+      }
+    }
+    this.map.delete(id);
+    this.urls.delete(id);
+    this.modes.delete(id);
+    this.frameSets.delete(id);
+    this.generation.delete(id);
+    this.refs.delete(id);
   }
 
   private evict(): void {
@@ -315,13 +383,29 @@ export class TextureLru {
   }
 }
 
-function destroyFrameSet(set: EmoteFrameSet, keep: EmoteFrameSet | null): void {
+function destroyFrameSet(
+  set: EmoteFrameSet,
+  keep: EmoteFrameSet | null,
+  beforeDestroy?: (textures: Texture[]) => void,
+): void {
+  const doomed: Texture[] = [];
   for (const tex of set.frames) {
     if (keep && keep.frames.includes(tex)) {
       continue;
     }
     if (tex !== Texture.EMPTY) {
+      doomed.push(tex);
+    }
+  }
+  if (doomed.length === 0) {
+    return;
+  }
+  beforeDestroy?.(doomed);
+  for (const tex of doomed) {
+    try {
       tex.destroy(true);
+    } catch {
+      /* already gone */
     }
   }
 }

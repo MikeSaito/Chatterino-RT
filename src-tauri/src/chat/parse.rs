@@ -307,11 +307,11 @@ fn parse_usernotice(
         notice_params.as_ref(),
         &raw_system,
     );
-        let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
-            let twitch_emotes = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
-            let gif_spans = parse_twitch_gifs(tags.get("gifs").as_deref(), text);
-            let emote_spans = merge_emote_and_gif_spans(twitch_emotes, gif_spans);
-            let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
+    let attached = trailing.filter(|t| !t.is_empty()).map(|text| {
+        let twitch_emotes = parse_twitch_emotes(tags.get("emotes").as_deref(), text);
+        let gif_spans = parse_twitch_gifs(tags.get("gifs").as_deref(), text);
+        let emote_spans = merge_emote_and_gif_spans(twitch_emotes, gif_spans);
+        let (link_spans, mention_spans) = super::spans::decorate_text_spans(text, &emote_spans);
         Box::new(ChatEvent::Privmsg {
             id: format!(
                 "{}-body",
@@ -737,7 +737,8 @@ pub fn emote_span_for_gif(text: &str, gif_id: &str, url: &str) -> Option<EmoteSp
 fn safe_twitch_gif_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.chars()
+        && id
+            .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 

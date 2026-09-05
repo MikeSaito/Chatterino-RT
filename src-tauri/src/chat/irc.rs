@@ -12,8 +12,8 @@ use super::constants::BATCH_FLUSH_MS;
 use super::emoji::attach_emoji;
 use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
-use super::helix::resolve_badge_urls;
 use super::gifs::build_outbound_privmsg_line;
+use super::helix::resolve_badge_urls;
 use super::parse::{
     emote_span_for_gif, parse_line, shift_emote_spans_back, strip_leading_reply_mention,
     synthetic_id, ParsedLine,

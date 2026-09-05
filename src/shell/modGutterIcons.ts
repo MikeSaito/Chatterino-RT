@@ -1,6 +1,7 @@
 /** Canvas-rasterized ban/clock icons for the Pixi mod gutter. */
 
 import { Texture } from "pixi.js";
+import { isRenderableTexture } from "../chat/textureGuards";
 
 const cache = new Map<string, Texture>();
 
@@ -11,8 +12,11 @@ export function modGutterIconTexture(
 ): Texture {
   const key = `${kind}:${size}:${color}`;
   const hit = cache.get(key);
-  if (hit && !hit.destroyed) {
+  if (hit && isRenderableTexture(hit)) {
     return hit;
+  }
+  if (hit) {
+    cache.delete(key);
   }
   const px = Math.max(12, Math.round(size));
   const canvas = document.createElement("canvas");

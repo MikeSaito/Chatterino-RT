@@ -9,6 +9,24 @@ export function resolveEmoteUrl(url: string, animate: boolean): string {
   return url.replace("/default/", "/static/").replace("/animated/", "/static/");
 }
 
+/** Smaller Giphy asset for fast first paint of Twitch chat GIFs. */
+export function resolveGifPreviewUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const u = new URL(trimmed.startsWith("//") ? `https:${trimmed}` : trimmed);
+    const m = u.pathname.match(/^(\/media\/[^/]+\/)giphy\.(gif|webp)$/i);
+    if (!m) {
+      return null;
+    }
+    return `${u.origin}${m[1]}giphy-downsized.gif`;
+  } catch {
+    return null;
+  }
+}
+
 const EMOJI_CDN_TWITTER =
   "https://cdn.jsdelivr.net/npm/emoji-datasource-twitter@15.1.2/img/twitter/64";
 const EMOJI_CDN_FACEBOOK =

@@ -26,6 +26,7 @@ import {
   CLIP_CARD_TITLE_COLOR,
 } from "../shell/clipCards";
 import type { TextureLru } from "./textures";
+import { isRenderableTexture } from "./textureGuards";
 
 export type ClipCardWidgets = {
   root: Container;
@@ -103,12 +104,13 @@ export function releaseClipThumb(
   clip: ClipCardWidgets,
   textures: TextureLru,
 ): void {
-  if (clip.thumbKey) {
-    textures.release(clip.thumbKey);
-    clip.thumbKey = "";
-  }
-  clip.thumb.texture = Texture.EMPTY;
   clip.thumb.visible = false;
+  clip.thumb.texture = Texture.EMPTY;
+  if (clip.thumbKey) {
+    const key = clip.thumbKey;
+    clip.thumbKey = "";
+    textures.release(key);
+  }
 }
 
 export function hideClipCard(clip: ClipCardWidgets): void {
@@ -227,11 +229,12 @@ export function paintClipCard(opts: {
           clip.thumb.visible = true;
         }
       });
-    } else if (clip.thumb.texture !== Texture.EMPTY) {
+    } else if (isRenderableTexture(clip.thumb.texture)) {
       applySprite(clip.thumb, clip.thumb.texture, thumbW, CLIP_CARD_HEIGHT_PX);
       clip.thumb.visible = true;
     } else {
       clip.thumb.visible = false;
+      clip.thumb.texture = Texture.EMPTY;
     }
   } else {
     releaseClipThumb(clip, textures);

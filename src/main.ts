@@ -132,9 +132,16 @@ let bootEpoch = 0;
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     bootEpoch += 1;
+    chatIpc?.stop();
+    chatIpc = null;
     teardownChat?.();
     teardownChat = null;
   });
+}
+
+function stopChatIpc(): void {
+  chatIpc?.stop();
+  chatIpc = null;
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -156,10 +163,12 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 window.addEventListener("beforeunload", () => {
+  stopChatIpc();
   teardownChat?.();
   teardownChat = null;
 });
 window.addEventListener("pagehide", () => {
+  stopChatIpc();
   teardownChat?.();
   teardownChat = null;
 });

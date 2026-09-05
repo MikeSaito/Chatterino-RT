@@ -12,6 +12,7 @@ import {
   Texture,
   type Application,
 } from "pixi.js";
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   BADGE_SIZE,
@@ -50,7 +51,7 @@ import {
   whisperPrefix,
 } from "./chatSystemText";
 import { t } from "../i18n/index.ts";
-import { resolveEmojiUrl } from "./emoteUrl";
+import { resolveEmojiUrl, resolveGifPreviewUrl } from "./emoteUrl";
 import { trailingDebounce, type TrailingDebounce } from "./debounce";
 import {
   badgeVisibilityEqual,
@@ -69,7 +70,8 @@ import {
   releaseClipThumb,
   type ClipCardWidgets,
 } from "./clipCardPixi";
-import { EmoteFrameTicker, TextureLru } from "./textures";
+import { EmoteFrameTicker, isRenderableTexture, TextureLru } from "./textures";
+import { cleanseSpriteTexture, resetBitmapTextGpuTree, sanitizeStageSprites } from "./textureGuards";
 import {
   ScrollModel,
   wheelDeltaRows,
@@ -110,8 +112,12 @@ import {
   indexToLineCol,
   lineColToIndex,
   renderWrapped,
+  renderWrappedContinuation,
   withCollapsedEllipsis,
   wrapBody,
+  wrapLineHeights,
+  wrapLineAtY,
+  wrapLineOffsetY,
   wrapLineOriginX,
   type WrapLine,
   type WrapOptions,
@@ -255,6 +261,8 @@ type Slot = {
   /** True after title/host rewrite; displayBody must not rebuild from bodySource. */
   linkEnriched: boolean;
   wrapLines: WrapLine[];
+  /** Per-line body row heights (tall GIF/emote rows expand beyond lineHeight). */
+  wrapLineHeights: number[];
   /** false until paintClip finishes metrics for current bodyRaw. */
   wrapReady: boolean;
   lineCount: number;
@@ -387,6 +395,10 @@ export class MessageRing {
   private static readonly LAYOUT_SETTLE_QUIET_MS = 64;
   private mediaRepaintSlots = new Set<Slot>();
   private mediaRepaintRaf = 0;
+  private renderPrerenderHook: (() => void) | null = null;
+  private rendererSanitizePatched = false;
+  /** Dedupe prerender + renderStart + patched render in the same ticker frame. */
+  private lastSanitizeTickerTime = Number.NaN;
   /** Live msg ids this channel session (survive gap recovery snapshot). */
   private liveMsgIds = new Set<string>();
   /**
@@ -484,6 +496,9 @@ export class MessageRing {
   ) {
     this.poolSize = poolSize;
     this.textures = textures;
+    this.textures.setInvalidateListener((id, doomed) => {
+      this.onTexturesInvalidated(id, doomed);
+    });
     this.emoteTicker.subscribe(() => this.tickEmoteFrames());
     this.perfOn =
       import.meta.env.DEV === true ||
@@ -544,6 +559,8 @@ export class MessageRing {
     slot.linkEnriched = true;
     // Only this row needs wrap recompute; dual-anchor layout preserves scroll.
     slot.wrapReady = false;
+    slot.wrapLineHeights = [];
+    slot.lineCount = this.estimateSlotLineCount(slot);
     this.layout(undefined, new Set([slot]));
   }
 
@@ -860,6 +877,11 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
+      if (!isRenderableTexture(spr.texture)) {
+        spr.visible = false;
+        spr.texture = Texture.EMPTY;
+        continue;
+      }
       spr.visible = true;
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
       spr.y = this.lineMediaY(contentY, this.badgeSize);
@@ -884,12 +906,7 @@ export class MessageRing {
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
       if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
-        spr.visible = true;
-        spr.x = prevX;
-        spr.y = prevY;
-        if (spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-        }
+        this.paintEmoteSpriteAt(slot, i, spr, span, prevX, prevY, paint.w, paint.h);
         continue;
       }
       const pos = indexToLineCol(
@@ -903,13 +920,16 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      spr.visible = true;
-      spr.x =
-        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
-      if (spr.texture !== Texture.EMPTY) {
-        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-      }
+      this.paintEmoteSpriteAt(
+        slot,
+        i,
+        spr,
+        span,
+        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col,
+        this.lineMediaYForWrapLine(contentY, paint.h, pos.line, slot),
+        paint.w,
+        paint.h,
+      );
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
@@ -927,7 +947,7 @@ export class MessageRing {
           slot.bitsLabel.text = ` ${span.bitsAmount}`;
           slot.bitsLabel.tint = tint;
           slot.bitsLabel.x = spr.x + paint.w + 2;
-          slot.bitsLabel.y = contentY + pos.line * this.lineHeight;
+          slot.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
           bitsLabelShown = true;
         }
       }
@@ -993,7 +1013,7 @@ export class MessageRing {
       const slot = visible[i];
       slot.startRow = i;
       slot.root.y = y;
-      y += slot.lineCount * this.lineHeight;
+      y += this.slotPixelHeight(slot);
       if (i + 1 < visible.length) {
         y += gapPx;
       }
@@ -1013,16 +1033,16 @@ export class MessageRing {
   }
 
   private loadBadgeSprites(slot: Slot): void {
+    for (const spr of slot.badges) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
     for (const key of slot.badgeKeys) {
       if (key) {
         this.textures.release(key);
       }
     }
     slot.badgeKeys = new Array(slot.badges.length).fill("");
-    for (const spr of slot.badges) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
     const visible = this.visibleBadges(slot);
     const msgId = slot.msgId;
     for (let i = 0; i < slot.badges.length; i += 1) {
@@ -1184,6 +1204,9 @@ export class MessageRing {
     if (boldChanged || this.nickAtlasDesignSize === 0) {
       this.clearNickPaintTextures();
       this.reinstallNickFont();
+      if (this.ready) {
+        this.applyFontStylesToSlots(true);
+      }
     }
     this.refreshFontMetrics();
     this.repaintNickChrome();
@@ -1648,16 +1671,22 @@ export class MessageRing {
       }
       for (const spr of slot.badges) {
         spr.y = this.lineMediaY(0, this.badgeSize);
-        if (spr.visible && spr.texture !== Texture.EMPTY) {
+        if (spr.visible && isRenderableTexture(spr.texture)) {
           applySpriteTexture(spr, spr.texture, this.badgeSize, this.badgeSize);
+        } else if (spr.visible) {
+          spr.visible = false;
+          spr.texture = Texture.EMPTY;
         }
       }
       for (let e = 0; e < slot.emotes.length; e += 1) {
         const spr = slot.emotes[e];
         const span = slot.spansRaw[e];
-        if (spr.visible && spr.texture !== Texture.EMPTY && span) {
+        if (spr.visible && isRenderableTexture(spr.texture) && span) {
           const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, spr.texture, paint.w, paint.h);
+        } else if (spr.visible) {
+          spr.visible = false;
+          spr.texture = Texture.EMPTY;
         }
       }
     }
@@ -1697,6 +1726,194 @@ export class MessageRing {
       line * this.lineHeight +
       Math.max(0, this.lineHeight - mediaH)
     );
+  }
+
+  private wrapLineRowHeight(slot: Slot, line: number): number {
+    return slot.wrapLineHeights[line] ?? this.lineHeight;
+  }
+
+  private wrapLineY(contentY: number, line: number, slot: Slot): number {
+    if (slot.wrapLineHeights.length === 0) {
+      return contentY + line * this.lineHeight;
+    }
+    return contentY + wrapLineOffsetY(slot.wrapLineHeights, line);
+  }
+
+  private lineMediaYForWrapLine(
+    contentY: number,
+    mediaH: number,
+    line: number,
+    slot: Slot,
+  ): number {
+    const rowH = this.wrapLineRowHeight(slot, line);
+    return this.wrapLineY(contentY, line, slot) + Math.max(0, rowH - mediaH);
+  }
+
+  private slotBodyPixelHeight(slot: Slot): number {
+    if (slot.wrapLineHeights.length > 0) {
+      return slot.wrapLineHeights.reduce((a, b) => a + b, 0);
+    }
+    const bodyLines = Math.max(
+      1,
+      slot.wrapLines.length > 0
+        ? slot.wrapLines.length
+        : slot.lineCount - slot.replyRows - slot.clipCardRows,
+    );
+    let bodyPix = bodyLines * this.lineHeight;
+    if (this.enableEmoteImages) {
+      for (const span of slot.spansRaw) {
+        if (span.provider !== "twitch-gif" || span.zeroWidth === true) {
+          continue;
+        }
+        const { h } = this.emotePaintSize(span);
+        if (
+          span.start === 0 &&
+          span.end >= Math.max(1, slot.bodyRaw.length - 1)
+        ) {
+          bodyPix = Math.max(bodyPix, h + this.lineHeight);
+        } else {
+          bodyPix += Math.max(0, h - this.lineHeight);
+        }
+      }
+    }
+    return bodyPix;
+  }
+
+  private slotPixelHeight(slot: Slot): number {
+    return (
+      slot.replyRows * this.lineHeight +
+      this.slotBodyPixelHeight(slot) +
+      slot.clipCardRows * this.lineHeight
+    );
+  }
+
+  /** Scroll row budget before paintClip; tall GIF placeholders reserve extra rows. */
+  private estimateSlotLineCount(slot: Slot): number {
+    const bodyPix = this.slotBodyPixelHeight(slot);
+    return (
+      slot.replyRows +
+      slot.clipCardRows +
+      Math.max(1, Math.ceil(bodyPix / this.lineHeight))
+    );
+  }
+
+  /** Twitch chat GIFs are always fetched as animation-capable assets. */
+  private wantAnimateSpan(span: EmoteSpan): boolean {
+    return span.provider === "twitch-gif" ? true : this.animateEmotes;
+  }
+
+  /** Prefer LRU cache over stale sprite.texture (eviction / slot reuse). */
+  private resolveEmotePaintTexture(
+    slot: Slot,
+    index: number,
+    spr: Sprite,
+  ): Texture {
+    const key = slot.emoteKeys[index];
+    if (key) {
+      if (this.textures.isAnimated(key) && this.animateEmotes) {
+        const frame = this.textures.frameAt(key, this.emoteTicker.position());
+        if (isRenderableTexture(frame)) {
+          return frame;
+        }
+      }
+      const cached = this.textures.get(key);
+      if (isRenderableTexture(cached)) {
+        return cached;
+      }
+    }
+    const tex = spr.texture;
+    return isRenderableTexture(tex) ? tex : Texture.EMPTY;
+  }
+
+  private scheduleEmoteLoad(
+    slot: Slot,
+    index: number,
+    span: EmoteSpan,
+    msgId: string,
+  ): void {
+    if (!this.enableEmoteImages || span.provider === "cheer-mask") {
+      return;
+    }
+    const key =
+      span.provider === "cheer"
+        ? `cheer:${span.url}`
+        : `${span.provider}:${span.emoteId}`;
+    if (slot.emoteKeys[index] !== key) {
+      slot.emoteKeys[index] = key;
+      this.textures.acquire(key);
+    }
+    const fullUrl = this.emoteLoadUrl(span);
+    const wantAnimate = this.wantAnimateSpan(span);
+    const onLoaded = (tex: Texture | null): void => {
+      if (
+        !tex ||
+        slot.msgId !== msgId ||
+        !this.enableEmoteImages ||
+        slot.emoteKeys[index] !== key
+      ) {
+        return;
+      }
+      const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
+      applySpriteTexture(slot.emotes[index], tex, paint.w, paint.h);
+      this.repaintSlotMedia(slot);
+    };
+    if (span.provider === "twitch-gif" && wantAnimate) {
+      const previewUrl = resolveGifPreviewUrl(fullUrl);
+      if (previewUrl && previewUrl !== fullUrl) {
+        void this.textures.load(key, previewUrl, false).then((tex) => {
+          onLoaded(tex);
+          if (
+            slot.msgId !== msgId ||
+            !this.enableEmoteImages ||
+            slot.emoteKeys[index] !== key
+          ) {
+            return;
+          }
+          void this.textures.load(key, fullUrl, true).then(onLoaded);
+        });
+        return;
+      }
+    }
+    void this.textures.load(key, fullUrl, wantAnimate).then(onLoaded);
+  }
+
+  private placeEmoteSprite(
+    spr: Sprite,
+    tex: Texture,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    spr.x = x;
+    spr.y = y;
+    if (!isRenderableTexture(tex)) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+      return;
+    }
+    spr.visible = true;
+    applySpriteTexture(spr, tex, w, h);
+  }
+
+  private paintEmoteSpriteAt(
+    slot: Slot,
+    index: number,
+    spr: Sprite,
+    span: EmoteSpan,
+    x: number,
+    y: number,
+    paintW: number,
+    paintH: number,
+  ): void {
+    let tex = this.resolveEmotePaintTexture(slot, index, spr);
+    // A texture may have been purged after its Pixi source was destroyed.
+    // Keep the key (and its ref count) but let TextureLru fetch a fresh asset.
+    if (tex === Texture.EMPTY && slot.msgId) {
+      this.scheduleEmoteLoad(slot, index, span, slot.msgId);
+      tex = this.resolveEmotePaintTexture(slot, index, spr);
+    }
+    this.placeEmoteSprite(spr, tex, x, y, paintW, paintH);
   }
 
   /**
@@ -1817,7 +2034,7 @@ export class MessageRing {
       }
       slot.bitsLabel.style.fontSize = this.fontSize;
       slot.bitsLabel.style.lineHeight = this.lineHeight;
-      if (forceDirty && slot.msgId) {
+      if (forceDirty) {
         dirtyBitmapText(slot.time);
         dirtyBitmapText(slot.nick);
         dirtyBitmapText(slot.body);
@@ -1833,6 +2050,13 @@ export class MessageRing {
           dirtyBitmapText(mt);
         }
         dirtyBitmapText(slot.bitsLabel);
+        dirtyBitmapText(slot.clipUi.duration);
+        dirtyBitmapText(slot.clipUi.title);
+        dirtyBitmapText(slot.clipUi.game);
+        dirtyBitmapText(slot.clipUi.foot);
+        for (const ct of slot.caughtTexts) {
+          dirtyBitmapText(ct);
+        }
       }
     }
   }
@@ -1873,6 +2097,9 @@ export class MessageRing {
       ],
     });
     this.nickAtlasDesignSize = atlasSize;
+    if (this.ready) {
+      resetBitmapTextGpuTree(this.app.stage, this.app.renderer.uid);
+    }
   }
 
   scrollSnapshot(): ScrollSnapshot {
@@ -2193,6 +2420,7 @@ export class MessageRing {
         clipCardRows: 0,
         linkEnriched: false,
         wrapLines: [{ start: 0, end: 0 }],
+        wrapLineHeights: [],
         wrapReady: false,
         lineCount: 1,
         bodyIndent: 0,
@@ -2279,6 +2507,98 @@ export class MessageRing {
       this.layout();
     }, 100);
     this.app.renderer.on("resize", this.onRendererResize);
+    if (!this.renderPrerenderHook) {
+      this.renderPrerenderHook = (): void => {
+        this.sanitizeBeforeRender();
+      };
+      this.app.renderer.runners.prerender.add(this.renderPrerenderHook);
+      this.app.renderer.runners.renderStart.add(this.renderPrerenderHook);
+    }
+    this.patchRendererSanitize();
+  }
+
+  /** Последняя линия обороны: sanitize внутри render до collectRenderables. */
+  private patchRendererSanitize(): void {
+    if (this.rendererSanitizePatched) {
+      return;
+    }
+    this.rendererSanitizePatched = true;
+    const renderer = this.app.renderer;
+    const origRender = renderer.render.bind(renderer);
+    renderer.render = (options) => {
+      this.sanitizeBeforeRender();
+      return origRender(options);
+    };
+  }
+
+  private onTexturesInvalidated(
+    id: string,
+    doomed: readonly Texture[],
+  ): void {
+    const doomedSet = new Set(doomed);
+    for (const slot of this.slots) {
+      for (let e = 0; e < slot.emoteKeys.length; e += 1) {
+        if (slot.emoteKeys[e] === id) {
+          cleanseSpriteTexture(slot.emotes[e]);
+        } else if (doomedSet.has(slot.emotes[e].texture)) {
+          cleanseSpriteTexture(slot.emotes[e]);
+        }
+      }
+      for (const spr of slot.badges) {
+        if (doomedSet.has(spr.texture)) {
+          cleanseSpriteTexture(spr);
+        }
+      }
+      for (const spr of slot.modIcons) {
+        if (doomedSet.has(spr.texture)) {
+          cleanseSpriteTexture(spr);
+        }
+      }
+      if (doomedSet.has(slot.nickPaintSpr.texture)) {
+        cleanseSpriteTexture(slot.nickPaintSpr);
+        slot.nickPaintKey = "";
+        if (slot.nick.text) {
+          slot.nick.visible = true;
+        }
+      }
+      if (doomedSet.has(slot.clipUi.thumb.texture)) {
+        cleanseSpriteTexture(slot.clipUi.thumb);
+        slot.clipUi.thumbKey = "";
+      }
+    }
+  }
+
+  /** Сразу перед collectRenderables: все Sprite на stage (Pixi не cull off-screen). */
+  private sanitizeBeforeRender(): void {
+    if (!this.ready) {
+      return;
+    }
+    const tickerTime = this.app.ticker.lastTime;
+    if (tickerTime === this.lastSanitizeTickerTime) {
+      return;
+    }
+    this.lastSanitizeTickerTime = tickerTime;
+    sanitizeStageSprites(this.app.stage);
+    for (const slot of this.slots) {
+      if (!slot.msgId || !slot.root.visible) {
+        continue;
+      }
+      if (
+        slot.nickPaintSpr.visible &&
+        !isRenderableTexture(slot.nickPaintSpr.texture)
+      ) {
+        slot.nickPaintKey = "";
+        if (slot.nick.text) {
+          slot.nick.visible = true;
+        }
+      }
+      if (
+        slot.clipUi.thumbKey &&
+        !isRenderableTexture(slot.clipUi.thumb.texture)
+      ) {
+        slot.clipUi.thumbKey = "";
+      }
+    }
   }
 
   reset(): void {
@@ -2342,6 +2662,12 @@ export class MessageRing {
 
   destroy(): void {
     this.ready = false;
+    this.textures.setInvalidateListener(null);
+    if (this.renderPrerenderHook) {
+      this.app.renderer.runners.prerender.remove(this.renderPrerenderHook);
+      this.app.renderer.runners.renderStart.remove(this.renderPrerenderHook);
+      this.renderPrerenderHook = null;
+    }
     this.cancelLayoutSettle();
     this.resizeDebounce?.cancel();
     this.resizeDebounce = null;
@@ -2645,8 +2971,23 @@ export class MessageRing {
   }
 
   private clearSlot(slot: Slot): void {
-    releaseClipThumb(slot.clipUi, this.textures);
+    slot.root.visible = false;
     hideClipCard(slot.clipUi);
+    for (const spr of slot.emotes) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    for (const spr of slot.badges) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    slot.nickPaintSpr.visible = false;
+    slot.nickPaintSpr.texture = Texture.EMPTY;
+    for (const spr of slot.modIcons) {
+      spr.visible = false;
+      spr.texture = Texture.EMPTY;
+    }
+    releaseClipThumb(slot.clipUi, this.textures);
     for (const key of slot.emoteKeys) {
       if (key) {
         this.textures.release(key);
@@ -2660,7 +3001,6 @@ export class MessageRing {
     slot.emoteKeys = [];
     slot.badgeKeys = [];
     slot.badgesRaw = [];
-    slot.root.visible = false;
     slot.root.cursor = "default";
     slot.time.text = "";
     slot.nick.text = "";
@@ -2691,17 +3031,14 @@ export class MessageRing {
       mt.visible = false;
       mt.text = "";
     }
-    for (const spr of slot.modIcons) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
     for (const ct of slot.caughtTexts) {
       ct.visible = false;
       ct.text = "";
     }
     slot.wrapLines = [{ start: 0, end: 0 }];
+    slot.wrapLineHeights = [];
     slot.wrapReady = false;
-    slot.lineCount = 1;
+    slot.lineCount = this.estimateSlotLineCount(slot);
     slot.bodyIndent = 0;
     slot.bodyContIndent = 0;
     slot.replyRows = 0;
@@ -2720,8 +3057,6 @@ export class MessageRing {
     slot.useNickStyle = false;
     slot.nickPaint = null;
     slot.nickPaintKey = "";
-    slot.nickPaintSpr.visible = false;
-    slot.nickPaintSpr.texture = Texture.EMPTY;
     slot.nick.visible = true;
     slot.replyToLogin = "";
     slot.replyToText = "";
@@ -2750,14 +3085,6 @@ export class MessageRing {
     slot.systemCloudBounds = null;
     slot.mentions.clear();
     slot.disabledGfx.clear();
-    for (const spr of slot.emotes) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    for (const spr of slot.badges) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
     for (const mt of slot.mentionTexts) {
       mt.visible = false;
       mt.text = "";
@@ -2769,10 +3096,6 @@ export class MessageRing {
     for (const mt of slot.modBtns) {
       mt.visible = false;
       mt.text = "";
-    }
-    for (const spr of slot.modIcons) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
     }
     for (const ct of slot.caughtTexts) {
       ct.visible = false;
@@ -2875,8 +3198,8 @@ export class MessageRing {
     slot.bodyRaw = this.displayBody(slot.bodySource, slot.linkSpans);
     // Recycled slots keep stale wrapLines; cull must see them as dirty.
     slot.wrapLines = [{ start: 0, end: 0 }];
+    slot.wrapLineHeights = [];
     slot.wrapReady = false;
-    slot.lineCount = 1;
     slot.leadLen = drawn.leadLen;
     if (event.kind === "privmsg") {
       slot.replyToId = event.replyToId ?? "";
@@ -2905,6 +3228,9 @@ export class MessageRing {
     slot.spansRaw = drawn.spans;
     slot.mentionSpans = drawn.mentions;
     slot.badgesRaw = drawn.badges;
+    slot.replyRows =
+      !this.hideReplyContext && slot.replyToLogin.length > 0 ? 1 : 0;
+    slot.lineCount = this.estimateSlotLineCount(slot);
     slot.highlightColor = drawn.highlightColor;
     slot.systemTextKind = "";
     slot.clearLogin = "";
@@ -3001,7 +3327,6 @@ export class MessageRing {
     slot.badgeKeys = [];
     if (this.enableEmoteImages) {
       for (let i = 0; i < slot.emotes.length; i += 1) {
-        const spr = slot.emotes[i];
         const span = drawn.spans[i];
         if (!span) {
           continue;
@@ -3009,27 +3334,7 @@ export class MessageRing {
         if (span.provider === "cheer-mask") {
           continue;
         }
-        const key =
-          span.provider === "cheer"
-            ? `cheer:${span.url}`
-            : `${span.provider}:${span.emoteId}`;
-        slot.emoteKeys[i] = key;
-        this.textures.acquire(key);
-        const wantAnimate = this.animateEmotes;
-        const url = this.emoteLoadUrl(span);
-        void this.textures.load(key, url, wantAnimate).then((tex) => {
-          if (
-            tex &&
-            slot.msgId === msgId &&
-            this.enableEmoteImages &&
-            slot.emoteKeys[i] === key &&
-            this.animateEmotes === wantAnimate
-          ) {
-            const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
-            applySpriteTexture(spr, tex, paint.w, paint.h);
-            this.repaintSlotMedia(slot);
-          }
-        });
+        this.scheduleEmoteLoad(slot, i, span, msgId);
       }
     }
     if (this.isSystemCloud(slot)) {
@@ -3382,16 +3687,21 @@ export class MessageRing {
         this.measureBodyLineWidth(slot, line, layoutOpts, cloudFontSize),
       );
     }
-    const textRows = Math.max(1, lines.length);
     const textBlockW = Math.max(1, Math.ceil(maxLineW));
     const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
-    // Hug text rows at cloud metrics; vertical pad may use message gap below.
-    // Scroll grid stays textRows × main lineHeight (smaller pill, no clip).
-    slot.lineCount = textRows;
-    const allocatedH = slot.lineCount * this.lineHeight;
+    slot.wrapLineHeights = wrapLineHeights(
+      lines,
+      slot.bodyRaw,
+      slot.spansRaw,
+      layoutOpts,
+      cloudLineHeight,
+    );
+    const bodyPix = this.slotBodyPixelHeight(slot);
+    slot.lineCount = Math.max(1, Math.ceil(bodyPix / this.lineHeight));
+    const allocatedH = this.slotPixelHeight(slot);
     const cloudX = marginX;
     const cloudY = 0;
-    const cloudH = textRows * cloudLineHeight + 2 * padY;
+    const cloudH = bodyPix + 2 * padY;
     const textOriginX = cloudX + padX;
     const contentY = cloudY + padY;
 
@@ -3400,7 +3710,7 @@ export class MessageRing {
     slot.body.x = textOriginX;
     slot.body.y = contentY;
     slot.bodyCont.x = textOriginX;
-    slot.bodyCont.y = contentY + cloudLineHeight;
+    slot.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? cloudLineHeight);
 
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
@@ -3416,11 +3726,14 @@ export class MessageRing {
       slot.bodyCont.text = "";
     } else {
       slot.bodyCont.visible = true;
-      slot.bodyCont.text = renderWrapped(
+      slot.bodyCont.text = renderWrappedContinuation(
         slot.bodyRaw,
         restLines,
+        slot.wrapLineHeights,
+        cloudLineHeight,
         slot.spansRaw,
         layoutOpts,
+        false,
       );
       dirtyBitmapText(slot.bodyCont);
     }
@@ -3480,12 +3793,7 @@ export class MessageRing {
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
       if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
-        spr.visible = true;
-        spr.x = prevX;
-        spr.y = prevY;
-        if (spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-        }
+        this.paintEmoteSpriteAt(slot, i, spr, span, prevX, prevY, paint.w, paint.h);
         continue;
       }
       const pos = indexToLineCol(
@@ -3499,15 +3807,16 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      spr.visible = true;
-      spr.x = textOriginX + pos.col;
-      spr.y =
-        contentY +
-        pos.line * cloudLineHeight +
-        Math.max(0, cloudLineHeight - paint.h);
-      if (spr.texture !== Texture.EMPTY) {
-        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-      }
+      this.paintEmoteSpriteAt(
+        slot,
+        i,
+        spr,
+        span,
+        textOriginX + pos.col,
+        this.lineMediaYForWrapLine(contentY, paint.h, pos.line, slot),
+        paint.w,
+        paint.h,
+      );
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
@@ -3517,7 +3826,34 @@ export class MessageRing {
     slot.bitsLabel.text = "";
   }
 
+  private sanitizeSlotRenderableTextures(slot: Slot): void {
+    cleanseSpriteTexture(slot.nickPaintSpr);
+    if (
+      slot.nickPaintSpr.visible &&
+      !isRenderableTexture(slot.nickPaintSpr.texture)
+    ) {
+      slot.nickPaintKey = "";
+      if (slot.nick.text) {
+        slot.nick.visible = true;
+      }
+    }
+    for (const spr of slot.badges) {
+      cleanseSpriteTexture(spr);
+    }
+    for (const spr of slot.emotes) {
+      cleanseSpriteTexture(spr);
+    }
+    for (const spr of slot.modIcons) {
+      cleanseSpriteTexture(spr);
+    }
+    cleanseSpriteTexture(slot.clipUi.thumb);
+    if (!isRenderableTexture(slot.clipUi.thumb.texture)) {
+      slot.clipUi.thumbKey = "";
+    }
+  }
+
   private paintClip(slot: Slot): void {
+    this.sanitizeSlotRenderableTextures(slot);
     slot.time.style.fontSize = this.fontSize;
     slot.time.style.lineHeight = this.lineHeight;
     slot.nick.style.fontFamily = "ChatNickFont";
@@ -3584,6 +3920,11 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
+      if (!isRenderableTexture(spr.texture)) {
+        spr.visible = false;
+        spr.texture = Texture.EMPTY;
+        continue;
+      }
       spr.visible = true;
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
       spr.y = this.lineMediaY(contentY, this.badgeSize);
@@ -3623,7 +3964,6 @@ export class MessageRing {
     slot.body.x = firstOriginX;
     slot.body.y = contentY;
     slot.bodyCont.x = contOriginX;
-    slot.bodyCont.y = contentY + this.lineHeight;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
@@ -3668,7 +4008,6 @@ export class MessageRing {
     } else {
       slot.clipCardRows = 0;
     }
-    slot.lineCount = replyRows + lines.length + slot.clipCardRows;
     slot.bodyIndent = firstOriginX;
     slot.bodyContIndent = contOriginX;
     slot.replyRows = replyRows;
@@ -3677,6 +4016,19 @@ export class MessageRing {
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
     const renderOpts = this.wrapOpts(slot, overlayMentions, firstWidthPx);
+    slot.wrapLineHeights = wrapLineHeights(
+      lines,
+      slot.bodyRaw,
+      slot.spansRaw,
+      renderOpts,
+      this.lineHeight,
+    );
+    const bodyPix = this.slotBodyPixelHeight(slot);
+    slot.lineCount =
+      replyRows +
+      slot.clipCardRows +
+      Math.max(1, Math.ceil(bodyPix / this.lineHeight));
+    slot.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? this.lineHeight);
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
     slot.body.text = withCollapsedEllipsis(
@@ -3689,14 +4041,19 @@ export class MessageRing {
       slot.bodyCont.text = "";
     } else {
       slot.bodyCont.visible = true;
-      slot.bodyCont.text = withCollapsedEllipsis(
-        renderWrapped(slot.bodyRaw, restLines, slot.spansRaw, renderOpts),
+      slot.bodyCont.text = renderWrappedContinuation(
+        slot.bodyRaw,
+        restLines,
+        slot.wrapLineHeights,
+        this.lineHeight,
+        slot.spansRaw,
+        renderOpts,
         collapsed,
       );
       dirtyBitmapText(slot.bodyCont);
     }
     if (slot.root.hitArea instanceof Rectangle) {
-      slot.root.hitArea.height = slot.lineCount * this.lineHeight;
+      slot.root.hitArea.height = this.slotPixelHeight(slot);
     }
     this.paintHighlight(slot);
     slot.mentions.clear();
@@ -3743,12 +4100,7 @@ export class MessageRing {
       const zw = this.enableZeroWidthEmotes && span.zeroWidth === true;
       // Overlay only onto the last painted non-mask emote; lone ZW paints as a regular emote.
       if (stacksZeroWidth(slot.bodyRaw, prevEnd, span.start, zw, hasPrev)) {
-        spr.visible = true;
-        spr.x = prevX;
-        spr.y = prevY;
-        if (spr.texture !== Texture.EMPTY) {
-          applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-        }
+        this.paintEmoteSpriteAt(slot, i, spr, span, prevX, prevY, paint.w, paint.h);
         continue;
       }
       const pos = indexToLineCol(
@@ -3762,13 +4114,16 @@ export class MessageRing {
         spr.visible = false;
         continue;
       }
-      spr.visible = true;
-      spr.x =
-        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-      spr.y = this.lineMediaY(contentY, paint.h, pos.line);
-      if (spr.texture !== Texture.EMPTY) {
-        applySpriteTexture(spr, spr.texture, paint.w, paint.h);
-      }
+      this.paintEmoteSpriteAt(
+        slot,
+        i,
+        spr,
+        span,
+        wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col,
+        this.lineMediaYForWrapLine(contentY, paint.h, pos.line, slot),
+        paint.w,
+        paint.h,
+      );
       prevX = spr.x;
       prevY = spr.y;
       hasPrev = true;
@@ -3786,7 +4141,7 @@ export class MessageRing {
           slot.bitsLabel.text = ` ${span.bitsAmount}`;
           slot.bitsLabel.tint = tint;
           slot.bitsLabel.x = spr.x + paint.w + 2;
-          slot.bitsLabel.y = contentY + pos.line * this.lineHeight;
+          slot.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
           bitsLabelShown = true;
         }
       }
@@ -3825,7 +4180,7 @@ export class MessageRing {
   private paintHighlight(slot: Slot): void {
     slot.highlight.clear();
     const cloud = slot.systemCloudBounds;
-    const h = slot.lineCount * this.lineHeight;
+    const h = this.slotPixelHeight(slot);
     const w = this.app.screen.width;
     if (this.findHitId && slot.msgId === this.findHitId) {
       if (cloud) {
@@ -3919,7 +4274,7 @@ export class MessageRing {
       return;
     }
     slot.disabledGfx
-      .rect(0, 0, this.app.screen.width, slot.lineCount * this.lineHeight)
+      .rect(0, 0, this.app.screen.width, this.slotPixelHeight(slot))
       .fill({
         color: this.themeFills.disabled,
         alpha: this.themeFills.disabledAlpha,
@@ -3974,8 +4329,8 @@ export class MessageRing {
         );
         const x0 =
           wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col;
-        const y =
-          contentY + start.line * rowLineHeight + rowLineHeight - 2;
+        const rowH = slot.wrapLineHeights[start.line] ?? rowLineHeight;
+        const y = this.wrapLineY(contentY, start.line, slot) + rowH - 2;
         slot.mentions
           .moveTo(x0, y)
           .lineTo(x0 + linkW, y)
@@ -4028,7 +4383,7 @@ export class MessageRing {
         ht.style.fill = this.themeFills.timestamp;
         ht.x =
           wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-        ht.y = contentY + pos.line * this.lineHeight;
+        ht.y = this.wrapLineY(contentY, pos.line, slot);
         ht.visible = true;
         dirtyBitmapText(ht);
       }
@@ -4088,7 +4443,7 @@ export class MessageRing {
           wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
         // Same row top as body. Explicit lineHeight so Pixi V-centers ChatNickFont
         // glyphs like ChatFont (unset lineHeight sat mentions above body).
-        mt.y = contentY + pos.line * this.lineHeight;
+        mt.y = this.wrapLineY(contentY, pos.line, slot);
         mt.visible = true;
         dirtyBitmapText(mt);
       }
@@ -4139,7 +4494,7 @@ export class MessageRing {
         ct.style.fill = 0xffffff;
         ct.tint = AUTOMOD_CAUGHT_COLOR;
         ct.x = wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
-        ct.y = contentY + pos.line * this.lineHeight;
+        ct.y = this.wrapLineY(contentY, pos.line, slot);
         ct.visible = true;
         dirtyBitmapText(ct);
       }
@@ -4273,7 +4628,7 @@ export class MessageRing {
 
   private slotYIntersects(slot: Slot, top: number, bottom: number): boolean {
     const y0 = slot.root.y;
-    const y1 = y0 + Math.max(1, slot.lineCount) * this.lineHeight;
+    const y1 = y0 + this.slotPixelHeight(slot);
     return y1 >= top && y0 <= bottom;
   }
 
@@ -4325,7 +4680,7 @@ export class MessageRing {
         const slot = visible[i];
         slot.startRow = i;
         slot.root.y = y;
-        y += slot.lineCount * this.lineHeight;
+        y += this.slotPixelHeight(slot);
         if (i + 1 < visible.length) {
           y += gapPx;
         }
@@ -4351,7 +4706,7 @@ export class MessageRing {
         totalY = placeY();
       }
     } else {
-      const paintBudgetMs = 10;
+      const paintBudgetMs = 14;
       const paintStarted = performance.now();
       let budgetHit = false;
       for (let iter = 0; iter < 4; iter += 1) {
@@ -4410,11 +4765,18 @@ export class MessageRing {
     const t0 = performance.now();
     fn();
     const ms = performance.now() - t0;
-    if (ms > 16) {
+    const slowMs = name === "crt-layout" ? 32 : 16;
+    if (
+      ms > slowMs &&
+      !(
+        name === "crt-layout" &&
+        (this.loadingSnapshot || this.layoutSettling)
+      )
+    ) {
       const now = performance.now();
       if (now - this.perfLogAt >= 1000) {
         this.perfLogAt = now;
-        console.warn(`[crt-perf] ${name} ${ms.toFixed(1)}ms (>16ms)`);
+        console.warn(`[crt-perf] ${name} ${ms.toFixed(1)}ms (>${slowMs}ms)`);
       }
     }
   }
@@ -4532,14 +4894,14 @@ export class MessageRing {
       if (shown > 0) {
         contentH += gapPx;
       }
-      contentH += slot.lineCount * this.lineHeight;
+      contentH += this.slotPixelHeight(slot);
       shown += 1;
     }
     const band = this.viewportPaintBand(contentH);
     // Anchors must be taken before paintClip mutates lineCount under stale root.y.
     const anchors = this.captureScrollAnchors();
     const paintStarted = performance.now();
-    const paintBudgetMs = 8;
+    const paintBudgetMs = 14;
     let heightsChanged = false;
     let unfinished = false;
     for (let i = 0; i < this.occupied; i += 1) {
@@ -4888,10 +5250,11 @@ export class MessageRing {
       }
       const kind = action.label === "clock" ? "clock" : "ban";
       const tex = modGutterIconTexture(kind, iconSize, color);
-      spr.texture = tex;
-      spr.width = iconSize;
-      spr.height = iconSize;
-      spr.visible = true;
+      if (!isRenderableTexture(tex)) {
+        spr.visible = false;
+        continue;
+      }
+      applySpriteTexture(spr, tex, iconSize, iconSize);
       spr.x = x + padX;
       spr.y = this.lineMediaY(0, iconSize);
       const btnW = iconSize + padX * 2;
@@ -4987,7 +5350,7 @@ export class MessageRing {
     if (
       key === slot.nickPaintKey &&
       slot.nickPaintSpr.visible &&
-      slot.nickPaintSpr.texture !== Texture.EMPTY
+      isRenderableTexture(slot.nickPaintSpr.texture)
     ) {
       this.touchNickPaintLru(key);
       const pad =
@@ -4999,6 +5362,14 @@ export class MessageRing {
       return baseW;
     }
     let tex = this.nickPaintTextures.get(key);
+    if (tex && !isRenderableTexture(tex)) {
+      this.nickPaintTextures.delete(key);
+      const stale = this.nickPaintTextureOrder.indexOf(key);
+      if (stale >= 0) {
+        this.nickPaintTextureOrder.splice(stale, 1);
+      }
+      tex = undefined;
+    }
     let pad = 1;
     if (!tex) {
       const raster = rasterizeNickPaint({
@@ -5011,6 +5382,8 @@ export class MessageRing {
       if (!raster) {
         slot.nick.visible = true;
         slot.nickPaintSpr.visible = false;
+        slot.nickPaintSpr.texture = Texture.EMPTY;
+        slot.nickPaintKey = "";
         return baseW;
       }
       pad = raster.pad;
@@ -5022,6 +5395,13 @@ export class MessageRing {
     } else {
       pad = (tex as Texture & { __crtPad?: number }).__crtPad ?? 1;
       this.touchNickPaintLru(key);
+    }
+    if (!isRenderableTexture(tex)) {
+      slot.nick.visible = true;
+      slot.nickPaintSpr.visible = false;
+      slot.nickPaintSpr.texture = Texture.EMPTY;
+      slot.nickPaintKey = "";
+      return baseW;
     }
     slot.nickPaintKey = key;
     slot.nickPaintSpr.texture = tex;
@@ -5051,19 +5431,34 @@ export class MessageRing {
       if (!old) {
         break;
       }
-      let inUse = false;
+      let pinnedVisible = false;
       for (const slot of this.slots) {
-        if (slot.nickPaintKey === old && slot.nickPaintSpr.visible) {
-          inUse = true;
+        if (
+          slot.nickPaintKey === old &&
+          slot.nickPaintSpr.visible &&
+          slot.root.visible
+        ) {
+          pinnedVisible = true;
           break;
         }
       }
-      if (inUse) {
+      if (pinnedVisible) {
         this.nickPaintTextureOrder.push(old);
         continue;
       }
       const doomed = this.nickPaintTextures.get(old);
       this.nickPaintTextures.delete(old);
+      for (const slot of this.slots) {
+        if (slot.nickPaintKey !== old && slot.nickPaintSpr.texture !== doomed) {
+          continue;
+        }
+        slot.nickPaintKey = "";
+        slot.nickPaintSpr.visible = false;
+        slot.nickPaintSpr.texture = Texture.EMPTY;
+        if (slot.nick.text) {
+          slot.nick.visible = true;
+        }
+      }
       if (doomed && doomed !== Texture.EMPTY) {
         try {
           doomed.destroy(true);
@@ -5109,13 +5504,18 @@ export class MessageRing {
     const rowLh = cloud?.lineHeight ?? this.lineHeight;
     const measureSize = cloud?.fontSize ?? this.fontSize;
     const contentY = cloud ? slot.body.y : slot.replyRows * this.lineHeight;
-    if (
-      slotLocalY < contentY ||
-      slotLocalY >= contentY + slot.wrapLines.length * rowLh
-    ) {
+    const bodyEndY =
+      !cloud && slot.wrapLineHeights.length > 0
+        ? contentY + this.slotBodyPixelHeight(slot)
+        : contentY + slot.wrapLines.length * rowLh;
+    if (slotLocalY < contentY || slotLocalY >= bodyEndY) {
       return null;
     }
-    const bodyLine = Math.floor((slotLocalY - contentY) / rowLh);
+    const relY = slotLocalY - contentY;
+    const bodyLine =
+      !cloud && slot.wrapLineHeights.length > 0
+        ? wrapLineAtY(slot.wrapLineHeights, relY)
+        : Math.floor(relY / rowLh);
     if (bodyLine < 0 || bodyLine >= slot.wrapLines.length) {
       return null;
     }
@@ -5209,7 +5609,7 @@ export class MessageRing {
         continue;
       }
       const top = slot.root.y;
-      const h = slot.lineCount * this.lineHeight;
+      const h = this.slotPixelHeight(slot);
       if (y < top || y >= top + h) {
         continue;
       }
@@ -5280,7 +5680,7 @@ export class MessageRing {
     if (
       localX < 0 ||
       slotLocalY < 0 ||
-      slotLocalY >= slot.lineCount * this.lineHeight
+      slotLocalY >= this.slotPixelHeight(slot)
     ) {
       return null;
     }
@@ -5325,7 +5725,7 @@ export class MessageRing {
     if (
       localX < 0 ||
       slotLocalY < 0 ||
-      slotLocalY >= slot.lineCount * this.lineHeight
+      slotLocalY >= this.slotPixelHeight(slot)
     ) {
       return null;
     }
@@ -5355,7 +5755,7 @@ export class MessageRing {
     if (
       localX < 0 ||
       slotLocalY < 0 ||
-      slotLocalY >= slot.lineCount * this.lineHeight
+      slotLocalY >= this.slotPixelHeight(slot)
     ) {
       return null;
     }
@@ -5403,7 +5803,7 @@ export class MessageRing {
         continue;
       }
       const top = slot.root.y;
-      const h = slot.lineCount * this.lineHeight + this.messageGapPx();
+      const h = this.slotPixelHeight(slot) + this.messageGapPx();
       if (y >= top && y < top + h) {
         return {
           msgId: slot.msgId,
@@ -5580,47 +5980,26 @@ export class MessageRing {
       if (!slot.msgId) {
         continue;
       }
+      for (const spr of slot.emotes) {
+        spr.visible = false;
+        spr.texture = Texture.EMPTY;
+      }
       for (const key of slot.emoteKeys) {
         if (key) {
           this.textures.release(key);
         }
       }
       slot.emoteKeys = new Array(slot.emotes.length).fill("");
-      for (const spr of slot.emotes) {
-        spr.visible = false;
-        spr.texture = Texture.EMPTY;
-      }
       if (!this.enableEmoteImages) {
         continue;
       }
       const msgId = slot.msgId;
       for (let e = 0; e < slot.emotes.length; e += 1) {
-        const spr = slot.emotes[e];
         const span = slot.spansRaw[e];
         if (!span || span.provider === "cheer-mask") {
           continue;
         }
-        const key =
-          span.provider === "cheer"
-            ? `cheer:${span.url}`
-            : `${span.provider}:${span.emoteId}`;
-        slot.emoteKeys[e] = key;
-        this.textures.acquire(key);
-        const wantAnimate = this.animateEmotes;
-        const url = this.emoteLoadUrl(span);
-        void this.textures.load(key, url, wantAnimate).then((tex) => {
-          if (
-            tex &&
-            slot.msgId === msgId &&
-            this.enableEmoteImages &&
-            slot.emoteKeys[e] === key &&
-            this.animateEmotes === wantAnimate
-          ) {
-            const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
-            applySpriteTexture(spr, tex, paint.w, paint.h);
-            this.repaintSlotMedia(slot);
-          }
-        });
+        this.scheduleEmoteLoad(slot, e, span, msgId);
       }
     }
   }
@@ -5637,9 +6016,11 @@ export class MessageRing {
         const spr = slot.emotes[e];
         const span = slot.spansRaw[e];
         const tex = this.textures.frameAt(key, 0) ?? this.textures.get(key);
-        if (tex && spr.visible && span) {
+        if (isRenderableTexture(tex) && spr.visible && span) {
           const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, tex, paint.w, paint.h);
+        } else if (spr.visible && !isRenderableTexture(spr.texture)) {
+          cleanseSpriteTexture(spr);
         }
       }
     }
@@ -5667,9 +6048,11 @@ export class MessageRing {
           continue;
         }
         const tex = this.textures.frameAt(key, pos);
-        if (tex && spr.texture !== tex) {
+        if (isRenderableTexture(tex) && spr.texture !== tex) {
           const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
           applySpriteTexture(spr, tex, paint.w, paint.h);
+        } else if (!isRenderableTexture(spr.texture)) {
+          cleanseSpriteTexture(spr);
         }
       }
     }
@@ -5824,6 +6207,12 @@ function applySpriteTexture(
   width: number,
   height: number,
 ): void {
+  if (!isRenderableTexture(tex)) {
+    spr.visible = false;
+    spr.texture = Texture.EMPTY;
+    return;
+  }
+  spr.visible = true;
   spr.texture = tex;
   spr.width = width;
   spr.height = height;
