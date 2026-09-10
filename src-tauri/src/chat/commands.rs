@@ -15,7 +15,7 @@ use super::custom_commands::{self, CustomCommandSet, ExpandContext};
 use super::filters::{self, Filters};
 use super::settings::DisplaySettings;
 use super::spans::allowed_chat_url;
-use super::state::{BttvCmd, EventCmd, IrcCmd, OutboundGif, OutboundPrivmsg, Shared};
+use super::state::{BttvCmd, EventCmd, IrcCmd, OutboundPrivmsg, Shared};
 use super::types::ChatBatch;
 
 const MAX_CHAT_CHARS: usize = 500;
@@ -308,65 +308,7 @@ pub async fn chat_send(
     let channel = resolve_send_channel(&state, channel.as_deref())?;
     ensure_can_send(&state)?;
     let text = prepare_outgoing_text(&state, &channel, &text, None)?;
-    dispatch_chat_send(&app, &state, &channel, text, reply_to, None).await
-}
-
-/// Send a Twitch chat GIF via IRC `gifs` tag (Helix does not support GIF fragments).
-#[tauri::command]
-pub async fn chat_send_gif(
-    app: AppHandle,
-    state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)] gifId: String,
-    url: String,
-    label: String,
-    #[allow(non_snake_case)] replyToId: Option<String>,
-    channel: Option<String>,
-) -> Result<(), ApiError> {
-    let reply_to = match replyToId
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(id) => Some(validate_msg_id(id)?),
-        None => None,
-    };
-    let channel = resolve_send_channel(&state, channel.as_deref())?;
-    ensure_can_send(&state)?;
-    let gif_id = gifId.trim().to_string();
-    if !super::gifs::safe_gif_id(&gif_id) {
-        return Err(ApiError::coded("error.gif.id", "invalid gif id"));
-    }
-    let url = url.trim().to_string();
-    let allowed = super::fetch::allowed_twitch_gif_url(&url)
-        .ok_or_else(|| ApiError::coded("error.gif.url", "gif url not allowed"))?;
-    if !super::fetch::gif_url_matches_id(&allowed, &gif_id) {
-        return Err(ApiError::coded("error.gif.url", "gif url not allowed"));
-    }
-    let text = super::gifs::format_outgoing_gif_text(&label);
-    let text = prepare_outgoing_text(&state, &channel, &text, None)?;
-    dispatch_chat_send(
-        &app,
-        &state,
-        &channel,
-        text,
-        reply_to,
-        Some(OutboundGif {
-            gif_id,
-            url: allowed,
-        }),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn chat_gif_search(
-    state: tauri::State<'_, Shared>,
-    query: String,
-) -> Result<Vec<super::gifs::GifSearchHit>, ApiError> {
-    ensure_can_send(&state)?;
-    super::gifs::search_gifs(&query)
-        .await
-        .map_err(|message| ApiError::coded("error.gif.search", message))
+    dispatch_chat_send(&app, &state, &channel, text, reply_to).await
 }
 
 #[tauri::command]
@@ -492,7 +434,7 @@ pub async fn chat_exec_custom_command(
         ));
     }
     let text = prepare_outgoing_text(&state, &channel, "", Some(menu))?;
-    dispatch_chat_send(&app, &state, &channel, text, reply_to, None).await
+    dispatch_chat_send(&app, &state, &channel, text, reply_to).await
 }
 
 struct MenuExpand<'a> {
@@ -682,11 +624,7 @@ async fn dispatch_chat_send(
     channel: &str,
     text: String,
     reply_to: Option<String>,
-    gif: Option<OutboundGif>,
 ) -> Result<(), ApiError> {
-    if gif.is_some() {
-        return dispatch_chat_send_irc(state, channel, text, reply_to, gif).await;
-    }
     if let Some(raid) = parse_raid_slash(text.trim()) {
         return handle_raid_slash(app, state, channel, raid).await;
     }
@@ -700,7 +638,7 @@ async fn dispatch_chat_send(
         return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;
     }
 
-    dispatch_chat_send_irc(state, channel, text, reply_to, None).await
+    dispatch_chat_send_irc(state, channel, text, reply_to).await
 }
 
 async fn dispatch_chat_send_irc(
@@ -708,11 +646,10 @@ async fn dispatch_chat_send_irc(
     channel: &str,
     text: String,
     reply_to: Option<String>,
-    gif: Option<OutboundGif>,
 ) -> Result<(), ApiError> {
     let mut payload = format_outgoing(&text)?;
     let allow_dup = knob_bool(state, "behaviour.allowDuplicateMessages", true);
-    if allow_dup && gif.is_none() {
+    if allow_dup {
         let last = state
             .last_sent
             .lock()
@@ -733,7 +670,6 @@ async fn dispatch_chat_send_irc(
             channel: channel.to_string(),
             text: payload,
             reply_to,
-            gif,
         }),
     )
     .await
@@ -1334,7 +1270,6 @@ async fn send_via_helix(
                 channel,
                 payload,
                 reply_to.map(str::to_string),
-                None,
             );
             Ok(())
         }

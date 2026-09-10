@@ -35,17 +35,10 @@ use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
 
 #[derive(Debug, Clone)]
-pub struct OutboundGif {
-    pub gif_id: String,
-    pub url: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct OutboundPrivmsg {
     pub channel: String,
     pub text: String,
     pub reply_to: Option<String>,
-    pub gif: Option<OutboundGif>,
 }
 
 #[derive(Debug, Clone)]

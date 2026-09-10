@@ -99,7 +99,8 @@ impl SendWait {
         let Some(end) = self.end else {
             return 0;
         };
-        end.saturating_duration_since(Instant::now()).as_secs()
+        let remaining = end.saturating_duration_since(Instant::now());
+        remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0)
     }
 
     pub fn current_text(&self) -> String {
@@ -307,5 +308,17 @@ mod tests {
         w.clear();
         assert_eq!(w.poll_emit().as_deref(), Some(""));
         assert!(w.poll_emit().is_none());
+    }
+
+    #[test]
+    fn fractional_last_second_remains_visible() {
+        let mut w = SendWait::default();
+        w.end = Some(Instant::now() + Duration::from_millis(900));
+        assert_eq!(w.remaining_secs(), 1);
+        assert_eq!(w.poll_emit().as_deref(), Some("1s"));
+        assert!(w.end.is_some());
+        w.end = Some(Instant::now() - Duration::from_millis(1));
+        assert_eq!(w.poll_emit().as_deref(), Some(""));
+        assert!(w.end.is_none());
     }
 }

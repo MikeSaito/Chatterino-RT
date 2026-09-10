@@ -1013,7 +1013,9 @@ export function wrapLineHeights(
       const { h } = emoteDisplaySize(span, ctx.emoteMinPx);
       maxH = Math.max(maxH, h);
     }
-    return maxH;
+    // bodyCont is a BitmapText block: continuation Y can advance only in
+    // line-height increments. Keep the layout grid in the same units.
+    return Math.max(base, Math.ceil(maxH / base) * base);
   });
 }
 

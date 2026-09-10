@@ -29,6 +29,10 @@ impl Pending {
         rmp_serde::to_vec_named(event).map(|v| v.len()).unwrap_or(0)
     }
 
+    pub fn event_too_large(event: &ChatEvent) -> bool {
+        Self::event_bytes(event) > BATCH_MAX_BYTES
+    }
+
     pub fn would_exceed(&self, event: &ChatEvent) -> bool {
         let extra = Self::event_bytes(event);
         if self.events.is_empty() {
@@ -56,7 +60,11 @@ impl Pending {
         };
         let old_bytes = Self::event_bytes(&self.events[idx]);
         let new_bytes = Self::event_bytes(&event);
-        self.bytes = self.bytes.saturating_sub(old_bytes) + new_bytes;
+        let replaced_bytes = self.bytes.saturating_sub(old_bytes) + new_bytes;
+        if replaced_bytes > BATCH_MAX_BYTES {
+            return false;
+        }
+        self.bytes = replaced_bytes;
         self.events[idx] = event;
         true
     }
@@ -70,7 +78,7 @@ impl Pending {
     }
 
     pub fn take_batch(&mut self) -> Option<ChatBatch> {
-        if self.events.is_empty() {
+        if self.events.is_empty() && self.dropped == 0 {
             return None;
         }
         self.seq = self.seq.saturating_add(1);
@@ -115,6 +123,19 @@ mod tests {
         };
         assert!(p.would_exceed(&huge));
         assert!(!p.push(huge));
+        let batch = p.take_batch().expect("dropped-only batch");
+        assert!(batch.events.is_empty());
+        assert_eq!(batch.dropped, 1);
+    }
+
+    #[test]
+    fn undelivered_without_new_events_emits_recovery_batch() {
+        let mut p = Pending::new("xqc");
+        p.note_undelivered(3);
+        let batch = p.take_batch().expect("dropped-only batch");
+        assert_eq!(batch.seq, 1);
+        assert_eq!(batch.dropped, 3);
+        assert!(batch.events.is_empty());
         assert!(p.take_batch().is_none());
     }
 
@@ -169,6 +190,26 @@ mod tests {
         assert_eq!(p.events.len(), 1);
         match &p.events[0] {
             ChatEvent::Clearchat { stack_count, .. } => assert_eq!(*stack_count, 2),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn upsert_rejects_replacement_over_byte_limit() {
+        let mut p = Pending::new("xqc");
+        assert!(p.push(notice("same")));
+        let huge = ChatEvent::Notice {
+            id: "same".into(),
+            timestamp_ms: 2,
+            text: "x".repeat(BATCH_MAX_BYTES + 64),
+            msg_id: None,
+            timeout_remaining_sec: None,
+        };
+        assert!(!p.upsert_by_id(huge));
+        let batch = p.take_batch().unwrap();
+        assert_eq!(batch.events.len(), 1);
+        match &batch.events[0] {
+            ChatEvent::Notice { text, .. } => assert_eq!(text, "xxxxxxxx"),
             other => panic!("{other:?}"),
         }
     }

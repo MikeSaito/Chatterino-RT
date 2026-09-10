@@ -1807,27 +1807,6 @@ async function boot(): Promise<void> {
       composerSprites.sync();
       composerChrome.sync();
     },
-    sendGif: async (gifId, url, label) => {
-      if (!lastAuth.canSend || sending) {
-        throw new Error(t("composer.send.title.needAuth"));
-      }
-      sending = true;
-      syncComposer();
-      try {
-        await invoke("chat_send_gif", {
-          gifId,
-          url,
-          label,
-          replyToId: replyTarget?.id ?? null,
-        });
-        clearReply();
-        composerChrome.pulse();
-        sendSelfTyping(false, true);
-      } finally {
-        sending = false;
-        syncComposer();
-      }
-    },
   });
   emoteOpen.addEventListener("click", () => {
     emotePopup.toggle();

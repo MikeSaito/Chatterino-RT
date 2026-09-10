@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { MAX_GIF_FRAMES, TEXTURE_LRU_LIMIT } from "../constants";
 import { isAllowedEmoteCdnUrl } from "./emoteCdnAllowlist";
 import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
+import { lruVictimsToSize } from "./textureLruPolicy";
 import { resolveEmoteUrl } from "./emoteUrl";
 
 import { isRenderableTexture } from "./textureGuards";
@@ -292,14 +293,6 @@ export class TextureLru {
 
   clear(): void {
     for (const id of [...this.map.keys()]) {
-      const dropped = this.map.get(id);
-      const droppedSet = this.frameSets.get(id);
-      if (droppedSet) {
-        destroyFrameSet(droppedSet, null, (texs) => this.invalidateTextures(id, texs));
-      } else if (dropped && dropped !== Texture.EMPTY) {
-        this.invalidateTextures(id, [dropped]);
-        dropped.destroy(true);
-      }
       this.dropEntry(id);
     }
     this.inflight.clear();
@@ -315,7 +308,8 @@ export class TextureLru {
       this.evict();
       return true;
     }
-    this.evict();
+    // A new key needs one free slot. Evict at the limit, not only above it.
+    this.evict(this.maxEntries - 1);
     if (this.map.size >= this.maxEntries) {
       return false;
     }
@@ -363,21 +357,15 @@ export class TextureLru {
     this.modes.delete(id);
     this.frameSets.delete(id);
     this.generation.delete(id);
-    this.refs.delete(id);
   }
 
-  private evict(): void {
-    while (this.map.size > this.maxEntries) {
-      let victim: string | undefined;
-      for (const key of this.map.keys()) {
-        if ((this.refs.get(key) ?? 0) === 0) {
-          victim = key;
-          break;
-        }
-      }
-      if (!victim) {
-        break;
-      }
+  private evict(maxSize = this.maxEntries): void {
+    const victims = lruVictimsToSize(
+      this.map.keys(),
+      (key) => (this.refs.get(key) ?? 0) > 0,
+      maxSize,
+    );
+    for (const victim of victims) {
       this.dropEntry(victim);
     }
   }

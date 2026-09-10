@@ -12,14 +12,12 @@ use super::constants::BATCH_FLUSH_MS;
 use super::emoji::attach_emoji;
 use super::emotes::{attach_third_party, resolve_overlays};
 use super::fetch;
-use super::gifs::build_outbound_privmsg_line;
 use super::helix::resolve_badge_urls;
 use super::parse::{
-    emote_span_for_gif, parse_line, shift_emote_spans_back, strip_leading_reply_mention,
-    synthetic_id, ParsedLine,
+    parse_line, shift_emote_spans_back, strip_leading_reply_mention, synthetic_id, ParsedLine,
 };
 use super::spans::{decorate_text_spans_ex, FindMentions};
-use super::state::{BttvCmd, EventCmd, IrcCmd, OutboundGif, OutboundPrivmsg, Shared};
+use super::state::{BttvCmd, EventCmd, IrcCmd, OutboundPrivmsg, Shared};
 use super::types::{ChatConnState, ChatEvent, ChatPipe, ChatSendWait, ChatStatus, ChatTyping};
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
@@ -303,14 +301,7 @@ async fn connect_session(
                             Err(()) => return SessionEnd::Reconnect { wait: true },
                             Ok(sent) => {
                                 for item in sent {
-                                    echo_own_privmsg(
-                                        app,
-                                        shared,
-                                        &item.channel,
-                                        item.text,
-                                        item.reply_to,
-                                        item.gif,
-                                    );
+                                    echo_own_privmsg(app, shared, &item.channel, item.text, item.reply_to);
                                 }
                             }
                         }
@@ -393,14 +384,7 @@ async fn connect_session(
                                         }
                                         Ok(sent) => {
                                             for item in sent {
-                                                echo_own_privmsg(
-                                                    app,
-                                                    shared,
-                                                    &item.channel,
-                                                    item.text,
-                                                    item.reply_to,
-                                                    item.gif,
-                                                );
+                                                echo_own_privmsg(app, shared, &item.channel, item.text, item.reply_to);
                                             }
                                         }
                                     }
@@ -553,13 +537,13 @@ where
             rest.push_back(msg);
             continue;
         }
-        let line = build_outbound_privmsg_line(
-            &msg.channel,
-            &msg.text,
-            msg.reply_to.as_deref(),
-            msg.gif.as_ref().map(|g| g.gif_id.as_str()),
-            msg.gif.as_ref().map(|g| g.url.as_str()),
-        );
+        let line = match &msg.reply_to {
+            Some(id) => format!(
+                "@reply-parent-msg-id={id} PRIVMSG #{} :{}",
+                msg.channel, msg.text
+            ),
+            None => format!("PRIVMSG #{} :{}", msg.channel, msg.text),
+        };
         if send_line(write, &line).await.is_err() {
             rest.push_back(msg);
             rest.append(pending);
@@ -1350,7 +1334,6 @@ pub(crate) fn echo_own_privmsg(
     channel: &str,
     text: String,
     reply_to: Option<String>,
-    gif: Option<OutboundGif>,
 ) {
     let Some((login, _)) = auth::resolved_login_token(shared) else {
         return;
@@ -1388,12 +1371,6 @@ pub(crate) fn echo_own_privmsg(
             },
         )
         .unwrap_or((None, None, None));
-    let mut emote_spans = Vec::new();
-    if let Some(g) = gif.as_ref() {
-        if let Some(span) = emote_span_for_gif(&text, &g.gif_id, &g.url) {
-            emote_spans.push(span);
-        }
-    }
     let mut event = ChatEvent::Privmsg {
         id: synthetic_id("l", now, &text),
         timestamp_ms: now,
@@ -1403,7 +1380,7 @@ pub(crate) fn echo_own_privmsg(
         color,
         badges,
         text,
-        emote_spans,
+        emote_spans: Vec::new(),
         link_spans: Vec::new(),
         mention_spans: Vec::new(),
         bits: None,

@@ -187,14 +187,18 @@ impl ChannelBuf {
         {
             return None;
         }
+        if Pending::event_too_large(&live_event) {
+            self.pending.note_undelivered(1);
+            return self.pending.take_batch();
+        }
         if self.pending.would_exceed(&live_event) {
             let flushed = self.pending.take_batch();
-            let _accepted = self.pending.push(live_event);
-            debug_assert!(_accepted);
+            let accepted = self.pending.push(live_event);
+            debug_assert!(accepted);
             return flushed;
         }
-        let _accepted = self.pending.push(live_event);
-        debug_assert!(_accepted);
+        let accepted = self.pending.push(live_event);
+        debug_assert!(accepted);
         if self.pending.should_flush() {
             return self.pending.take_batch();
         }
@@ -207,7 +211,7 @@ impl ChannelBuf {
 
     /// Prepend history snapshot events; dedup by id against existing scrollback.
     pub fn prepend_history(&mut self, events: Vec<ChatEvent>) -> usize {
-        let existing: HashSet<String> = self
+        let mut seen: HashSet<String> = self
             .scrollback
             .snapshot()
             .iter()
@@ -215,7 +219,7 @@ impl ChannelBuf {
             .collect();
         let filtered: Vec<ChatEvent> = events
             .into_iter()
-            .filter(|e| !existing.contains(e.id()))
+            .filter(|e| e.id().is_empty() || seen.insert(e.id().to_string()))
             .collect();
         self.scrollback.prepend_front(&filtered)
     }
@@ -332,6 +336,22 @@ mod tests {
     }
 
     #[test]
+    fn prepend_history_dedups_ids_within_same_response() {
+        let mut buf = ChannelBuf::new("xqc", 1000);
+        assert_eq!(
+            buf.prepend_history(vec![notice("a"), notice("a"), notice("b")]),
+            2
+        );
+        let ids: Vec<String> = buf
+            .scrollback
+            .snapshot()
+            .iter()
+            .map(|event| event.id().to_string())
+            .collect();
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
     fn snapshot_flushes_pending_and_advances_seq() {
         let mut hub = crate::chat::hub::Hub::default();
         hub.set_active(Some("xqc".into()));
@@ -371,6 +391,28 @@ mod tests {
             );
         }
         assert!(buf.scrollback.len() >= BATCH_MAX_MESSAGES);
+    }
+
+    #[test]
+    fn oversized_event_requests_snapshot_without_panicking() {
+        let mut buf = ChannelBuf::new("xqc", 1000);
+        let event = ChatEvent::Notice {
+            id: "huge".into(),
+            timestamp_ms: 1,
+            text: "x".repeat(crate::chat::constants::BATCH_MAX_BYTES + 64),
+            msg_id: None,
+            timeout_remaining_sec: None,
+        };
+        let batch = buf
+            .ingest(event, None, &SimilarityCfg::default(), no_stack())
+            .expect("dropped-only recovery batch");
+        assert!(batch.events.is_empty());
+        assert_eq!(batch.dropped, 1);
+        assert!(buf
+            .scrollback
+            .snapshot()
+            .iter()
+            .any(|event| event.id() == "huge"));
     }
 
     #[test]

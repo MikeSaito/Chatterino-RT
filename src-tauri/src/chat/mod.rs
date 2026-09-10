@@ -28,7 +28,6 @@ pub mod ffz_channel;
 pub mod filter_lang;
 pub mod filter_set;
 pub mod filters;
-pub mod gifs;
 pub mod helix;
 pub mod highlight_blacklist;
 pub mod highlight_sound;

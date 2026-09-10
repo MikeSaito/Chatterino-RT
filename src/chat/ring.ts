@@ -71,7 +71,12 @@ import {
   type ClipCardWidgets,
 } from "./clipCardPixi";
 import { EmoteFrameTicker, isRenderableTexture, TextureLru } from "./textures";
-import { cleanseSpriteTexture, resetBitmapTextGpuTree, sanitizeStageSprites } from "./textureGuards";
+import {
+  cleanseSpriteTexture,
+  detachSpriteTexture,
+  resetBitmapTextGpuTree,
+  sanitizeStageSprites,
+} from "./textureGuards";
 import {
   ScrollModel,
   wheelDeltaRows,
@@ -2539,30 +2544,30 @@ export class MessageRing {
     for (const slot of this.slots) {
       for (let e = 0; e < slot.emoteKeys.length; e += 1) {
         if (slot.emoteKeys[e] === id) {
-          cleanseSpriteTexture(slot.emotes[e]);
+          detachSpriteTexture(slot.emotes[e]);
         } else if (doomedSet.has(slot.emotes[e].texture)) {
-          cleanseSpriteTexture(slot.emotes[e]);
+          detachSpriteTexture(slot.emotes[e]);
         }
       }
       for (const spr of slot.badges) {
         if (doomedSet.has(spr.texture)) {
-          cleanseSpriteTexture(spr);
+          detachSpriteTexture(spr);
         }
       }
       for (const spr of slot.modIcons) {
         if (doomedSet.has(spr.texture)) {
-          cleanseSpriteTexture(spr);
+          detachSpriteTexture(spr);
         }
       }
       if (doomedSet.has(slot.nickPaintSpr.texture)) {
-        cleanseSpriteTexture(slot.nickPaintSpr);
+        detachSpriteTexture(slot.nickPaintSpr);
         slot.nickPaintKey = "";
         if (slot.nick.text) {
           slot.nick.visible = true;
         }
       }
       if (doomedSet.has(slot.clipUi.thumb.texture)) {
-        cleanseSpriteTexture(slot.clipUi.thumb);
+        detachSpriteTexture(slot.clipUi.thumb);
         slot.clipUi.thumbKey = "";
       }
     }

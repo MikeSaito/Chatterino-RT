@@ -745,10 +745,10 @@ const gifLineHeights = wrapLineHeights(
   { measureAdvance: adv, emoteMinPx: 20, maskEmotes: true },
   22,
 );
-if (gifLineHeights[0] !== 100) {
-  throw new Error(`GIF wrap line height expected 100, got ${gifLineHeights[0]}`);
+if (gifLineHeights[0] !== 110) {
+  throw new Error(`GIF wrap line height expected 110, got ${gifLineHeights[0]}`);
 }
-if (wrapLineOffsetY(gifLineHeights, 1) !== 100) {
+if (wrapLineOffsetY(gifLineHeights, 1) !== 110) {
   throw new Error("wrapLineOffsetY mismatch for single tall GIF line");
 }
 

@@ -20,7 +20,7 @@ const DEV_CSP = [
 export default defineConfig(async () => ({
   clearScreen: false,
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         main: path.resolve(root, "index.html"),
         settings: path.resolve(root, "settings.html"),
@@ -34,11 +34,6 @@ export default defineConfig(async () => ({
   },
   optimizeDeps: {
     exclude: ["@xmldom/xmldom"],
-    esbuildOptions: {
-      alias: {
-        "@xmldom/xmldom": xmldomStub,
-      },
-    },
   },
   server: {
     port: 1420,

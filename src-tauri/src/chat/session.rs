@@ -48,20 +48,24 @@ pub fn snapshot(shared: &Shared) -> Result<Session, ApiError> {
 }
 
 pub fn ensure_can_open(shared: &Shared, normalized: &str) -> Result<(), ApiError> {
+    let inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    ensure_can_open_in(&inner.data, normalized)
+}
+
+fn ensure_can_open_in(data: &Session, normalized: &str) -> Result<(), ApiError> {
     if !valid_login(normalized) {
         return Err(ApiError::coded(
             "error.channel.name",
             "channel name: 1-25 characters [a-z0-9_]",
         ));
     }
-    let inner = shared
-        .session
-        .lock()
-        .map_err(|_| ApiError::internal("lock"))?;
-    if inner.data.open.iter().any(|c| c == normalized) {
+    if data.open.iter().any(|c| c == normalized) {
         return Ok(());
     }
-    if inner.data.open.len() >= MAX_OPEN {
+    if data.open.len() >= MAX_OPEN {
         return Err(ApiError::coded_params(
             "error.channel.limit",
             format!("no more than {MAX_OPEN} open channels"),
@@ -90,12 +94,12 @@ pub fn preferred_focus(shared: &Shared) -> Option<String> {
 /// Update recents / last_channel. Open tab order is stable: new channels append;
 /// focusing an already-open tab does not move it (drag-reorder owns order).
 pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<Session, ApiError> {
-    ensure_can_open(shared, &normalized)?;
-    let (path, data) = {
-        let mut inner = shared
-            .session
-            .lock()
-            .map_err(|_| ApiError::internal("lock"))?;
+    let mut inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    ensure_can_open_in(&inner.data, &normalized)?;
+    {
         let list = &mut inner.data.recents;
         if let Some(pos) = list.iter().position(|c| c == &normalized) {
             list.remove(pos);
@@ -108,22 +112,22 @@ pub fn remember(shared: &Shared, normalized: String, bump_mru: bool) -> Result<S
             open.push(normalized.clone());
         }
         debug_assert!(open.len() <= MAX_OPEN);
-        if bump_mru {
-            inner.data.last_channel = Some(normalized);
-        }
-        (inner.path.clone(), inner.data.clone())
-    };
-    save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
+    }
+    if bump_mru {
+        inner.data.last_channel = Some(normalized);
+    }
+    let data = inner.data.clone();
+    save_file(&inner.path, &data).map_err(|e| ApiError::internal(&e))?;
     Ok(data)
 }
 
 /// Replace open-tab order after UI drag-reorder. Must be a permutation of current open set.
 pub fn reorder_open(shared: &Shared, next: Vec<String>) -> Result<Session, ApiError> {
-    let (path, data) = {
-        let mut inner = shared
-            .session
-            .lock()
-            .map_err(|_| ApiError::internal("lock"))?;
+    let mut inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    {
         let current = &inner.data.open;
         if next.len() != current.len() {
             return Err(ApiError::coded(
@@ -158,42 +162,38 @@ pub fn reorder_open(shared: &Shared, next: Vec<String>) -> Result<Session, ApiEr
                 inner.data.last_channel = inner.data.open.first().cloned();
             }
         }
-        (inner.path.clone(), inner.data.clone())
-    };
-    save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
+    }
+    let data = inner.data.clone();
+    save_file(&inner.path, &data).map_err(|e| ApiError::internal(&e))?;
     Ok(data)
 }
 
 pub fn forget_open(shared: &Shared, normalized: &str) -> Result<Session, ApiError> {
-    let (path, data) = {
-        let mut inner = shared
-            .session
-            .lock()
-            .map_err(|_| ApiError::internal("lock"))?;
-        // Leave removes the tab entirely: drop from open and recents so hydrate
-        // with showRecents does not bring the channel back after restart.
-        inner.data.open.retain(|c| c != normalized);
-        inner.data.recents.retain(|c| c != normalized);
-        if inner.data.last_channel.as_deref() == Some(normalized) {
-            inner.data.last_channel = inner.data.open.first().cloned();
-        }
-        (inner.path.clone(), inner.data.clone())
-    };
-    save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
+    let mut inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    // Leave removes the tab entirely: drop from open and recents so hydrate
+    // with showRecents does not bring the channel back after restart.
+    inner.data.open.retain(|c| c != normalized);
+    inner.data.recents.retain(|c| c != normalized);
+    if inner.data.last_channel.as_deref() == Some(normalized) {
+        inner.data.last_channel = inner.data.open.first().cloned();
+    }
+    let data = inner.data.clone();
+    save_file(&inner.path, &data).map_err(|e| ApiError::internal(&e))?;
     Ok(data)
 }
 
 pub fn clear_last(shared: &Shared) -> Result<Session, ApiError> {
-    let (path, data) = {
-        let mut inner = shared
-            .session
-            .lock()
-            .map_err(|_| ApiError::internal("lock"))?;
-        inner.data.last_channel = None;
-        inner.data.open.clear();
-        (inner.path.clone(), inner.data.clone())
-    };
-    save_file(&path, &data).map_err(|e| ApiError::internal(&e))?;
+    let mut inner = shared
+        .session
+        .lock()
+        .map_err(|_| ApiError::internal("lock"))?;
+    inner.data.last_channel = None;
+    inner.data.open.clear();
+    let data = inner.data.clone();
+    save_file(&inner.path, &data).map_err(|e| ApiError::internal(&e))?;
     Ok(data)
 }
 
@@ -237,6 +237,18 @@ fn valid_login(login: &str) -> bool {
         && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+fn normalize_saved_list(logins: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::with_capacity(logins.len().min(limit));
+    logins
+        .into_iter()
+        .filter_map(|login| {
+            let normalized = login.to_ascii_lowercase();
+            (valid_login(&normalized) && seen.insert(normalized.clone())).then_some(normalized)
+        })
+        .take(limit)
+        .collect()
+}
+
 fn load_file(path: &Path) -> Session {
     let Ok(raw) = fs::read_to_string(path) else {
         return Session::default();
@@ -244,22 +256,18 @@ fn load_file(path: &Path) -> Session {
     let Ok(mut session) = serde_json::from_str::<Session>(&raw) else {
         return Session::default();
     };
-    session.recents = session
-        .recents
-        .into_iter()
-        .filter(|c| valid_login(c))
-        .collect();
-    session.recents.truncate(MAX_RECENTS);
-    session.open = session
-        .open
-        .into_iter()
-        .filter(|c| valid_login(c))
-        .collect();
-    session.open.truncate(MAX_OPEN);
+    session.recents = normalize_saved_list(session.recents, MAX_RECENTS);
+    session.open = normalize_saved_list(session.open, MAX_OPEN);
     if let Some(last) = session.last_channel.take() {
-        session.last_channel = valid_login(&last).then_some(last);
+        let normalized = last.to_ascii_lowercase();
+        session.last_channel = valid_login(&normalized).then_some(normalized);
     }
-    if session.last_channel.is_none() {
+    if !session.open.is_empty()
+        && session
+            .last_channel
+            .as_ref()
+            .is_none_or(|last| !session.open.contains(last))
+    {
         session.last_channel = session.open.first().cloned();
     }
     session
@@ -282,6 +290,70 @@ fn save_file(path: &Path, data: &Session) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::chat::state::Shared;
+
+    #[test]
+    fn concurrent_remember_serializes_disk_and_enforces_limit() {
+        let shared = Shared::new();
+        let path = std::env::temp_dir().join(format!(
+            "webtv-session-concurrent-{}.json",
+            std::process::id()
+        ));
+        shared.session.lock().unwrap().path = path.clone();
+        let barrier = std::sync::Barrier::new(MAX_OPEN + 8);
+        let outcomes = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..MAX_OPEN + 8)
+                .map(|i| {
+                    let shared = &shared;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        remember(shared, format!("u{i}"), true)
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            outcomes.iter().filter(|result| result.is_ok()).count(),
+            MAX_OPEN
+        );
+        for error in outcomes.iter().filter_map(|result| result.as_ref().err()) {
+            assert_eq!(error.code, "error.channel.limit");
+        }
+        let memory = snapshot(&shared).unwrap();
+        let disk: Session = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(memory.open.len(), MAX_OPEN);
+        assert_eq!(disk, memory);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_normalizes_and_deduplicates_saved_channels() {
+        let path = std::env::temp_dir().join(format!(
+            "webtv-session-load-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            r#"{
+                "lastChannel": "MISSING",
+                "recents": ["XQC", "xqc", "Valid_2", "has space"],
+                "open": ["XQC", "xqc", "Valid_2", "valid_2"]
+            }"#,
+        )
+        .unwrap();
+        let loaded = load_file(&path);
+        assert_eq!(loaded.open, vec!["xqc", "valid_2"]);
+        assert_eq!(loaded.recents, vec!["xqc", "valid_2"]);
+        assert_eq!(loaded.last_channel.as_deref(), Some("xqc"));
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn remember_orders_and_caps() {

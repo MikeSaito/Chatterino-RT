@@ -97,17 +97,9 @@ pub fn snapshot(shared: &Shared) -> Result<Filters, String> {
 
 pub fn replace(shared: &Shared, incoming: Filters) -> Result<Filters, String> {
     let clean = sanitize(incoming)?;
-    let path = shared
-        .filters
-        .lock()
-        .map_err(|e| e.to_string())?
-        .path
-        .clone();
-    save_file(&path, &clean)?;
     let mut inner = shared.filters.lock().map_err(|e| e.to_string())?;
-    if inner.path != path {
-        return Err("config directory changed".into());
-    }
+    // Serialize disk replacement and publication of the matching in-memory value.
+    save_file(&inner.path, &clean)?;
     inner.data = clean.clone();
     Ok(clean)
 }
@@ -1766,6 +1758,55 @@ fn save_file(path: &Path, data: &Filters) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_replace_keeps_disk_and_memory_in_sync() {
+        let shared = Shared::new();
+        let path = std::env::temp_dir().join(format!(
+            "webtv-filters-concurrent-{}.json",
+            std::process::id()
+        ));
+        shared.filters.lock().unwrap().path = path.clone();
+        let barrier = std::sync::Barrier::new(16);
+        let outcomes = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..16)
+                .map(|i| {
+                    let shared = &shared;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        replace(
+                            shared,
+                            Filters {
+                                highlight_phrases: vec![format!("phrase{i}")],
+                                ..Filters::default()
+                            },
+                        )
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        for result in outcomes {
+            result.unwrap();
+        }
+        let disk: Filters = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(disk, snapshot(&shared).unwrap());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_save_does_not_publish_filter_change() {
+        let shared = Shared::new();
+        let incoming = Filters {
+            highlight_phrases: vec!["important".into()],
+            ..Filters::default()
+        };
+        assert!(replace(&shared, incoming).is_err());
+        assert_eq!(snapshot(&shared).unwrap(), Filters::default());
+    }
 
     fn privmsg(login: &str, text: &str) -> ChatEvent {
         ChatEvent::Privmsg {

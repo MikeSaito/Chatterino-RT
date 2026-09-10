@@ -44,9 +44,14 @@ export function cleanseSpriteTexture(spr: Sprite): void {
     return;
   }
   if (!isRenderableTexture(spr.texture)) {
-    spr.visible = false;
-    spr.texture = Texture.EMPTY;
+    detachSpriteTexture(spr);
   }
+}
+
+/** Remove a texture reference before its owner destroys the underlying GPU data. */
+export function detachSpriteTexture(spr: Sprite): void {
+  spr.visible = false;
+  spr.texture = Texture.EMPTY;
 }
 
 /** Обход всего дерева stage: Pixi батчит все visible Sprite, не только viewport. */
@@ -103,7 +108,7 @@ export function cleanseSpritesUsingTextures(
   for (const child of root.children) {
     if (child instanceof Sprite) {
       if (doomed.has(child.texture)) {
-        cleanseSpriteTexture(child);
+        detachSpriteTexture(child);
       }
     }
     if (child instanceof Container) {
