@@ -1,12 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { CHAT_HISTORY_LOADED_EVENT, CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants";
-import { decodeBatch } from "./batchDecode";
+import { CHAT_HISTORY_LOADED_EVENT, CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../constants.ts";
+import { decodeBatch } from "./batchDecode.ts";
 import type { ChatBatch, ChatEvent } from "./types";
 import type { MessageRing } from "./ring";
-import { notifyHighlightSounds } from "../shell/highlightSound";
-import { notifyHighlightFlash } from "../shell/highlightFlash";
-import { createMountBootstrapGate, liveBatchAction } from "./ipcMountGate";
+import { notifyHighlightSounds } from "../shell/highlightSound.ts";
+import { notifyHighlightFlash } from "../shell/highlightFlash.ts";
+import { createMountBootstrapGate, liveBatchAction } from "./ipcMountGate.ts";
 
 export type ChatIpc = {
   join: (channel: string, focus?: boolean) => Promise<string>;
@@ -76,6 +76,8 @@ export function bindChatIpc(
   let overflowDuringSnapshot = false;
   let retryTimer: number | undefined;
   let resubscribing = false;
+  let pipeRetryTimer: number | undefined;
+  let pipeRetryDelay = 250;
   let opBusy = false;
   let unlistenPipe: (() => void) | null = null;
   let unlistenHistory: (() => void) | null = null;
@@ -239,6 +241,17 @@ export function bindChatIpc(
     void invokeFn("chat_unsubscribe", { generation }).catch(() => undefined);
   };
 
+  const schedulePipeRetry = (): void => {
+    if (stopped || pipeRetryTimer !== undefined) {
+      return;
+    }
+    pipeRetryTimer = window.setTimeout(() => {
+      pipeRetryTimer = undefined;
+      void resubscribe();
+    }, pipeRetryDelay);
+    pipeRetryDelay = Math.min(pipeRetryDelay * 2, 5000);
+  };
+
   const attachChannel = async (): Promise<void> => {
     if (stopped) {
       return;
@@ -268,6 +281,7 @@ export function bindChatIpc(
       if (my === pipeEpoch && activePipe === channel) {
         activePipe.onmessage = () => undefined;
         activePipe = null;
+        schedulePipeRetry();
       }
       throw err;
     }
@@ -281,6 +295,11 @@ export function bindChatIpc(
       return;
     }
     pipeGeneration = generation;
+    if (pipeRetryTimer !== undefined) {
+      window.clearTimeout(pipeRetryTimer);
+      pipeRetryTimer = undefined;
+    }
+    pipeRetryDelay = 250;
   };
 
   const resubscribe = async (): Promise<void> => {
@@ -290,10 +309,19 @@ export function bindChatIpc(
     resubscribing = true;
     try {
       await attachChannel();
+      // Refresh history after installing the pipe: recover messages received
+      // while no subscription was available, even in a now-quiet channel.
+      if (!stopped && activePipe) {
+        snapshotQueued = true;
+        void pump();
+      }
     } catch {
-      /* next join/pump retries */
+      schedulePipeRetry();
     } finally {
       resubscribing = false;
+      if (!activePipe) {
+        schedulePipeRetry();
+      }
     }
   };
 
@@ -505,6 +533,10 @@ export function bindChatIpc(
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer);
         retryTimer = undefined;
+      }
+      if (pipeRetryTimer !== undefined) {
+        window.clearTimeout(pipeRetryTimer);
+        pipeRetryTimer = undefined;
       }
       if (unlistenPipe) {
         unlistenPipe();

@@ -199,6 +199,14 @@ async fn connect_session(
             _ = ticker.tick() => {
                 flush_emit(app, shared);
                 emit_send_waits(app, shared);
+                match flush_outgoing(&mut write, wanted, &in_rooms, pending_out, shared).await {
+                    Err(()) => return SessionEnd::Reconnect { wait: true },
+                    Ok(sent) => {
+                        for item in sent {
+                            echo_own_privmsg(app, shared, &item.channel, item.text, item.reply_to);
+                        }
+                    }
+                }
                 if pong_deadline.is_some_and(|d| Instant::now() >= d) {
                     return SessionEnd::Reconnect { wait: true };
                 }
@@ -534,6 +542,18 @@ where
             continue;
         }
         if !in_rooms.contains(&msg.channel) {
+            rest.push_back(msg);
+            continue;
+        }
+        let high_rate = shared
+            .hub
+            .lock()
+            .map_err(|_| ())?
+            .channel_self_high_rate(&msg.channel);
+        let prepared = shared.send_rate.lock().map_err(|_| ())?.prepare(high_rate);
+        if prepared != super::send_wait::PrepareSend::Ok {
+            // Keep accepted messages queued; the session ticker retries after
+            // the rate window opens, without blocking incoming IRC traffic.
             rest.push_back(msg);
             continue;
         }
@@ -1335,6 +1355,17 @@ pub(crate) fn echo_own_privmsg(
     text: String,
     reply_to: Option<String>,
 ) {
+    echo_own_privmsg_with_id(app, shared, channel, text, reply_to, None);
+}
+
+pub(crate) fn echo_own_privmsg_with_id(
+    app: &AppHandle,
+    shared: &Shared,
+    channel: &str,
+    text: String,
+    reply_to: Option<String>,
+    message_id: Option<String>,
+) {
     let Some((login, _)) = auth::resolved_login_token(shared) else {
         return;
     };
@@ -1372,7 +1403,7 @@ pub(crate) fn echo_own_privmsg(
         )
         .unwrap_or((None, None, None));
     let mut event = ChatEvent::Privmsg {
-        id: synthetic_id("l", now, &text),
+        id: message_id.unwrap_or_else(|| synthetic_id("l", now, &text)),
         timestamp_ms: now,
         user_id,
         login: login.clone(),
@@ -1778,4 +1809,98 @@ fn unix_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod outbound_tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    #[derive(Default)]
+    struct RecordingSink(Vec<String>);
+
+    impl Sink<Message> for RecordingSink {
+        type Error = ();
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), ()> {
+            if let Message::Text(text) = message {
+                self.0.push(text.to_string());
+            }
+            Ok(())
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn queued_irc_messages_wait_for_rate_limit_and_keep_order() {
+        let shared = Shared::new();
+        let wanted = HashSet::from(["alpha".into()]);
+        let mut pending =
+            VecDeque::from(["first", "second", "third"].map(|text| OutboundPrivmsg {
+                channel: "alpha".into(),
+                text: text.into(),
+                reply_to: None,
+            }));
+        assert!(shared.try_reserve_outbound(3));
+        assert!(shared.try_reserve_outbound(3));
+        assert!(shared.try_reserve_outbound(3));
+        let mut sink = RecordingSink::default();
+        let sent = flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+            .await
+            .unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].text, "first");
+        assert_eq!(pending.len(), 2);
+        assert_eq!(sink.0, vec!["PRIVMSG #alpha :first\r\n"]);
+        assert!(
+            flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(pending.front().unwrap().text, "second");
+        tokio::time::sleep(Duration::from_millis(1150)).await;
+        let sent = flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+            .await
+            .unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].text, "second");
+        assert_eq!(pending.front().unwrap().text, "third");
+        assert_eq!(sink.0.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn unjoined_channels_keep_outbound_messages_without_using_rate_allowance() {
+        let shared = Shared::new();
+        let wanted = HashSet::from(["alpha".into()]);
+        let mut pending = VecDeque::from([OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "hello".into(),
+            reply_to: Some("parent".into()),
+        }]);
+        let mut sink = RecordingSink::default();
+        assert!(
+            flush_outgoing(&mut sink, &wanted, &HashSet::new(), &mut pending, &shared)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(pending.len(), 1);
+        let sent = flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+            .await
+            .unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sink.0,
+            vec!["@reply-parent-msg-id=parent PRIVMSG #alpha :hello\r\n"]
+        );
+    }
 }

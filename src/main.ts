@@ -120,6 +120,7 @@ import {
   type TooltipPreviewMode,
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
+import { submitComposerDraft } from "./shell/composerSend";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, CHAT_TYPING_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
 import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus, ChatTyping, ViewerRole } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
@@ -1843,6 +1844,7 @@ async function boot(): Promise<void> {
   }
   let holdStatus = false;
   let sending = false;
+  let draftRevision = 0;
   let complete: {
     start: number;
     suffix: string;
@@ -2781,6 +2783,7 @@ async function boot(): Promise<void> {
   });
 
   messageInput.addEventListener("input", () => {
+    draftRevision += 1;
     if (applyingComplete) {
       composerChrome.sync();
       return;
@@ -3077,6 +3080,7 @@ async function boot(): Promise<void> {
 
   function setReply(id: string, login: string, text: string): void {
     replyTarget = { id, login, text };
+    draftRevision += 1;
     const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
     replyLabelEl.textContent = t("reply.label", { login, preview });
     replyBarEl.hidden = false;
@@ -3084,6 +3088,7 @@ async function boot(): Promise<void> {
   }
 
   function clearReply(): void {
+    draftRevision += 1;
     replyTarget = null;
     replyLabelEl.textContent = "";
     replyBarEl.hidden = true;
@@ -3568,21 +3573,29 @@ async function boot(): Promise<void> {
     if (!lastAuth.canSend || sending) {
       return;
     }
-    const text = messageInput.value;
     sending = true;
     syncComposer();
     try {
-      outgoingRaidCtl.noteMessage(ipc.active(), text);
-      await invoke("chat_send", {
-        text,
-        replyToId: replyTarget?.id ?? null,
+      await submitComposerDraft({
+        read: () => ({
+          text: messageInput.value,
+          channel: ipc.active(),
+          replyToId: replyTarget?.id ?? null,
+          revision: draftRevision,
+        }),
+        send: async ({ text, channel, replyToId }) => {
+          outgoingRaidCtl.noteMessage(channel, text);
+          await invoke("chat_send", { text, channel, replyToId });
+        },
+        clear: () => {
+          messageInput.value = "";
+          clearComplete();
+          clearReply();
+          sendSelfTyping(false, true);
+        },
       });
-      messageInput.value = "";
-      clearComplete();
-      clearReply();
       composerChrome.pulse();
       composerSprites.sync();
-      sendSelfTyping(false, true);
     } catch (err) {
       setStatus(formatError(err));
     } finally {
@@ -3592,6 +3605,7 @@ async function boot(): Promise<void> {
   }
 
   function applyMounted(joined: string): void {
+    draftRevision += 1;
     replyThreadCtl?.close();
     channels.remember(joined);
     ensureOpenChannelChrome();

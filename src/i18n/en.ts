@@ -632,6 +632,10 @@ export const en = {
   "settings.accounts.userId": "id {id}",
   "settings.accounts.pastePrompt":
     "Paste the Chatterino login line (oauth_token=…;username=…;…)",
+  "error.message.rate_limited": "You are sending messages too quickly. Please wait and try again.",
+  "error.message.send_unavailable": "Sending messages in this channel isn't possible.",
+  "error.message.send_failed": "Message was not sent: {reason}",
+  "error.message.unknown_command": "Unknown command: {command}",
 } as const;
 
 export type MessageKey = keyof typeof en;
