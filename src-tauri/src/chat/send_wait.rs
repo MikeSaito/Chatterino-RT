@@ -214,7 +214,10 @@ pub enum PrepareSend {
 
 impl SendRateState {
     pub fn prepare(&mut self, high_rate: bool) -> PrepareSend {
-        use std::time::{Duration, Instant};
+        self.prepare_at(high_rate, Instant::now())
+    }
+
+    fn prepare_at(&mut self, high_rate: bool, now: Instant) -> PrepareSend {
         const PLEB_GAP: Duration = Duration::from_millis(1100);
         const MOD_GAP: Duration = Duration::from_millis(100);
         const WINDOW: Duration = Duration::from_secs(32);
@@ -222,16 +225,23 @@ impl SendRateState {
         const MOD_MAX: usize = 99;
         const ERROR_COOLDOWN: Duration = Duration::from_secs(30);
 
-        let now = Instant::now();
-        let (queue, max, gap) = if high_rate {
-            (&mut self.mod_times, MOD_MAX, MOD_GAP)
-        } else {
-            (&mut self.pleb, PLEB_MAX, PLEB_GAP)
-        };
-        while queue.front().is_some_and(|t| *t + WINDOW < now) {
-            queue.pop_front();
+        for queue in [&mut self.pleb, &mut self.mod_times] {
+            while queue.front().is_some_and(|t| *t + WINDOW <= now) {
+                queue.pop_front();
+            }
         }
-        if queue.back().is_some_and(|t| *t + gap > now) {
+        let (max, gap) = if high_rate {
+            (MOD_MAX, MOD_GAP)
+        } else {
+            (PLEB_MAX, PLEB_GAP)
+        };
+        let last = self
+            .pleb
+            .back()
+            .into_iter()
+            .chain(self.mod_times.back())
+            .max();
+        if last.is_some_and(|t| *t + gap > now) {
             if self
                 .last_error_speed
                 .is_none_or(|t| t + ERROR_COOLDOWN < now)
@@ -241,7 +251,7 @@ impl SendRateState {
             }
             return PrepareSend::Blocked;
         }
-        if queue.len() >= max {
+        if self.pleb.len() + self.mod_times.len() >= max {
             if self
                 .last_error_amount
                 .is_none_or(|t| t + ERROR_COOLDOWN < now)
@@ -251,7 +261,11 @@ impl SendRateState {
             }
             return PrepareSend::Blocked;
         }
-        queue.push_back(now);
+        if high_rate {
+            self.mod_times.push_back(now);
+        } else {
+            self.pleb.push_back(now);
+        }
         PrepareSend::Ok
     }
 }
@@ -267,6 +281,76 @@ mod tests {
         assert_eq!(format_short_duration(3725, 2), "1h 2m");
         assert_eq!(format_short_duration(90_000, 2), "1d 1h");
         assert_eq!(format_short_duration(0, 2), "");
+    }
+
+    #[test]
+    fn rate_limiter_waits_for_gap_without_consuming_rejected_attempts() {
+        let mut rate = SendRateState::default();
+        let now = Instant::now();
+        assert_eq!(rate.prepare_at(false, now), PrepareSend::Ok);
+        assert!(matches!(
+            rate.prepare_at(false, now + Duration::from_millis(40)),
+            PrepareSend::Notice(_)
+        ));
+        assert_eq!(
+            rate.prepare_at(false, now + Duration::from_millis(80)),
+            PrepareSend::Blocked
+        );
+        assert_eq!(
+            rate.prepare_at(false, now + Duration::from_millis(1100)),
+            PrepareSend::Ok
+        );
+        assert_eq!(rate.pleb.len(), 2);
+    }
+
+    #[test]
+    fn rate_limiter_counts_both_roles_in_one_account_window() {
+        let mut rate = SendRateState::default();
+        let now = Instant::now();
+        for index in 0..19 {
+            assert_eq!(
+                rate.prepare_at(false, now + Duration::from_millis(index * 1100)),
+                PrepareSend::Ok
+            );
+        }
+        assert!(matches!(
+            rate.prepare_at(false, now + Duration::from_millis(20900)),
+            PrepareSend::Notice(_)
+        ));
+        // Elevated channels can use the higher allowance, but those messages
+        // still count when switching back to a regular channel.
+        assert_eq!(
+            rate.prepare_at(true, now + Duration::from_millis(21000)),
+            PrepareSend::Ok
+        );
+        assert_eq!(
+            rate.prepare_at(false, now + Duration::from_millis(22100)),
+            PrepareSend::Blocked
+        );
+        assert_eq!(
+            rate.prepare_at(false, now + Duration::from_secs(34)),
+            PrepareSend::Ok
+        );
+    }
+
+    #[test]
+    fn elevated_rate_limit_enforces_gap_and_window() {
+        let mut rate = SendRateState::default();
+        let now = Instant::now();
+        for index in 0..99 {
+            assert_eq!(
+                rate.prepare_at(true, now + Duration::from_millis(index * 100)),
+                PrepareSend::Ok
+            );
+        }
+        assert!(matches!(
+            rate.prepare_at(true, now + Duration::from_millis(9900)),
+            PrepareSend::Notice(_)
+        ));
+        assert_eq!(
+            rate.prepare_at(true, now + Duration::from_secs(32)),
+            PrepareSend::Ok
+        );
     }
 
     #[test]

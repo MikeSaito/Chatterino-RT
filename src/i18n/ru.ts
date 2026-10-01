@@ -2,6 +2,10 @@ import type { MessageKey } from "./en.ts";
 
 /** Russian UI strings. Must cover every MessageKey. */
 export const ru: Record<MessageKey, string> = {
+  "error.message.rate_limited": "Вы отправляете сообщения слишком быстро. Подождите и попробуйте снова.",
+  "error.message.send_unavailable": "Отправка сообщений в этот канал сейчас недоступна.",
+  "error.message.send_failed": "Сообщение не отправлено: {reason}",
+  "error.message.unknown_command": "Неизвестная команда: {command}",
   "sidebar.join.label": "канал",
   "sidebar.join.submit": "Join",
   "sidebar.join.toggle": "Присоединиться к каналу",

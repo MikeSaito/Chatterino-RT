@@ -1187,7 +1187,11 @@ async fn send_via_helix(
     if is_unknown_command_for_helix(text.trim()) {
         let cmd = text.trim().split_whitespace().next().unwrap_or("");
         state.post_channel_notice(app, channel, format!("{cmd} is not a known command."));
-        return Ok(());
+        return Err(ApiError::coded_params(
+            "error.message.unknown_command",
+            format!("{cmd} is not a known command."),
+            BTreeMap::from([("command".into(), cmd.into())]),
+        ));
     }
     let mut payload = format_outgoing_helix(text)?;
     let high_rate = state
@@ -1214,9 +1218,17 @@ async fn send_via_helix(
         super::send_wait::PrepareSend::Ok => {}
         super::send_wait::PrepareSend::Notice(msg) => {
             state.post_channel_notice(app, channel, msg.into());
-            return Ok(());
+            return Err(ApiError::coded(
+                "error.message.rate_limited",
+                "You are sending messages too quickly. Please wait and try again.",
+            ));
         }
-        super::send_wait::PrepareSend::Blocked => return Ok(()),
+        super::send_wait::PrepareSend::Blocked => {
+            return Err(ApiError::coded(
+                "error.message.rate_limited",
+                "You are sending messages too quickly. Please wait and try again.",
+            ))
+        }
     }
     let room_id = state
         .hub
@@ -1236,7 +1248,10 @@ async fn send_via_helix(
             channel,
             "Sending messages in this channel isn't possible.".into(),
         );
-        return Ok(());
+        return Err(ApiError::coded(
+            "error.message.send_unavailable",
+            "Sending messages in this channel isn't possible.",
+        ));
     };
     let sender_id = auth::ensure_twitch_user_id(state).await;
     let Some(sender_id) = sender_id else {
@@ -1245,7 +1260,10 @@ async fn send_via_helix(
             channel,
             "Sending messages in this channel isn't possible.".into(),
         );
-        return Ok(());
+        return Err(ApiError::coded(
+            "error.message.send_unavailable",
+            "Sending messages in this channel isn't possible.",
+        ));
     };
     let token = auth::oauth_token(state).ok_or_else(|| {
         ApiError::coded(
@@ -1254,30 +1272,42 @@ async fn send_via_helix(
         )
     })?;
     let client_id = auth::resolved_client_id(state);
-    if let Ok(mut last) = state.last_sent.lock() {
-        last.insert(channel.to_string(), payload.clone());
-    }
-    super::provider_activity::post_send_activity(state.clone(), channel.to_string());
     let outcome = super::helix::send_chat_message(
         &room_id, &sender_id, &payload, reply_to, &token, &client_id,
     )
     .await;
-    match outcome {
-        super::helix::HelixSendOutcome::Sent => {
-            super::irc::echo_own_privmsg(
+    match helix_send_result(outcome) {
+        Ok(message_id) => {
+            if let Ok(mut last) = state.last_sent.lock() {
+                last.insert(channel.to_string(), payload.clone());
+            }
+            super::provider_activity::post_send_activity(state.clone(), channel.to_string());
+            super::irc::echo_own_privmsg_with_id(
                 app,
                 state,
                 channel,
                 payload,
                 reply_to.map(str::to_string),
+                Some(message_id),
             );
             Ok(())
         }
-        super::helix::HelixSendOutcome::Dropped(msg)
-        | super::helix::HelixSendOutcome::Failed(msg) => {
-            state.post_channel_notice(app, channel, msg);
-            Ok(())
+        Err(error) => {
+            state.post_channel_notice(app, channel, error.message.clone());
+            Err(error)
         }
+    }
+}
+
+fn helix_send_result(outcome: super::helix::HelixSendOutcome) -> Result<String, ApiError> {
+    match outcome {
+        super::helix::HelixSendOutcome::Sent(id) => Ok(id),
+        super::helix::HelixSendOutcome::Dropped(message)
+        | super::helix::HelixSendOutcome::Failed(message) => Err(ApiError::coded_params(
+            "error.message.send_failed",
+            message.clone(),
+            BTreeMap::from([("reason".into(), message)]),
+        )),
     }
 }
 
@@ -2504,6 +2534,23 @@ async fn send_cmd(state: &Shared, cmd: IrcCmd) -> Result<(), ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn helix_rejections_are_errors_and_success_keeps_server_id() {
+        use super::super::helix::HelixSendOutcome;
+        assert_eq!(
+            helix_send_result(HelixSendOutcome::Sent("server-id".into())).unwrap(),
+            "server-id"
+        );
+        for outcome in [
+            HelixSendOutcome::Dropped("Slow down".into()),
+            HelixSendOutcome::Failed("Network error".into()),
+        ] {
+            let error = helix_send_result(outcome).unwrap_err();
+            assert_eq!(error.code, "error.message.send_failed");
+            assert_eq!(error.params.get("reason"), Some(&error.message));
+        }
+    }
 
     #[test]
     fn rejects_bad_channel() {

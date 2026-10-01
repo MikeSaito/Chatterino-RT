@@ -859,7 +859,7 @@ async fn get_helix(
 /// Result of POST /chat/messages (Chatterino HelixSentMessage parity).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelixSendOutcome {
-    Sent,
+    Sent(String),
     Dropped(String),
     Failed(String),
 }
@@ -877,7 +877,14 @@ pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if is_sent {
-        return HelixSendOutcome::Sent;
+        return match item
+            .get("message_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        {
+            Some(id) => HelixSendOutcome::Sent(id.to_string()),
+            None => HelixSendOutcome::Failed("Sent message response is missing its ID.".into()),
+        };
     }
     if let Some(reason) = item.get("drop_reason").and_then(Value::as_object) {
         let msg = reason
@@ -1772,7 +1779,16 @@ mod tests {
         let sent = serde_json::json!({
             "data": [{ "message_id": "1", "is_sent": true }]
         });
-        assert_eq!(parse_send_chat_response(&sent), HelixSendOutcome::Sent);
+        assert_eq!(
+            parse_send_chat_response(&sent),
+            HelixSendOutcome::Sent("1".into())
+        );
+
+        let missing_id = serde_json::json!({ "data": [{ "is_sent": true }] });
+        assert!(matches!(
+            parse_send_chat_response(&missing_id),
+            HelixSendOutcome::Failed(_)
+        ));
 
         let dropped = serde_json::json!({
             "data": [{
