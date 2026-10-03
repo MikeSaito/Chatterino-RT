@@ -20,6 +20,7 @@ let serverLog = "";
 server.stdout.on("data", (s) => { serverLog += s; }); server.stderr.on("data", (s) => { serverLog += s; });
 let chrome;
 let ws;
+let browserLog = "";
 const failures = [];
 try {
   for (let i = 0; ; i++) {
@@ -27,11 +28,13 @@ try {
     if (i > 100 || server.exitCode !== null) throw new Error(`Vite did not start: ${serverLog}`);
     await sleep(100);
   }
-  chrome = spawn(browser, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling", "--enable-precise-memory-info", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--remote-debugging-port=9224", `--user-data-dir=${profile}`, "about:blank"], { windowsHide: true, stdio: "ignore" });
+  chrome = spawn(browser, ["--headless=new", ...(process.env.CI === "true" ? ["--no-sandbox"] : []), "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling", "--enable-precise-memory-info", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9224", `--user-data-dir=${profile}`, "about:blank"], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+  chrome.stderr.on("data", (s) => { browserLog = (browserLog + s).slice(-8192); });
+  chrome.on("error", (e) => { browserLog += e.message; });
   let pages;
   for (let i = 0; ; i++) {
     try { pages = await (await fetch("http://127.0.0.1:9224/json/list")).json(); if (pages.some((p) => p.type === "page")) break; } catch {}
-    if (i > 100 || chrome.exitCode !== null) throw new Error("Chromium did not start");
+    if (i > 600 || chrome.exitCode !== null) throw new Error(`Chromium did not start (${browser}, exit=${chrome.exitCode}): ${browserLog}`);
     await sleep(100);
   }
   ws = new WebSocket(pages.find((p) => p.type === "page").webSocketDebuggerUrl);
