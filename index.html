@@ -146,6 +146,10 @@
               <p id="reply-label"></p>
               <button type="button" id="reply-cancel" class="btn-icon" data-i18n-title="reply.cancel" data-i18n-aria-label="reply.cancel" title="Cancel" aria-label="Cancel"></button>
             </div>
+            <div id="send-status" hidden role="status" aria-live="polite">
+              <span id="send-status-label"></span>
+              <button id="send-retry" type="button" class="btn" hidden>Retry</button>
+            </div>
             <form id="composer">
               <label class="sr-only" for="composer-input" data-i18n="composer.label">message</label>
               <section id="outgoing-raid-banner" aria-live="polite" hidden>

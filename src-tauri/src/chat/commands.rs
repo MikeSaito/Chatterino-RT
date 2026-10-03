@@ -288,7 +288,23 @@ pub fn chat_snapshot(
 
 /// Send chat text. Optional `channel` binds the send to a joined snapshot
 /// (mod gutter / UserCard / timeout popup) so a tab switch mid-flight cannot
-/// retarget hub.active. Composer omits `channel`.
+/// retarget hub.active. The composer also supplies an explicit channel.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendReceipt {
+    pub status: &'static str,
+    pub message_id: Option<String>,
+}
+
+impl SendReceipt {
+    fn command() -> Self {
+        Self {
+            status: "completed",
+            message_id: None,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
@@ -296,7 +312,7 @@ pub async fn chat_send(
     text: String,
     #[allow(non_snake_case)] replyToId: Option<String>,
     channel: Option<String>,
-) -> Result<(), ApiError> {
+) -> Result<SendReceipt, ApiError> {
     let reply_to = match replyToId
         .as_deref()
         .map(str::trim)
@@ -434,7 +450,9 @@ pub async fn chat_exec_custom_command(
         ));
     }
     let text = prepare_outgoing_text(&state, &channel, "", Some(menu))?;
-    dispatch_chat_send(&app, &state, &channel, text, reply_to).await
+    dispatch_chat_send(&app, &state, &channel, text, reply_to)
+        .await
+        .map(|_| ())
 }
 
 struct MenuExpand<'a> {
@@ -624,15 +642,21 @@ async fn dispatch_chat_send(
     channel: &str,
     text: String,
     reply_to: Option<String>,
-) -> Result<(), ApiError> {
+) -> Result<SendReceipt, ApiError> {
     if let Some(raid) = parse_raid_slash(text.trim()) {
-        return handle_raid_slash(app, state, channel, raid).await;
+        return handle_raid_slash(app, state, channel, raid)
+            .await
+            .map(|_| SendReceipt::command());
     }
     if let Some(warn) = parse_warn_slash(text.trim()) {
-        return handle_warn_slash(app, state, channel, warn).await;
+        return handle_warn_slash(app, state, channel, warn)
+            .await
+            .map(|_| SendReceipt::command());
     }
     if let Some(lt) = super::low_trust::parse_low_trust_slash(text.trim()) {
-        return super::low_trust::handle_low_trust_slash(app, state, channel, lt).await;
+        return super::low_trust::handle_low_trust_slash(app, state, channel, lt)
+            .await
+            .map(|_| SendReceipt::command());
     }
     if should_send_helix(state) {
         return send_via_helix(app, state, channel, &text, reply_to.as_deref()).await;
@@ -646,7 +670,7 @@ async fn dispatch_chat_send_irc(
     channel: &str,
     text: String,
     reply_to: Option<String>,
-) -> Result<(), ApiError> {
+) -> Result<SendReceipt, ApiError> {
     let mut payload = format_outgoing(&text)?;
     let allow_dup = knob_bool(state, "behaviour.allowDuplicateMessages", true);
     if allow_dup {
@@ -658,18 +682,29 @@ async fn dispatch_chat_send_irc(
             payload = prepare_duplicate_message(&payload);
         }
     }
+    let sender_login = auth::resolved_login_token(state)
+        .map(|(login, _)| login)
+        .ok_or_else(|| {
+            ApiError::coded(
+                "error.auth.required_send",
+                "Twitch login required to send messages",
+            )
+        })?;
     if !state.try_reserve_outbound(MAX_PENDING_OUT) {
         return Err(ApiError::coded(
             "error.message.send_queue_full",
             "send queue is full, wait for connection",
         ));
     }
+    let (ticket, receipt) = super::delivery::queued();
     if let Err(err) = send_cmd(
         state,
         IrcCmd::Privmsg(OutboundPrivmsg {
             channel: channel.to_string(),
             text: payload,
             reply_to,
+            delivery: Some(ticket),
+            sender_login: Some(sender_login),
         }),
     )
     .await
@@ -677,8 +712,12 @@ async fn dispatch_chat_send_irc(
         state.release_outbound(1);
         return Err(err);
     }
+    receipt.wait().await?;
     super::provider_activity::post_send_activity(state.clone(), channel.to_string());
-    Ok(())
+    Ok(SendReceipt {
+        status: "transmitted",
+        message_id: None,
+    })
 }
 
 fn custom_command_triggers(state: &Shared) -> Vec<String> {
@@ -1183,7 +1222,7 @@ async fn send_via_helix(
     channel: &str,
     text: &str,
     reply_to: Option<&str>,
-) -> Result<(), ApiError> {
+) -> Result<SendReceipt, ApiError> {
     if is_unknown_command_for_helix(text.trim()) {
         let cmd = text.trim().split_whitespace().next().unwrap_or("");
         state.post_channel_notice(app, channel, format!("{cmd} is not a known command."));
@@ -1288,9 +1327,12 @@ async fn send_via_helix(
                 channel,
                 payload,
                 reply_to.map(str::to_string),
-                Some(message_id),
+                Some(message_id.clone()),
             );
-            Ok(())
+            Ok(SendReceipt {
+                status: "sent",
+                message_id: Some(message_id),
+            })
         }
         Err(error) => {
             state.post_channel_notice(app, channel, error.message.clone());
@@ -1302,6 +1344,7 @@ async fn send_via_helix(
 fn helix_send_result(outcome: super::helix::HelixSendOutcome) -> Result<String, ApiError> {
     match outcome {
         super::helix::HelixSendOutcome::Sent(id) => Ok(id),
+        super::helix::HelixSendOutcome::Unknown(_) => Err(super::delivery::unknown()),
         super::helix::HelixSendOutcome::Dropped(message)
         | super::helix::HelixSendOutcome::Failed(message) => Err(ApiError::coded_params(
             "error.message.send_failed",
@@ -2550,6 +2593,12 @@ mod tests {
             assert_eq!(error.code, "error.message.send_failed");
             assert_eq!(error.params.get("reason"), Some(&error.message));
         }
+        assert_eq!(
+            helix_send_result(HelixSendOutcome::Unknown("Lost response".into()))
+                .unwrap_err()
+                .code,
+            "error.message.send_unknown"
+        );
     }
 
     #[test]

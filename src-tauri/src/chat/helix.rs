@@ -862,6 +862,7 @@ pub enum HelixSendOutcome {
     Sent(String),
     Dropped(String),
     Failed(String),
+    Unknown(String),
 }
 
 pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
@@ -870,12 +871,11 @@ pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
         .and_then(Value::as_array)
         .and_then(|arr| arr.first())
     else {
-        return HelixSendOutcome::Failed("Your message was not sent.".into());
+        return HelixSendOutcome::Unknown("Message response could not be confirmed.".into());
     };
-    let is_sent = item
-        .get("is_sent")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let Some(is_sent) = item.get("is_sent").and_then(Value::as_bool) else {
+        return HelixSendOutcome::Unknown("Message response could not be confirmed.".into());
+    };
     if is_sent {
         return match item
             .get("message_id")
@@ -883,7 +883,7 @@ pub fn parse_send_chat_response(value: &Value) -> HelixSendOutcome {
             .filter(|id| !id.is_empty())
         {
             Some(id) => HelixSendOutcome::Sent(id.to_string()),
-            None => HelixSendOutcome::Failed("Sent message response is missing its ID.".into()),
+            None => HelixSendOutcome::Unknown("Sent message response is missing its ID.".into()),
         };
     }
     if let Some(reason) = item.get("drop_reason").and_then(Value::as_object) {
@@ -942,40 +942,37 @@ pub async fn send_chat_message(
     }
     let url = format!("{HELIX}/chat/messages");
     let client = http_client();
-    let mut delay = Duration::from_millis(200);
-    let mut last = String::from("no response");
-    for attempt in 0..ATTEMPTS {
-        match client
-            .post(&url)
-            .header("Client-Id", client_id)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                match resp.json::<Value>().await {
-                    Ok(v) if status.is_success() => return parse_send_chat_response(&v),
-                    Ok(v) => {
-                        return HelixSendOutcome::Failed(map_send_chat_http_error(
-                            status.as_u16(),
-                            &v,
-                        ))
-                    }
-                    Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
-                }
-            }
-            Err(e) => last = super::http_client::format_reqwest_error_brief(&e),
+    // POST is not idempotent: a lost response may follow a successful send.
+    // Never replay it automatically or label that outcome safely retryable.
+    let response = client
+        .post(&url)
+        .header("Client-Id", client_id)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let value = resp.json::<Value>().await;
+            classify_send_response(status.as_u16(), value.ok())
         }
-        if attempt + 1 < ATTEMPTS {
-            tokio::time::sleep(delay).await;
-            delay *= 2;
-        }
+        Err(e) => HelixSendOutcome::Unknown(super::http_client::format_reqwest_error_brief(&e)),
     }
-    HelixSendOutcome::Failed(format!("Failed to send message: {last}"))
+}
+
+fn classify_send_response(status: u16, body: Option<Value>) -> HelixSendOutcome {
+    if status >= 500 || (200..300).contains(&status) && body.is_none() {
+        return HelixSendOutcome::Unknown("Message response could not be confirmed.".into());
+    }
+    let body = body.unwrap_or(Value::Null);
+    if (200..300).contains(&status) {
+        parse_send_chat_response(&body)
+    } else {
+        HelixSendOutcome::Failed(map_send_chat_http_error(status, &body))
+    }
 }
 
 pub fn parse_shared_chat_session(value: &Value) -> Vec<String> {
@@ -1787,7 +1784,7 @@ mod tests {
         let missing_id = serde_json::json!({ "data": [{ "is_sent": true }] });
         assert!(matches!(
             parse_send_chat_response(&missing_id),
-            HelixSendOutcome::Failed(_)
+            HelixSendOutcome::Unknown(_)
         ));
 
         let dropped = serde_json::json!({
@@ -1801,6 +1798,30 @@ mod tests {
             parse_send_chat_response(&dropped),
             HelixSendOutcome::Dropped("Slow down!".into())
         );
+    }
+
+    #[test]
+    fn unknown_send_responses_cannot_be_safely_retried() {
+        assert!(matches!(
+            classify_send_response(200, None),
+            HelixSendOutcome::Unknown(_)
+        ));
+        assert!(matches!(
+            classify_send_response(200, Some(serde_json::json!({"data": [{}]}))),
+            HelixSendOutcome::Unknown(_)
+        ));
+        assert!(matches!(
+            classify_send_response(503, Some(serde_json::json!({"message": "unavailable"}))),
+            HelixSendOutcome::Unknown(_)
+        ));
+        assert!(matches!(
+            classify_send_response(429, Some(serde_json::json!({"message": "rate limited"}))),
+            HelixSendOutcome::Failed(_)
+        ));
+        assert!(matches!(
+            classify_send_response(403, None),
+            HelixSendOutcome::Failed(_)
+        ));
     }
 
     #[test]

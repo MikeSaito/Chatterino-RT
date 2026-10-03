@@ -69,6 +69,9 @@ jobs:
       - name: JavaScript tests
         run: npm test
 
+      - name: Browser workspace checks and message-stream benchmark
+        run: npm run test:browser
+
   build:
     name: Production build
     runs-on: windows-latest

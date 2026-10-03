@@ -199,7 +199,7 @@ async fn connect_session(
             _ = ticker.tick() => {
                 flush_emit(app, shared);
                 emit_send_waits(app, shared);
-                match flush_outgoing(&mut write, wanted, &in_rooms, pending_out, shared).await {
+                match flush_outgoing(&mut write, wanted, &in_rooms, pending_out, shared, &nick).await {
                     Err(()) => return SessionEnd::Reconnect { wait: true },
                     Ok(sent) => {
                         for item in sent {
@@ -303,6 +303,7 @@ async fn connect_session(
                             &in_rooms,
                             pending_out,
                             shared,
+                            &nick,
                         )
                         .await
                         {
@@ -384,6 +385,7 @@ async fn connect_session(
                                         &in_rooms,
                                         pending_out,
                                         shared,
+                                        &nick,
                                     )
                                     .await
                                     {
@@ -530,13 +532,32 @@ async fn flush_outgoing<S>(
     in_rooms: &HashSet<String>,
     pending: &mut VecDeque<OutboundPrivmsg>,
     shared: &Shared,
+    connection_login: &str,
 ) -> Result<Vec<OutboundPrivmsg>, ()>
 where
     S: Sink<Message> + Unpin,
 {
     let mut sent: Vec<OutboundPrivmsg> = Vec::new();
     let mut rest = VecDeque::new();
-    while let Some(msg) = pending.pop_front() {
+    while let Some(mut msg) = pending.pop_front() {
+        if msg.sender_login.as_ref().is_some_and(|expected| {
+            expected != connection_login
+                || auth::resolved_login_token(shared)
+                    .as_ref()
+                    .map(|(login, _)| login)
+                    != Some(expected)
+        }) {
+            shared.release_outbound(1);
+            continue;
+        }
+        if msg
+            .delivery
+            .as_ref()
+            .is_some_and(|ticket| ticket.cancelled())
+        {
+            shared.release_outbound(1);
+            continue;
+        }
         if !wanted.contains(&msg.channel) {
             shared.release_outbound(1);
             continue;
@@ -564,11 +585,23 @@ where
             ),
             None => format!("PRIVMSG #{} :{}", msg.channel, msg.text),
         };
+        if msg.delivery.as_ref().is_some_and(|ticket| !ticket.start()) {
+            shared.release_outbound(1);
+            continue;
+        }
         if send_line(write, &line).await.is_err() {
-            rest.push_back(msg);
+            // A failed/partial write may have reached Twitch. Replaying it on
+            // reconnect could duplicate it, so report uncertainty and remove it.
+            if let Some(ticket) = msg.delivery.as_mut() {
+                ticket.finish(Err(super::delivery::unknown()));
+            }
+            shared.release_outbound(1);
             rest.append(pending);
             *pending = rest;
             return Err(());
+        }
+        if let Some(ticket) = msg.delivery.as_mut() {
+            ticket.finish(Ok(()));
         }
         shared.release_outbound(1);
         if let Ok(mut last) = shared.last_sent.lock() {
@@ -1814,6 +1847,15 @@ fn unix_ms() -> u64 {
 #[cfg(test)]
 mod outbound_tests {
     use super::*;
+    async fn flush_outgoing<S: Sink<Message> + Unpin>(
+        write: &mut S,
+        wanted: &HashSet<String>,
+        rooms: &HashSet<String>,
+        pending: &mut VecDeque<OutboundPrivmsg>,
+        shared: &Shared,
+    ) -> Result<Vec<OutboundPrivmsg>, ()> {
+        super::flush_outgoing(write, wanted, rooms, pending, shared, "fixture").await
+    }
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
@@ -1848,6 +1890,8 @@ mod outbound_tests {
                 channel: "alpha".into(),
                 text: text.into(),
                 reply_to: None,
+                delivery: None,
+                sender_login: None,
             }));
         assert!(shared.try_reserve_outbound(3));
         assert!(shared.try_reserve_outbound(3));
@@ -1885,6 +1929,8 @@ mod outbound_tests {
             channel: "alpha".into(),
             text: "hello".into(),
             reply_to: Some("parent".into()),
+            delivery: None,
+            sender_login: None,
         }]);
         let mut sink = RecordingSink::default();
         assert!(
@@ -1901,6 +1947,112 @@ mod outbound_tests {
         assert_eq!(
             sink.0,
             vec!["@reply-parent-msg-id=parent PRIVMSG #alpha :hello\r\n"]
+        );
+    }
+
+    #[tokio::test]
+    async fn receipt_completes_after_flush_and_part_cancels_queued_send() {
+        let shared = Shared::new();
+        let wanted = HashSet::from(["alpha".into()]);
+        let (ticket, receipt) = super::super::delivery::queued();
+        let mut pending = VecDeque::from([OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "hello".into(),
+            reply_to: None,
+            delivery: Some(ticket),
+            sender_login: None,
+        }]);
+        assert!(shared.try_reserve_outbound(2));
+        let mut sink = RecordingSink::default();
+        flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+            .await
+            .unwrap();
+        assert!(receipt.wait().await.is_ok());
+        let (ticket, receipt) = super::super::delivery::queued();
+        pending.push_back(OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "bye".into(),
+            reply_to: None,
+            delivery: Some(ticket),
+            sender_login: None,
+        });
+        release_pending_channel(&mut pending, "alpha", &shared);
+        assert_eq!(
+            receipt.wait().await.unwrap_err().code,
+            "error.message.send_cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_queue_never_replays_and_failed_write_is_not_requeued() {
+        let shared = Shared::new();
+        let wanted = HashSet::from(["alpha".into()]);
+        let (ticket, receipt) = super::super::delivery::queued();
+        let mut pending = VecDeque::from([OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "expired".into(),
+            reply_to: None,
+            delivery: Some(ticket),
+            sender_login: None,
+        }]);
+        receipt.wait_for(Duration::ZERO).await.unwrap_err();
+        let mut sink = RecordingSink::default();
+        assert!(
+            flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(sink.0.is_empty());
+        let (ticket, receipt) = super::super::delivery::queued();
+        pending.push_back(OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "uncertain".into(),
+            reply_to: None,
+            delivery: Some(ticket),
+            sender_login: None,
+        });
+        let mut failing = Box::pin(futures_util::sink::unfold((), |(), _: Message| async {
+            Err::<(), ()>(())
+        }));
+        assert!(
+            flush_outgoing(&mut failing, &wanted, &wanted, &mut pending, &shared)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            receipt.wait().await.unwrap_err().code,
+            "error.message.send_unknown"
+        );
+        assert!(
+            pending.is_empty(),
+            "uncertain send is not replayed on reconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn account_change_cancels_queued_messages() {
+        let shared = Shared::new();
+        let wanted = HashSet::from(["alpha".into()]);
+        let (ticket, receipt) = super::super::delivery::queued();
+        let mut pending = VecDeque::from([OutboundPrivmsg {
+            channel: "alpha".into(),
+            text: "old account draft".into(),
+            reply_to: None,
+            delivery: Some(ticket),
+            sender_login: Some("previous_account".into()),
+        }]);
+        let mut sink = RecordingSink::default();
+        assert!(
+            flush_outgoing(&mut sink, &wanted, &wanted, &mut pending, &shared)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(sink.0.is_empty());
+        assert_eq!(
+            receipt.wait().await.unwrap_err().code,
+            "error.message.send_cancelled"
         );
     }
 }

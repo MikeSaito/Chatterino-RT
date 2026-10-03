@@ -120,7 +120,9 @@ import {
   type TooltipPreviewMode,
 } from "./shell/emoteTooltip";
 import { isAtUserToken, isColonEmoteToken, tokenAtCursor } from "./chat/token";
-import { submitComposerDraft } from "./shell/composerSend";
+import { Workspace, type ChannelDraft, type WorkspaceScroll } from "./shell/workspace";
+import { SendStatus, type SendResult } from "./shell/sendStatus";
+import { ChatPerformance } from "./chat/performance";
 import { CHAT_AUTH_EVENT, CHAT_CHANNEL_LIVE_EVENT, CHAT_ROOMS_EVENT, CHAT_ROOMSTATE_EVENT, CHAT_SEND_WAIT_EVENT, CHAT_STATUS_EVENT, CHAT_TYPING_EVENT, scrollbackLimitFromKnobs, scrollbackUsercardLimitFromKnobs } from "./constants";
 import type { AuthInfo, ChannelLive, ChatEvent, ChatStatus, ChatTyping, ViewerRole } from "./chat/types";
 import type { AppSettings } from "./shell/settings/dialog";
@@ -899,11 +901,20 @@ async function boot(): Promise<void> {
   let authOp: "idle" | "start" | "import" | "logout" = "idle";
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
+  const performanceTrace = new ChatPerformance();
+  ring.performanceTrace = performanceTrace;
+  const workspace = new Workspace(localStorage);
+  let composerChannel = "";
+  const closedWorkspaceChannels = new Set<string>();
+  let restoringScroll: WorkspaceScroll | undefined;
+  let workspaceMounting = false;
+  let scrollSaveTimer: number | undefined;
+  let scrollRestoreTimer: number | undefined;
   if (
     import.meta.env.DEV ||
     localStorage.getItem("crt-debug") === "1"
   ) {
-    (window as Window & { __crt?: { ring: MessageRing } }).__crt = { ring };
+    (window as Window & { __crt?: { ring: MessageRing; performance: ChatPerformance } }).__crt = { ring, performance: performanceTrace };
   }
   try {
     await ring.init();
@@ -1084,6 +1095,12 @@ async function boot(): Promise<void> {
       emoteTooltipCtl?.refresh();
       quickActionsCtl?.syncOnScroll(lastPointerY);
       syncChatEmpty();
+      if (!workspaceMounting && !restoringScroll && composerChannel && !closedWorkspaceChannels.has(composerChannel) && scrollSaveTimer === undefined) {
+        scrollSaveTimer = window.setTimeout(() => {
+          scrollSaveTimer = undefined;
+          if (!workspaceMounting && !restoringScroll && composerChannel && !closedWorkspaceChannels.has(composerChannel)) workspace.putScroll(composerChannel, ring.workspaceScroll());
+        }, 250);
+      }
     },
   });
   try {
@@ -1288,6 +1305,12 @@ async function boot(): Promise<void> {
   });
   const linkEnrichment = bindLinkEnrichment(ring);
   const ipc = bindChatIpc(ring, {
+    performance: performanceTrace,
+    onBeforeMount: (_previous, next) => switchWorkspace(next),
+    afterSnapshot: () => {
+      workspaceMounting = false;
+      restoreReadingPosition();
+    },
     afterBatch: (events) => {
       replyThreadLive?.(events);
       linkEnrichment.afterBatch(events);
@@ -1661,6 +1684,7 @@ async function boot(): Promise<void> {
   };
   document.addEventListener("visibilitychange", onDocHidden);
   chainTeardown(() => {
+    performanceTrace.stop();
     document.removeEventListener("visibilitychange", onDocHidden);
   });
   const chatFindCtl = bindSearchPopup({
@@ -1804,6 +1828,7 @@ async function boot(): Promise<void> {
       messageInput.value = `${before}${padL}${code}${padR}${after}`;
       const caret = before.length + padL.length + code.length + padR.length;
       messageInput.setSelectionRange(caret, caret);
+      saveComposerDraft();
       messageInput.focus();
       composerSprites.sync();
       composerChrome.sync();
@@ -1844,7 +1869,6 @@ async function boot(): Promise<void> {
   }
   let holdStatus = false;
   let sending = false;
-  let draftRevision = 0;
   let complete: {
     start: number;
     suffix: string;
@@ -1861,6 +1885,35 @@ async function boot(): Promise<void> {
   let viewThreadSeq = 0;
   let copyJsonSeq = 0;
   let replyTarget: { id: string; login: string; text: string } | null = null;
+  const sendStatus = new SendStatus(async (channel, draft) => {
+    outgoingRaidCtl.noteMessage(channel, draft.text);
+    return invoke<SendResult>("chat_send", { text: draft.text, channel, replyToId: draft.reply?.id ?? null });
+  }, () => { if (bootAlive()) { paintSendStatus(); syncComposer(); } });
+  const sendStatusEl = document.querySelector<HTMLElement>("#send-status")!;
+  const sendStatusLabel = document.querySelector<HTMLElement>("#send-status-label")!;
+  const retrySend = document.querySelector<HTMLButtonElement>("#send-retry")!;
+  retrySend.addEventListener("click", () => {
+    const attempt = sendStatus.get(composerChannel);
+    if (attempt?.state === "error" && lastAuth.canSend) void performSend(attempt.channel, attempt.draft);
+  });
+  workspace.onError = () => setStatus(t("workspace.saveError"));
+  const flushWorkspace = (): void => {
+    saveComposerDraft();
+    if (composerChannel && !closedWorkspaceChannels.has(composerChannel) && !workspaceMounting && !restoringScroll) workspace.putScroll(composerChannel, ring.workspaceScroll());
+    workspace.flush();
+  };
+  window.addEventListener("pagehide", flushWorkspace, { signal: earlySignal });
+  window.addEventListener("blur", flushWorkspace, { signal: earlySignal });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flushWorkspace(); }, { signal: earlySignal });
+  canvasHost.addEventListener("wheel", cancelScrollRestore, { passive: true, signal: earlySignal });
+  canvasHost.addEventListener("keydown", (ev) => { if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"].includes(ev.key)) cancelScrollRestore(); }, { signal: earlySignal });
+  scrollTrack.addEventListener("pointerdown", cancelScrollRestore, { signal: earlySignal });
+  jumpBottom.addEventListener("click", cancelScrollRestore, { signal: earlySignal });
+  chainTeardown(() => {
+    flushWorkspace();
+    if (scrollSaveTimer !== undefined) window.clearTimeout(scrollSaveTimer);
+    if (scrollRestoreTimer !== undefined) window.clearTimeout(scrollRestoreTimer);
+  });
   let contextTarget: SlotContext | null = null;
   /** Channel snapshot at menu open (pin/unpin must not follow tab switch). */
   let contextMenuChannel = "";
@@ -2196,6 +2249,7 @@ async function boot(): Promise<void> {
     messageInput.value = `${before}${mention}${after}`;
     const caret = before.length + mention.length;
     messageInput.setSelectionRange(caret, caret);
+    saveComposerDraft();
     composer.hidden = false;
     messageInput.focus();
     composerChrome.sync();
@@ -2705,6 +2759,9 @@ async function boot(): Promise<void> {
     const focus = ev.payload.active || "";
     if (ev.payload.dropped) {
       const droppedKey = ev.payload.dropped.toLowerCase();
+      closedWorkspaceChannels.add(droppedKey);
+      workspace.retain(open);
+      sendStatus.forget(droppedKey);
       channels.remove(ev.payload.dropped);
       sendWaitByChannel.delete(droppedKey);
       streamByChannel.delete(droppedKey);
@@ -2783,7 +2840,7 @@ async function boot(): Promise<void> {
   });
 
   messageInput.addEventListener("input", () => {
-    draftRevision += 1;
+    saveComposerDraft();
     if (applyingComplete) {
       composerChrome.sync();
       return;
@@ -2838,6 +2895,7 @@ async function boot(): Promise<void> {
     }
     ev.preventDefault();
     messageInput.value = ev.key;
+    saveComposerDraft();
     composer.hidden = false;
     messageInput.focus();
     composerChrome.sync();
@@ -2887,6 +2945,7 @@ async function boot(): Promise<void> {
     }
     const recents = Array.isArray(session.recents) ? session.recents : [];
     const open = Array.isArray(session.open) ? session.open : [];
+    workspace.retain(open.length ? open : session.lastChannel ? [session.lastChannel] : []);
     const focus =
       session.lastChannel && open.includes(session.lastChannel)
         ? session.lastChannel
@@ -3080,7 +3139,7 @@ async function boot(): Promise<void> {
 
   function setReply(id: string, login: string, text: string): void {
     replyTarget = { id, login, text };
-    draftRevision += 1;
+    saveComposerDraft();
     const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
     replyLabelEl.textContent = t("reply.label", { login, preview });
     replyBarEl.hidden = false;
@@ -3088,8 +3147,8 @@ async function boot(): Promise<void> {
   }
 
   function clearReply(): void {
-    draftRevision += 1;
     replyTarget = null;
+    saveComposerDraft();
     replyLabelEl.textContent = "";
     replyBarEl.hidden = true;
     composerChrome.sync();
@@ -3195,6 +3254,8 @@ async function boot(): Promise<void> {
   }
 
   function syncComposer(): void {
+    sending = sendStatus.pending(composerChannel);
+    paintSendStatus();
     const on = lastAuth.canSend && !sending;
     sendBtn.disabled = !on;
     messageInput.disabled = !lastAuth.canSend;
@@ -3507,6 +3568,7 @@ async function boot(): Promise<void> {
       messageInput.value = `${messageInput.value.slice(0, complete.start)}${item.insert}${complete.suffix}`;
       const pos = complete.start + item.insert.length;
       messageInput.setSelectionRange(pos, pos);
+      saveComposerDraft();
       complete.popup = null;
       composerSprites.rememberMany([item]);
       composerSprites.sync();
@@ -3570,42 +3632,97 @@ async function boot(): Promise<void> {
   }
 
   async function sendMessage(): Promise<void> {
-    if (!lastAuth.canSend || sending) {
+    if (!lastAuth.canSend || channelBusy || sendStatus.pending(composerChannel)) {
       return;
     }
-    sending = true;
-    syncComposer();
-    try {
-      await submitComposerDraft({
-        read: () => ({
-          text: messageInput.value,
-          channel: ipc.active(),
-          replyToId: replyTarget?.id ?? null,
-          revision: draftRevision,
-        }),
-        send: async ({ text, channel, replyToId }) => {
-          outgoingRaidCtl.noteMessage(channel, text);
-          await invoke("chat_send", { text, channel, replyToId });
-        },
-        clear: () => {
-          messageInput.value = "";
-          clearComplete();
-          clearReply();
-          sendSelfTyping(false, true);
-        },
-      });
+    saveComposerDraft();
+    await performSend(composerChannel, workspace.draft(composerChannel));
+  }
+
+  async function performSend(channel: string, draft: ChannelDraft): Promise<void> {
+    const result = await sendStatus.submit(channel, draft);
+    if (!bootAlive()) return;
+    // Save any edits made during IPC before comparing the accepted draft.
+    saveComposerDraft();
+    if (result && !closedWorkspaceChannels.has(channel) && workspace.clearAccepted(channel, draft) && channel === composerChannel) {
+      restoreComposerDraft();
+      clearComplete();
+      sendSelfTyping(false, true);
       composerChrome.pulse();
-      composerSprites.sync();
-    } catch (err) {
-      setStatus(formatError(err));
-    } finally {
-      sending = false;
-      syncComposer();
+    }
+    workspace.flush();
+    paintSendStatus();
+    if (closedWorkspaceChannels.has(channel)) sendStatus.forget(channel);
+    syncComposer();
+  }
+
+  function paintSendStatus(): void {
+    const attempt = sendStatus.get(composerChannel);
+    sendStatusEl.hidden = !attempt;
+    retrySend.hidden = attempt?.state !== "error";
+    retrySend.disabled = !lastAuth.canSend || channelBusy;
+    retrySend.textContent = t("send.retry");
+    if (!attempt) return;
+    sendStatusEl.dataset.state = attempt.state;
+    sendStatusLabel.textContent = attempt.state === "error" ? `${t("send.error")}: ${formatError(attempt.error)}` : t(`send.${attempt.state}`);
+    sendStatusEl.title = attempt.draft.text;
+  }
+
+  function saveComposerDraft(): void {
+    if (!composerChannel || closedWorkspaceChannels.has(composerChannel)) return;
+    workspace.putDraft(composerChannel, {
+      text: messageInput.value, reply: replyTarget,
+      start: messageInput.selectionStart ?? 0, end: messageInput.selectionEnd ?? 0,
+    });
+  }
+
+  function restoreComposerDraft(): void {
+    const draft = workspace.draft(composerChannel);
+    messageInput.value = draft.text;
+    messageInput.setSelectionRange(draft.start, draft.end);
+    replyTarget = draft.reply;
+    const preview = draft.reply ? draft.reply.text.slice(0, 80) : "";
+    replyLabelEl.textContent = draft.reply ? t("reply.label", { login: draft.reply.login, preview }) : "";
+    replyBarEl.hidden = !draft.reply;
+    composerSprites.sync();
+    composerChrome.sync();
+    paintSendStatus();
+    syncComposer();
+  }
+
+  function switchWorkspace(next: string): void {
+    saveComposerDraft();
+    if (composerChannel && !closedWorkspaceChannels.has(composerChannel) && !workspaceMounting && !restoringScroll) workspace.putScroll(composerChannel, ring.workspaceScroll());
+    if (scrollSaveTimer !== undefined) window.clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = undefined;
+    cancelScrollRestore();
+    workspace.flush();
+    composerChannel = next;
+    if (next) closedWorkspaceChannels.delete(next);
+    workspaceMounting = Boolean(next);
+    restoringScroll = workspace.scroll(next);
+    restoreComposerDraft();
+    clearComplete();
+    if (restoringScroll) {
+      scrollRestoreTimer = window.setTimeout(() => {
+        scrollRestoreTimer = undefined;
+        restoreReadingPosition(true);
+      }, 2000);
     }
   }
 
+  function restoreReadingPosition(fallback = false): void {
+    if (!restoringScroll || workspaceMounting) return;
+    if (ring.restoreWorkspaceScroll(restoringScroll, fallback)) cancelScrollRestore();
+  }
+
+  function cancelScrollRestore(): void {
+    restoringScroll = undefined;
+    if (scrollRestoreTimer !== undefined) window.clearTimeout(scrollRestoreTimer);
+    scrollRestoreTimer = undefined;
+  }
+
   function applyMounted(joined: string): void {
-    draftRevision += 1;
     replyThreadCtl?.close();
     channels.remember(joined);
     ensureOpenChannelChrome();
@@ -3693,7 +3810,6 @@ async function boot(): Promise<void> {
     joinControl.disabled = true;
     sendSelfTyping(false, true);
     clearComplete();
-    clearReply();
     hideContextMenu();
     const leftActive = ipc.active() === name;
     try {
@@ -3756,7 +3872,6 @@ async function boot(): Promise<void> {
     sendSelfTyping(false, true);
     holdStatus = false;
     clearComplete();
-    clearReply();
     hideContextMenu();
     try {
       const joined = await ipc.join(name, focus);

@@ -34,14 +34,16 @@ use super::shared_chat::SharedChatState;
 use super::twitch_blocks::TwitchBlockSet;
 use super::types::ChatBatch;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OutboundPrivmsg {
     pub channel: String,
     pub text: String,
     pub reply_to: Option<String>,
+    pub delivery: Option<super::delivery::DeliveryTicket>,
+    pub sender_login: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum IrcCmd {
     Join(String),
     Part,

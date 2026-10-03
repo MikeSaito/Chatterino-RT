@@ -2,6 +2,17 @@ import type { MessageKey } from "./en.ts";
 
 /** Russian UI strings. Must cover every MessageKey. */
 export const ru: Record<MessageKey, string> = {
+  "send.queued": "В очереди / отправляется…",
+  "send.sent": "Принято Twitch",
+  "send.transmitted": "Отправлено по IRC · подтверждение Twitch недоступно",
+  "send.completed": "Команда обработана",
+  "send.error": "Ошибка отправки",
+  "send.unknown": "Результат неизвестен · проверьте чат перед повторной отправкой",
+  "send.retry": "Повторить",
+  "workspace.saveError": "Не удалось сохранить рабочее пространство. Черновики остаются в этом окне.",
+  "error.message.send_cancelled": "Сообщение в очереди отменено.",
+  "error.message.send_timeout": "Истекло время ожидания в очереди. Попробуйте снова.",
+  "error.message.send_unknown": "Соединение оборвалось во время отправки. Результат неизвестен; проверьте чат перед повторной отправкой.",
   "error.message.rate_limited": "Вы отправляете сообщения слишком быстро. Подождите и попробуйте снова.",
   "error.message.send_unavailable": "Отправка сообщений в этот канал сейчас недоступна.",
   "error.message.send_failed": "Сообщение не отправлено: {reason}",

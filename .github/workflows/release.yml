@@ -62,6 +62,9 @@ jobs:
       - name: JavaScript tests
         run: npm test
 
+      - name: Browser workspace checks and message-stream benchmark
+        run: npm run test:browser
+
       - name: Assert tag matches package version
         shell: bash
         run: |
