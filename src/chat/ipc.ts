@@ -4,6 +4,7 @@ import { CHAT_HISTORY_LOADED_EVENT, CHAT_PIPE_EVENT, IPC_QUEUE_MAX } from "../co
 import { decodeBatch } from "./batchDecode.ts";
 import type { ChatBatch, ChatEvent } from "./types";
 import type { MessageRing } from "./ring";
+import type { ChatPerformance } from "./performance";
 import { notifyHighlightSounds } from "../shell/highlightSound.ts";
 import { notifyHighlightFlash } from "../shell/highlightFlash.ts";
 import { createMountBootstrapGate, liveBatchAction } from "./ipcMountGate.ts";
@@ -47,9 +48,12 @@ export type ChatIpcRing = {
 };
 
 export type BindChatIpcOpts = {
+  performance?: ChatPerformance;
   afterBatch?: (events: ChatEvent[]) => void;
   /** Cancel in-flight link enrichment / similar work on channel mount reset. */
   onMountReset?: () => void;
+  onBeforeMount?: (previous: string, next: string) => void;
+  afterSnapshot?: (channel: string) => void;
   /** Optional platform hooks for unit tests. */
   invoke?: typeof invoke;
   listen?: typeof listen;
@@ -85,6 +89,7 @@ export function bindChatIpc(
   let pipeGeneration: number | null = null;
   const queued: ChatBatch[] = [];
   const ops: Op[] = [];
+  const arrivals = new WeakMap<ChatBatch, number>();
 
   const applySnapshot = async (channel: string, expected: number): Promise<boolean> => {
     if (stopped || expected !== epoch) {
@@ -97,6 +102,7 @@ export function bindChatIpc(
     lastSeq = snap.seq;
     ring.setBoundChannel?.(channel);
     ring.applySnapshot(snap.events);
+    opts?.afterSnapshot?.(channel);
     afterBatch?.(snap.events);
     return true;
   };
@@ -135,7 +141,9 @@ export function bindChatIpc(
       return;
     }
     lastSeq = batch.seq;
+    const started = opts?.performance?.active() ? performance.now() : undefined;
     ring.pushMany(batch.events);
+    if (started !== undefined) opts?.performance?.batch(batch.events.length, arrivals.get(batch) ?? started, performance.now() - started);
     notifyHighlightSounds(batch.events);
     notifyHighlightFlash(batch.events);
     afterBatch?.(batch.events);
@@ -195,7 +203,8 @@ export function bindChatIpc(
     handling = false;
   };
 
-  const onBatch = (batch: ChatBatch) => {
+  const onBatch = (batch: ChatBatch, receivedAt?: number) => {
+    if (receivedAt !== undefined) arrivals.set(batch, receivedAt);
     if (stopped) {
       return;
     }
@@ -267,9 +276,10 @@ export function bindChatIpc(
       if (my !== pipeEpoch || stopped) {
         return;
       }
+      const receivedAt = opts?.performance?.active() ? performance.now() : undefined;
       const batch = decodeBatch(payload);
       if (batch) {
-        onBatch(batch);
+        onBatch(batch, receivedAt);
       } else {
         onBadPipe();
       }
@@ -332,6 +342,7 @@ export function bindChatIpc(
     }
     epoch += 1;
     const expected = epoch;
+    opts?.onBeforeMount?.(active, joined);
     active = joined;
     lastSeq = 0;
     ring.reset();
@@ -363,6 +374,7 @@ export function bindChatIpc(
 
   const clearActive = (): void => {
     epoch += 1;
+    opts?.onBeforeMount?.(active, "");
     active = "";
     lastSeq = 0;
     mountGate.clear();

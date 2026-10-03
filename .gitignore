@@ -30,3 +30,4 @@ dist-ssr
 /cdp-*.mjs
 /cdp-*.png
 scripts/cdp/*.png
+/artifacts/

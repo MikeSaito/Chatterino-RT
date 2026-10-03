@@ -1,5 +1,16 @@
 /** English UI strings. Keys are stable message ids. */
 export const en = {
+  "send.queued": "Queued / sending…",
+  "send.sent": "Accepted by Twitch",
+  "send.transmitted": "Sent via IRC · Twitch confirmation unavailable",
+  "send.completed": "Command processed",
+  "send.error": "Send failed",
+  "send.unknown": "Delivery unknown · check chat before sending again",
+  "send.retry": "Retry",
+  "workspace.saveError": "Could not save workspace. Drafts remain available in this window.",
+  "error.message.send_cancelled": "Queued message cancelled.",
+  "error.message.send_timeout": "Message expired in queue. Try again.",
+  "error.message.send_unknown": "Connection lost during sending. Delivery is unknown; check chat before sending again.",
   "sidebar.join.label": "channel",
   "sidebar.join.submit": "Join",
   "sidebar.join.toggle": "Join channel",

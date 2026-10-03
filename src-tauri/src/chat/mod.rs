@@ -18,6 +18,7 @@ pub mod complete;
 pub mod constants;
 pub mod custom_commands;
 pub mod custom_player;
+pub mod delivery;
 pub mod emoji;
 pub mod emote_popup;
 pub mod emotes;

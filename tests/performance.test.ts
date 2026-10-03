@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { ChatPerformance, Samples } from "../src/chat/performance.ts";
+
+const samples = new Samples(3);
+for (const n of [1, 2, 3, 4, 5]) samples.add(n);
+samples.add(NaN);
+assert.deepEqual(samples.report(), { count: 5, samples: 3, meanMs: 3, p50Ms: 4, p95Ms: 5, p99Ms: 5, maxMs: 5 });
+let now = 0;
+let id = 0;
+const frames = new Map<number, (n: number) => void>();
+const perf = new ChatPerformance({ now: () => now, frame: (fn) => { frames.set(++id, fn); return id; }, cancel: (i) => { frames.delete(i); }, memory: () => null });
+function frame(at: number) { now = at; const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach((fn) => fn(at)); }
+perf.start();
+perf.batch(5, 0, 2);
+perf.operation("crt-layout", 4);
+frame(16); frame(32); frame(70);
+const report = perf.stop();
+assert.equal(report.messages, 5);
+assert.equal(report.processing.meanMs, 2);
+assert.equal(report.receiptToFrame.meanMs, 32);
+assert.equal(report.frames.count, 2);
+assert.equal(report.longFrames, 1);
+assert.equal(report.operations["crt-layout"].meanMs, 4);
+assert.equal(report.jsHeapBytes.end, null, "unavailable heap is not zero");
+assert.equal(frames.size, 0, "stop cancels every frame callback");
+perf.start(); perf.batch(1, now, 1); perf.stop(); perf.start();
+frame(86); frame(102);
+assert.equal(perf.report().receiptToFrame.count, 0, "stale batch cannot enter a new trace");
+perf.stop();
+perf.start();
+for (let n = 0; n < 10_000; n++) perf.batch(1, now, 1);
+assert.ok(frames.size <= 129, "paused/background frames cannot accumulate unbounded latency callbacks");
+assert.equal(perf.report().messages, 10_000);
+perf.stop();
+console.log("performance tests ok");

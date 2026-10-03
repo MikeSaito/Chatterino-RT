@@ -14,6 +14,8 @@ import {
 } from "pixi.js";
 
 import { invoke } from "@tauri-apps/api/core";
+import type { WorkspaceScroll } from "../shell/workspace";
+import type { ChatPerformance } from "./performance";
 import {
   BADGE_SIZE,
   BADGE_SLOTS_PER_ROW,
@@ -2109,6 +2111,27 @@ export class MessageRing {
 
   scrollSnapshot(): ScrollSnapshot {
     return this.scroll.snapshot();
+  }
+
+  performanceTrace?: ChatPerformance;
+
+  workspaceScroll(): WorkspaceScroll {
+    return {
+      atBottom: this.scroll.atBottom,
+      anchor: this.scroll.captureAnchor(this.laidSlots()),
+      rowsFromBottom: Math.max(0, this.scroll.bottom() - this.scroll.desired),
+    };
+  }
+
+  restoreWorkspaceScroll(saved: WorkspaceScroll, fallback = false): boolean {
+    if (saved.atBottom) { this.goToBottom(); return true; }
+    const row = this.scroll.resolveAnchor(this.laidSlots(), saved.anchor);
+    if (row === undefined && !fallback) return false;
+    if (this.scroll.contentRows === 0) return false;
+    // Cancel snapshot's pending bottom pin before restoring reading position.
+    this.layoutSettlePinned = false;
+    this.setDesired(row ?? Math.max(0, this.scroll.bottom() - saved.rowsFromBottom), false);
+    return true;
   }
 
   goToBottom(): void {
@@ -4763,13 +4786,14 @@ export class MessageRing {
   }
 
   private withPerfMeasure(name: string, fn: () => void): void {
-    if (!this.perfEnabled() || typeof performance === "undefined") {
+    if ((!this.perfEnabled() && !this.performanceTrace?.active()) || typeof performance === "undefined") {
       fn();
       return;
     }
     const t0 = performance.now();
     fn();
     const ms = performance.now() - t0;
+    this.performanceTrace?.operation(name, ms);
     const slowMs = name === "crt-layout" ? 32 : 16;
     if (
       ms > slowMs &&
