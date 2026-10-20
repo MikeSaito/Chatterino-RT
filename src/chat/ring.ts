@@ -1,3 +1,5 @@
+import { bodyIndexAt, inside } from "./rowHitTest";
+import { NickPaintResources } from "./nickPaintResources";
 import {
   clampEmoteScale,
   parseCheerColor,
@@ -49,9 +51,7 @@ import type {
   UsernoticeParams,
 } from "./types";
 import {
-  paintCacheKey,
   paintRepresentativeRgb,
-  rasterizeNickPaint,
 } from "./nickPaint";
 
 /** Stock Chatterino low-trust / restricted row tint (`MessageLayout.cpp` `#404040`). */
@@ -129,13 +129,11 @@ import {
   collapseWrapLines,
   emoteDisplaySize,
   indexToLineCol,
-  lineColToIndex,
   renderWrapped,
   renderWrappedContinuation,
   withCollapsedEllipsis,
   wrapBody,
   wrapLineHeights,
-  wrapLineAtY,
   wrapLineOffsetY,
   wrapLineOriginX,
   type WrapLine,
@@ -456,9 +454,7 @@ export class MessageRing {
   private colorUsernames = true;
   private readonly nickColorCache = new NickColorCache(500);
   /** Canvas textures for 7TV nick paints (key → Texture). */
-  private readonly nickPaintTextures = new Map<string, Texture>();
-  private readonly nickPaintTextureOrder: string[] = [];
-  private static readonly NICK_PAINT_LRU = 64;
+  private readonly nickPaintResources = new NickPaintResources(() => this.slots);
   private hideReplyContext = false;
   private badgeVisibility: BadgeVisibilityFlags = { ...DEFAULT_BADGE_VISIBILITY };
   private pauseMouse = false;
@@ -1225,7 +1221,7 @@ export class MessageRing {
       return;
     }
     if (boldChanged || this.nickAtlasDesignSize === 0) {
-      this.clearNickPaintTextures();
+      this.nickPaintResources.clear();
       this.reinstallNickFont();
       if (this.ready) {
         this.applyFontStylesToSlots(true);
@@ -1602,7 +1598,7 @@ export class MessageRing {
     if (!changed && this.atlasDesignSize > 0) {
       return;
     }
-    this.clearNickPaintTextures();
+    this.nickPaintResources.clear();
     this.reinstallChatFont();
     this.refreshFontMetrics();
     if (!this.ready) {
@@ -2719,7 +2715,7 @@ export class MessageRing {
     window.clearTimeout(this.hoverPauseTimer);
     this.hoverPauseTimer = 0;
     this.pauseMouse = false;
-    this.clearNickPaintTextures();
+    this.nickPaintResources.clear();
     this.emoteTicker.destroy();
     if (this.lastReadFadeRaf !== 0) {
       cancelAnimationFrame(this.lastReadFadeRaf);
@@ -5369,240 +5365,26 @@ export class MessageRing {
     );
   }
 
-  /** Show gradient Sprite or keep BitmapText; returns nick column width (BitmapText). */
   private applyNickPaintChrome(slot: Slot, contentY: number): number {
-    const text = slot.nick.text;
-    const baseW = Math.max(
-      this.measureBitmapTextWidth("ChatNickFont", text),
-      8,
-    );
-    if (!slot.nickPaint || !text) {
-      slot.nick.visible = true;
-      slot.nickPaintSpr.visible = false;
-      slot.nickPaintSpr.texture = Texture.EMPTY;
-      slot.nickPaintKey = "";
-      return baseW;
-    }
-    const family = this.chatFontFamily || "Segoe UI";
-    const weight = qtWeightToCss(this.nickBoldScale);
-    const key = paintCacheKey(
-      slot.nickPaint,
-      text,
-      this.fontSize,
-      family,
-      weight,
-    );
-    if (
-      key === slot.nickPaintKey &&
-      slot.nickPaintSpr.visible &&
-      isRenderableTexture(slot.nickPaintSpr.texture)
-    ) {
-      this.touchNickPaintLru(key);
-      const pad =
-        (slot.nickPaintSpr.texture as Texture & { __crtPad?: number })
-          .__crtPad ?? 1;
-      slot.nickPaintSpr.x = slot.nick.x - pad;
-      slot.nickPaintSpr.y = contentY - pad;
-      slot.nick.visible = false;
-      return baseW;
-    }
-    let tex = this.nickPaintTextures.get(key);
-    if (tex && !isRenderableTexture(tex)) {
-      this.nickPaintTextures.delete(key);
-      const stale = this.nickPaintTextureOrder.indexOf(key);
-      if (stale >= 0) {
-        this.nickPaintTextureOrder.splice(stale, 1);
-      }
-      tex = undefined;
-    }
-    let pad = 1;
-    if (!tex) {
-      const raster = rasterizeNickPaint({
-        paint: slot.nickPaint,
-        text,
-        fontSize: this.fontSize,
-        fontFamily: family,
-        fontWeight: weight,
-      });
-      if (!raster) {
-        slot.nick.visible = true;
-        slot.nickPaintSpr.visible = false;
-        slot.nickPaintSpr.texture = Texture.EMPTY;
-        slot.nickPaintKey = "";
-        return baseW;
-      }
-      pad = raster.pad;
-      tex = Texture.from(raster.canvas);
-      (tex as Texture & { __crtPad?: number }).__crtPad = pad;
-      this.nickPaintTextures.set(key, tex);
-      this.nickPaintTextureOrder.push(key);
-      this.evictNickPaintTextures();
-    } else {
-      pad = (tex as Texture & { __crtPad?: number }).__crtPad ?? 1;
-      this.touchNickPaintLru(key);
-    }
-    if (!isRenderableTexture(tex)) {
-      slot.nick.visible = true;
-      slot.nickPaintSpr.visible = false;
-      slot.nickPaintSpr.texture = Texture.EMPTY;
-      slot.nickPaintKey = "";
-      return baseW;
-    }
-    slot.nickPaintKey = key;
-    slot.nickPaintSpr.texture = tex;
-    slot.nickPaintSpr.x = slot.nick.x - pad;
-    slot.nickPaintSpr.y = contentY - pad;
-    slot.nickPaintSpr.visible = true;
-    slot.nick.visible = false;
-    return baseW;
+    return this.nickPaintResources.apply(slot, contentY, {
+      fontFamily: this.chatFontFamily,
+      fontWeight: qtWeightToCss(this.nickBoldScale),
+      fontSize: this.fontSize,
+      measure: (text) => this.measureBitmapTextWidth("ChatNickFont", text),
+    });
   }
 
-  private touchNickPaintLru(key: string): void {
-    const at = this.nickPaintTextureOrder.indexOf(key);
-    if (at >= 0) {
-      this.nickPaintTextureOrder.splice(at, 1);
-    }
-    this.nickPaintTextureOrder.push(key);
+  private bodyIndexAt(slot: Slot, localX: number, localY: number): number | null {
+    return bodyIndexAt(slot, localX, localY, {
+      lineHeight: this.lineHeight,
+      fontSize: this.fontSize,
+      bodyHeight: () => this.slotBodyPixelHeight(slot),
+      wrapOptions: (cloud, size) => this.wrapOpts(slot, cloud ? [] : undefined, undefined, size),
+    });
   }
 
-  private evictNickPaintTextures(): void {
-    let guard = this.nickPaintTextureOrder.length;
-    while (
-      this.nickPaintTextureOrder.length > MessageRing.NICK_PAINT_LRU &&
-      guard > 0
-    ) {
-      guard -= 1;
-      const old = this.nickPaintTextureOrder.shift();
-      if (!old) {
-        break;
-      }
-      let pinnedVisible = false;
-      for (const slot of this.slots) {
-        if (
-          slot.nickPaintKey === old &&
-          slot.nickPaintSpr.visible &&
-          slot.root.visible
-        ) {
-          pinnedVisible = true;
-          break;
-        }
-      }
-      if (pinnedVisible) {
-        this.nickPaintTextureOrder.push(old);
-        continue;
-      }
-      const doomed = this.nickPaintTextures.get(old);
-      this.nickPaintTextures.delete(old);
-      for (const slot of this.slots) {
-        if (slot.nickPaintKey !== old && slot.nickPaintSpr.texture !== doomed) {
-          continue;
-        }
-        slot.nickPaintKey = "";
-        slot.nickPaintSpr.visible = false;
-        slot.nickPaintSpr.texture = Texture.EMPTY;
-        if (slot.nick.text) {
-          slot.nick.visible = true;
-        }
-      }
-      if (doomed && doomed !== Texture.EMPTY) {
-        try {
-          doomed.destroy(true);
-        } catch {
-          /* already gone */
-        }
-      }
-    }
-  }
-
-  private clearNickPaintTextures(): void {
-    for (const slot of this.slots) {
-      slot.nickPaintKey = "";
-      slot.nickPaintSpr.visible = false;
-      slot.nickPaintSpr.texture = Texture.EMPTY;
-      slot.nick.visible = true;
-    }
-    for (const tex of this.nickPaintTextures.values()) {
-      if (tex !== Texture.EMPTY) {
-        try {
-          tex.destroy(true);
-        } catch {
-          /* */
-        }
-      }
-    }
-    this.nickPaintTextures.clear();
-    this.nickPaintTextureOrder.length = 0;
-  }
-
-  /** Map pointer in slot-local coords to a UTF-16 index in bodyRaw. */
-  private bodyIndexAt(
-    slot: Slot,
-    localX: number,
-    slotLocalY: number,
-  ): number | null {
-    if (slot.systemCloudBounds) {
-      if (!this.pointInSystemCloud(slot, localX, slotLocalY)) {
-        return null;
-      }
-    }
-    const cloud = slot.systemCloudBounds;
-    const rowLh = cloud?.lineHeight ?? this.lineHeight;
-    const measureSize = cloud?.fontSize ?? this.fontSize;
-    const contentY = cloud ? slot.body.y : slot.replyRows * this.lineHeight;
-    const bodyEndY =
-      !cloud && slot.wrapLineHeights.length > 0
-        ? contentY + this.slotBodyPixelHeight(slot)
-        : contentY + slot.wrapLines.length * rowLh;
-    if (slotLocalY < contentY || slotLocalY >= bodyEndY) {
-      return null;
-    }
-    const relY = slotLocalY - contentY;
-    const bodyLine =
-      !cloud && slot.wrapLineHeights.length > 0
-        ? wrapLineAtY(slot.wrapLineHeights, relY)
-        : Math.floor(relY / rowLh);
-    if (bodyLine < 0 || bodyLine >= slot.wrapLines.length) {
-      return null;
-    }
-    const originX = wrapLineOriginX(
-      slot.bodyIndent,
-      bodyLine,
-      slot.bodyContIndent,
-    );
-    if (localX < originX) {
-      return null;
-    }
-    const xPx = localX - originX;
-    return lineColToIndex(
-      slot.bodyRaw,
-      slot.wrapLines,
-      bodyLine,
-      xPx,
-      slot.spansRaw,
-      this.wrapOpts(
-        slot,
-        cloud ? [] : undefined,
-        undefined,
-        measureSize,
-      ),
-    );
-  }
-
-  private pointInSystemCloud(
-    slot: Slot,
-    localX: number,
-    localY: number,
-  ): boolean {
-    const b = slot.systemCloudBounds;
-    if (!b) {
-      return false;
-    }
-    return (
-      localX >= b.x &&
-      localX < b.x + b.w &&
-      localY >= b.y &&
-      localY < b.y + b.h
-    );
+  private pointInSystemCloud(slot: Slot, x: number, y: number): boolean {
+    return inside(slot.systemCloudBounds, x, y);
   }
 
   private mentionLoginAt(slot: Slot, ev: FederatedPointerEvent): string | null {

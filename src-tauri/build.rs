@@ -1,6 +1,61 @@
 fn main() {
+    if std::env::var_os("CARGO_FEATURE_VALIDATION").is_some() {
+        for target in ["HEAD", "index"] {
+            if let Ok(output) = std::process::Command::new("git")
+                .args(["rev-parse", "--git-path", target])
+                .output()
+            {
+                if let Ok(path) = String::from_utf8(output.stdout) {
+                    println!("cargo:rerun-if-changed={}", path.trim());
+                }
+            }
+        }
+        if let Ok(output) = std::process::Command::new("git")
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .output()
+        {
+            if let Ok(reference) = String::from_utf8(output.stdout) {
+                if !reference.trim().is_empty() {
+                    if let Ok(output) = std::process::Command::new("git")
+                        .args(["rev-parse", "--git-path", reference.trim()])
+                        .output()
+                    {
+                        if let Ok(path) = String::from_utf8(output.stdout) {
+                            println!("cargo:rerun-if-changed={}", path.trim());
+                        }
+                    }
+                }
+            }
+        }
+        let revision = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("git revision");
+        let revision = String::from_utf8(revision.stdout).expect("revision UTF-8");
+        let changed = std::process::Command::new("git")
+            .args(["diff", "--quiet", "HEAD"])
+            .status()
+            .map(|status| !status.success())
+            .unwrap_or(true);
+        let untracked = std::process::Command::new("git")
+            .args(["ls-files", "--others", "--exclude-standard"])
+            .output()
+            .map(|output| !output.stdout.is_empty())
+            .unwrap_or(true);
+        println!(
+            "cargo:rustc-env=CRT_VALIDATION_REVISION={}",
+            revision.trim()
+        );
+        println!(
+            "cargo:rustc-env=CRT_VALIDATION_DIRTY={}",
+            changed || untracked
+        );
+    }
     // Opt-in ACL for app invoke commands so capabilities can restrict settings vs main.
     const COMMANDS: &[&str] = &[
+        "validation_start",
+        "validation_status",
+        "validation_quit",
         "chat_join",
         "chat_leave",
         "chat_part",

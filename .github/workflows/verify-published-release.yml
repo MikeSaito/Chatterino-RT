@@ -1,0 +1,40 @@
+name: Verify published release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Verify public downloads and latest update endpoint
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: npm run test:release -- --tag "$env:RELEASE_TAG" --public
+      - name: Keep verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-release-verification
+          path: |
+            artifacts/release-check/verification.json
+            artifacts/release-check/SHA256SUMS.txt
+          if-no-files-found: warn

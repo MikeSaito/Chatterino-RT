@@ -1327,6 +1327,12 @@ pub(crate) fn env_secret(name: &str) -> Option<String> {
     }
 }
 
+#[cfg(feature = "validation")]
+fn env_login_token() -> Option<(String, String)> {
+    None
+}
+
+#[cfg(not(feature = "validation"))]
 fn env_login_token() -> Option<(String, String)> {
     let login = env_secret("TWITCH_LOGIN")?.to_lowercase();
     if login == "your_login_here" || !valid_login(&login) {

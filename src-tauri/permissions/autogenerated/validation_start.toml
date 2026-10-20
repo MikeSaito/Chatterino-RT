@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-validation-start"
+description = "Enables the validation_start command without any pre-configured scope."
+commands.allow = ["validation_start"]
+
+[[permission]]
+identifier = "deny-validation-start"
+description = "Denies the validation_start command without any pre-configured scope."
+commands.deny = ["validation_start"]

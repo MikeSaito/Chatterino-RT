@@ -1,3 +1,6 @@
+import { createModerationDispatch } from "./shell/moderationDispatch";
+import { createChannelLifecycle } from "./shell/channelLifecycle";
+import { createAuthActions } from "./shell/authActions";
 import { completeComposerSend } from "./shell/composerDelivery";
 import "pixi.js/unsafe-eval";
 import { invoke } from "@tauri-apps/api/core";
@@ -897,9 +900,19 @@ async function boot(): Promise<void> {
   let customUriScheme = String(bootKnobs["external.customURIScheme"] ?? "").trim();
   let imageUploadKnobs: ImageUploadKnobs = parseImageUploadKnobs(bootKnobs);
   let modActionBtns: ModActionBtn[] = bootModActions;
-  let modSendBusy = false;
+  const moderationDispatch = createModerationDispatch({
+    invoke, normalizeChannel: snapshotModChannel, alive: bootAlive,
+    error: (err) => setStatus(formatError(err)),
+  });
+  chainTeardown(() => moderationDispatch.dispose());
   let lastAuth: AuthInfo = { canSend: false, fromEnv: false, scopesIncomplete: false };
-  let authOp: "idle" | "start" | "import" | "logout" = "idle";
+  const authActions = createAuthActions({
+    invoke, alive: bootAlive, auth: () => lastAuth, apply: applyAuth,
+    refresh: paintAuthFromServer, formatError, reportError: setStatus, paste: pasteEl,
+    disable: (op) => { (op === "start" ? signinBtn : op === "import" ? importBtn : logoutBtn).disabled = true; },
+    clearClipboard: () => navigator.clipboard.writeText(""),
+  });
+  chainTeardown(() => authActions.dispose());
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
   const performanceTrace = new ChatPerformance();
@@ -915,7 +928,7 @@ async function boot(): Promise<void> {
     import.meta.env.DEV ||
     localStorage.getItem("crt-debug") === "1"
   ) {
-    (window as Window & { __crt?: { ring: MessageRing; performance: ChatPerformance } }).__crt = { ring, performance: performanceTrace };
+    (window as Window & { __crt?: { ring: MessageRing; performance: ChatPerformance; resources: () => ReturnType<TextureLru["diagnostics"]> } }).__crt = { ring, performance: performanceTrace, resources: () => textures.diagnostics() };
   }
   try {
     await ring.init();
@@ -1919,12 +1932,61 @@ async function boot(): Promise<void> {
   let contextTarget: SlotContext | null = null;
   /** Channel snapshot at menu open (pin/unpin must not follow tab switch). */
   let contextMenuChannel = "";
-  let channelBusy = false;
-  const channelQueue: {
-    kind: "join" | "leave" | "sync";
-    name: string;
-    focus?: boolean;
-  }[] = [];
+  const channelLifecycle = createChannelLifecycle({
+    ipc,
+    setBusy: (busy) => { joinControl.disabled = busy; },
+    beforeJoin: () => { sendSelfTyping(false, true); holdStatus = false; clearComplete(); hideContextMenu(); },
+    beforeLeave: () => { sendSelfTyping(false, true); clearComplete(); hideContextMenu(); },
+    mounted: applyMounted,
+    backgroundJoined: (joined) => { channels.remember(joined, false); ensureOpenChannelChrome(); },
+    invalidName: () => { holdStatus = true; setStatus(t("status.channelNameInvalid")); },
+    error: (err) => { holdStatus = true; setStatus(formatError(err)); },
+    cleared: () => {
+      replyThreadCtl?.close();
+      channelInput.value = "";
+      syncPlayerForLayout("");
+      repaintChannelTitle();
+      chatFindCtl.onChannelChanged();
+      applySendWaitForActive();
+      pollPanel.sync();
+      pinnedBanner.sync();
+    },
+    left: (name, next, wasActive) => {
+      const leftKey = name.toLowerCase();
+      channels.remove(name);
+      sendWaitByChannel.delete(leftKey);
+      streamByChannel.delete(leftKey);
+      roomByChannel.delete(leftKey);
+      typingByChannel.delete(leftKey);
+      avatarUrlByLogin.delete(leftKey);
+      avatarFetchInFlight.delete(leftKey);
+      if (!next) {
+        replyThreadCtl?.close();
+        channelInput.value = "";
+        syncPlayerForLayout("");
+        repaintChannelTitle();
+        chatFindCtl.onChannelChanged();
+        applySendWaitForActive();
+        pollPanel.sync();
+        pinnedBanner.sync();
+        paintTypingStatus();
+        quickActionsCtl?.hide();
+        ring.clearHover();
+        syncChatEmpty();
+        outgoingRaidCtl.syncActiveChannel();
+        return;
+      }
+      if (wasActive) {
+        applyMounted(next);
+      } else {
+        channels.paint(ipc.active());
+        applySendWaitForActive();
+        pollPanel.sync();
+        pinnedBanner.sync();
+      }
+    },
+  });
+  chainTeardown(() => channelLifecycle.dispose());
 
   const channels = bindChannelList(
     list,
@@ -2112,21 +2174,8 @@ async function boot(): Promise<void> {
   ring.setOnContextMenu((ctx) => {
     openContextMenu(ctx);
   });
-  const sendModCommand = (text: string, channelRaw: string): void => {
-    const channel = snapshotModChannel(channelRaw);
-    if (!channel || modSendBusy) {
-      return;
-    }
-    modSendBusy = true;
-    void (async () => {
-      try {
-        await invoke("chat_send", { text, replyToId: null, channel });
-      } catch (err) {
-        setStatus(formatError(err));
-      } finally {
-        modSendBusy = false;
-      }
-    })();
+  const sendModCommand = (text: string, channel: string): void => {
+    void moderationDispatch.send(text, channel);
   };
   const modTimeoutPopup = bindModTimeoutPopup({
     host: modTimeoutPopupEl,
@@ -2172,27 +2221,7 @@ async function boot(): Promise<void> {
   ring.setOnAutomodAction((action, messageId, ctx) => {
     hideContextMenu();
     modTimeoutPopup.hide();
-    if (modSendBusy) {
-      return;
-    }
-    const channel = snapshotModChannel(ctx.channel || ipc.active() || "");
-    if (!channel) {
-      return;
-    }
-    modSendBusy = true;
-    void (async () => {
-      try {
-        await invoke("chat_automod_manage", {
-          msgId: messageId,
-          action,
-          channel,
-        });
-      } catch (err) {
-        setStatus(formatError(err));
-      } finally {
-        modSendBusy = false;
-      }
-    })();
+    void moderationDispatch.automod(action, messageId, ctx.channel || ipc.active() || "");
   });
   ring.setOnViewerRoleChange(() => {
     userCard?.syncMod();
@@ -2777,10 +2806,7 @@ async function boot(): Promise<void> {
       channels.syncOpen(open, focus);
     }
     ensureOpenChannelChrome();
-    channelQueue.push({ kind: "sync", name: focus });
-    if (!channelBusy) {
-      drainChannelQueue();
-    }
+    void channelLifecycle.sync(focus);
   }).then(trackUnlisten);
 
   await listen<{ channelId: string; text: string }>(CHAT_SEND_WAIT_EVENT, (ev) => {
@@ -3209,18 +3235,18 @@ async function boot(): Promise<void> {
     const scopesGapEnv = scopesGap && info.fromEnv;
     const scopesGapDevice = scopesGap && !info.fromEnv;
     signinBtn.hidden = (signed && !scopesGapDevice) || pending;
-    signinBtn.disabled = pending || authOp === "start";
+    signinBtn.disabled = pending || authActions.operation === "start";
     signinBtn.textContent = scopesGapDevice ? t("auth.scopes.reloginBtn") : t("auth.signin");
     // Настройки: рядом с «Войти» без сессии; в меню chip когда вошли.
     settingsBtn.hidden = showChip;
     // Pending: «Отмена»; signed idle — logout только через chip-меню.
     logoutBtn.hidden = !pending;
     logoutBtn.textContent = t("auth.cancel");
-    logoutBtn.disabled = authOp === "logout";
+    logoutBtn.disabled = authActions.operation === "logout";
     // «Вставить код» только в pendingPaste, никогда в idle.
     pasteEl.hidden = !pendingPaste;
     importBtn.hidden = !pendingPaste;
-    importBtn.disabled = authOp === "import";
+    importBtn.disabled = authActions.operation === "import";
     if (pendingDevice) {
       deviceEl.hidden = false;
       const code = t("auth.device.code", { code: info.userCode ?? "" });
@@ -3249,7 +3275,7 @@ async function boot(): Promise<void> {
   async function paintAuthFromServer(message?: string): Promise<void> {
     const gen = ++authPaintGen;
     const info = await invoke<AuthInfo>("auth_status");
-    if (gen !== authPaintGen) {
+    if (gen !== authPaintGen || !bootAlive()) {
       return;
     }
     applyAuth(message ? { ...info, message } : info);
@@ -3270,76 +3296,9 @@ async function boot(): Promise<void> {
     composerSprites.sync();
   }
 
-  async function startLogin(): Promise<void> {
-    const op = "start" as const;
-    authOp = op;
-    signinBtn.disabled = true;
-    try {
-      await invoke("auth_start");
-      await paintAuthFromServer();
-    } catch (err) {
-      try {
-        await paintAuthFromServer(formatError(err));
-      } catch {
-        applyAuth({ ...lastAuth, message: formatError(err) });
-      }
-    } finally {
-      if (authOp === op) {
-        authOp = "idle";
-        applyAuth(lastAuth);
-      }
-    }
-  }
-
-  async function importLogin(): Promise<void> {
-    const blob = pasteEl.value;
-    const op = "import" as const;
-    authOp = op;
-    importBtn.disabled = true;
-    try {
-      await invoke("auth_import", { blob });
-      pasteEl.value = "";
-      try {
-        await navigator.clipboard.writeText("");
-      } catch {
-        /* clipboard may be denied */
-      }
-      await paintAuthFromServer();
-    } catch (err) {
-      try {
-        await paintAuthFromServer(formatError(err));
-      } catch {
-        applyAuth({ ...lastAuth, message: formatError(err) });
-      }
-    } finally {
-      if (authOp === op) {
-        authOp = "idle";
-        applyAuth(lastAuth);
-      }
-    }
-  }
-
-  async function logout(): Promise<void> {
-    const op = "logout" as const;
-    authOp = op;
-    logoutBtn.disabled = true;
-    try {
-      await invoke("auth_logout");
-      await paintAuthFromServer();
-    } catch (err) {
-      setStatus(formatError(err));
-      try {
-        await paintAuthFromServer();
-      } catch {
-        /* keep lastAuth */
-      }
-    } finally {
-      if (authOp === op) {
-        authOp = "idle";
-        applyAuth(lastAuth);
-      }
-    }
-  }
+  function startLogin(): Promise<void> { return authActions.start(); }
+  function importLogin(): Promise<void> { return authActions.import(); }
+  function logout(): Promise<void> { return authActions.logout(); }
 
   async function refreshColonComplete(): Promise<void> {
     if (applyingComplete || !emoteCompletionWithColon) {
@@ -3634,7 +3593,7 @@ async function boot(): Promise<void> {
   }
 
   async function sendMessage(): Promise<void> {
-    if (!lastAuth.canSend || channelBusy || sendStatus.pending(composerChannel)) {
+    if (!lastAuth.canSend || channelLifecycle.busy || sendStatus.pending(composerChannel)) {
       return;
     }
     saveComposerDraft();
@@ -3664,7 +3623,7 @@ async function boot(): Promise<void> {
     const attempt = sendStatus.get(composerChannel);
     sendStatusEl.hidden = !attempt;
     retrySend.hidden = attempt?.state !== "error";
-    retrySend.disabled = !lastAuth.canSend || channelBusy;
+    retrySend.disabled = !lastAuth.canSend || channelLifecycle.busy;
     retrySend.textContent = t("send.retry");
     if (!attempt) return;
     sendStatusEl.dataset.state = attempt.state;
@@ -3754,146 +3713,9 @@ async function boot(): Promise<void> {
     composerSprites.sync();
   }
 
-  function drainChannelQueue(): void {
-    const next = channelQueue.shift();
-    if (!next) {
-      return;
-    }
-    if (next.kind === "leave") {
-      void leaveChannel(next.name);
-      return;
-    }
-    if (next.kind === "sync") {
-      void syncRooms(next.name);
-      return;
-    }
-    void joinChannel(next.name, next.focus !== false);
-  }
+  function leaveChannel(raw: string): Promise<void> { return channelLifecycle.leave(raw); }
+  function joinChannel(raw: string, focus = true): Promise<void> { return channelLifecycle.join(raw, focus); }
 
-  async function syncRooms(focus: string): Promise<void> {
-    if (channelBusy) {
-      channelQueue.unshift({ kind: "sync", name: focus });
-      return;
-    }
-    channelBusy = true;
-    joinControl.disabled = true;
-    try {
-      await ipc.syncActive(focus || null);
-      if (focus) {
-        applyMounted(focus);
-      } else {
-        replyThreadCtl?.close();
-        channelInput.value = "";
-        syncPlayerForLayout("");
-        repaintChannelTitle();
-        chatFindCtl.onChannelChanged();
-        applySendWaitForActive();
-            pollPanel.sync();
-        pinnedBanner.sync();
-      }
-    } catch (err) {
-      holdStatus = true;
-      setStatus(formatError(err));
-    } finally {
-      channelBusy = false;
-      joinControl.disabled = false;
-      drainChannelQueue();
-    }
-  }
-
-  async function leaveChannel(raw: string): Promise<void> {
-    const name = raw.trim();
-    if (!name) {
-      return;
-    }
-    if (channelBusy) {
-      channelQueue.push({ kind: "leave", name });
-      return;
-    }
-    channelBusy = true;
-    joinControl.disabled = true;
-    sendSelfTyping(false, true);
-    clearComplete();
-    hideContextMenu();
-    const leftActive = ipc.active() === name;
-    try {
-      const next = await ipc.leave(name);
-      const leftKey = name.toLowerCase();
-      channels.remove(name);
-      sendWaitByChannel.delete(leftKey);
-      streamByChannel.delete(leftKey);
-      roomByChannel.delete(leftKey);
-      typingByChannel.delete(leftKey);
-      avatarUrlByLogin.delete(leftKey);
-      avatarFetchInFlight.delete(leftKey);
-      if (!next) {
-        replyThreadCtl?.close();
-        channelInput.value = "";
-        syncPlayerForLayout("");
-        repaintChannelTitle();
-        chatFindCtl.onChannelChanged();
-        applySendWaitForActive();
-            pollPanel.sync();
-        pinnedBanner.sync();
-        paintTypingStatus();
-        quickActionsCtl?.hide();
-        ring.clearHover();
-        syncChatEmpty();
-        outgoingRaidCtl.syncActiveChannel();
-        return;
-      }
-      if (leftActive) {
-        applyMounted(next);
-      } else {
-        channels.paint(ipc.active());
-        applySendWaitForActive();
-        pollPanel.sync();
-        pinnedBanner.sync();
-      }
-    } catch (err) {
-      holdStatus = true;
-      setStatus(formatError(err));
-    } finally {
-      channelBusy = false;
-      joinControl.disabled = false;
-      drainChannelQueue();
-    }
-  }
-
-  async function joinChannel(raw: string, focus = true): Promise<void> {
-    const name = normalizeChannelInput(raw);
-    if (!name) {
-      holdStatus = true;
-      setStatus(t("status.channelNameInvalid"));
-      return;
-    }
-    if (channelBusy) {
-      channelQueue.push({ kind: "join", name, focus });
-      return;
-    }
-    channelBusy = true;
-    joinControl.disabled = true;
-    sendSelfTyping(false, true);
-    holdStatus = false;
-    clearComplete();
-    hideContextMenu();
-    try {
-      const joined = await ipc.join(name, focus);
-      if (focus) {
-        applyMounted(joined);
-      } else {
-        channels.remember(joined, false);
-        ensureOpenChannelChrome();
-      }
-    } catch (err) {
-      holdStatus = true;
-      setStatus(formatError(err));
-    } finally {
-      channelBusy = false;
-      joinControl.disabled = false;
-      drainChannelQueue();
-    }
-  }
 }
 
 function formatStatus(s: ChatStatus): string {

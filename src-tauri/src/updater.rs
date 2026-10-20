@@ -68,6 +68,10 @@ fn env_https_endpoint(name: &str) -> Option<Result<Url, String>> {
 
 fn parse_https_endpoint(raw: &str) -> Result<Url, String> {
     let url = Url::parse(raw.trim()).map_err(|e| format!("error.updater.endpoint: {e}"))?;
+    #[cfg(feature = "validation")]
+    if url.scheme() == "http" && url.host_str() == Some("127.0.0.1") {
+        return Ok(url);
+    }
     if url.scheme() != "https" {
         return Err("error.updater.insecure_endpoint".into());
     }
@@ -97,7 +101,8 @@ fn resolve_pubkey(app: &AppHandle) -> Option<String> {
 
 fn resolve_endpoints(app: &AppHandle, beta: bool) -> Result<Vec<Url>, String> {
     let conf = conf_from_tauri_json(app);
-    if conf.dangerous_insecure_transport_protocol.unwrap_or(false) {
+    if conf.dangerous_insecure_transport_protocol.unwrap_or(false) && !cfg!(feature = "validation")
+    {
         return Err("error.updater.insecure_endpoint".into());
     }
 
@@ -131,7 +136,7 @@ pub fn is_ready(app: &AppHandle, beta: bool) -> bool {
 }
 
 pub fn status(app: &AppHandle, beta: bool) -> UpdaterStatus {
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let current_version = app.package_info().version.to_string();
     if resolve_pubkey(app).is_none() {
         return UpdaterStatus {
             ready: false,
@@ -289,6 +294,15 @@ mod tests {
     fn rejects_http_endpoint() {
         let err = parse_https_endpoint("http://example.com/latest.json").unwrap_err();
         assert_eq!(err, "error.updater.insecure_endpoint");
+    }
+
+    #[test]
+    fn loopback_transport_is_only_available_in_validation_builds() {
+        assert_eq!(
+            parse_https_endpoint("http://127.0.0.1:9443/latest.json").is_ok(),
+            cfg!(feature = "validation")
+        );
+        assert!(parse_https_endpoint("http://example.com/latest.json").is_err());
     }
 
     #[test]

@@ -49,3 +49,9 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_PropertiesSystem",
 ] }
+
+[dev-dependencies]
+minisign-verify = "=0.3.0"
+
+[features]
+validation = []

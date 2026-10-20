@@ -22,6 +22,17 @@ pub fn apply_knob_to_registry(knobs: &BTreeMap<String, Value>) -> Result<(), Str
     set_registered(want)
 }
 
+#[cfg(any(test, feature = "validation"))]
+thread_local! {
+    static TEST_REGISTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(any(test, feature = "validation"))]
+pub fn is_registered() -> bool {
+    TEST_REGISTERED.with(|value| value.get())
+}
+
+#[cfg(not(any(test, feature = "validation")))]
 pub fn is_registered() -> bool {
     #[cfg(windows)]
     {
@@ -36,6 +47,13 @@ pub fn is_registered() -> bool {
     }
 }
 
+#[cfg(any(test, feature = "validation"))]
+pub fn set_registered(enabled: bool) -> Result<(), String> {
+    TEST_REGISTERED.with(|value| value.set(enabled));
+    Ok(())
+}
+
+#[cfg(not(any(test, feature = "validation")))]
 pub fn set_registered(enabled: bool) -> Result<(), String> {
     #[cfg(windows)]
     {

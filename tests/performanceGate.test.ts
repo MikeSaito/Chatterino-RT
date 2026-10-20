@@ -19,4 +19,7 @@ const invalid = copies(3); invalid[0].metrics.longFrameRatio = 2;
 assert.throws(() => compareRuns(copies(5),copies(3),invalid), /Invalid measurement/);
 const unavailable = copies(3); unavailable[0].metrics.privateBytes = NaN;
 assert.throws(() => compareRuns(copies(5),copies(3),unavailable), /Invalid measurement/);
+const shrinkingBase = copies(3); shrinkingBase.forEach(r => r.metrics.memoryGrowthBytes = -100);
+const shrinkingCalibration = copies(5); shrinkingCalibration.forEach(r => r.metrics.memoryGrowthBytes = -100);
+assert.deepEqual(compareRuns(shrinkingCalibration, shrinkingBase, copies(3)), [], "shrinking memory is not a leak baseline");
 console.log("performance gate tests ok");

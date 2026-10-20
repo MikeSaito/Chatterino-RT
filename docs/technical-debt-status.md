@@ -1,43 +1,72 @@
 # Technical debt implementation status
 
-Implemented:
+## Completed
 
-- Scroll chrome owns and cancels all DOM subscriptions, scroll callback, pending
-  animation frame, timeout and resize observer. Disposal is idempotent and releases
-  pointer capture. An older binding cannot clear a newer binding's scroll callback
-  or pause state.
-- `npm run test:contract` exports JSON and MessagePack through Rust's real
-  `ChatBatch` and encoder, checks the reviewed golden JSON and compares every
-  decoded value using the production TypeScript decoder. All eleven event kinds,
-  nested notices, optional fields, Unicode and damaged packets are covered. CI and
-  draft release builds run this command. Update the golden only after reviewing
-  the Rust and TypeScript contract changes together.
-- Send completion orchestration lives in `composerDelivery.ts`; pure row formatting
-  lives in `rowFormatting.ts`. Remaining controllers and renderer resources have
-  not yet been extracted.
-- `npm run test:performance-gate -- report.json` compares measured runs. The input
-  is an array of scenario groups, each containing `calibration` (five runs),
-  `baseline` (three runs), and `candidate` (three runs). Required scenario names:
-  `50-emotes`, `200-emotes`, `200-scroll-emotes`. Each run has `environment`, `build`,
-  `scenario`, `generated`, `processed`, `crashed`, and `metrics`: `processingP95Ms`,
-  `frameP95Ms`, `longFrameRatio`, `privateBytes`, `memoryGrowthBytes`.
-  Memory means private bytes of the entire application process tree, not JS heap.
-  Growth is the end minus the post-warmup value. Reports must contain finite
-  measurements; unavailable required measurements cannot pass the gate.
-  Relative scatter is the median absolute deviation divided by the calibration
-  median. Candidate medians must not exceed the baseline by max(15%, three times
-  scatter); when the calibration median is zero, the absolute deviation is used.
+- Scroll lifecycle cleanup and reviewed Rust/TypeScript JSON + MessagePack contracts
+  are covered by tests and CI.
+- Release builds remain drafts. They now download and verify all NSIS/MSI assets,
+  embedded versions, updater signatures using the baked production public key,
+  GitHub digests when provided, and SHA-256. Authenticode is checked separately;
+  unsigned releases remain supported, but mixed/invalid signatures fail.
+- A published-release workflow checks the public manifest, each installer and the
+  actual updater download. Reports and SHA256SUMS are retained on workflow failure.
+- The `validation` Rust feature provides an offline source through the actual
+  parser, channel buffers, MessagePack encoder, Tauri Channel and renderer. It is
+  absent from normal builds. The validation app requires its own product identity,
+  ignores Twitch environment credentials, and never starts the network workers.
+- Native smoke checks cover real Rust invocations, process restart, local settings,
+  channels, drafts, animated emote decoding and private memory of the process tree.
+  The installer runner refuses ordinary production installers.
+- The local upgrade check installs two validation packages, serves a signed update
+  over loopback, installs it through the real updater and verifies the new version
+  and persisted state. A disposable key is used; production keeps HTTPS and its
+  original baked public key. This tests the update mechanism on two versioned
+  validation packages, not historical release source compatibility.
+- Auth operations, serialized channel lifecycle and moderation dispatch now have
+  separate controllers with disposal. Row text formatting, pointer-to-text mapping
+  and nickname paint GPU resource ownership are separated from MessageRing.
+- Unit tests no longer write the user's Windows autorun registry entry.
 
-Not implemented or validated yet:
+## Local Windows commands
 
-- Local Windows test isolation on the existing release PC, installed-app
-  smoke/persistence/update automation and the Rust test-only message source.
-- Two-minute warmup / 30-minute hardware scenario collection on the existing PC, animated local emote
-  assets, environment fingerprint collection and release integration of the gate.
-  The comparison utility alone does not make hardware checks mandatory for release.
-- Installer metadata, cryptographic updater verification, checksums and public
-  post-publication verification as permanent release steps.
-- Full channel/auth/moderation extraction and row interaction/resource controllers.
+```powershell
+npm run test:release -- --tag v1.1.7 --public
+npm run build:validation -- --debug
+npm run test:installed -- --installer "src-tauri/target/debug/bundle/nsis/Chatterino RT Validation_1.1.7_x64-setup.exe"
+npm run test:upgrade:prepare
+npm run test:installed -- --installer artifacts/validation-upgrade/validation-1.1.6.exe --update-installer artifacts/validation-upgrade/validation-1.1.7.exe
+```
 
-The existing short browser load test remains unchanged and continues to check
-message delivery and measurement availability, without timing thresholds.
+Test profiles, reports, installers and disposable keys stay under ignored
+`artifacts/`. The validation app has its own Windows settings directory; test
+installations have their own install directories and product registration.
+Ordinary app data and login are not copied. Test installation artifacts are kept
+for inspection; use their own uninstaller to remove the Validation product.
+
+## Long performance runs — skipped at the owner's request
+
+No long-run performance result or regression baseline is claimed. These runs do
+not block releases when no evidence file is supplied.
+
+The optional tools are ready: build committed baseline and candidate sources in
+release mode using `npm run build:validation`, keep both executables, then run:
+
+```powershell
+npm run test:hardware-suite -- --baseline-exe <baseline.exe> --candidate-exe <candidate.exe>
+```
+
+The suite performs five calibration, three baseline and three candidate passes.
+Each pass has 50/s, 200/s and scrolling 200/s scenarios with local animated emotes,
+120 seconds of warmup and 1800 seconds of measurement per scenario (about 18 hours
+in total). Reports contain frame/processing percentiles, process-tree memory,
+post-warmup growth, texture/frame counts, source revision and environment identity
+(CPU, GPU/driver, WebView2, display, settings, power plan and fixture hash). GPU
+allocation bytes are unavailable and reported as null. A changed environment or
+uncommitted/debug build cannot establish a baseline.
+
+`npm run test:performance-gate -- <comparison.json> --release` checks complete
+measurements and flags candidate regressions beyond max(15%, three times the
+relative median absolute deviation of calibration). Missing messages and crashes
+fail. An optional `release-evidence/vX.Y.Z.json` committed for a tag is enforced by
+the release workflow and must match the candidate revision. Omitted evidence is
+explicitly reported as skipped. Existing short browser checks remain mandatory.

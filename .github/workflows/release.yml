@@ -68,6 +68,18 @@ jobs:
       - name: Browser workspace checks and message-stream benchmark
         run: npm run test:browser
 
+      - name: Compare hardware measurements when supplied
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $report = "release-evidence/$env:RELEASE_TAG.json"
+          if (Test-Path -LiteralPath $report) {
+            npm run test:performance-gate -- $report --release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            Write-Output "Hardware soak comparison skipped: no measurements supplied for this release."
+          }
+
       - name: Assert tag matches package version
         shell: bash
         run: |
@@ -99,3 +111,19 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           updaterJsonPreferNsis: true
           args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.release.conf.json
+
+      - name: Verify draft installers and updater artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run test:release -- --tag "$env:RELEASE_TAG"
+
+      - name: Keep release verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-verification
+          path: |
+            artifacts/release-check/verification.json
+            artifacts/release-check/SHA256SUMS.txt
+          if-no-files-found: warn

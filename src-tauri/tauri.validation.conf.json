@@ -1,0 +1,37 @@
+{
+  "productName": "Chatterino RT Validation",
+  "identifier": "com.mike.webtv-chats.validation",
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://127.0.0.1:9443/latest.json"
+      ],
+      "dangerousInsecureTransportProtocol": true
+    }
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        "default",
+        "settings",
+        {
+          "identifier": "validation-only",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "allow-validation-start",
+            "allow-validation-status",
+            "allow-validation-quit"
+          ]
+        }
+      ]
+    }
+  }
+}

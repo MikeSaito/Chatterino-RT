@@ -39,7 +39,14 @@
     "test:copy-format": "node --experimental-strip-types ./tests/copyFormat.test.ts",
     "tauri": "tauri",
     "test:contract": "node --experimental-strip-types scripts/check-wire-contract.ts",
-    "test:performance-gate": "node --experimental-strip-types scripts/check-performance.ts"
+    "test:performance-gate": "node --experimental-strip-types scripts/check-performance.ts",
+    "test:release": "node --experimental-strip-types scripts/release/verify.mjs",
+    "build:validation": "tauri build --features validation --config src-tauri/tauri.validation.conf.json",
+    "test:desktop": "node scripts/desktop/run.mjs",
+    "test:soak": "node scripts/desktop/run.mjs --profile soak",
+    "test:installed": "node scripts/desktop/install.mjs",
+    "test:upgrade:prepare": "node scripts/desktop/prepare-upgrade.mjs",
+    "test:hardware-suite": "node scripts/desktop/collect-suite.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",

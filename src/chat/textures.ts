@@ -199,6 +199,15 @@ export class TextureLru {
     return isRenderableTexture(frame) ? frame : undefined;
   }
 
+  diagnostics(): { textures: number; animatedSets: number; animationFrames: number; inflight: number } {
+    return {
+      textures: this.map.size,
+      animatedSets: [...this.frameSets.values()].filter((set) => set.frames.length > 1).length,
+      animationFrames: [...this.frameSets.values()].reduce((sum, set) => sum + set.frames.length, 0),
+      inflight: this.inflight.size,
+    };
+  }
+
   isAnimated(id: string): boolean {
     const set = this.frameSets.get(id);
     return !!set && set.frames.length > 1;

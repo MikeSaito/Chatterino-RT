@@ -4,6 +4,8 @@
 mod chat;
 mod security;
 mod updater;
+#[cfg(feature = "validation")]
+mod validation;
 
 use chat::clips::resolve_clip_info;
 use chat::commands::{
@@ -73,25 +75,30 @@ pub fn run() {
         .manage(UpdaterGate::default())
         .setup(move |app| {
             app.handle().plugin(updater::plugin_builder().build())?;
-            chat::auth::init(app.handle(), &shared)?;
-            chat::filters::init(app.handle(), &shared)?;
-            chat::session::init(app.handle(), &shared)?;
-            chat::settings::init(app.handle(), &shared)?;
-            chat::user_data::init(&shared)?;
-            chat::toast_shortcut::apply_from_settings(&shared);
-            chat::eventapi::start(shared.clone())?;
-            chat::bttv_live::start(shared.clone())?;
-            chat::polls::start(app.handle().clone(), shared.clone())?;
-            chat::low_trust::start(app.handle().clone(), shared.clone())?;
-            chat::pins::start(app.handle().clone(), shared.clone())?;
-            chat::automod::start(app.handle().clone(), shared.clone())?;
-            chat::live_status::start(app.handle().clone(), shared.clone());
-            chat::live_notifications::start(app.handle().clone(), shared.clone());
-            chat::shared_chat::start(shared.clone());
-            chat::shared_bans::start(app.handle().clone(), shared.clone())?;
-            chat::irc::start(app.handle().clone(), shared)?;
-            security::allow_embed_storage(app);
-            Ok(())
+            #[cfg(feature = "validation")]
+            return validation::setup(app.handle(), &shared).map_err(Into::into);
+            #[cfg(not(feature = "validation"))]
+            {
+                chat::auth::init(app.handle(), &shared)?;
+                chat::filters::init(app.handle(), &shared)?;
+                chat::session::init(app.handle(), &shared)?;
+                chat::settings::init(app.handle(), &shared)?;
+                chat::user_data::init(&shared)?;
+                chat::toast_shortcut::apply_from_settings(&shared);
+                chat::eventapi::start(shared.clone())?;
+                chat::bttv_live::start(shared.clone())?;
+                chat::polls::start(app.handle().clone(), shared.clone())?;
+                chat::low_trust::start(app.handle().clone(), shared.clone())?;
+                chat::pins::start(app.handle().clone(), shared.clone())?;
+                chat::automod::start(app.handle().clone(), shared.clone())?;
+                chat::live_status::start(app.handle().clone(), shared.clone());
+                chat::live_notifications::start(app.handle().clone(), shared.clone());
+                chat::shared_chat::start(shared.clone());
+                chat::shared_bans::start(app.handle().clone(), shared.clone())?;
+                chat::irc::start(app.handle().clone(), shared)?;
+                security::allow_embed_storage(app);
+                Ok(())
+            }
         })
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -102,6 +109,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(feature = "validation")]
+            validation::validation_start,
+            #[cfg(feature = "validation")]
+            validation::validation_status,
+            #[cfg(feature = "validation")]
+            validation::validation_quit,
             chat_join,
             chat_leave,
             chat_part,

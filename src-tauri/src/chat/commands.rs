@@ -2282,6 +2282,14 @@ pub struct CdnImageBytes {
 
 #[tauri::command]
 pub async fn fetch_emote_cdn(url: String) -> Result<CdnImageBytes, ApiError> {
+    #[cfg(feature = "validation")]
+    if url.starts_with(crate::validation::EMOTE_PREFIX) {
+        crate::validation::FIXTURE_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Ok(CdnImageBytes {
+            bytes: include_bytes!("../../fixtures/animated-emote.gif").to_vec(),
+            content_type: Some("image/gif".into()),
+        });
+    }
     let (bytes, content_type) = super::fetch::fetch_cdn_image(&url)
         .await
         .map_err(|message| ApiError::invalid(&message))?;

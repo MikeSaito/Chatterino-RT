@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { createAuthActions } from "../src/shell/authActions.ts";
+let finish!:()=>void, applied=0, refreshes=0, clipboard=0;
+const paste={value:"code"};
+const auth={canSend:false,fromEnv:false,scopesIncomplete:false};
+const actions=createAuthActions({invoke:()=>new Promise<void>(resolve=>{finish=resolve;}),alive:()=>true,auth:()=>auth,apply:()=>{applied++;},refresh:async()=>{refreshes++;},formatError:String,reportError:()=>{},paste,disable:()=>{},clearClipboard:async()=>{clipboard++;}});
+const importing=actions.import();assert.equal(actions.operation,"import");finish();await importing;
+assert.equal(paste.value,"");assert.equal(clipboard,1);assert.equal(refreshes,1);assert.equal(actions.operation,"idle");
+const pending=actions.start();actions.dispose();const before=applied;finish();await pending;assert.equal(applied,before);assert.equal(refreshes,1);
+console.log("auth actions tests ok");

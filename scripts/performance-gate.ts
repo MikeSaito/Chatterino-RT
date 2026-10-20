@@ -26,11 +26,12 @@ export function compareRuns(calibration: Run[], baseline: Run[], candidate: Run[
  const failures: string[] = [];
  for (const r of all) if (r.crashed || !Number.isSafeInteger(r.generated) || r.generated <= 0 || r.processed !== r.generated) failures.push(`${r.build}: crash or lost messages`);
  for (const key of ["processingP95Ms", "frameP95Ms", "longFrameRatio", "privateBytes", "memoryGrowthBytes"] as (keyof Metric)[]) {
-  const values = calibration.map(r => r.metrics[key]);
+  const value = (run: Run): number => key === "memoryGrowthBytes" ? Math.max(0, run.metrics[key]) : run.metrics[key];
+  const values = calibration.map(value);
   const center = median(values);
   const deviation = median(values.map(v => Math.abs(v-center)));
-  const base = median(baseline.map(r => r.metrics[key]));
-  const next = median(candidate.map(r => r.metrics[key]));
+  const base = median(baseline.map(value));
+  const next = median(candidate.map(value));
   const allowance = center === 0
     ? Math.max(Math.abs(base) * .15, deviation * 3)
     : Math.abs(base) * Math.max(.15, 3 * deviation / Math.abs(center));
