@@ -1103,6 +1103,7 @@ async function boot(): Promise<void> {
       }
     },
   });
+  chainTeardown(scrollChrome.dispose);
   try {
     supportsIncognito =
       (await invoke<boolean>("supports_incognito_links")) === true;

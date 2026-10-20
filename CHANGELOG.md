@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.7
+
+- Refresh the Dark and Light palettes, channel tabs, header, composer, reply preview, empty state, and send-status cards.
+- Remove the duplicated app name from the toolbar; the native window title retains the name.
+- Keep chat controls usable at the minimum window size, with scrolling channel tabs and a bounded channel menu.
+- Recalculate the scrollbar thumb and highlight marks when its track changes size, including window and composer resizing.
+- Constrain the chat canvas to its host while the renderer completes a deferred resize.
+- Expand browser checks across all four themes, both layouts, minimum sizes, 150% display scaling, Russian labels, long tab lists, keyboard focus, and send states.
+- Include dependency updates merged since 1.1.6, with full Rust, JavaScript, browser, and production-build validation.
+
 ## 1.1.6
 
 - Keep independent message drafts, reply targets, and cursor selections for each channel.
