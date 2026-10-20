@@ -51,7 +51,7 @@ jobs:
   js-test:
     name: JS tests
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -62,6 +62,15 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Rust / TypeScript wire contract
+        run: npm run test:contract
 
       - name: Typecheck
         run: npm run typecheck

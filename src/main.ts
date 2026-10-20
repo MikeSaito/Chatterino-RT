@@ -1,3 +1,4 @@
+import { completeComposerSend } from "./shell/composerDelivery";
 import "pixi.js/unsafe-eval";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -3641,20 +3642,22 @@ async function boot(): Promise<void> {
   }
 
   async function performSend(channel: string, draft: ChannelDraft): Promise<void> {
-    const result = await sendStatus.submit(channel, draft);
-    if (!bootAlive()) return;
-    // Save any edits made during IPC before comparing the accepted draft.
-    saveComposerDraft();
-    if (result && !closedWorkspaceChannels.has(channel) && workspace.clearAccepted(channel, draft) && channel === composerChannel) {
-      restoreComposerDraft();
-      clearComplete();
-      sendSelfTyping(false, true);
-      composerChrome.pulse();
-    }
-    workspace.flush();
-    paintSendStatus();
-    if (closedWorkspaceChannels.has(channel)) sendStatus.forget(channel);
-    syncComposer();
+    await completeComposerSend(channel, draft, {
+      status: sendStatus,
+      workspace,
+      alive: bootAlive,
+      isClosed: (name) => closedWorkspaceChannels.has(name),
+      activeChannel: () => composerChannel,
+      saveDraft: saveComposerDraft,
+      acceptedActive: () => {
+        restoreComposerDraft();
+        clearComplete();
+        sendSelfTyping(false, true);
+        composerChrome.pulse();
+      },
+      paintStatus: paintSendStatus,
+      syncComposer,
+    });
   }
 
   function paintSendStatus(): void {

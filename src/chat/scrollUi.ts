@@ -2,6 +2,8 @@ import type { MessageRing } from "./ring";
 import type { ScrollSnapshot } from "./scroll";
 import { t } from "../i18n/index.ts";
 
+const pauseOwners = new WeakMap<MessageRing, object>();
+
 export function bindScrollChrome(opts: {
   ring: MessageRing;
   host: HTMLElement;
@@ -22,8 +24,15 @@ export function bindScrollChrome(opts: {
   let marksTrackH = -1;
   let jumpHideTimer = 0;
   let jumpWasVisible = false;
+  let disposed = false;
+  let jumpFrame = 0;
+  let pointerId: number | undefined;
+  const listeners = new AbortController();
+  const pauseOwner = {};
+  pauseOwners.set(ring, pauseOwner);
 
   const paintJump = (state: ScrollSnapshot): void => {
+    if (disposed) return;
     const show = !state.atBottom;
     const pending = ring.pendingBelowCount();
     if (show) {
@@ -42,8 +51,10 @@ export function bindScrollChrome(opts: {
       jump.setAttribute("aria-label", label);
       jump.title = label;
       if (!jumpWasVisible) {
-        requestAnimationFrame(() => {
-          jump.classList.add("is-visible");
+        if (jumpFrame) cancelAnimationFrame(jumpFrame);
+        jumpFrame = requestAnimationFrame(() => {
+          jumpFrame = 0;
+          if (!disposed && jumpWasVisible) jump.classList.add("is-visible");
         });
       } else {
         jump.classList.add("is-visible");
@@ -83,6 +94,7 @@ export function bindScrollChrome(opts: {
   };
 
   const paint = (state: ScrollSnapshot): void => {
+    if (disposed) return;
     track.classList.toggle("idle", !state.overflow);
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", String(state.bottom));
@@ -162,6 +174,7 @@ export function bindScrollChrome(opts: {
   };
 
   const setHideHighlights = (hide: boolean): void => {
+    if (disposed) return;
     hideHighlights = hide;
     track.classList.toggle("is-hidden-marks", hide);
     if (hide) {
@@ -171,10 +184,11 @@ export function bindScrollChrome(opts: {
     }
   };
 
-  ring.setOnScroll(paint);
+  const unsubscribeScroll = ring.setOnScroll(paint);
   paint(ring.scrollSnapshot());
   // Track geometry can change without a scroll event (window or composer resize).
   const resizeObserver = new ResizeObserver(() => {
+    if (disposed) return;
     const state = ring.scrollSnapshot();
     layoutThumb(state);
     paintMarks(state);
@@ -184,18 +198,18 @@ export function bindScrollChrome(opts: {
   const onWheel = (ev: WheelEvent): void => {
     ring.handleWheel(ev);
   };
-  host.addEventListener("wheel", onWheel, { passive: false });
-  track.addEventListener("wheel", onWheel, { passive: false });
+  host.addEventListener("wheel", onWheel, { passive: false, signal: listeners.signal });
+  track.addEventListener("wheel", onWheel, { passive: false, signal: listeners.signal });
 
   host.addEventListener("pointerenter", () => {
     ring.noteChatHover();
-  });
+  }, { signal: listeners.signal });
   host.addEventListener("pointermove", () => {
     ring.noteChatHover();
-  });
+  }, { signal: listeners.signal });
   host.addEventListener("pointerleave", () => {
     ring.leaveChatHover();
-  });
+  }, { signal: listeners.signal });
 
   const syncKeyPause = (ev: KeyboardEvent | FocusEvent): void => {
     const mod = ring.pauseModifierName();
@@ -218,13 +232,13 @@ export function bindScrollChrome(opts: {
       (mod === "Meta" && meta && !shift && !ctrl && !alt);
     ring.setKeyPause(down);
   };
-  window.addEventListener("keydown", syncKeyPause);
-  window.addEventListener("keyup", syncKeyPause);
-  window.addEventListener("blur", syncKeyPause);
+  window.addEventListener("keydown", syncKeyPause, { signal: listeners.signal });
+  window.addEventListener("keyup", syncKeyPause, { signal: listeners.signal });
+  window.addEventListener("blur", syncKeyPause, { signal: listeners.signal });
 
   jump.addEventListener("click", () => {
     ring.goToBottom();
-  });
+  }, { signal: listeners.signal });
 
   const yToDesired = (clientY: number, state: ScrollSnapshot): number => {
     const rect = track.getBoundingClientRect();
@@ -240,7 +254,7 @@ export function bindScrollChrome(opts: {
 
   let dragging = false;
   track.addEventListener("pointerdown", (ev) => {
-    if (ev.button !== 0) {
+    if (ev.button !== 0 || dragging) {
       return;
     }
     const state = ring.scrollSnapshot();
@@ -249,23 +263,29 @@ export function bindScrollChrome(opts: {
     }
     ev.preventDefault();
     track.setPointerCapture(ev.pointerId);
+    pointerId = ev.pointerId;
     dragging = true;
     track.classList.add("is-dragging");
     track.focus();
     ring.setDesired(yToDesired(ev.clientY, state));
-  });
+  }, { signal: listeners.signal });
   track.addEventListener("pointermove", (ev) => {
     if (!dragging) {
       return;
     }
     ring.setDesired(yToDesired(ev.clientY, ring.scrollSnapshot()));
-  });
+  }, { signal: listeners.signal });
   const endDrag = (): void => {
     dragging = false;
+    if (pointerId !== undefined && track.hasPointerCapture(pointerId)) {
+      track.releasePointerCapture(pointerId);
+    }
+    pointerId = undefined;
     track.classList.remove("is-dragging");
   };
-  track.addEventListener("pointerup", endDrag);
-  track.addEventListener("pointercancel", endDrag);
+  track.addEventListener("pointerup", endDrag, { signal: listeners.signal });
+  track.addEventListener("pointercancel", endDrag, { signal: listeners.signal });
+  track.addEventListener("lostpointercapture", endDrag, { signal: listeners.signal });
 
   track.addEventListener("keydown", (ev) => {
     const state = ring.scrollSnapshot();
@@ -299,11 +319,23 @@ export function bindScrollChrome(opts: {
       ev.preventDefault();
       ring.setDesired(state.desired + state.viewRows, anim);
     }
-  });
+  }, { signal: listeners.signal });
 
   return {
     setHideHighlights,
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      listeners.abort();
+      unsubscribeScroll();
+      endDrag();
+      if (pauseOwners.get(ring) === pauseOwner) {
+        pauseOwners.delete(ring);
+        ring.leaveChatHover();
+        ring.setKeyPause(false);
+      }
+      if (jumpFrame) cancelAnimationFrame(jumpFrame);
+      jumpFrame = 0;
       resizeObserver.disconnect();
       window.clearTimeout(jumpHideTimer);
     },

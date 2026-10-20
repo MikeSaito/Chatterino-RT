@@ -1,0 +1,158 @@
+{
+  "channelId": "xqc",
+  "seq": 3,
+  "dropped": 1,
+  "events": [
+    {
+      "kind": "privmsg",
+      "id": "1",
+      "timestampMs": 10,
+      "userId": "9",
+      "login": "ann",
+      "displayName": "Анна",
+      "color": "#fff",
+      "badges": [
+        {
+          "set": "moderator",
+          "version": "1",
+          "source": "twitch"
+        }
+      ],
+      "text": "Привет 👋 日本語",
+      "emoteSpans": [
+        {
+          "start": 0,
+          "end": 2,
+          "emoteId": "25",
+          "provider": "twitch",
+          "url": "https://static-cdn.jtvnw.net/x",
+          "zeroWidth": false
+        }
+      ],
+      "action": false
+    },
+    {
+      "kind": "roomstate",
+      "id": "r",
+      "timestampMs": 11,
+      "emoteOnly": true,
+      "subsOnly": false,
+      "slowSec": 5,
+      "followersOnly": -1
+    },
+    {
+      "kind": "notice",
+      "id": "n",
+      "timestampMs": 12,
+      "text": "ok"
+    },
+    {
+      "kind": "clearchat",
+      "id": "cc",
+      "timestampMs": 20,
+      "targetLogin": "ann",
+      "durationSec": 30,
+      "stackCount": 2
+    },
+    {
+      "kind": "clearmsg",
+      "id": "cm",
+      "timestampMs": 21,
+      "targetId": "1"
+    },
+    {
+      "kind": "usernotice",
+      "id": "un",
+      "timestampMs": 22,
+      "systemText": "Спасибо 🎉",
+      "params": {
+        "displayName": "Анна",
+        "months": 3
+      },
+      "privmsg": {
+        "kind": "privmsg",
+        "id": "1",
+        "timestampMs": 10,
+        "userId": "9",
+        "login": "ann",
+        "displayName": "Анна",
+        "color": "#fff",
+        "badges": [
+          {
+            "set": "moderator",
+            "version": "1",
+            "source": "twitch"
+          }
+        ],
+        "text": "Привет 👋 日本語",
+        "emoteSpans": [
+          {
+            "start": 0,
+            "end": 2,
+            "emoteId": "25",
+            "provider": "twitch",
+            "url": "https://static-cdn.jtvnw.net/x",
+            "zeroWidth": false
+          }
+        ],
+        "action": false
+      }
+    },
+    {
+      "kind": "userstate",
+      "id": "us",
+      "timestampMs": 23,
+      "badges": [],
+      "isModTag": true
+    },
+    {
+      "kind": "automodHeld",
+      "id": "ah",
+      "timestampMs": 24,
+      "messageId": "held",
+      "channelId": "xqc",
+      "authorUserId": "9",
+      "authorLogin": "ann",
+      "authorDisplayName": "Анна",
+      "text": "проверка",
+      "caughtRanges": [
+        {
+          "start": 0,
+          "end": 2
+        }
+      ],
+      "status": "pending"
+    },
+    {
+      "kind": "automodStatus",
+      "id": "as",
+      "timestampMs": 25,
+      "targetId": "held",
+      "status": "approved"
+    },
+    {
+      "kind": "lowTrustHeader",
+      "id": "lh",
+      "timestampMs": 26,
+      "status": "restricted",
+      "detail": "проверка"
+    },
+    {
+      "kind": "lowTrustMessage",
+      "id": "lm",
+      "timestampMs": 27,
+      "messageId": "low",
+      "userId": "9",
+      "login": "ann",
+      "displayName": "Анна",
+      "text": "日本語",
+      "status": "restricted",
+      "channelLogin": "xqc"
+    },
+    {
+      "kind": "roomstate",
+      "id": "partial",
+      "timestampMs": 28
+    }
+  ]
+}

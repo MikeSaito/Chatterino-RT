@@ -56,6 +56,9 @@ jobs:
         run: cargo test
         working-directory: src-tauri
 
+      - name: Rust / TypeScript wire contract
+        run: npm run test:contract
+
       - name: Typecheck
         run: npm run typecheck
 

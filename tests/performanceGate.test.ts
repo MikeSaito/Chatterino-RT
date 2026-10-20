@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { compareRuns, type Run } from "../scripts/performance-gate.ts";
+const run: Run = { environment:"fixed", build:"base", scenario:"200-scroll-emotes", generated:100, processed:100, crashed:false, metrics:{processingP95Ms:10,frameP95Ms:20,longFrameRatio:.1,privateBytes:1000,memoryGrowthBytes:0} };
+const copies = (n: number) => Array.from({length:n}, () => structuredClone(run));
+assert.deepEqual(compareRuns(copies(5),copies(3),copies(3)),[]);
+const slower = copies(3); slower.forEach(r => r.metrics.processingP95Ms=12);
+assert.match(compareRuns(copies(5),copies(3),slower).join(),/processingP95Ms/);
+const leaking = copies(3); leaking.forEach(r => r.metrics.memoryGrowthBytes=100);
+assert.match(compareRuns(copies(5),copies(3),leaking).join(),/memoryGrowthBytes/);
+const changed = copies(3); changed[0].environment="new";
+assert.throws(() => compareRuns(copies(5),copies(3),changed),/Environment/);
+const lost = copies(3); lost[0].processed--;
+assert.match(compareRuns(copies(5),copies(3),lost).join(),/lost messages/);
+assert.throws(() => compareRuns(copies(4),copies(3),copies(3)),/five/);
+
+const missing = copies(3); delete (missing[0] as Partial<Run>).crashed;
+assert.throws(() => compareRuns(copies(5),copies(3),missing), /Incomplete/);
+const invalid = copies(3); invalid[0].metrics.longFrameRatio = 2;
+assert.throws(() => compareRuns(copies(5),copies(3),invalid), /Invalid measurement/);
+const unavailable = copies(3); unavailable[0].metrics.privateBytes = NaN;
+assert.throws(() => compareRuns(copies(5),copies(3),unavailable), /Invalid measurement/);
+console.log("performance gate tests ok");

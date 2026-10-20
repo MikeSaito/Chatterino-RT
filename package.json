@@ -37,7 +37,9 @@
     "test:reply-root": "node --experimental-strip-types ./tests/replyRoot.test.ts",
     "test:event-lookup": "node --experimental-strip-types ./tests/eventLookup.test.ts",
     "test:copy-format": "node --experimental-strip-types ./tests/copyFormat.test.ts",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:contract": "node --experimental-strip-types scripts/check-wire-contract.ts",
+    "test:performance-gate": "node --experimental-strip-types scripts/check-performance.ts"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
