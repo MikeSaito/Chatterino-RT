@@ -16,7 +16,7 @@ const fixtureWindow = window as Window & {
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
-    delivery: (result: string) => Promise<void>;
+    delivery: (result: string, reply?: boolean) => Promise<void>;
   };
 };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -127,7 +127,11 @@ fixtureWindow.__fixture = {
     last.scrollIntoView({ block: "nearest", inline: "nearest" });
     await switchTo("channel_with_long_name_13");
   },
-  async delivery(result) {
+  async delivery(result, reply = false) {
+    if (reply) {
+      await switchTo("alpha");
+      selectReply();
+    }
     const before = pendingSends.length;
     type("A new message for this channel");
     submit();

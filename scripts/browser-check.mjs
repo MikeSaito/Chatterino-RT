@@ -105,13 +105,14 @@ try {
   const chromeBounds = async () => evaluate(`(() => {
     const box = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return {x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height}; };
     const outside = [...document.querySelectorAll('body *')].filter(e => {const r=e.getBoundingClientRect(); return r.height && r.bottom>innerHeight+1 && getComputedStyle(e).position!=='fixed';}).slice(0,12).map(e=>({id:e.id, tag:e.tagName, bottom:e.getBoundingClientRect().bottom}));
-    return {width:innerWidth, height:innerHeight, scrollWidth:document.documentElement.scrollWidth, scrollHeight:document.documentElement.scrollHeight, outside, input:box('composer-input'), send:box('composer-send'), chat:box('chat-canvas-host'), header:box('header-more'), track:box('chat-scroll'), thumb:box('chat-scroll-thumb')};
+    return {width:innerWidth, height:innerHeight, scrollWidth:document.documentElement.scrollWidth, scrollHeight:document.documentElement.scrollHeight, outside, input:box('composer-input'), send:box('composer-send'), chat:box('chat-canvas-host'), canvas:box('chat-canvas'), header:box('header-more'), track:box('chat-scroll'), thumb:box('chat-scroll-thumb')};
   })()`);
   const fits = async (label) => {
     const b = await chromeBounds();
     assert.ok(b.scrollWidth <= b.width + 1 && b.scrollHeight <= b.height + 1, `${label}: page overflow ${JSON.stringify(b)}`);
     for (const id of ["input", "send", "header"]) assert.ok(b[id].x >= 0 && b[id].right <= b.width + 1 && b[id].y >= 0 && b[id].bottom <= b.height + 1 && b[id].width > 12, `${label}: clipped ${id} ${JSON.stringify(b)}`);
     assert.ok(b.chat.height > 20, `${label}: no room for chat ${JSON.stringify(b)}`);
+    assert.ok(b.canvas.right <= b.chat.right + 1 && b.canvas.bottom <= b.chat.bottom + 1, `${label}: canvas outside its host ${JSON.stringify(b)}`);
     assert.ok(b.thumb.y >= b.track.y - 1 && b.thumb.bottom <= b.track.bottom + 1, `${label}: scrollbar outside its track ${JSON.stringify(b)}`);
   };
   for (const theme of ["Dark", "Light", "Black", "White"]) {
@@ -157,11 +158,21 @@ try {
   await viewport(1280, 800);
   await evaluate("window.__fixture.appearance('Dark', 'Classic')");
   for (const state of ["error", "unknown", "transmitted", "sent", "queued"]) {
-    await evaluate(`window.__fixture.delivery('${state}')`);
+    await evaluate(`window.__fixture.delivery('${state}', ${state === "error"})`);
     await fits(`send state ${state}`);
     assert.equal(await evaluate("document.querySelector('#send-status').dataset.state"), state);
     assert.equal(await evaluate("document.querySelector('#send-retry').hidden"), state !== "error");
     await capture(`ui-send-${state}`);
+    if (state === "error") {
+      await viewport(320, 240);
+      await fits("failed reply at minimum size");
+      await capture("ui-send-error-compact");
+      await evaluate("window.__fixture.appearance('Dark', 'Classic', 'ru')");
+      await fits("Russian failed reply at minimum size");
+      await capture("ui-send-error-compact-ru");
+      await evaluate("window.__fixture.appearance('Dark', 'Classic')");
+      await viewport(1280, 800);
+    }
   }
   assert.deepEqual(failures, [], "no unhandled browser exceptions during theme/layout changes");
   console.log("UI chrome: four themes, minimum sizes, high DPI, Russian, tab overflow, keyboard focus, send states");
