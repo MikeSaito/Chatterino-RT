@@ -6,10 +6,18 @@ import type { ChatEvent } from "../src/chat/types";
 import type { MessageRing, SlotContext } from "../src/chat/ring";
 import type { ChatPerformance } from "../src/chat/performance";
 import type { SendResult } from "../src/shell/sendStatus";
+import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
-  __fixture?: { ready: () => boolean; smoke: () => Promise<string[]>; load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown> };
+  __fixture?: {
+    ready: () => boolean;
+    smoke: () => Promise<string[]>;
+    load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
+    appearance: (theme: string, layout: string, language?: string) => Promise<void>;
+    addTabs: () => Promise<void>;
+    delivery: (result: string) => Promise<void>;
+  };
 };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function check(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -63,9 +71,13 @@ mockIPC(async (cmd, args) => {
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
   if (cmd === "cache_info") return { path: "", isCustom: false };
-  if (cmd === "updater_status") return { ready: false, currentVersion: "1.1.6", reason: "fixture" };
-  if (cmd === "about_info") return { version: "1.1.6", settingsDirectory: "fixture" };
-  if (cmd.startsWith("plugin:window|")) return cmd.endsWith("is_maximized") ? false : null;
+  if (cmd === "updater_status") return { ready: false, currentVersion: "1.1.7", reason: "fixture" };
+  if (cmd === "about_info") return { version: "1.1.7", settingsDirectory: "fixture" };
+  if (cmd.startsWith("plugin:window|")) {
+    if (cmd.endsWith("inner_size")) return { width: innerWidth * devicePixelRatio, height: innerHeight * devicePixelRatio };
+    if (cmd.endsWith("scale_factor")) return devicePixelRatio;
+    return cmd.endsWith("is_maximized") ? false : null;
+  }
   if (cmd === "streamer_mode_detect" || cmd === "supports_incognito_links" || cmd === "chatterino1_commands_available") return false;
   return null;
 }, { shouldMockEvents: true });
@@ -96,6 +108,35 @@ const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset
 
 fixtureWindow.__fixture = {
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
+  async appearance(theme, layout, language = "en") {
+    settings.knobs["appearance.theme"] = theme;
+    settings.knobs["appearance.uiLayout"] = layout;
+    settings.knobs["interface.language"] = language;
+    await emit(SETTINGS_PREVIEW_EVENT, settings);
+    await until(() => document.documentElement.dataset.theme === theme && document.querySelector<HTMLElement>("#app")!.dataset.uiLayout === layout.toLowerCase());
+    await sleep(250);
+  },
+  async addTabs() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    for (let i = 0; i < 14; i++) {
+      const channel = `channel_with_long_name_${i}`;
+      history.set(channel, Array.from({ length: 50 }, (_, n) => message(channel, n)));
+      await invoke("chat_join", { channel, focus: false });
+    }
+    const last = document.querySelector<HTMLButtonElement>('[data-channel="channel_with_long_name_13"] .channel-item')!;
+    last.scrollIntoView({ block: "nearest", inline: "nearest" });
+    await switchTo("channel_with_long_name_13");
+  },
+  async delivery(result) {
+    const before = pendingSends.length;
+    type("A new message for this channel");
+    submit();
+    await until(() => pendingSends.length === before + 1);
+    if (result === "queued") return;
+    if (result === "error" || result === "unknown") pendingSends[before].reject({ code: result === "error" ? "error.message.send_timeout" : "error.message.send_unknown" });
+    else pendingSends[before].resolve({ status: result as SendResult["status"] });
+    await until(() => state() === result);
+  },
   async smoke() {
     const checks: string[] = [];
     await switchTo("alpha");

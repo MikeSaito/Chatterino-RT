@@ -28,6 +28,11 @@ const BGS: BgKey[] = ["windowBg", "surface1", "surface2", "surface3"];
 
 for (const preset of listThemePresets()) {
   const t = themeTokens(preset);
+  if (preset === "Dark" || preset === "Light") {
+    for (const background of [t.accent, t.accentHover]) {
+      assert(passesAaText(t.accentText, background), `${preset} primary button text contrast`);
+    }
+  }
   for (const bgKey of BGS) {
     const bg = t[bgKey];
     for (const key of TEXT_KEYS) {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const uiOnly = process.argv.includes("--ui-only");
 const browser = process.env.CRT_BROWSER_PATH ?? [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -83,7 +84,7 @@ try {
   assert.ok(Math.abs(restored.scroll.anchor.offsetFrac - savedAlpha.scroll.anchor.offsetFrac) < .02);
   console.log("UI restart: active tab, draft, reply, scroll anchor restored");
   const loads = [];
-  for (const [rate, scrolling] of [[50, false], [200, false], [200, true]]) {
+  for (const [rate, scrolling] of (uiOnly ? [] : [[50, false], [200, false], [200, true]])) {
     const report = await evaluate(`window.__fixture.load(${rate}, 8, ${scrolling})`);
     assert.equal(report.messages, report.generated, "every generated event was processed by real IPC/ring");
     assert.ok(report.receiptToFrame.count > 0 && report.frames.count > 0, JSON.stringify({ report, failures }));
@@ -92,7 +93,78 @@ try {
   }
   assert.deepEqual(failures, [], "no unhandled browser exceptions");
   const out = join(root, "artifacts"); mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, "browser-performance.json"), JSON.stringify({ environment: "Chromium headless, SwiftShader software GPU, 1280×800, DPR 1, synthetic text messages, mocked Tauri transport", smoke, restored, loads }, null, 2));
+  if (!uiOnly) writeFileSync(join(out, "browser-performance.json"), JSON.stringify({ environment: "Chromium headless, SwiftShader software GPU, 1280×800, DPR 1, synthetic text messages, mocked Tauri transport", smoke, restored, loads }, null, 2));
+  const capture = async (name) => {
+    const shot = await command("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(out, `${name}.png`), Buffer.from(shot.data, "base64"));
+  };
+  const viewport = async (width, height, scale = 1) => {
+    await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
+    await sleep(200);
+  };
+  const chromeBounds = async () => evaluate(`(() => {
+    const box = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return {x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height}; };
+    const outside = [...document.querySelectorAll('body *')].filter(e => {const r=e.getBoundingClientRect(); return r.height && r.bottom>innerHeight+1 && getComputedStyle(e).position!=='fixed';}).slice(0,12).map(e=>({id:e.id, tag:e.tagName, bottom:e.getBoundingClientRect().bottom}));
+    return {width:innerWidth, height:innerHeight, scrollWidth:document.documentElement.scrollWidth, scrollHeight:document.documentElement.scrollHeight, outside, input:box('composer-input'), send:box('composer-send'), chat:box('chat-canvas-host'), header:box('header-more'), track:box('chat-scroll'), thumb:box('chat-scroll-thumb')};
+  })()`);
+  const fits = async (label) => {
+    const b = await chromeBounds();
+    assert.ok(b.scrollWidth <= b.width + 1 && b.scrollHeight <= b.height + 1, `${label}: page overflow ${JSON.stringify(b)}`);
+    for (const id of ["input", "send", "header"]) assert.ok(b[id].x >= 0 && b[id].right <= b.width + 1 && b[id].y >= 0 && b[id].bottom <= b.height + 1 && b[id].width > 12, `${label}: clipped ${id} ${JSON.stringify(b)}`);
+    assert.ok(b.chat.height > 20, `${label}: no room for chat ${JSON.stringify(b)}`);
+    assert.ok(b.thumb.y >= b.track.y - 1 && b.thumb.bottom <= b.track.bottom + 1, `${label}: scrollbar outside its track ${JSON.stringify(b)}`);
+  };
+  for (const theme of ["Dark", "Light", "Black", "White"]) {
+    await viewport(1280, 800);
+    await evaluate(`window.__fixture.appearance('${theme}', 'Classic')`);
+    await fits(`${theme} desktop`);
+    await capture(`ui-classic-${theme}`);
+    await viewport(320, 240);
+    await fits(`${theme} minimum Classic size`);
+    await capture(`ui-compact-${theme}`);
+  }
+  await viewport(480, 360, 1.5);
+  await evaluate("window.__fixture.appearance('Dark', 'Classic', 'ru')");
+  await fits("Russian at 150% DPI");
+  await evaluate("window.__fixture.addTabs()");
+  assert.ok(await evaluate("document.querySelector('#channel-list').scrollWidth > document.querySelector('#channel-list').clientWidth"), "long tabs scroll within their own strip");
+  await fits("overflowing channel tabs");
+  await capture("ui-tabs-ru");
+  await evaluate("document.querySelector('#emote-open').focus()");
+  await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+  await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+  assert.equal(await evaluate("document.activeElement.id"), "composer-input", "keyboard can reach the composer from its toolbar");
+  assert.ok(await evaluate("parseFloat(getComputedStyle(document.activeElement).outlineWidth) >= 2"), "keyboard focus stays visible");
+  await viewport(320, 240);
+  await evaluate("document.querySelector('#header-more').focus()");
+  await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+  await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await sleep(150);
+  const menuBounds = await evaluate(`(() => {const menu=document.querySelector('#header-menu'); const r=menu.getBoundingClientRect(); return {hidden:menu.hidden,x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight,focus:document.activeElement.id};})()`);
+  assert.ok(!menuBounds.hidden && menuBounds.x>=0 && menuBounds.y>=0 && menuBounds.right<=menuBounds.width && menuBounds.bottom<=menuBounds.height, `channel menu stays inside the minimum window: ${JSON.stringify(menuBounds)}`);
+  await capture("ui-menu-compact");
+  await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  assert.equal(await evaluate("document.querySelector('#header-menu').hidden"), true, "Escape closes the channel menu");
+  await command("Network.enable");
+  await command("Network.setBlockedURLs", { urls: ["*://player.twitch.tv/*", "*://embed.twitch.tv/*"] });
+  for (const theme of ["Dark", "Light"]) {
+    await viewport(960, 420);
+    await evaluate(`window.__fixture.appearance('${theme}', 'Extended')`);
+    await fits(`${theme} minimum Extended size`);
+    await capture(`ui-extended-${theme}`);
+  }
+  await viewport(1280, 800);
+  await evaluate("window.__fixture.appearance('Dark', 'Classic')");
+  for (const state of ["error", "unknown", "transmitted", "sent", "queued"]) {
+    await evaluate(`window.__fixture.delivery('${state}')`);
+    await fits(`send state ${state}`);
+    assert.equal(await evaluate("document.querySelector('#send-status').dataset.state"), state);
+    assert.equal(await evaluate("document.querySelector('#send-retry').hidden"), state !== "error");
+    await capture(`ui-send-${state}`);
+  }
+  assert.deepEqual(failures, [], "no unhandled browser exceptions during theme/layout changes");
+  console.log("UI chrome: four themes, minimum sizes, high DPI, Russian, tab overflow, keyboard focus, send states");
   const screenshot = await command("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(out, "browser-check.png"), Buffer.from(screenshot.data, "base64"));
   console.log("Browser checks passed; report: artifacts/browser-performance.json");

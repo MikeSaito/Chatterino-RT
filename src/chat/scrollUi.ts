@@ -12,6 +12,7 @@ export function bindScrollChrome(opts: {
 }): {
   setHideHighlights: (hide: boolean) => void;
   refreshLocale: () => void;
+  dispose: () => void;
 } {
   const { ring, host, track, thumb, jump, onScroll } = opts;
   const marksLayer = track.querySelector<HTMLElement>("#chat-scroll-marks");
@@ -100,7 +101,7 @@ export function bindScrollChrome(opts: {
       return;
     }
     const ratio = Math.min(1, state.viewRows / state.contentRows);
-    const thumbH = Math.max(16, trackH * ratio);
+    const thumbH = Math.min(trackH, Math.max(16, trackH * ratio));
     const travel = Math.max(0, trackH - thumbH);
     const t = state.bottom <= 0 ? 1 : state.current / state.bottom;
     thumb.style.height = `${thumbH}px`;
@@ -172,6 +173,13 @@ export function bindScrollChrome(opts: {
 
   ring.setOnScroll(paint);
   paint(ring.scrollSnapshot());
+  // Track geometry can change without a scroll event (window or composer resize).
+  const resizeObserver = new ResizeObserver(() => {
+    const state = ring.scrollSnapshot();
+    layoutThumb(state);
+    paintMarks(state);
+  });
+  resizeObserver.observe(track);
 
   const onWheel = (ev: WheelEvent): void => {
     ring.handleWheel(ev);
@@ -223,7 +231,7 @@ export function bindScrollChrome(opts: {
     const trackH = rect.height;
     const ratio =
       state.contentRows > 0 ? Math.min(1, state.viewRows / state.contentRows) : 1;
-    const thumbH = Math.max(16, trackH * ratio);
+    const thumbH = Math.min(trackH, Math.max(16, trackH * ratio));
     const travel = Math.max(1, trackH - thumbH);
     const y = clientY - rect.top - thumbH / 2;
     const t = Math.min(1, Math.max(0, y / travel));
@@ -295,6 +303,10 @@ export function bindScrollChrome(opts: {
 
   return {
     setHideHighlights,
+    dispose: () => {
+      resizeObserver.disconnect();
+      window.clearTimeout(jumpHideTimer);
+    },
     refreshLocale: () => {
       paintJump(ring.scrollSnapshot());
     },
