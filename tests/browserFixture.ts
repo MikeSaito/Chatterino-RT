@@ -41,7 +41,7 @@ mockConvertFileSrc("windows");
 const { emptySettings } = await import("../src/shell/settings/settingsApply");
 const settings = emptySettings();
 settings.knobs["appearance.uiLayout"] = "Classic";
-settings.knobs["interface.language"] = "en";
+settings.knobs["appearance.uiLanguage"] = "en";
 settings.knobs["misc.showMessageLength"] = true;
 mockIPC(async (cmd, args) => {
   const a = (args ?? {}) as Record<string, unknown>;
@@ -84,6 +84,7 @@ mockIPC(async (cmd, args) => {
 
 const html = new DOMParser().parseFromString(await (await fetch("/index.html")).text(), "text/html");
 html.querySelectorAll("script").forEach((s) => s.remove());
+document.documentElement.lang = html.documentElement.lang;
 document.head.innerHTML = html.head.innerHTML;
 document.body.innerHTML = html.body.innerHTML;
 localStorage.setItem("crt-debug", "1");
@@ -111,9 +112,9 @@ fixtureWindow.__fixture = {
   async appearance(theme, layout, language = "en") {
     settings.knobs["appearance.theme"] = theme;
     settings.knobs["appearance.uiLayout"] = layout;
-    settings.knobs["interface.language"] = language;
+    settings.knobs["appearance.uiLanguage"] = language;
     await emit(SETTINGS_PREVIEW_EVENT, settings);
-    await until(() => document.documentElement.dataset.theme === theme && document.querySelector<HTMLElement>("#app")!.dataset.uiLayout === layout.toLowerCase());
+    await until(() => document.documentElement.dataset.theme === theme && document.documentElement.lang === language && document.querySelector<HTMLElement>("#app")!.dataset.uiLayout === layout.toLowerCase());
     await sleep(250);
   },
   async addTabs() {

@@ -5234,6 +5234,8 @@ button.poll-panel-option-btn.is-selected {
   #app[data-ui-layout="classic"] #composer { padding: 4px 6px; }
   #composer-inner { padding: 5px 6px; border-radius: 10px; }
   #reply-bar, #send-status { margin-top: 4px; margin-left: 6px; margin-right: 6px; padding-top: 3px; padding-bottom: 3px; }
+  #send-status { padding-left: 6px; padding-right: 6px; gap: 6px; line-height: 1.3; }
+  #send-retry { padding: 3px 6px; }
   #reply-cancel { width: 24px; height: 24px; }
   .chat-empty-icon { width: 48px; height: 48px; padding: 10px; border-radius: 16px; }
   .chat-empty-inner { gap: 6px; }
