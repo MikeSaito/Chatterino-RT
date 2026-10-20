@@ -115,7 +115,7 @@ fixtureWindow.__fixture = {
     settings.knobs["appearance.uiLanguage"] = language;
     await emit(SETTINGS_PREVIEW_EVENT, settings);
     await until(() => document.documentElement.dataset.theme === theme && document.documentElement.lang === language && document.querySelector<HTMLElement>("#app")!.dataset.uiLayout === layout.toLowerCase());
-    await sleep(250);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   },
   async addTabs() {
     const { invoke } = await import("@tauri-apps/api/core");

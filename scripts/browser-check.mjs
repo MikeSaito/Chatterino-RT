@@ -100,7 +100,9 @@ try {
   };
   const viewport = async (width, height, scale = 1) => {
     await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: scale, mobile: false });
-    await sleep(200);
+    // Layout observers and Pixi both resize on animation frames. A fixed delay
+    // can finish before the first frame on a busy software-GPU CI runner.
+    await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   };
   const chromeBounds = async () => evaluate(`(() => {
     const box = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return {x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height}; };
@@ -108,6 +110,7 @@ try {
     return {width:innerWidth, height:innerHeight, scrollWidth:document.documentElement.scrollWidth, scrollHeight:document.documentElement.scrollHeight, outside, input:box('composer-input'), send:box('composer-send'), chat:box('chat-canvas-host'), canvas:box('chat-canvas'), header:box('header-more'), track:box('chat-scroll'), thumb:box('chat-scroll-thumb')};
   })()`);
   const fits = async (label) => {
+    await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
     const b = await chromeBounds();
     assert.ok(b.scrollWidth <= b.width + 1 && b.scrollHeight <= b.height + 1, `${label}: page overflow ${JSON.stringify(b)}`);
     for (const id of ["input", "send", "header"]) assert.ok(b[id].x >= 0 && b[id].right <= b.width + 1 && b[id].y >= 0 && b[id].bottom <= b.height + 1 && b[id].width > 12, `${label}: clipped ${id} ${JSON.stringify(b)}`);
