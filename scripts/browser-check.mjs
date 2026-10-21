@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { waitForBrowserReady } from "./browserReadiness.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const uiOnly = process.argv.includes("--ui-only");
@@ -61,10 +62,7 @@ try {
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     return result.result.value;
   };
-  const ready = async () => {
-    for (let i = 0; i < 500; i++) { if (await evaluate("Boolean(window.__fixture?.ready())")) return; await sleep(40); }
-    throw new Error(`UI not ready: ${await evaluate("document.querySelector('#status-text')?.textContent")} / ${failures.join("\n")}`);
-  };
+  const ready = (previousTimeOrigin) => waitForBrowserReady(evaluate, { previousTimeOrigin });
   await command("Runtime.enable"); await command("Page.enable");
   await command("Emulation.setFocusEmulationEnabled", { enabled: true });
   await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -76,7 +74,9 @@ try {
   const savedAlpha = saved.channels.find((r) => r.channel === "alpha");
   assert.equal(savedAlpha.draft.text, "new draft after failure");
   assert.equal(savedAlpha.draft.reply.id, "alpha-4");
-  await command("Page.reload"); await sleep(200); await ready();
+  const previousTimeOrigin = await evaluate("performance.timeOrigin");
+  await command("Page.reload");
+  await ready(previousTimeOrigin);
   const restored = await evaluate(`({text: document.querySelector('#composer-input').value, reply: document.querySelector('#reply-label').textContent, scroll: window.__crt.ring.workspaceScroll(), active: document.querySelector('#channel-input').value})`);
   assert.equal(restored.text, "new draft after failure"); assert.equal(restored.active, "alpha");
   assert.ok(restored.reply.includes("viewer4"));
