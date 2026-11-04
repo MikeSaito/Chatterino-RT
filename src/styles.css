@@ -3217,14 +3217,14 @@ button.poll-panel-option-btn.is-selected {
 
 #chat-quick-actions {
   position: absolute;
-  inset: 0 0 auto;
-  height: 30px;
+  inset: 0 6px auto auto;
+  height: 24px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  background: color-mix(in srgb, var(--c-surface-2) 38%, var(--c-split-bg));
-  border-bottom: 1px solid var(--c-border);
+  gap: 1px;
+  padding: 0 1px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-1);
   pointer-events: auto;
 }
 
@@ -3232,10 +3232,14 @@ button.poll-panel-option-btn.is-selected {
   display: none;
 }
 
+#chat-canvas-host:has(#chat-jump-bottom.is-visible) #chat-quick-actions.is-near-bottom {
+  right: 46px;
+}
+
 #chat-quick-actions .btn-icon {
   flex: none;
-  width: 28px;
-  height: 24px;
+  width: 24px;
+  height: 22px;
 }
 
 #chat-empty {

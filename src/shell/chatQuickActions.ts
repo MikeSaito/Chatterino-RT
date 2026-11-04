@@ -9,7 +9,7 @@ export type ChatQuickActions = {
   isHoveringBar: () => boolean;
 };
 
-/** DOM buttons occupy the footer reserved in the Pixi message stack. */
+/** Keep the action buttons on the upper edge of the hovered message. */
 export function bindChatQuickActions(opts: {
   host: HTMLElement;
   ring: MessageRing;
@@ -29,7 +29,6 @@ export function bindChatQuickActions(opts: {
     canReply: boolean;
   } | null = null;
   let overBar = false;
-  let opening = false;
   let height = 0;
   let hoverRaf = 0;
   let pointerX = 0;
@@ -48,25 +47,25 @@ export function bindChatQuickActions(opts: {
 
   const hide = (): void => {
     cancelPaint();
-    const hadMessage = hover !== null;
     hover = null;
     overBar = false;
     bar.hidden = true;
-    if (hadMessage) {
-      ring.setMessageActions(null);
-    }
   };
 
-  const syncOnScroll = (): void => {
-    if (!hover || opening) {
-      return;
-    }
-    const top = ring.messageActionsTop(hover.msgId);
-    if (top === null || top < 0 || top + height > host.clientHeight + 0.5) {
+  const position = (top: number | null, viewportHeight: number): void => {
+    if (top === null || top < -0.5 || top >= viewportHeight || height > viewportHeight) {
       hide();
       return;
     }
-    bar.style.transform = `translateY(${top}px)`;
+    const y = Math.max(0, Math.min(top - height / 2, viewportHeight - height));
+    bar.style.transform = `translateY(${y}px)`;
+    bar.classList.toggle("is-near-bottom", y + height > viewportHeight - 40);
+  };
+
+  const syncOnScroll = (): void => {
+    if (hover) {
+      position(ring.messageTopInViewport(hover.msgId), host.clientHeight);
+    }
   };
 
   const paint = (): void => {
@@ -79,11 +78,10 @@ export function bindChatQuickActions(opts: {
       return;
     }
     const anchor = ring.messageAnchorAt(pointerX, pointerY);
-    if (!anchor || anchor.bottom > rect.bottom + 0.5) {
+    if (!anchor || anchor.top < rect.top - 0.5) {
       hide();
       return;
     }
-    const sameMessage = hover?.msgId === anchor.msgId;
     hover = {
       msgId: anchor.msgId,
       login: anchor.login,
@@ -91,17 +89,11 @@ export function bindChatQuickActions(opts: {
       canReply: anchor.canReply,
     };
     replyBtn.hidden = !anchor.canReply;
-    if (!sameMessage) {
-      opening = true;
+    if (bar.hidden) {
       bar.hidden = false;
       height = bar.offsetHeight;
-      try {
-        ring.setMessageActions(anchor.msgId, height);
-      } finally {
-        opening = false;
-      }
-      syncOnScroll();
     }
+    position(anchor.top - rect.top, rect.height);
   };
 
   const onHostMove = (ev: PointerEvent): void => {

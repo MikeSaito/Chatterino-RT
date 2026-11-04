@@ -486,7 +486,6 @@ export class MessageRing {
     disabledAlpha: 0x99 / 255,
   };
   private hoveredMsgId = "";
-  private messageActions: { msgId: string; height: number } | null = null;
   private lastReadFadeMsgId = "";
   private lastReadFadeStart = 0;
   private lastReadFadeRaf = 0;
@@ -1033,7 +1032,7 @@ export class MessageRing {
       const slot = visible[i];
       slot.startRow = i;
       slot.root.y = y;
-      y += this.slotLayoutHeight(slot);
+      y += this.slotPixelHeight(slot);
       if (i + 1 < visible.length) {
         y += gapPx;
       }
@@ -1805,11 +1804,6 @@ export class MessageRing {
       this.slotBodyPixelHeight(slot) +
       slot.clipCardRows * this.lineHeight
     );
-  }
-
-  private slotLayoutHeight(slot: Slot): number {
-    const actions = this.messageActions;
-    return this.slotPixelHeight(slot) + (actions?.msgId === slot.msgId ? actions.height : 0);
   }
 
   /** Scroll row budget before paintClip; tall GIF placeholders reserve extra rows. */
@@ -2800,7 +2794,6 @@ export class MessageRing {
     this.lastReadFadeMsgId = "";
     this.lastReadFadeStart = 0;
     this.hoveredMsgId = "";
-    this.messageActions = null;
     this.pendingBelow = 0;
     if (this.lastReadFadeRaf !== 0) {
       cancelAnimationFrame(this.lastReadFadeRaf);
@@ -4727,7 +4720,7 @@ export class MessageRing {
         const slot = visible[i];
         slot.startRow = i;
         slot.root.y = y;
-        y += this.slotLayoutHeight(slot);
+        y += this.slotPixelHeight(slot);
         if (i + 1 < visible.length) {
           y += gapPx;
         }
@@ -4942,7 +4935,7 @@ export class MessageRing {
       if (shown > 0) {
         contentH += gapPx;
       }
-      contentH += this.slotLayoutHeight(slot);
+      contentH += this.slotPixelHeight(slot);
       shown += 1;
     }
     const band = this.viewportPaintBand(contentH);
@@ -5612,7 +5605,6 @@ export class MessageRing {
     login: string;
     text: string;
     top: number;
-    bottom: number;
     right: number;
     canReply: boolean;
   } | null {
@@ -5645,7 +5637,6 @@ export class MessageRing {
           login: slot.login,
           text: slot.copyText || slot.bodyRaw,
           top: rect.top + stageY + top,
-          bottom: rect.top + stageY + top + height,
           right: rect.right - 8,
           canReply:
             this.showReplyButton &&
@@ -5658,33 +5649,9 @@ export class MessageRing {
     return null;
   }
 
-  /** Reserve a footer in the message stack without invalidating its text wraps. */
-  setMessageActions(msgId: string | null, height = 0): void {
-    if (!this.ready || (this.messageActions?.msgId ?? null) === msgId) {
-      return;
-    }
-    const anchors = this.captureScrollAnchors();
-    this.messageActions = msgId === null ? null : { msgId, height };
-    this.repositionRootsFromCache(anchors);
-    if (msgId === null) {
-      return;
-    }
-    const top = this.messageActionsTop(msgId);
-    if (top !== null && top + height > this.app.screen.height) {
-      const spill = top + height - this.app.screen.height;
-      this.scroll.setDesired(this.scroll.current + spill / this.lineHeight);
-      this.afterScrollChange();
-    }
-  }
-
-  messageActionsTop(msgId: string): number | null {
-    if (this.messageActions?.msgId !== msgId) {
-      return null;
-    }
+  messageTopInViewport(msgId: string): number | null {
     const slot = this.findSlotByMsgId(msgId);
-    return slot?.root.visible
-      ? slot.root.y + this.slotPixelHeight(slot) + this.app.stage.y
-      : null;
+    return slot?.root.visible ? slot.root.y + this.app.stage.y : null;
   }
 
   /** Build SlotContext for a message id (quick-actions "more"). */
