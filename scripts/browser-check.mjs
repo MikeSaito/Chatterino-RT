@@ -62,7 +62,19 @@ try {
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     return result.result.value;
   };
-  const ready = (previousTimeOrigin) => waitForBrowserReady(evaluate, { previousTimeOrigin });
+  const ready = async (previousTimeOrigin) => {
+    try {
+      await waitForBrowserReady(evaluate, { previousTimeOrigin, attempts: 1500 });
+    } catch (error) {
+      const state = await evaluate(`({
+        document: document.readyState,
+        fixture: Boolean(window.__fixture),
+        chat: Boolean(window.__crt),
+        status: document.querySelector("#status-text")?.textContent
+      })`).catch(() => null);
+      throw new Error(`Browser setup failed: ${JSON.stringify({ state, failures })}`, { cause: error });
+    }
+  };
   await command("Runtime.enable"); await command("Page.enable");
   await command("Emulation.setFocusEmulationEnabled", { enabled: true });
   await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
