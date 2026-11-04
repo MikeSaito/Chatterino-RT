@@ -5,6 +5,7 @@ import { encode } from "@msgpack/msgpack";
 import type { ChatEvent } from "../src/chat/types";
 import type { MessageRing, SlotContext } from "../src/chat/ring";
 import type { ChatPerformance } from "../src/chat/performance";
+import type { Sprite } from "pixi.js";
 import type { SendResult } from "../src/shell/sendStatus";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 
@@ -12,6 +13,7 @@ const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
   __fixture?: {
     ready: () => boolean;
+    chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
@@ -36,6 +38,7 @@ function message(channel: string, i: number): ChatEvent {
 }
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
+let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
 const { emptySettings } = await import("../src/shell/settings/settingsApply");
@@ -45,6 +48,7 @@ settings.knobs["appearance.uiLanguage"] = "en";
 settings.knobs["misc.showMessageLength"] = true;
 mockIPC(async (cmd, args) => {
   const a = (args ?? {}) as Record<string, unknown>;
+  if (cmd === "fetch_emote_cdn" && gifResponse) return gifResponse(String(a.url));
   if (cmd === "settings_get" || cmd === "settings_set") return settings;
   if (cmd === "filters_get") return { enableSelfHighlight: true, ignoreLogins: [], ignorePhrases: [], highlightPhrases: [], highlightLogins: [] };
   if (cmd === "auth_status") return { canSend: true, login: "fixture", fromEnv: false, scopesIncomplete: false };
@@ -109,6 +113,62 @@ const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset
 
 fixtureWindow.__fixture = {
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
+  async chatGifs() {
+    const host = window as Window & { isTauri?: boolean };
+    const wasTauri = host.isTauri;
+    const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
+    const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
+    const base = "https://media2.giphy.com/media";
+    const fullUrl = `${base}/test-animation/giphy.gif?cid=fixture`;
+    const fallbackUrl = `${base}/test-fallback/giphy.webp?cid=fixture`;
+    const smallerUrl = `${base}/test-fallback/giphy-downsized.gif?cid=fixture`;
+    const emoteUrl = "https://cdn.7tv.app/emote/test-animation/1x.webp";
+    const requests: string[] = [];
+    let finishPreview!: () => void;
+    const slowPreview = new Promise<void>((resolve) => { finishPreview = resolve; });
+    const channel = active();
+    const ring = fixtureWindow.__crt!.ring;
+    const sprites = (id: string) => (ring as unknown as {
+      slots: { msgId: string; root: { visible: boolean }; emotes: Sprite[] }[];
+    }).slots.find((slot) => slot.msgId === id && slot.root.visible)?.emotes;
+    const append = (id: string, provider: string, url: string, text: string) => {
+      const event = {
+        ...message(channel, nextId++), id, text,
+        emoteSpans: [{ start: 0, end: text.length, provider, emoteId: url, url, zeroWidth: false }],
+      };
+      const seq = (sequences.get(channel) ?? 1) + 1;
+      sequences.set(channel, seq);
+      channelPipe!.onmessage(encode({ channelId: channel, seq, dropped: 0, events: [event] }));
+    };
+    host.isTauri = true;
+    gifResponse = async (url) => {
+      requests.push(url);
+      if (url === fullUrl || url === emoteUrl || url === smallerUrl) return image;
+      if (url.includes("/test-animation/giphy-downsized.gif")) await slowPreview;
+      throw new Error("fixture image unavailable");
+    };
+    try {
+      ring.goToBottom();
+      append("animated-emote", "7tv", emoteUrl, "Эмот");
+      append("chat-gif-first", "twitch-gif", fullUrl, "Анимация");
+      await until(() => Boolean(sprites("animated-emote")?.[0].visible));
+      check(requests.includes(fullUrl), "chat GIF must request the original without waiting for the preview");
+      await until(() => Boolean(sprites("chat-gif-first")?.[0].visible));
+      const initialFrame = sprites("chat-gif-first")![0].texture;
+      await until(() => Boolean(sprites("chat-gif-first")?.[0].visible && sprites("chat-gif-first")![0].texture !== initialFrame));
+      append("chat-gif-repeat", "twitch-gif", fullUrl, "Повтор анимации");
+      await until(() => Boolean(sprites("chat-gif-repeat")?.[0].visible));
+      check(requests.filter((url) => url === fullUrl).length === 1, "repeated chat GIF must reuse the original texture");
+      check(!requests.some((url) => url.includes("/test-animation/giphy-downsized.gif")), "working original must skip the smaller GIF");
+      append("chat-gif-fallback", "twitch-gif", fallbackUrl, "Запасная анимация");
+      await until(() => Boolean(sprites("chat-gif-fallback")?.[0].visible));
+      check(requests.includes(smallerUrl), "unavailable original must try the smaller GIF with the original query");
+    } finally {
+      finishPreview();
+      gifResponse = undefined;
+      host.isTauri = wasTauri;
+    }
+  },
   async appearance(theme, layout, language = "en") {
     settings.knobs["appearance.theme"] = theme;
     settings.knobs["appearance.uiLayout"] = layout;

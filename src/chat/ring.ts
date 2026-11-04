@@ -65,7 +65,7 @@ import {
   whisperPrefix,
 } from "./chatSystemText";
 import { t } from "../i18n/index.ts";
-import { resolveEmojiUrl, resolveGifPreviewUrl } from "./emoteUrl";
+import { resolveEmojiUrl, resolveGifFallbackUrl } from "./emoteUrl";
 import { trailingDebounce, type TrailingDebounce } from "./debounce";
 import {
   badgeVisibilityEqual,
@@ -1863,6 +1863,7 @@ export class MessageRing {
     }
     const fullUrl = this.emoteLoadUrl(span);
     const wantAnimate = this.wantAnimateSpan(span);
+    const fallbackUrl = span.provider === "twitch-gif" ? resolveGifFallbackUrl(fullUrl) : null;
     const onLoaded = (tex: Texture | null): void => {
       if (
         !tex ||
@@ -1876,24 +1877,7 @@ export class MessageRing {
       applySpriteTexture(slot.emotes[index], tex, paint.w, paint.h);
       this.repaintSlotMedia(slot);
     };
-    if (span.provider === "twitch-gif" && wantAnimate) {
-      const previewUrl = resolveGifPreviewUrl(fullUrl);
-      if (previewUrl && previewUrl !== fullUrl) {
-        void this.textures.load(key, previewUrl, false).then((tex) => {
-          onLoaded(tex);
-          if (
-            slot.msgId !== msgId ||
-            !this.enableEmoteImages ||
-            slot.emoteKeys[index] !== key
-          ) {
-            return;
-          }
-          void this.textures.load(key, fullUrl, true).then(onLoaded);
-        });
-        return;
-      }
-    }
-    void this.textures.load(key, fullUrl, wantAnimate).then(onLoaded);
+    void this.textures.load(key, fullUrl, wantAnimate, fallbackUrl).then(onLoaded);
   }
 
   private placeEmoteSprite(

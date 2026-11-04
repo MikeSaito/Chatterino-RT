@@ -177,7 +177,9 @@ try {
       await viewport(1280, 800);
     }
   }
-  assert.deepEqual(failures, [], "no unhandled browser exceptions during theme/layout changes");
+  await evaluate("window.__fixture.chatGifs()");
+  console.log("UI GIFs: animated emote, original chat GIF, cache reuse, smaller GIF fallback");
+  assert.deepEqual(failures, [], "no unhandled browser exceptions during theme/layout and GIF checks");
   console.log("UI chrome: four themes, minimum sizes, high DPI, Russian, tab overflow, keyboard focus, send states");
   const screenshot = await command("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(out, "browser-check.png"), Buffer.from(screenshot.data, "base64"));

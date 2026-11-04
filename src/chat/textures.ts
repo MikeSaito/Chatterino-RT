@@ -227,7 +227,12 @@ export class TextureLru {
     this.evict();
   }
 
-  async load(id: string, url: string, animate: boolean): Promise<Texture | null> {
+  async load(
+    id: string,
+    url: string,
+    animate: boolean,
+    fallbackUrl: string | null = null,
+  ): Promise<Texture | null> {
     const resolved = resolveEmoteUrl(url, animate);
     const cached = this.get(id);
     if (
@@ -249,7 +254,16 @@ export class TextureLru {
     this.generation.set(id, token);
     this.urls.set(id, resolved);
     this.modes.set(id, animate);
-    const job = loadTextureSet(resolved, animate)
+    // Keep both URLs in the same load job so other slots reuse the result.
+    const load = loadTextureSet(resolved, animate);
+    const job = (fallbackUrl && fallbackUrl !== resolved
+      ? load.catch((error: unknown) => {
+          if (this.generation.get(id) !== token) {
+            throw error;
+          }
+          return loadTextureSet(fallbackUrl, animate);
+        })
+      : load)
       .then((set) => {
         if (this.inflight.get(id) === job) {
           this.inflight.delete(id);

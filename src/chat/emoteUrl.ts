@@ -9,8 +9,8 @@ export function resolveEmoteUrl(url: string, animate: boolean): string {
   return url.replace("/default/", "/static/").replace("/animated/", "/static/");
 }
 
-/** Smaller Giphy asset for fast first paint of Twitch chat GIFs. */
-export function resolveGifPreviewUrl(url: string): string | null {
+/** Smaller Giphy asset if the original Twitch chat GIF cannot be loaded. */
+export function resolveGifFallbackUrl(url: string): string | null {
   const trimmed = url.trim();
   if (!trimmed) {
     return null;
@@ -21,7 +21,7 @@ export function resolveGifPreviewUrl(url: string): string | null {
     if (!m) {
       return null;
     }
-    return `${u.origin}${m[1]}giphy-downsized.gif`;
+    return `${u.origin}${m[1]}giphy-downsized.gif${u.search}`;
   } catch {
     return null;
   }
