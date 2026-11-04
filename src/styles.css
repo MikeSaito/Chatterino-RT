@@ -396,20 +396,6 @@ body,
   white-space: nowrap;
 }
 
-.channel-item::after {
-  content: "";
-  position: absolute;
-  inset-inline: 8px;
-  bottom: 0;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--c-accent);
-  transform: scaleX(0);
-  transform-origin: center bottom;
-  transition: transform var(--transition-fast);
-  pointer-events: none;
-}
-
 .channel-item:hover:not(:disabled) {
   background: transparent;
   color: var(--c-window-text);
@@ -419,10 +405,6 @@ body,
   background: transparent;
   color: var(--c-window-text);
   font-weight: 650;
-}
-
-.channel-item.is-active::after {
-  transform: scaleX(1);
 }
 
 .channel-item.is-active:hover:not(:disabled) {
@@ -2845,20 +2827,10 @@ button.poll-panel-option-btn.is-selected {
 }
 
 #chat-canvas-host {
-  --chat-action-rail: 26px;
   min-width: 0;
   min-height: 0;
   height: 100%;
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--chat-action-rail);
-  grid-template-rows: minmax(0, 1fr);
-}
-
-#chat-render-host {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
 }
 
 #chat-canvas-host:focus {
@@ -3187,7 +3159,7 @@ button.poll-panel-option-btn.is-selected {
 
 #chat-jump-bottom {
   position: absolute;
-  right: calc(var(--chat-action-rail) + var(--space-2));
+  right: var(--space-2);
   bottom: var(--space-2);
   z-index: 2;
   margin: 0;
@@ -3235,44 +3207,25 @@ button.poll-panel-option-btn.is-selected {
   display: none;
 }
 
-#chat-quick-actions {
-  --action-size: 22px;
-  --action-height: calc(3 * var(--action-size) + 2px);
-  --action-top: clamp(
-    0px,
-    calc(var(--action-row-top, 0px) - var(--action-height) + var(--action-size)),
-    calc(var(--action-host-height, 100vh) - var(--action-height))
-  );
+#chat-actions-layer {
   position: absolute;
   z-index: 2;
-  top: var(--action-top);
-  inset-inline-end: 0;
-  width: var(--chat-action-rail);
-  max-height: 100%;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-block: 1px;
-  padding-inline-start: 2px;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: var(--c-surface-1);
-}
-
-#chat-quick-actions:has(#chat-qa-reply[hidden]) {
-  --action-height: calc(2 * var(--action-size) + 2px);
-}
-
-#chat-quick-actions::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 0;
-  top: clamp(0px, calc(var(--action-row-top, 0px) - var(--action-top) + 2px), calc(100% - 10px));
-  width: 2px;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--c-accent);
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
+}
+
+#chat-quick-actions {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--c-surface-2) 38%, var(--c-split-bg));
+  border-bottom: 1px solid var(--c-border);
+  pointer-events: auto;
 }
 
 #chat-quick-actions[hidden] {
@@ -3281,8 +3234,8 @@ button.poll-panel-option-btn.is-selected {
 
 #chat-quick-actions .btn-icon {
   flex: none;
-  width: var(--action-size);
-  height: var(--action-size);
+  width: 28px;
+  height: 24px;
 }
 
 #chat-empty {

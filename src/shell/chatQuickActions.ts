@@ -9,10 +9,9 @@ export type ChatQuickActions = {
   isHoveringBar: () => boolean;
 };
 
-/** Actions docked beside the hovered message. */
+/** DOM buttons occupy the footer reserved in the Pixi message stack. */
 export function bindChatQuickActions(opts: {
   host: HTMLElement;
-  renderHost: HTMLElement;
   ring: MessageRing;
   bar: HTMLElement;
   replyBtn: HTMLButtonElement;
@@ -22,7 +21,7 @@ export function bindChatQuickActions(opts: {
   onCopy: (text: string) => void;
   onMore: (ctx: SlotContext) => void;
 }): ChatQuickActions {
-  const { host, renderHost, ring, bar, replyBtn, copyBtn, moreBtn } = opts;
+  const { host, ring, bar, replyBtn, copyBtn, moreBtn } = opts;
   let hover: {
     msgId: string;
     login: string;
@@ -30,6 +29,8 @@ export function bindChatQuickActions(opts: {
     canReply: boolean;
   } | null = null;
   let overBar = false;
+  let opening = false;
+  let height = 0;
   let hoverRaf = 0;
   let pointerX = 0;
   let pointerY = 0;
@@ -47,41 +48,60 @@ export function bindChatQuickActions(opts: {
 
   const hide = (): void => {
     cancelPaint();
+    const hadMessage = hover !== null;
     hover = null;
     overBar = false;
     bar.hidden = true;
+    if (hadMessage) {
+      ring.setMessageActions(null);
+    }
+  };
+
+  const syncOnScroll = (): void => {
+    if (!hover || opening) {
+      return;
+    }
+    const top = ring.messageActionsTop(hover.msgId);
+    if (top === null || top < 0 || top + height > host.clientHeight + 0.5) {
+      hide();
+      return;
+    }
+    bar.style.transform = `translateY(${top}px)`;
   };
 
   const paint = (): void => {
     if (overBar) {
       return;
     }
-    const rect = renderHost.getBoundingClientRect();
-    if (pointerY < rect.top || pointerY >= rect.bottom || pointerX < rect.left) {
+    const rect = host.getBoundingClientRect();
+    if (pointerY < rect.top || pointerY >= rect.bottom || pointerX < rect.left || pointerX >= rect.right) {
       hide();
-      return;
-    }
-    // Keep the message selected while the pointer crosses the rail to the buttons.
-    if (pointerX >= rect.right) {
       return;
     }
     const anchor = ring.messageAnchorAt(pointerX, pointerY);
-    if (!anchor) {
+    if (!anchor || anchor.bottom > rect.bottom + 0.5) {
       hide();
       return;
     }
+    const sameMessage = hover?.msgId === anchor.msgId;
     hover = {
       msgId: anchor.msgId,
       login: anchor.login,
       text: anchor.text,
       canReply: anchor.canReply,
     };
-    if (replyBtn.hidden === anchor.canReply) {
-      replyBtn.hidden = !anchor.canReply;
+    replyBtn.hidden = !anchor.canReply;
+    if (!sameMessage) {
+      opening = true;
+      bar.hidden = false;
+      height = bar.offsetHeight;
+      try {
+        ring.setMessageActions(anchor.msgId, height);
+      } finally {
+        opening = false;
+      }
+      syncOnScroll();
     }
-    bar.style.setProperty("--action-row-top", `${anchor.top - rect.top}px`);
-    bar.style.setProperty("--action-host-height", `${rect.height}px`);
-    bar.hidden = false;
   };
 
   const onHostMove = (ev: PointerEvent): void => {
@@ -144,6 +164,7 @@ export function bindChatQuickActions(opts: {
 
   host.addEventListener("pointermove", onHostMove);
   host.addEventListener("pointerleave", onHostLeave);
+  host.addEventListener("wheel", onHostLeave, { capture: true, passive: true });
   bar.addEventListener("pointerenter", onBarEnter);
   bar.addEventListener("pointerleave", onBarLeave);
   replyBtn.addEventListener("click", onReplyClick);
@@ -153,20 +174,12 @@ export function bindChatQuickActions(opts: {
   return {
     hide,
     isHoveringBar: () => overBar,
-    syncOnScroll: () => {
-      if (bar.hidden || !hover) {
-        return;
-      }
-      if (overBar || pointerX >= renderHost.getBoundingClientRect().right) {
-        onHostLeave();
-        return;
-      }
-      paint();
-    },
+    syncOnScroll,
     dispose: () => {
       hide();
       host.removeEventListener("pointermove", onHostMove);
       host.removeEventListener("pointerleave", onHostLeave);
+      host.removeEventListener("wheel", onHostLeave, true);
       bar.removeEventListener("pointerenter", onBarEnter);
       bar.removeEventListener("pointerleave", onBarLeave);
       replyBtn.removeEventListener("click", onReplyClick);

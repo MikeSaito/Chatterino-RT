@@ -213,7 +213,6 @@ async function boot(): Promise<void> {
   const pane = document.querySelector<HTMLElement>("#chat-pane");
   const chatColumn = document.querySelector<HTMLElement>("#chat-column");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
-  const renderHost = document.querySelector<HTMLElement>("#chat-render-host");
   const scrollTrack = document.querySelector<HTMLElement>("#chat-scroll");
   const scrollThumb = document.querySelector<HTMLElement>("#chat-scroll-thumb");
   const jumpBottom = document.querySelector<HTMLButtonElement>("#chat-jump-bottom");
@@ -293,7 +292,6 @@ async function boot(): Promise<void> {
     !pane ||
     !chatColumn ||
     !canvasHost ||
-    !renderHost ||
     !scrollTrack ||
     !scrollThumb ||
     !jumpBottom ||
@@ -864,7 +862,7 @@ async function boot(): Promise<void> {
 
   let app;
   try {
-    app = await createChatApp(canvas, renderHost);
+    app = await createChatApp(canvas, canvasHost);
   } catch (err) {
     teardownChat?.();
     teardownChat = null;
@@ -877,8 +875,8 @@ async function boot(): Promise<void> {
   const textures = new TextureLru(
     textureLruLimitForDisplay({
       dpr: typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
-      width: renderHost.clientWidth || window.innerWidth || 1920,
-      height: renderHost.clientHeight || window.innerHeight || 1080,
+      width: canvasHost.clientWidth || window.innerWidth || 1920,
+      height: canvasHost.clientHeight || window.innerHeight || 1080,
     }),
   );
   let bootKnobs: AppSettings["knobs"] = {};
@@ -1790,7 +1788,6 @@ async function boot(): Promise<void> {
   });
   quickActionsCtl = bindChatQuickActions({
     host: canvasHost,
-    renderHost,
     ring,
     bar: chatQuickBar,
     replyBtn: chatQaReply,
