@@ -152,6 +152,7 @@ export const ru: Record<MessageKey, string> = {
   "error.automod.invalidAction": "Некорректное действие AutoMod",
   "error.warn.scope":
     "Нет scope варна (moderator:manage:warnings) — войдите снова",
+  "chat.qa.group": "Действия с сообщением",
   "chat.qa.reply": "Ответить",
   "chat.qa.copy": "Копировать",
   "chat.qa.more": "Ещё",

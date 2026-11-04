@@ -5,13 +5,14 @@ import { t } from "../i18n";
 export type ChatQuickActions = {
   hide: () => void;
   dispose: () => void;
-  syncOnScroll: (pointerY: number) => void;
+  syncOnScroll: () => void;
   isHoveringBar: () => boolean;
 };
 
-/** Hover toolbar: reply / copy / more over chat rows. */
+/** Actions docked beside the hovered message. */
 export function bindChatQuickActions(opts: {
   host: HTMLElement;
+  renderHost: HTMLElement;
   ring: MessageRing;
   bar: HTMLElement;
   replyBtn: HTMLButtonElement;
@@ -21,57 +22,50 @@ export function bindChatQuickActions(opts: {
   onCopy: (text: string) => void;
   onMore: (ctx: SlotContext) => void;
 }): ChatQuickActions {
-  const { host, ring, bar, replyBtn, copyBtn, moreBtn } = opts;
+  const { host, renderHost, ring, bar, replyBtn, copyBtn, moreBtn } = opts;
   let hover: {
     msgId: string;
     login: string;
     text: string;
     canReply: boolean;
   } | null = null;
-  let lastY = 0;
-  let lastX = 0;
-  let pinned = false;
   let overBar = false;
+  let hoverRaf = 0;
+  let pointerX = 0;
+  let pointerY = 0;
 
   setButtonIcon(replyBtn, "reply", { size: 14, label: t("chat.qa.reply") });
   setButtonIcon(copyBtn, "copy", { size: 14, label: t("chat.qa.copy") });
   setButtonIcon(moreBtn, "more", { size: 14, label: t("chat.qa.more") });
 
-  let hideTimer = 0;
-
-  const hide = (): void => {
+  const cancelPaint = (): void => {
     if (hoverRaf !== 0) {
       cancelAnimationFrame(hoverRaf);
       hoverRaf = 0;
     }
-    if (pinned) {
-      return;
-    }
-    hover = null;
-    bar.classList.remove("is-visible");
-    window.clearTimeout(hideTimer);
-    const reduced =
-      typeof matchMedia === "function" &&
-      matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) {
-      bar.hidden = true;
-      return;
-    }
-    hideTimer = window.setTimeout(() => {
-      hideTimer = 0;
-      if (!bar.classList.contains("is-visible")) {
-        bar.hidden = true;
-      }
-    }, 100);
   };
 
-  const paint = (clientX: number, clientY: number): void => {
-    lastX = clientX;
-    lastY = clientY;
-    if (pinned) {
+  const hide = (): void => {
+    cancelPaint();
+    hover = null;
+    overBar = false;
+    bar.hidden = true;
+  };
+
+  const paint = (): void => {
+    if (overBar) {
       return;
     }
-    const anchor = ring.messageAnchorAt(clientX, clientY);
+    const rect = renderHost.getBoundingClientRect();
+    if (pointerY < rect.top || pointerY >= rect.bottom || pointerX < rect.left) {
+      hide();
+      return;
+    }
+    // Keep the message selected while the pointer crosses the rail to the buttons.
+    if (pointerX >= rect.right) {
+      return;
+    }
+    const anchor = ring.messageAnchorAt(pointerX, pointerY);
     if (!anchor) {
       hide();
       return;
@@ -82,59 +76,38 @@ export function bindChatQuickActions(opts: {
       text: anchor.text,
       canReply: anchor.canReply,
     };
-    replyBtn.hidden = !anchor.canReply;
-    const hostRect = host.getBoundingClientRect();
-    window.clearTimeout(hideTimer);
-    hideTimer = 0;
+    if (replyBtn.hidden === anchor.canReply) {
+      replyBtn.hidden = !anchor.canReply;
+    }
+    bar.style.setProperty("--action-row-top", `${anchor.top - rect.top}px`);
+    bar.style.setProperty("--action-host-height", `${rect.height}px`);
     bar.hidden = false;
-    bar.style.top = `${Math.max(4, anchor.top - hostRect.top)}px`;
-    bar.style.right = "28px";
-    bar.classList.add("is-visible");
   };
 
-  let hoverRaf = 0;
-  let pendingX = 0;
-  let pendingY = 0;
-
   const onHostMove = (ev: PointerEvent): void => {
-    pendingX = ev.clientX;
-    pendingY = ev.clientY;
-    if (hoverRaf !== 0) {
+    pointerX = ev.clientX;
+    pointerY = ev.clientY;
+    if (overBar || hoverRaf !== 0) {
       return;
     }
     hoverRaf = requestAnimationFrame(() => {
       hoverRaf = 0;
-      paint(pendingX, pendingY);
+      paint();
     });
   };
 
-  const onHostLeave = (ev: PointerEvent): void => {
-    if (hoverRaf !== 0) {
-      cancelAnimationFrame(hoverRaf);
-      hoverRaf = 0;
-    }
-    const related = ev.relatedTarget;
-    if (related instanceof Node && bar.contains(related)) {
-      return;
-    }
+  const onHostLeave = (): void => {
     hide();
-    if (!overBar) {
-      ring.clearHover();
-    }
+    ring.clearHover();
   };
 
   const onBarEnter = (): void => {
     overBar = true;
+    cancelPaint();
   };
 
-  const onBarLeave = (ev: PointerEvent): void => {
+  const onBarLeave = (): void => {
     overBar = false;
-    const related = ev.relatedTarget;
-    if (related instanceof Node && host.contains(related)) {
-      return;
-    }
-    hide();
-    ring.clearHover();
   };
 
   const onReplyClick = (ev: MouseEvent): void => {
@@ -160,14 +133,13 @@ export function bindChatQuickActions(opts: {
     if (!hover) {
       return;
     }
-    const ctx = ring.contextForMsgId(hover.msgId, lastX, lastY);
+    const rect = moreBtn.getBoundingClientRect();
+    const ctx = ring.contextForMsgId(hover.msgId, rect.left, rect.bottom);
     if (!ctx) {
       return;
     }
-    pinned = true;
-    opts.onMore(ctx);
-    pinned = false;
     hide();
+    opts.onMore(ctx);
   };
 
   host.addEventListener("pointermove", onHostMove);
@@ -179,27 +151,20 @@ export function bindChatQuickActions(opts: {
   moreBtn.addEventListener("click", onMoreClick);
 
   return {
-    hide: () => {
-      window.clearTimeout(hideTimer);
-      hideTimer = 0;
-      pinned = false;
-      overBar = false;
-      hover = null;
-      bar.hidden = true;
-      bar.classList.remove("is-visible");
-    },
+    hide,
     isHoveringBar: () => overBar,
-    syncOnScroll: (pointerY: number) => {
+    syncOnScroll: () => {
       if (bar.hidden || !hover) {
         return;
       }
-      paint(lastX, pointerY);
+      if (overBar || pointerX >= renderHost.getBoundingClientRect().right) {
+        onHostLeave();
+        return;
+      }
+      paint();
     },
     dispose: () => {
-      if (hoverRaf !== 0) {
-        cancelAnimationFrame(hoverRaf);
-        hoverRaf = 0;
-      }
+      hide();
       host.removeEventListener("pointermove", onHostMove);
       host.removeEventListener("pointerleave", onHostLeave);
       bar.removeEventListener("pointerenter", onBarEnter);

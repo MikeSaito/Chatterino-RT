@@ -213,6 +213,7 @@ async function boot(): Promise<void> {
   const pane = document.querySelector<HTMLElement>("#chat-pane");
   const chatColumn = document.querySelector<HTMLElement>("#chat-column");
   const canvasHost = document.querySelector<HTMLElement>("#chat-canvas-host");
+  const renderHost = document.querySelector<HTMLElement>("#chat-render-host");
   const scrollTrack = document.querySelector<HTMLElement>("#chat-scroll");
   const scrollThumb = document.querySelector<HTMLElement>("#chat-scroll-thumb");
   const jumpBottom = document.querySelector<HTMLButtonElement>("#chat-jump-bottom");
@@ -292,6 +293,7 @@ async function boot(): Promise<void> {
     !pane ||
     !chatColumn ||
     !canvasHost ||
+    !renderHost ||
     !scrollTrack ||
     !scrollThumb ||
     !jumpBottom ||
@@ -862,7 +864,7 @@ async function boot(): Promise<void> {
 
   let app;
   try {
-    app = await createChatApp(canvas, canvasHost);
+    app = await createChatApp(canvas, renderHost);
   } catch (err) {
     teardownChat?.();
     teardownChat = null;
@@ -875,8 +877,8 @@ async function boot(): Promise<void> {
   const textures = new TextureLru(
     textureLruLimitForDisplay({
       dpr: typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
-      width: canvasHost.clientWidth || window.innerWidth || 1920,
-      height: canvasHost.clientHeight || window.innerHeight || 1080,
+      width: renderHost.clientWidth || window.innerWidth || 1920,
+      height: renderHost.clientHeight || window.innerHeight || 1080,
     }),
   );
   let bootKnobs: AppSettings["knobs"] = {};
@@ -1051,7 +1053,6 @@ async function boot(): Promise<void> {
   let hideUsercardAvatars = true;
   let hideUserNotes = true;
   let userCard: ReturnType<typeof bindUserCard> | null = null;
-  let lastPointerY = 0;
   let quickActionsCtl: ReturnType<typeof bindChatQuickActions> | null = null;
   const chatEmptyEl = chatEmpty;
   const chatEmptyTitleEl = chatEmptyEl.querySelector<HTMLElement>(".chat-empty-title");
@@ -1107,7 +1108,7 @@ async function boot(): Promise<void> {
     onScroll: (state) => {
       chatA11y.onScroll(state);
       emoteTooltipCtl?.refresh();
-      quickActionsCtl?.syncOnScroll(lastPointerY);
+      quickActionsCtl?.syncOnScroll();
       syncChatEmpty();
       if (!workspaceMounting && !restoringScroll && composerChannel && !closedWorkspaceChannels.has(composerChannel) && scrollSaveTimer === undefined) {
         scrollSaveTimer = window.setTimeout(() => {
@@ -1787,11 +1788,9 @@ async function boot(): Promise<void> {
     userCard?.syncNotes();
     repaintChannelTitle();
   });
-  canvasHost.addEventListener("pointermove", (ev) => {
-    lastPointerY = ev.clientY;
-  });
   quickActionsCtl = bindChatQuickActions({
     host: canvasHost,
+    renderHost,
     ring,
     bar: chatQuickBar,
     replyBtn: chatQaReply,

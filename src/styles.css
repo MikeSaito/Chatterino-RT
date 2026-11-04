@@ -399,10 +399,9 @@ body,
 .channel-item::after {
   content: "";
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 1px;
-  height: 2px;
+  inset-inline: 8px;
+  bottom: 0;
+  height: 3px;
   border-radius: 2px;
   background: var(--c-accent);
   transform: scaleX(0);
@@ -2846,10 +2845,20 @@ button.poll-panel-option-btn.is-selected {
 }
 
 #chat-canvas-host {
+  --chat-action-rail: 26px;
   min-width: 0;
   min-height: 0;
   height: 100%;
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--chat-action-rail);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+#chat-render-host {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 #chat-canvas-host:focus {
@@ -3178,7 +3187,7 @@ button.poll-panel-option-btn.is-selected {
 
 #chat-jump-bottom {
   position: absolute;
-  right: var(--space-2);
+  right: calc(var(--chat-action-rail) + var(--space-2));
   bottom: var(--space-2);
   z-index: 2;
   margin: 0;
@@ -3227,24 +3236,42 @@ button.poll-panel-option-btn.is-selected {
 }
 
 #chat-quick-actions {
+  --action-size: 22px;
+  --action-height: calc(3 * var(--action-size) + 2px);
+  --action-top: clamp(
+    0px,
+    calc(var(--action-row-top, 0px) - var(--action-height) + var(--action-size)),
+    calc(var(--action-host-height, 100vh) - var(--action-height))
+  );
   position: absolute;
   z-index: 2;
+  top: var(--action-top);
+  inset-inline-end: 0;
+  width: var(--chat-action-rail);
+  max-height: 100%;
+  overflow: auto;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius-md);
+  padding-block: 1px;
+  padding-inline-start: 2px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--c-surface-1);
-  border: 1px solid var(--c-border);
-  box-shadow: var(--shadow-1);
-  opacity: 0;
-  transition: opacity 100ms ease;
-  pointer-events: none;
 }
 
-#chat-quick-actions.is-visible {
-  opacity: 1;
-  /* Фон панели не перехватывает клики по ссылкам под ней; только кнопки. */
+#chat-quick-actions:has(#chat-qa-reply[hidden]) {
+  --action-height: calc(2 * var(--action-size) + 2px);
+}
+
+#chat-quick-actions::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: clamp(0px, calc(var(--action-row-top, 0px) - var(--action-top) + 2px), calc(100% - 10px));
+  width: 2px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--c-accent);
   pointer-events: none;
 }
 
@@ -3253,13 +3280,9 @@ button.poll-panel-option-btn.is-selected {
 }
 
 #chat-quick-actions .btn-icon {
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-}
-
-#chat-quick-actions.is-visible .btn-icon {
-  pointer-events: auto;
+  flex: none;
+  width: var(--action-size);
+  height: var(--action-size);
 }
 
 #chat-empty {
@@ -3318,8 +3341,7 @@ button.poll-panel-option-btn.is-selected {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #chat-jump-bottom,
-  #chat-quick-actions {
+  #chat-jump-bottom {
     transition: none;
   }
 }

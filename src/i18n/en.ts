@@ -146,6 +146,7 @@ export const en = {
   "error.automod.invalidAction": "Invalid AutoMod action",
   "error.warn.scope":
     "Missing warn scope (moderator:manage:warnings) — re-login with your account",
+  "chat.qa.group": "Message actions",
   "chat.qa.reply": "Reply",
   "chat.qa.copy": "Copy",
   "chat.qa.more": "More",
