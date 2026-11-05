@@ -78,6 +78,18 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
     ring.configureChatFont({ ...font, family: font.family === "monospace" ? "serif" : "monospace" });
     await settle();
     check((counts.get(slot.body) ?? 0) > 0 && (counts.get(clip.title) ?? 0) > 0, "replaced font atlases rebuild unchanged message and clip text");
+    ring.applySnapshot(Array.from({ length: owner.slots.length }, (_, i) => ({ ...event, id: `reuse-row-${i}`, text: `Message ${i}` })));
+    ring.setDesired(0, false);
+    await settle();
+    const recycled = owner.slots.find((row) => row.msgId === "reuse-row-0")!;
+    check(recycled.nick.text === "Viewer:", "oldest row has rendered nickname geometry before reuse");
+    ring.goToBottom();
+    await settle();
+    counts.clear();
+    ring.pushMany([{ ...event, id: "reuse-row-next", text: "Recycled body" }]);
+    await settle();
+    check(owner.slots.find((row) => row.msgId === "reuse-row-next")?.nick === recycled.nick, "live append reuses the oldest row");
+    check(!counts.get(recycled.nick), "recycling a row for the same author retains its unchanged nickname geometry");
     const notice = { kind: "notice" as const, id: "render-cloud", timestampMs: 1700000000000, text: "System message" };
     ring.applySnapshot([notice]);
     await settle();

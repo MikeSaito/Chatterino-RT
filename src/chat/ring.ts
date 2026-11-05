@@ -3087,7 +3087,6 @@ export class MessageRing {
     const drawn = this.line(event);
     slot.time.text = drawn.time;
     slot.nickRaw = drawn.nick;
-    slot.nick.text = drawn.nick;
     slot.nick.tint = drawn.nickColor;
     if (event.kind === "privmsg") {
       slot.useNickStyle = true;
