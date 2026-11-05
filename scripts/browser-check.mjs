@@ -105,6 +105,8 @@ try {
   }
   const viewportRendering = await evaluate("window.__fixture.viewportRendering()");
   console.log("UI viewport rendering:", viewportRendering);
+  await evaluate("window.__fixture.viewportTextureSafety()");
+  console.log("UI culled texture recovery passed");
   assert.deepEqual(failures, [], "no unhandled browser exceptions");
   const out = join(root, "artifacts"); mkdirSync(out, { recursive: true });
   if (!uiOnly) writeFileSync(join(out, "browser-performance.json"), JSON.stringify({ environment: "Chromium headless, SwiftShader software GPU, 1280×800, DPR 1, synthetic text messages, mocked Tauri transport", smoke, restored, viewportRendering, loads }, null, 2));

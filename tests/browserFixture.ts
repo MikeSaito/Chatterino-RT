@@ -16,6 +16,7 @@ const fixtureWindow = window as Window & {
     chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
     viewportRendering: () => { history: number; top: number; bottom: number };
+    viewportTextureSafety: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -279,6 +280,32 @@ fixtureWindow.__fixture = {
     check(!first.root.renderable && last.root.renderable, "returning to the bottom renders new rows");
     check(ring.contextForMsgId(first.msgId, 0, 0)?.msgId === first.msgId, "history is kept after scrolling");
     return { history: history.length, top, bottom };
+  },
+  async viewportTextureSafety() {
+    const { Sprite, Texture } = await import("pixi.js");
+    const ring = fixtureWindow.__crt!.ring;
+    const { slots } = ring as unknown as {
+      slots: { root: import("pixi.js").Container }[];
+    };
+    const history = slots.filter((slot) => slot.root.visible).sort((a, b) => a.root.y - b.root.y);
+    const first = history[0];
+    check(first && history.length > 100, "texture check requires offscreen history");
+    ring.goToBottom();
+    check(!first.root.renderable, "old row is culled before texture invalidation");
+    const texture = new Texture({ source: Texture.WHITE.source });
+    const sprite = new Sprite(texture);
+    first.root.addChild(sprite);
+    // Simulate a cache eviction while the owning row is outside the viewport.
+    texture.destroy(false);
+    try {
+      ring.setDesired(0, false);
+      await until(() => sprite.texture === Texture.EMPTY);
+      check(!sprite.visible, "dead texture is detached before the old row is rendered");
+    } finally {
+      first.root.removeChild(sprite);
+      sprite.destroy();
+      ring.goToBottom();
+    }
   },
   async load(rate, seconds, scroll) {
     const trace = fixtureWindow.__crt!.performance;

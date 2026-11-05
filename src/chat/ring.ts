@@ -2592,7 +2592,7 @@ export class MessageRing {
     }
   }
 
-  /** Сразу перед collectRenderables: все Sprite на stage (Pixi не cull off-screen). */
+  /** Culled rows are checked again before they reenter the rendered set. */
   private sanitizeBeforeRender(): void {
     if (!this.ready) {
       return;
@@ -2602,11 +2602,11 @@ export class MessageRing {
       return;
     }
     this.lastSanitizeTickerTime = tickerTime;
-    sanitizeStageSprites(this.app.stage);
     for (const slot of this.slots) {
-      if (!slot.msgId || !slot.root.visible) {
+      if (!slot.msgId || !slot.root.visible || !slot.root.renderable) {
         continue;
       }
+      sanitizeStageSprites(slot.root);
       if (
         slot.nickPaintSpr.visible &&
         !isRenderableTexture(slot.nickPaintSpr.texture)
@@ -5023,8 +5023,11 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      slot.root.renderable =
-        slot.root.visible && this.slotYIntersects(slot, top, bottom);
+      const renderable = slot.root.visible && this.slotYIntersects(slot, top, bottom);
+      if (renderable && !slot.root.renderable) {
+        this.lastSanitizeTickerTime = Number.NaN;
+      }
+      slot.root.renderable = renderable;
     }
   }
 
