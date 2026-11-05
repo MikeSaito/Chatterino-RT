@@ -145,7 +145,7 @@ export class TextureLru {
   private readonly frameSets = new Map<string, EmoteFrameSet>();
   private readonly refs = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<Texture | null>>();
-  private readonly generation = new Map<string, number>();
+  private readonly generation = new Map<string, symbol>();
   private readonly maxEntries: number;
   private invalidateListener: TextureInvalidateListener | null = null;
 
@@ -250,7 +250,8 @@ export class TextureLru {
     ) {
       return pending;
     }
-    const token = (this.generation.get(id) ?? 0) + 1;
+    // Identity cannot repeat after clear, eviction or a failed load.
+    const token = Symbol();
     this.generation.set(id, token);
     this.urls.set(id, resolved);
     this.modes.set(id, animate);
@@ -307,6 +308,7 @@ export class TextureLru {
         if (this.generation.get(id) === token) {
           this.urls.delete(id);
           this.modes.delete(id);
+          this.generation.delete(id);
         }
         return null;
       });
@@ -319,6 +321,8 @@ export class TextureLru {
       this.dropEntry(id);
     }
     this.inflight.clear();
+    this.urls.clear();
+    this.modes.clear();
     this.generation.clear();
     this.refs.clear();
   }

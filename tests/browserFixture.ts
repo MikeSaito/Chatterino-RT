@@ -8,6 +8,7 @@ import type { ChatPerformance } from "../src/chat/performance";
 import type { Sprite } from "pixi.js";
 import type { SendResult } from "../src/shell/sendStatus";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
+import { checkTextureLifecycle } from "./browserTextureLifecycle";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -17,6 +18,7 @@ const fixtureWindow = window as Window & {
     smoke: () => Promise<string[]>;
     viewportRendering: () => { history: number; top: number; bottom: number };
     viewportTextureSafety: () => Promise<void>;
+    textureLifecycle: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -114,6 +116,7 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  textureLifecycle: () => checkTextureLifecycle((response) => { gifResponse = response; }),
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
   async chatGifs() {
     const host = window as Window & { isTauri?: boolean };
