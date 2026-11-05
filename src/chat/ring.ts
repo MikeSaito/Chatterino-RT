@@ -365,6 +365,7 @@ export class MessageRing {
   private readonly emoteTicker = new EmoteFrameTicker();
   private readonly scroll = new ScrollModel();
   private readonly laidBuf: LaidSlot[] = [];
+  private readonly measureStyles = new Map<string, TextStyle>();
   private occupied = 0;
   private head = 0;
   private highlightMarksGen = 0;
@@ -1932,11 +1933,15 @@ export class MessageRing {
       return 0;
     }
     try {
-      const style = new TextStyle({
-        fontFamily,
-        fontSize,
-        fill: "#ffffff",
-      });
+      const key = `${fontFamily}:${fontSize}`;
+      let style = this.measureStyles.get(key);
+      if (!style) {
+        style = new TextStyle({ fontFamily, fontSize, fill: "#ffffff" });
+        this.measureStyles.set(key, style);
+        if (this.measureStyles.size > 16) {
+          this.measureStyles.delete(this.measureStyles.keys().next().value!);
+        }
+      }
       const m = BitmapFontManager.measureText(text, style, false);
       const w = m.width * m.scale;
       if (w > 0) {
@@ -2065,6 +2070,7 @@ export class MessageRing {
   }
 
   private reinstallChatFont(): void {
+    this.measureStyles.clear();
     const atlasSize = atlasFontSize(this.chatFontSize);
     replaceBitmapFont("ChatFont", {
       name: "ChatFont",
@@ -2085,6 +2091,7 @@ export class MessageRing {
   }
 
   private reinstallNickFont(): void {
+    this.measureStyles.clear();
     const atlasSize = atlasFontSize(this.chatFontSize);
     replaceBitmapFont("ChatNickFont", {
       name: "ChatNickFont",
@@ -2621,6 +2628,7 @@ export class MessageRing {
 
   destroy(): void {
     this.ready = false;
+    this.measureStyles.clear();
     this.textures.setInvalidateListener(null);
     if (this.renderPrerenderHook) {
       this.app.renderer.runners.prerender.remove(this.renderPrerenderHook);
