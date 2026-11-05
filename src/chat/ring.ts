@@ -682,7 +682,7 @@ export class MessageRing {
     }
   }
 
-  private visibleBadges(slot: Slot): Badge[] {
+  private visibleBadges(slot: MessageRow): Badge[] {
     return filterVisibleBadges(
       slot.badgesRaw,
       this.badgeVisibility,
@@ -908,7 +908,8 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      slot.root.visible = !this.isSlotHiddenByPrivacy(slot);
+      slot.visible = !this.isSlotHiddenByPrivacy(slot);
+      slot.root.visible = slot.visible;
     }
   }
 
@@ -919,13 +920,14 @@ export class MessageRing {
     let shown = 0;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.root.visible) {
+      if (!slot.visible) {
         continue;
       }
       if (shown > 0) {
         y += gapPx;
       }
       slot.startRow = shown;
+      slot.y = y;
       slot.root.y = y;
       y += this.slotPixelHeight(slot);
       shown += 1;
@@ -1160,7 +1162,7 @@ export class MessageRing {
       if (slot.useNickStyle) {
         slot.nickRaw = this.paintedNick(slot.nickLogin, slot.nickDisplay);
         slot.nick.text = slot.nickRaw;
-        slot.nick.tint = resolveNickColor({
+        slot.nick.tint = slot.nickTint = resolveNickColor({
           color: slot.nickColorRaw,
           userId: slot.nickUserId,
           colorize: this.colorizeNicknames,
@@ -1443,14 +1445,14 @@ export class MessageRing {
       slot.bodyCont.style.fill = this.themeFills.body;
       slot.nick.style.fill = 0xffffff;
       if (slot.useNickStyle) {
-        slot.nick.tint = resolveNickColor({
+        slot.nick.tint = slot.nickTint = resolveNickColor({
           color: slot.nickColorRaw,
           userId: slot.nickUserId,
           colorize: this.colorizeNicknames,
           fallback: this.themeFills.nickFallback,
         });
       } else if (!slot.msgId) {
-        slot.nick.tint = this.themeFills.nickFallback;
+        slot.nick.tint = slot.nickTint = this.themeFills.nickFallback;
       }
     }
     this.markLayoutFullPaint();
@@ -1563,7 +1565,8 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(occStart + i) % this.poolSize];
       if (slot.msgId && slot.timestampMs) {
-        slot.time.text = formatTime(slot.timestampMs, this.timestampFormat);
+        slot.timeText = formatTime(slot.timestampMs, this.timestampFormat);
+        slot.time.text = slot.timeText;
       }
       for (const spr of slot.badges) {
         spr.y = this.lineMediaY(0, this.badgeSize);
@@ -1645,7 +1648,7 @@ export class MessageRing {
     return this.wrapLineY(contentY, line, slot) + Math.max(0, rowH - mediaH);
   }
 
-  private slotBodyPixelHeight(slot: Slot): number {
+  private slotBodyPixelHeight(slot: MessageRow): number {
     if (slot.wrapLineHeights.length > 0) {
       return slot.wrapLineHeights.reduce((a, b) => a + b, 0);
     }
@@ -1675,7 +1678,7 @@ export class MessageRing {
     return bodyPix;
   }
 
-  private slotPixelHeight(slot: Slot): number {
+  private slotPixelHeight(slot: MessageRow): number {
     return (
       slot.replyRows * this.lineHeight +
       this.slotBodyPixelHeight(slot) +
@@ -2225,7 +2228,7 @@ export class MessageRing {
     }
     this.lastSanitizeTickerTime = tickerTime;
     for (const slot of this.slots) {
-      if (!slot.msgId || !slot.root.visible || !slot.root.renderable) {
+      if (!slot.msgId || !slot.visible || !slot.root.renderable) {
         continue;
       }
       sanitizeStageSprites(slot.root);
@@ -2613,6 +2616,7 @@ export class MessageRing {
 
   private clearSlot(slot: Slot): void {
     this.releaseOverlayTexts(slot);
+    slot.visible = false;
     slot.root.visible = false;
     this.releaseSlotClipCard(slot);
     for (const spr of slot.emotes) {
@@ -2646,6 +2650,16 @@ export class MessageRing {
     this.resizeMediaSprites(slot, slot.modIcons, 0);
     slot.badgesRaw = [];
     slot.root.cursor = "default";
+    slot.timeText = "";
+    slot.nickText = "";
+    slot.nickTint = 0xffffff;
+    slot.y = 0;
+    slot.gutterWidth = 0;
+    slot.timeWidth = 0;
+    slot.nickX = 0;
+    slot.bodyY = 0;
+    slot.lineWidth = 0;
+    slot.firstLineWidth = 0;
     slot.time.text = "";
     slot.nick.text = "";
     slot.body.text = "";
@@ -2722,6 +2736,7 @@ export class MessageRing {
       slot.highlightPainted = false;
     }
     this.clearSystemCloud(slot);
+    slot.systemCloudBounds = null;
     this.clearSlotLinks(slot);
     this.clearDisabledBackground(slot);
     slot.modBtnHits = [];
@@ -2732,6 +2747,7 @@ export class MessageRing {
 
   private write(slot: Slot, event: ChatEvent): void {
     this.releaseOverlayTexts(slot);
+    slot.visible = true;
     slot.root.visible = true;
     slot.disabled =
       (event.kind === "privmsg" && !!event.disabled) ||
@@ -2768,9 +2784,10 @@ export class MessageRing {
       }
     }
     const drawn = this.line(event);
-    slot.time.text = drawn.time;
+    slot.timeText = drawn.time;
+    slot.time.text = slot.timeText;
     slot.nickRaw = drawn.nick;
-    slot.nick.tint = drawn.nickColor;
+    slot.nick.tint = slot.nickTint = drawn.nickColor;
     if (event.kind === "privmsg") {
       slot.useNickStyle = true;
       slot.nickUserId = event.userId;
@@ -2783,7 +2800,7 @@ export class MessageRing {
         : drawn.nickColor;
       this.nickColorCache.set(event.login, cacheColor);
       if (!event.paint) {
-        slot.nick.tint = drawn.nickColor;
+        slot.nick.tint = slot.nickTint = drawn.nickColor;
       }
     } else if (event.kind === "automodHeld") {
       slot.useNickStyle = true;
@@ -3211,7 +3228,7 @@ export class MessageRing {
     }
   }
 
-  private isSystemCloud(slot: Slot): boolean {
+  private isSystemCloud(slot: MessageRow): boolean {
     return (
       slot.system &&
       !slot.useNickStyle &&
@@ -3222,7 +3239,7 @@ export class MessageRing {
 
   /** Width of one wrap line in ChatFont layout px (emote holes included). */
   private measureBodyLineWidth(
-    slot: Slot,
+    slot: MessageRow,
     line: WrapLine,
     opts: WrapOptions,
     fontSize: number = this.fontSize,
@@ -3239,23 +3256,109 @@ export class MessageRing {
     return this.measureBitmapTextWidth("ChatFont", rendered, fontSize);
   }
 
-  /**
-   * Left-aligned pill for CLEARCHAT / CLEARMSG / USERNOTICE / NOTICE
-   * (Twitch web-style system “cloud”).
-   */
-  private paintSystemCloud(slot: Slot): void {
-    this.releaseSlotClipCard(slot);
-    this.resizeMediaSprites(slot, slot.modIcons, 0);
+  /** Geometry remains available when a message has no view. */
+  private measureSlot(slot: MessageRow): void {
+    if (this.isSystemCloud(slot)) {
+      this.measureSystemCloud(slot);
+      return;
+    }
+    slot.systemCloudBounds = null;
+    const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
+    slot.timeWidth = this.timestampsVisible()
+      ? this.measureBitmapTextWidth("ChatFont", formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)) + gap
+      : 0;
+    slot.gutterWidth = this.modGutterWidth(slot);
+    slot.replyRows = !this.hideReplyContext && slot.replyToLogin.length > 0 ? 1 : 0;
+    slot.bodyY = slot.replyRows * this.lineHeight;
+    const badgeN = this.visibleBadges(slot).length;
+    const badgeBand = badgeN === 0 ? 0 : badgeN * this.badgeSize + (badgeN - 1) * BADGE_GAP;
+    slot.nickX = slot.gutterWidth + slot.timeWidth + badgeBand;
+    const nickColon = slot.useNickStyle && !slot.isAction && slot.nickRaw.length > 0;
+    const nick = nickColon ? `${slot.nickRaw}:` : slot.nickRaw;
+    const maxNickPx = Math.max(8, this.app.screen.width - slot.nickX - gap - 8 - MIN_BODY_COLS_AFTER_NICK * this.charWidth);
+    slot.nickText = Math.max(this.measureBitmapTextWidth("ChatNickFont", nick), 8) > maxNickPx
+      ? this.clipNickToWidth(slot.nickRaw, maxNickPx, nickColon)
+      : nick;
+    const nickW = Math.max(this.measureBitmapTextWidth("ChatNickFont", slot.nickText), 8);
+    slot.bodyIndent = slot.nickX + nickW + gap;
+    slot.bodyContIndent = slot.gutterWidth;
+    slot.lineWidth = Math.max(1, Math.floor(this.app.screen.width - slot.bodyContIndent - 8));
+    slot.firstLineWidth = Math.max(1, Math.floor(this.app.screen.width - slot.bodyIndent - 8));
+    const opts = this.wrapOpts(slot, undefined, slot.firstLineWidth);
+    const wrapped = wrapBody(slot.bodyRaw, slot.lineWidth, slot.spansRaw, opts);
+    const maxLines = slot.collapsible && !slot.expanded ? this.collapseMessagesMinLines : 0;
+    const { lines, collapsed } = collapseWrapLines(wrapped, maxLines, slot.bodyRaw,
+      maxLines === 1 ? slot.firstLineWidth : slot.lineWidth, slot.spansRaw, opts);
+    slot.collapsed = collapsed;
+    slot.wrapLines = lines;
+    slot.clipCardRows = slot.clipCard ? clipCardRowCount(this.lineHeight) : 0;
+    const mentions = this.boldUsernames || this.colorUsernames
+      ? this.mentionSpansForOverlay(slot.mentionSpans, lines) : [];
+    slot.wrapLineHeights = wrapLineHeights(lines, slot.bodyRaw, slot.spansRaw,
+      this.wrapOpts(slot, mentions, slot.firstLineWidth), this.lineHeight);
+    slot.lineCount = slot.replyRows + slot.clipCardRows +
+      Math.max(1, Math.ceil(this.slotBodyPixelHeight(slot) / this.lineHeight));
+    slot.wrapReady = true;
+  }
+
+  private measureSystemCloud(slot: MessageRow): void {
     const padX = Math.max(6, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
     const padY = Math.max(1, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
     const radius = Math.max(6, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
-    const marginX = Math.max(
-      4,
-      Math.round(SYSTEM_CLOUD_MARGIN_X * this.fontScale),
-    );
+    const marginX = Math.max(4, Math.round(SYSTEM_CLOUD_MARGIN_X * this.fontScale));
+    const fontSize = this.systemCloudFontSize();
+    const lineHeight = this.systemCloudLineHeight(fontSize);
+    slot.lineWidth = Math.max(1, Math.floor(this.app.screen.width - marginX - padX * 2));
+    slot.firstLineWidth = slot.lineWidth;
+    const opts = this.wrapOpts(slot, [], slot.lineWidth, fontSize);
+    slot.wrapLines = wrapBody(slot.bodyRaw, slot.lineWidth, slot.spansRaw, opts);
+    slot.collapsed = false;
+    slot.replyRows = 0;
+    slot.clipCardRows = 0;
+    let maxLineW = 0;
+    for (const line of slot.wrapLines) {
+      maxLineW = Math.max(maxLineW, this.measureBodyLineWidth(slot, line, opts, fontSize));
+    }
+    slot.wrapLineHeights = wrapLineHeights(slot.wrapLines, slot.bodyRaw, slot.spansRaw, opts, lineHeight);
+    const bodyPix = this.slotBodyPixelHeight(slot);
+    slot.lineCount = Math.max(1, Math.ceil(bodyPix / this.lineHeight));
+    const cloud = slot.systemCloudBounds ??
+      (slot.systemCloudBounds = { x: 0, y: 0, w: 0, h: 0, radius: 0, lineHeight: 0, fontSize: 0 });
+    cloud.x = marginX;
+    cloud.y = 0;
+    cloud.w = Math.min(this.app.screen.width - marginX, Math.max(1, Math.ceil(maxLineW)) + 2 * padX);
+    cloud.h = bodyPix + 2 * padY;
+    cloud.radius = radius;
+    cloud.lineHeight = lineHeight;
+    cloud.fontSize = fontSize;
+    slot.bodyIndent = marginX + padX;
+    slot.bodyContIndent = slot.bodyIndent;
+    slot.bodyY = padY;
+    slot.wrapReady = true;
+  }
+
+  private modGutterWidth(slot: MessageRow): number {
+    if (!this.showModGutter(slot)) return 0;
+    const count = Math.min(MOD_GUTTER_ICON_COUNT, modGutterActions().length);
+    const iconSize = Math.max(14, Math.round(this.fontSize * 1.05));
+    const padX = Math.max(2, Math.round(2 * this.fontScale));
+    const gap = Math.max(4, Math.round(4 * this.fontScale));
+    return count > 0 ? count * (iconSize + padX * 2) + (count - 1) * gap : 0;
+  }
+
+  private paintSystemCloud(slot: Slot): void {
+    this.releaseSlotClipCard(slot);
+    this.resizeMediaSprites(slot, slot.modIcons, 0);
+    const cloud = slot.systemCloudBounds!;
+    const { x: cloudX, y: cloudY, w: cloudW, h: cloudH, radius,
+      fontSize: cloudFontSize, lineHeight: cloudLineHeight } = cloud;
     const paneW = this.app.screen.width;
-    const cloudFontSize = this.systemCloudFontSize();
-    const cloudLineHeight = this.systemCloudLineHeight(cloudFontSize);
+    const allocatedH = this.slotPixelHeight(slot);
+    const textOriginX = slot.bodyIndent;
+    const contentY = slot.bodyY;
+    const lines = slot.wrapLines;
+    const layoutOpts = this.wrapOpts(slot, [], slot.lineWidth, cloudFontSize);
+    slot.root.cursor = "default";
 
     slot.time.visible = false;
     slot.nick.visible = false;
@@ -3288,49 +3391,6 @@ export class MessageRing {
     slot.bodyCont.style.lineHeight = cloudLineHeight;
     slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
-    // Left margin only: cloud hugs text and stays left-aligned (not centered).
-    const maxInner = Math.max(1, Math.floor(paneW - marginX - padX * 2));
-    // Mentions stay in body fill (lavender); no nick-colored overlays inside the cloud.
-    const layoutOpts = this.wrapOpts(slot, [], maxInner, cloudFontSize);
-    const lines = wrapBody(
-      slot.bodyRaw,
-      maxInner,
-      slot.spansRaw,
-      layoutOpts,
-    );
-    slot.collapsed = false;
-    slot.root.cursor = "default";
-    slot.wrapLines = lines;
-    slot.wrapReady = true;
-    slot.replyRows = 0;
-
-    let maxLineW = 0;
-    for (const line of lines) {
-      maxLineW = Math.max(
-        maxLineW,
-        this.measureBodyLineWidth(slot, line, layoutOpts, cloudFontSize),
-      );
-    }
-    const textBlockW = Math.max(1, Math.ceil(maxLineW));
-    const cloudW = Math.min(paneW - marginX, textBlockW + 2 * padX);
-    slot.wrapLineHeights = wrapLineHeights(
-      lines,
-      slot.bodyRaw,
-      slot.spansRaw,
-      layoutOpts,
-      cloudLineHeight,
-    );
-    const bodyPix = this.slotBodyPixelHeight(slot);
-    slot.lineCount = Math.max(1, Math.ceil(bodyPix / this.lineHeight));
-    const allocatedH = this.slotPixelHeight(slot);
-    const cloudX = marginX;
-    const cloudY = 0;
-    const cloudH = bodyPix + 2 * padY;
-    const textOriginX = cloudX + padX;
-    const contentY = cloudY + padY;
-
-    slot.bodyIndent = textOriginX;
-    slot.bodyContIndent = textOriginX;
     slot.body.x = textOriginX;
     slot.body.y = contentY;
     slot.bodyCont.x = textOriginX;
@@ -3360,29 +3420,14 @@ export class MessageRing {
       );
     }
 
-    const previousCloud = slot.systemCloudBounds;
-    if (
-      !previousCloud ||
-      previousCloud.x !== cloudX || previousCloud.y !== cloudY ||
-      previousCloud.w !== cloudW || previousCloud.h !== cloudH ||
-      previousCloud.radius !== radius
-    ) {
+    const previousCloud = slot.cloudPaintBounds;
+    if (!previousCloud || previousCloud.x !== cloudX || previousCloud.y !== cloudY ||
+        previousCloud.w !== cloudW || previousCloud.h !== cloudH || previousCloud.radius !== radius) {
       slot.systemCloud.clear();
-      slot.systemCloud
-        .roundRect(cloudX, cloudY, cloudW, cloudH, radius)
+      slot.systemCloud.roundRect(cloudX, cloudY, cloudW, cloudH, radius)
         .fill({ color: SYSTEM_CLOUD_BG, alpha: 1 });
+      slot.cloudPaintBounds = { x: cloudX, y: cloudY, w: cloudW, h: cloudH, radius };
     }
-    const cloud = previousCloud ??
-      (slot.systemCloudBounds = {
-        x: 0, y: 0, w: 0, h: 0, radius: 0, lineHeight: 0, fontSize: 0,
-      });
-    cloud.x = cloudX;
-    cloud.y = cloudY;
-    cloud.w = cloudW;
-    cloud.h = cloudH;
-    cloud.radius = radius;
-    cloud.lineHeight = cloudLineHeight;
-    cloud.fontSize = cloudFontSize;
 
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = paneW;
@@ -3483,6 +3528,7 @@ export class MessageRing {
 
   private paintClip(slot: Slot): void {
     this.sanitizeSlotRenderableTextures(slot);
+    if (!slot.wrapReady) this.measureSlot(slot);
     if (this.isSystemCloud(slot)) {
       this.paintSystemCloud(slot);
       return;
@@ -3501,18 +3547,10 @@ export class MessageRing {
     this.clearSystemCloud(slot);
     slot.body.style.fill = this.themeFills.body;
     slot.bodyCont.style.fill = this.themeFills.body;
-    const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
-    const timeSample = this.timestampsVisible()
-      ? formatTime(Date.UTC(2000, 0, 1, 23, 59, 59, 999), this.timestampFormat)
-      : "";
-    const timeW = this.timestampsVisible()
-      ? this.measureBitmapTextWidth("ChatFont", timeSample) + gap
-      : 0;
     const gutterW = this.paintModGutter(slot);
-    const showReply =
-      !this.hideReplyContext && slot.replyToLogin.length > 0;
-    const replyRows = showReply ? 1 : 0;
-    const contentY = replyRows * this.lineHeight;
+    const timeW = slot.timeWidth;
+    const showReply = slot.replyRows > 0;
+    const contentY = slot.bodyY;
     if (showReply) {
       slot.replyHeader.visible = true;
       slot.replyHeader.style.fontSize = Math.max(
@@ -3538,9 +3576,6 @@ export class MessageRing {
     slot.time.y = contentY;
     slot.time.visible = this.timestampsVisible();
     const badgeVisible = this.visibleBadges(slot);
-    const badgeN = badgeVisible.length;
-    const badgeBand =
-      badgeN === 0 ? 0 : badgeN * this.badgeSize + (badgeN - 1) * BADGE_GAP;
     for (let i = 0; i < slot.badges.length; i += 1) {
       const spr = slot.badges[i];
       const badge = badgeVisible[i];
@@ -3557,46 +3592,20 @@ export class MessageRing {
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
       spr.y = this.lineMediaY(contentY, this.badgeSize);
     }
-    slot.nick.x = gutterW + timeW + badgeBand;
+    slot.nick.x = slot.nickX;
     slot.nick.y = contentY;
-    const paneW = this.app.screen.width;
-    // Stock MessageLayout does not ellipsis nicks for body budget. At high zoom,
-    // reserving MIN_BODY_CHARS * charWidth starved the nick column (shown as "..").
-    // Clip only when the full nick cannot leave at least one body column.
-    const prefixW = gutterW + timeW + badgeBand;
-    const nickColon =
-      slot.useNickStyle && !slot.isAction && slot.nickRaw.length > 0;
-    const nickForWidth = nickColon ? `${slot.nickRaw}:` : slot.nickRaw;
-    const fullNickW = Math.max(
-      this.measureBitmapTextWidth("ChatNickFont", nickForWidth),
-      8,
-    );
-    const maxNickPx = Math.max(
-      8,
-      paneW - prefixW - gap - 8 - MIN_BODY_COLS_AFTER_NICK * this.charWidth,
-    );
-    if (fullNickW > maxNickPx) {
-      slot.nick.text = this.clipNickToWidth(
-        slot.nickRaw,
-        maxNickPx,
-        nickColon,
-      );
-    } else {
-      slot.nick.text = nickForWidth;
-    }
-    const nickW = this.applyNickPaintChrome(slot, contentY);
-    const firstOriginX = gutterW + timeW + badgeBand + nickW + gap;
-    const contOriginX = gutterW;
-    // Split body: first wrap line after nick; lines 2+ under timestamp (no space-pad).
+    slot.nick.text = slot.nickText;
+    this.applyNickPaintChrome(slot, contentY);
+    const firstOriginX = slot.bodyIndent;
+    const contOriginX = slot.bodyContIndent;
     slot.body.x = firstOriginX;
     slot.body.y = contentY;
     slot.bodyCont.x = contOriginX;
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = this.app.screen.width;
     }
-    const edgePad = 8;
-    const fullWidthPx = Math.max(1, Math.floor(paneW - contOriginX - edgePad));
-    const firstWidthPx = Math.max(1, Math.floor(paneW - firstOriginX - edgePad));
+    const fullWidthPx = slot.lineWidth;
+    const firstWidthPx = slot.firstLineWidth;
     if (showReply) {
       slot.replyHeader.x = contOriginX;
       slot.replyHeader.text = clipReplyHeaderToWidth(
@@ -3606,54 +3615,14 @@ export class MessageRing {
       );
     }
     const layoutOpts = this.wrapOpts(slot, undefined, firstWidthPx);
-    const wrapped = wrapBody(
-      slot.bodyRaw,
-      fullWidthPx,
-      slot.spansRaw,
-      layoutOpts,
-    );
-    const maxLines =
-      slot.collapsible && !slot.expanded ? this.collapseMessagesMinLines : 0;
-    const collapseWidth =
-      maxLines === 1 ? firstWidthPx : fullWidthPx;
-    const { lines, collapsed } = collapseWrapLines(
-      wrapped,
-      maxLines,
-      slot.bodyRaw,
-      collapseWidth,
-      slot.spansRaw,
-      layoutOpts,
-    );
-    slot.collapsed = collapsed;
-    slot.root.cursor =
-      collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
-    slot.wrapLines = lines;
-    slot.wrapReady = true;
-    if (slot.clipCard) {
-      slot.clipCardRows = clipCardRowCount(this.lineHeight);
-    } else {
-      slot.clipCardRows = 0;
-    }
-    slot.bodyIndent = firstOriginX;
-    slot.bodyContIndent = contOriginX;
-    slot.replyRows = replyRows;
+    const lines = slot.wrapLines;
+    const collapsed = slot.collapsed;
+    slot.root.cursor = collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
     const overlayMentions =
       this.boldUsernames || this.colorUsernames
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
     const renderOpts = this.wrapOpts(slot, overlayMentions, firstWidthPx);
-    slot.wrapLineHeights = wrapLineHeights(
-      lines,
-      slot.bodyRaw,
-      slot.spansRaw,
-      renderOpts,
-      this.lineHeight,
-    );
-    const bodyPix = this.slotBodyPixelHeight(slot);
-    slot.lineCount =
-      replyRows +
-      slot.clipCardRows +
-      Math.max(1, Math.ceil(bodyPix / this.lineHeight));
     slot.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? this.lineHeight);
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
@@ -3901,9 +3870,9 @@ export class MessageRing {
   }
 
   private clearSystemCloud(slot: Slot): void {
-    if (slot.systemCloudBounds) {
+    if (slot.cloudPaintBounds) {
       slot.systemCloud.clear();
-      slot.systemCloudBounds = null;
+      slot.cloudPaintBounds = null;
     }
   }
 
@@ -4346,7 +4315,7 @@ export class MessageRing {
   }
 
   private slotYIntersects(slot: Slot, top: number, bottom: number): boolean {
-    const y0 = slot.root.y;
+    const y0 = slot.y;
     const y1 = y0 + this.slotPixelHeight(slot);
     return y1 >= top && y0 <= bottom;
   }
@@ -4388,7 +4357,7 @@ export class MessageRing {
       let heightsChanged = false;
       for (let i = 0; i < this.occupied; i += 1) {
         const slot = this.slots[(start + i) % this.poolSize];
-        if (!slot.root.visible || !paintOnly.has(slot)) {
+        if (!slot.visible || !paintOnly.has(slot)) {
           continue;
         }
         const prev = slot.lineCount;
@@ -4409,7 +4378,7 @@ export class MessageRing {
         let heightsChanged = false;
         for (let i = 0; i < this.occupied; i += 1) {
           const slot = this.slots[(start + i) % this.poolSize];
-          if (!slot.root.visible || this.slotWrapValid(slot)) {
+          if (!slot.visible || this.slotWrapValid(slot)) {
             continue;
           }
           if (!this.slotYIntersects(slot, band.top, band.bottom)) {
@@ -4585,7 +4554,7 @@ export class MessageRing {
     let shown = 0;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.root.visible) {
+      if (!slot.visible) {
         continue;
       }
       if (shown > 0) {
@@ -4602,7 +4571,7 @@ export class MessageRing {
     let unfinished = false;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId || !slot.root.visible) {
+      if (!slot.msgId || !slot.visible) {
         continue;
       }
       if (this.slotWrapValid(slot)) {
@@ -4697,7 +4666,7 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      const renderable = slot.root.visible && this.slotYIntersects(slot, top, bottom);
+      const renderable = slot.visible && this.slotYIntersects(slot, top, bottom);
       const entering = renderable && !slot.root.renderable;
       if (entering) {
         this.lastSanitizeTickerTime = Number.NaN;
@@ -4765,7 +4734,7 @@ export class MessageRing {
       nick: opts?.nick ?? this.contextNick(slot),
       text: slot.copyText || slot.bodyRaw,
       fullText: formatFullCopyText({
-        time: slot.time.text,
+        time: slot.timeText,
         nick: slot.nickRaw,
         body: slot.bodySource || slot.copyText,
         copyText: slot.copyText,
@@ -4933,7 +4902,7 @@ export class MessageRing {
     slot.root.cursor = this.linkAt(slot, ev) ? "pointer" : "default";
   }
 
-  private showModGutter(slot: Slot): boolean {
+  private showModGutter(slot: MessageRow): boolean {
     if (!this.moderationMode || !this.canModerate) {
       return false;
     }
@@ -5115,13 +5084,13 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId || !slot.root.visible) {
+      if (!slot.msgId || !slot.visible) {
         continue;
       }
       if (slot.disabled && this.hideModerated) {
         continue;
       }
-      const top = slot.root.y;
+      const top = slot.y;
       const h = this.slotPixelHeight(slot);
       if (y < top || y >= top + h) {
         continue;
@@ -5309,13 +5278,13 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId || !slot.root.visible || slot.system || !slot.login) {
+      if (!slot.msgId || !slot.visible || slot.system || !slot.login) {
         continue;
       }
       if (slot.disabled && this.hideModerated) {
         continue;
       }
-      const top = slot.root.y;
+      const top = slot.y;
       const height = this.slotPixelHeight(slot);
       if (y >= top && y < top + height + this.messageGapPx()) {
         return {
@@ -5337,7 +5306,7 @@ export class MessageRing {
 
   messageTopInViewport(msgId: string): number | null {
     const slot = this.findSlotByMsgId(msgId);
-    return slot?.root.visible ? slot.root.y + this.app.stage.y : null;
+    return slot?.root.visible ? slot.y + this.app.stage.y : null;
   }
 
   /** Build SlotContext for a message id (quick-actions "more"). */
@@ -5354,7 +5323,7 @@ export class MessageRing {
       nick: this.contextNick(slot),
       text: slot.copyText || slot.bodyRaw,
       fullText: formatFullCopyText({
-        time: slot.time.text,
+        time: slot.timeText,
         nick: slot.nickRaw,
         body: slot.bodySource || slot.copyText,
         copyText: slot.copyText,
@@ -5409,7 +5378,7 @@ export class MessageRing {
   }
 
   private slotScrollRow(slot: Slot): number {
-    return this.lineHeight > 0 ? slot.root.y / this.lineHeight : 0;
+    return this.lineHeight > 0 ? slot.y / this.lineHeight : 0;
   }
 
   private emotePixelSize(fontSize: number = this.fontSize): number {
@@ -5439,7 +5408,7 @@ export class MessageRing {
   }
 
   private wrapOpts(
-    slot?: Slot,
+    slot?: MessageRow,
     maskMentions?: readonly MentionSpan[],
     firstLineMaxWidthPx?: number,
     fontSize: number = this.fontSize,
@@ -5553,7 +5522,7 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.root.visible) {
+      if (!slot.visible) {
         continue;
       }
       for (let e = 0; e < slot.emotes.length; e += 1) {

@@ -2,12 +2,14 @@ import type { BitmapText, Graphics } from "pixi.js";
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
 import type { ThemePixiFills } from "../src/shell/theme";
+import { checkDetachedRowLayout } from "./browserDetachedRowLayout";
 
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 async function settle() { for (let i = 0; i < 4; i += 1) await frame(); }
 
 export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
+  checkDetachedRowLayout(ring);
   type TextPipe = { _updateContext: (text: BitmapText, proxy: unknown) => void };
   const owner = ring as unknown as {
     app: { renderer: { renderPipes: { bitmapText: TextPipe } } };

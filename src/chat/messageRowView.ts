@@ -6,6 +6,7 @@ export type MessageRowView = {
   highlight: Graphics;
   highlightPainted: boolean;
   systemCloud: Graphics;
+  cloudPaintBounds: { x: number; y: number; w: number; h: number; radius: number } | null;
   mentions: Graphics;
   linksPainted: boolean;
   disabledGfx: Graphics;
@@ -155,6 +156,7 @@ export function createMessageRowView(opts: {
     highlight: hl,
     highlightPainted: false,
     systemCloud,
+    cloudPaintBounds: null,
     mentions,
     linksPainted: false,
     disabledGfx,

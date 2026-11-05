@@ -22,6 +22,17 @@ export type MessageRow = {
   copyText: string;
   replyToId: string;
   timestampMs: number;
+  timeText: string;
+  nickText: string;
+  nickTint: number;
+  y: number;
+  visible: boolean;
+  gutterWidth: number;
+  timeWidth: number;
+  nickX: number;
+  bodyY: number;
+  lineWidth: number;
+  firstLineWidth: number;
   spansRaw: EmoteSpan[];
   linkSpans: LinkSpan[];
   hostSpans: HostSpanRange[];
@@ -33,7 +44,7 @@ export type MessageRow = {
   wrapLines: WrapLine[];
   /** Per-line body row heights (tall GIF/emote rows expand beyond lineHeight). */
   wrapLineHeights: number[];
-  /** false until paintClip finishes metrics for current bodyRaw. */
+  /** Cached geometry is valid for the current body and layout settings. */
   wrapReady: boolean;
   lineCount: number;
   /** Pixel origin of first body wrap line (ceil-aligned to char grid). */
@@ -113,6 +124,17 @@ export function createMessageRow(): MessageRow {
     copyText: "",
     replyToId: "",
     timestampMs: 0,
+    timeText: "",
+    nickText: "",
+    nickTint: 0xffffff,
+    y: 0,
+    visible: false,
+    gutterWidth: 0,
+    timeWidth: 0,
+    nickX: 0,
+    bodyY: 0,
+    lineWidth: 0,
+    firstLineWidth: 0,
     spansRaw: [],
     linkSpans: [],
     hostSpans: [],
