@@ -219,9 +219,12 @@ export type SlotContext = {
 type Slot = {
   root: Container;
   highlight: Graphics;
+  highlightPainted: boolean;
   systemCloud: Graphics;
   mentions: Graphics;
+  linksPainted: boolean;
   disabledGfx: Graphics;
+  disabledPaint: { w: number; h: number; color: number; alpha: number } | null;
   time: BitmapText;
   nick: BitmapText;
   /** Gradient nick overlay (7TV paint); BitmapText hidden when visible. */
@@ -2334,9 +2337,12 @@ export class MessageRing {
       const slot: Slot = {
         root,
         highlight: hl,
+        highlightPainted: false,
         systemCloud,
         mentions,
+        linksPainted: false,
         disabledGfx,
+        disabledPaint: null,
         time,
         nick,
         nickPaintSpr,
@@ -3028,11 +3034,13 @@ export class MessageRing {
     slot.noticeTimeoutSec = undefined;
     slot.replyHeader.visible = false;
     slot.replyHeader.text = "";
-    slot.highlight.clear();
-    slot.systemCloud.clear();
-    slot.systemCloudBounds = null;
-    slot.mentions.clear();
-    slot.disabledGfx.clear();
+    if (slot.highlightPainted) {
+      slot.highlight.clear();
+      slot.highlightPainted = false;
+    }
+    this.clearSystemCloud(slot);
+    this.clearSlotLinks(slot);
+    this.clearDisabledBackground(slot);
     slot.modBtnHits = [];
     slot.automodBtnHits = [];
     slot.bitsLabel.visible = false;
@@ -3047,7 +3055,7 @@ export class MessageRing {
       (event.kind === "usernotice" &&
         event.privmsg?.kind === "privmsg" &&
         !!event.privmsg.disabled);
-    slot.disabledGfx.clear();
+    this.clearDisabledBackground(slot);
     slot.expanded = false;
     slot.collapsed = false;
     // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
@@ -3670,19 +3678,29 @@ export class MessageRing {
       );
     }
 
-    slot.systemCloudBounds = {
-      x: cloudX,
-      y: cloudY,
-      w: cloudW,
-      h: cloudH,
-      radius,
-      lineHeight: cloudLineHeight,
-      fontSize: cloudFontSize,
-    };
-    slot.systemCloud.clear();
-    slot.systemCloud
-      .roundRect(cloudX, cloudY, cloudW, cloudH, radius)
-      .fill({ color: SYSTEM_CLOUD_BG, alpha: 1 });
+    const previousCloud = slot.systemCloudBounds;
+    if (
+      !previousCloud ||
+      previousCloud.x !== cloudX || previousCloud.y !== cloudY ||
+      previousCloud.w !== cloudW || previousCloud.h !== cloudH ||
+      previousCloud.radius !== radius
+    ) {
+      slot.systemCloud.clear();
+      slot.systemCloud
+        .roundRect(cloudX, cloudY, cloudW, cloudH, radius)
+        .fill({ color: SYSTEM_CLOUD_BG, alpha: 1 });
+    }
+    const cloud = previousCloud ??
+      (slot.systemCloudBounds = {
+        x: 0, y: 0, w: 0, h: 0, radius: 0, lineHeight: 0, fontSize: 0,
+      });
+    cloud.x = cloudX;
+    cloud.y = cloudY;
+    cloud.w = cloudW;
+    cloud.h = cloudH;
+    cloud.radius = radius;
+    cloud.lineHeight = cloudLineHeight;
+    cloud.fontSize = cloudFontSize;
 
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.width = paneW;
@@ -3690,7 +3708,7 @@ export class MessageRing {
     }
 
     this.paintHighlight(slot);
-    slot.mentions.clear();
+    this.clearSlotLinks(slot);
     for (const mt of slot.mentionTexts) {
       mt.visible = false;
       mt.text = "";
@@ -3783,6 +3801,10 @@ export class MessageRing {
 
   private paintClip(slot: Slot): void {
     this.sanitizeSlotRenderableTextures(slot);
+    if (this.isSystemCloud(slot)) {
+      this.paintSystemCloud(slot);
+      return;
+    }
     slot.time.style.fontSize = this.fontSize;
     slot.time.style.lineHeight = this.lineHeight;
     slot.nick.style.fontFamily = "ChatNickFont";
@@ -3794,12 +3816,7 @@ export class MessageRing {
     slot.bodyCont.style.lineHeight = this.lineHeight;
     slot.bitsLabel.style.fontSize = this.fontSize;
     slot.bitsLabel.style.lineHeight = this.lineHeight;
-    if (this.isSystemCloud(slot)) {
-      this.paintSystemCloud(slot);
-      return;
-    }
-    slot.systemCloud.clear();
-    slot.systemCloudBounds = null;
+    this.clearSystemCloud(slot);
     slot.body.style.fill = this.themeFills.body;
     slot.bodyCont.style.fill = this.themeFills.body;
     const gap = Math.max(4, Math.round(TIME_GAP * this.fontScale));
@@ -3981,7 +3998,7 @@ export class MessageRing {
       slot.root.hitArea.height = this.slotPixelHeight(slot);
     }
     this.paintHighlight(slot);
-    slot.mentions.clear();
+    this.clearSlotLinks(slot);
     this.paintLinks(slot, firstOriginX, contOriginX, contentY, layoutOpts);
     this.paintHostTexts(
       slot,
@@ -4120,64 +4137,57 @@ export class MessageRing {
   }
 
   private paintHighlight(slot: Slot): void {
-    slot.highlight.clear();
     const cloud = slot.systemCloudBounds;
-    const h = this.slotPixelHeight(slot);
-    const w = this.app.screen.width;
+    let color: number | undefined;
+    let alpha = 0;
     if (this.findHitId && slot.msgId === this.findHitId) {
-      if (cloud) {
-        slot.highlight
-          .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
-          .fill({ color: 0xf0ad4e, alpha: 0.28 });
-      } else {
-        slot.highlight.rect(0, 0, w, h).fill({ color: 0xf0ad4e, alpha: 0.28 });
-      }
+      color = 0xf0ad4e;
+      alpha = 0.28;
     } else {
       const parsed = parseHighlight(slot.highlightColor);
       if (parsed) {
-        if (cloud) {
-          slot.highlight
-            .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
-            .fill({ color: parsed.color, alpha: parsed.alpha });
-        } else {
-          slot.highlight
-            .rect(0, 0, w, h)
-            .fill({ color: parsed.color, alpha: parsed.alpha });
-        }
+        color = parsed.color;
+        alpha = parsed.alpha;
       } else if (this.hoveredMsgId && slot.msgId === this.hoveredMsgId) {
-        if (cloud) {
-          slot.highlight
-            .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
-            .fill({
-              color: this.themeFills.hover,
-              alpha: this.themeFills.hoverAlpha,
-            });
-        } else {
-          slot.highlight.rect(0, 0, w, h).fill({
-            color: this.themeFills.hover,
-            alpha: this.themeFills.hoverAlpha,
-          });
-        }
+        color = this.themeFills.hover;
+        alpha = this.themeFills.hoverAlpha;
       } else if (!cloud && this.alternateMessages && slot.startRow % 2 === 1) {
-        slot.highlight
-          .rect(0, 0, w, h)
-          .fill({
-            color: this.themeFills.alternate,
-            alpha: this.themeFills.alternateAlpha,
-          });
+        color = this.themeFills.alternate;
+        alpha = this.themeFills.alternateAlpha;
       }
     }
-    if (this.separateMessages && !slot.systemCloudBounds) {
+    const separator = this.separateMessages && !cloud;
+    const lastRead = this.showLastRead && !!this.lastReadMsgId &&
+      slot.msgId === this.lastReadMsgId;
+    if (color === undefined && !separator && !lastRead) {
+      if (slot.highlightPainted) {
+        slot.highlight.clear();
+        slot.highlightPainted = false;
+      }
+      return;
+    }
+    slot.highlight.clear();
+    slot.highlightPainted = true;
+    const h = this.slotPixelHeight(slot);
+    const w = this.app.screen.width;
+    if (color !== undefined) {
+      if (cloud) {
+        slot.highlight
+          .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
+          .fill({ color, alpha });
+      } else {
+        slot.highlight
+          .rect(0, 0, w, h)
+          .fill({ color, alpha });
+      }
+    }
+    if (separator) {
       slot.highlight
         .moveTo(0, h - 0.5)
         .lineTo(w, h - 0.5)
         .stroke({ width: 1, color: this.themeFills.separator, alpha: 0.9 });
     }
-    if (
-      this.showLastRead &&
-      this.lastReadMsgId &&
-      slot.msgId === this.lastReadMsgId
-    ) {
+    if (lastRead) {
       this.paintLastReadLine(slot.highlight, w, h);
     }
   }
@@ -4208,19 +4218,54 @@ export class MessageRing {
     gfx.stroke({ width: 1, color, alpha });
   }
 
+  private clearSystemCloud(slot: Slot): void {
+    if (slot.systemCloudBounds) {
+      slot.systemCloud.clear();
+      slot.systemCloudBounds = null;
+    }
+  }
+
+  private clearDisabledBackground(slot: Slot): void {
+    if (slot.disabledPaint) {
+      slot.disabledGfx.clear();
+      slot.disabledPaint = null;
+    }
+  }
+
   private paintDisabled(slot: Slot): void {
-    slot.disabledGfx.clear();
     const dim =
       slot.disabled || (this.fadeMessageHistory && slot.fromHistory);
     if (!dim) {
+      this.clearDisabledBackground(slot);
       return;
     }
+    const w = this.app.screen.width;
+    const h = this.slotPixelHeight(slot);
+    const color = this.themeFills.disabled;
+    const alpha = this.themeFills.disabledAlpha;
+    const previous = slot.disabledPaint;
+    if (
+      previous && previous.w === w && previous.h === h &&
+      previous.color === color && previous.alpha === alpha
+    ) {
+      return;
+    }
+    const paint = previous ?? (slot.disabledPaint = { w: 0, h: 0, color: 0, alpha: 0 });
+    paint.w = w;
+    paint.h = h;
+    paint.color = color;
+    paint.alpha = alpha;
+    slot.disabledGfx.clear();
     slot.disabledGfx
-      .rect(0, 0, this.app.screen.width, this.slotPixelHeight(slot))
-      .fill({
-        color: this.themeFills.disabled,
-        alpha: this.themeFills.disabledAlpha,
-      });
+      .rect(0, 0, w, h)
+      .fill({ color, alpha });
+  }
+
+  private clearSlotLinks(slot: Slot): void {
+    if (slot.linksPainted) {
+      slot.mentions.clear();
+      slot.linksPainted = false;
+    }
   }
 
   /** Underline link spans (hit-test uses the same ranges). */
@@ -4273,6 +4318,7 @@ export class MessageRing {
           wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col;
         const rowH = slot.wrapLineHeights[start.line] ?? rowLineHeight;
         const y = this.wrapLineY(contentY, start.line, slot) + rowH - 2;
+        slot.linksPainted = true;
         slot.mentions
           .moveTo(x0, y)
           .lineTo(x0 + linkW, y)

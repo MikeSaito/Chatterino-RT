@@ -1,4 +1,4 @@
-import type { BitmapText } from "pixi.js";
+import type { BitmapText, Graphics } from "pixi.js";
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
 import type { ThemePixiFills } from "../src/shell/theme";
@@ -12,7 +12,7 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
   const owner = ring as unknown as {
     app: { renderer: { renderPipes: { bitmapText: TextPipe } } };
     themeFills: ThemePixiFills; chatFontFamily: string; chatFontSize: number; chatFontWeight: number;
-    slots: { msgId: string; time: BitmapText; nick: BitmapText; body: BitmapText; bodyCont: BitmapText; clipUi: { duration: BitmapText; title: BitmapText; game: BitmapText; foot: BitmapText } | null }[];
+    slots: { msgId: string; time: BitmapText; nick: BitmapText; body: BitmapText; bodyCont: BitmapText; highlight: Graphics; systemCloud: Graphics; mentions: Graphics; disabledGfx: Graphics; clipUi: { bg: Graphics; durationBg: Graphics; duration: BitmapText; title: BitmapText; game: BitmapText; foot: BitmapText } | null }[];
   };
   const font = { family: owner.chatFontFamily, size: owner.chatFontSize, weight: owner.chatFontWeight };
   const theme = { ...owner.themeFills };
@@ -27,6 +27,8 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
   const counts = new Map<BitmapText, number>();
   const pipe = owner.app.renderer.renderPipes.bitmapText;
   const original = pipe._updateContext;
+  const graphicUpdates = new Map<Graphics, number>();
+  const unsubscribe: (() => void)[] = [];
   pipe._updateContext = function (text, proxy) {
     counts.set(text, (counts.get(text) ?? 0) + 1);
     original.call(this, text, proxy);
@@ -39,6 +41,13 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
     const slot = owner.slots.find((row) => row.msgId === event.id)!;
     const clip = slot.clipUi!;
     const texts = [slot.time, slot.nick, slot.body, slot.bodyCont, clip.duration, clip.title, clip.game, clip.foot];
+    const graphics = [slot.highlight, slot.systemCloud, slot.mentions, slot.disabledGfx, clip.bg, clip.durationBg];
+    for (const graphic of graphics) {
+      const context = graphic.context;
+      const updated = () => graphicUpdates.set(graphic, (graphicUpdates.get(graphic) ?? 0) + 1);
+      context.on("update", updated);
+      unsubscribe.push(() => context.off("update", updated));
+    }
     check(slot.body.text && slot.bodyCont.text && clip.title.text, "fixture paints multiline text and clip metadata");
     counts.clear();
     for (let i = 0; i < 3; i += 1) {
@@ -46,18 +55,46 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
       await settle();
     }
     check(texts.every((text) => !counts.get(text)), "unchanged content must reuse text geometry through real renderer frames");
+    check(graphics.every((graphic) => !graphicUpdates.get(graphic)), "unchanged content must retain its background geometry without clearing and redrawing");
     ring.applyLinkEnrichment(event.id, { ...payload, body: "Changed content" });
     await settle();
     check(slot.body.text.includes("Changed content") && (counts.get(slot.body) ?? 0) > 0, "changed content still rebuilds its text geometry");
+    check((graphicUpdates.get(slot.disabledGfx) ?? 0) > 0, "height changes update the dimmed history background");
+    graphicUpdates.clear();
+    ring.applyLinkEnrichment(event.id, { ...payload, body: "Changed content", clip: { ...payload.clip, durationSec: 36000 } });
+    await settle();
+    check((graphicUpdates.get(clip.durationBg) ?? 0) > 0 && !graphicUpdates.get(clip.bg), "changing duration updates its label background without rebuilding the card border");
     counts.clear();
     ring.applyThemeFills({ ...theme, body: 0x123456 });
     await settle();
     check(slot.body.style.fill === 0x123456 && (counts.get(slot.body) ?? 0) > 0, "theme changes update rendered body color");
+    ring.scrollToMsgId(event.id);
+    await settle();
+    check(slot.highlight.context.bounds.width > 0, "search selection paints a background");
+    ring.clearFindHit();
+    await settle();
+    check(slot.highlight.context.bounds.width === 0, "clearing search removes the previous background");
     counts.clear();
     ring.configureChatFont({ ...font, family: font.family === "monospace" ? "serif" : "monospace" });
     await settle();
     check((counts.get(slot.body) ?? 0) > 0 && (counts.get(clip.title) ?? 0) > 0, "replaced font atlases rebuild unchanged message and clip text");
+    const notice = { kind: "notice" as const, id: "render-cloud", timestampMs: 1700000000000, text: "System message" };
+    ring.applySnapshot([notice]);
+    await settle();
+    const cloud = owner.slots.find((row) => row.msgId === notice.id)!;
+    let cloudUpdates = 0;
+    const updated = () => cloudUpdates += 1;
+    cloud.systemCloud.context.on("update", updated);
+    unsubscribe.push(() => cloud.systemCloud.context.off("update", updated));
+    counts.clear();
+    ring.applyLinkEnrichment(notice.id, { ...payload, body: notice.text, clip: null });
+    await settle();
+    check(cloudUpdates === 0 && !counts.get(cloud.body), "unchanged system messages retain their rounded background and text geometry");
+    ring.applyLinkEnrichment(notice.id, { ...payload, body: "Long system content. ".repeat(30), clip: null });
+    await settle();
+    check(cloudUpdates > 0 && (counts.get(cloud.body) ?? 0) > 0, "system message size and text still update together");
   } finally {
+    for (const off of unsubscribe) off();
     pipe._updateContext = original;
     ring.configureChatFont(font);
     ring.applyThemeFills(theme);

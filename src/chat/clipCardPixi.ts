@@ -40,6 +40,7 @@ export type ClipCardWidgets = {
   game: BitmapText;
   foot: BitmapText;
   width: number;
+  durationBgWidth: number;
 };
 
 export function clipCardRowCount(lineHeight: number): number {
@@ -98,6 +99,7 @@ export function createClipCardWidgets(mutedFill: number): ClipCardWidgets {
     game,
     foot,
     width: 0,
+    durationBgWidth: 0,
   };
 }
 
@@ -117,6 +119,7 @@ export function releaseClipThumb(
 export function hideClipCard(clip: ClipCardWidgets): void {
   clip.root.visible = false;
   clip.width = 0;
+  clip.durationBgWidth = 0;
   clip.bg.clear();
   clip.durationBg.clear();
   clip.duration.text = "";
@@ -198,16 +201,19 @@ export function paintClipCard(opts: {
   const maxW = Math.max(120, paneW - left - 12);
   const width = Math.min(CLIP_CARD_MAX_W, maxW);
   const bodyRows = Math.max(0, lineCount - clipCardRows);
+  const widthChanged = clip.width !== width;
   clip.width = width;
   clip.root.visible = true;
   clip.root.x = left;
   clip.root.y = bodyRows * lineHeight + CLIP_CARD_GAP_PX;
 
-  clip.bg.clear();
-  clip.bg
-    .roundRect(0, 0, width, CLIP_CARD_HEIGHT_PX, CLIP_CARD_RADIUS)
-    .fill({ color: CLIP_CARD_BG, alpha: 0.94 })
-    .stroke({ width: 1, color: CLIP_CARD_BORDER, alpha: 0.18 });
+  if (widthChanged) {
+    clip.bg.clear();
+    clip.bg
+      .roundRect(0, 0, width, CLIP_CARD_HEIGHT_PX, CLIP_CARD_RADIUS)
+      .fill({ color: CLIP_CARD_BG, alpha: 0.94 })
+      .stroke({ width: 1, color: CLIP_CARD_BORDER, alpha: 0.18 });
+  }
 
   const thumbW = Math.min(CLIP_CARD_THUMB_W, Math.max(48, width - 40));
   clip.thumb.x = 0;
@@ -244,10 +250,13 @@ export function paintClipCard(opts: {
   const durH = 16;
   const durX = thumbW - durW - 6;
   const durY = CLIP_CARD_HEIGHT_PX - durH - 6;
-  clip.durationBg.clear();
-  clip.durationBg
-    .roundRect(durX, durY, durW, durH, 4)
-    .fill({ color: 0x000000, alpha: 0.78 });
+  if (widthChanged || clip.durationBgWidth !== durW) {
+    clip.durationBgWidth = durW;
+    clip.durationBg.clear();
+    clip.durationBg
+      .roundRect(durX, durY, durW, durH, 4)
+      .fill({ color: 0x000000, alpha: 0.78 });
+  }
   clip.duration.x = durX + 5;
   clip.duration.y = durY + 2;
 
