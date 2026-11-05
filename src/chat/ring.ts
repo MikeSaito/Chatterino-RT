@@ -1,3 +1,5 @@
+import { createMessageRow, type MessageRow } from "./messageRow";
+import { createMessageRowView, type MessageRowView } from "./messageRowView";
 import { bodyIndexAt, inside } from "./rowHitTest";
 import { NickPaintResources } from "./nickPaintResources";
 import {
@@ -17,7 +19,6 @@ import {
   BitmapFontManager,
   BitmapText,
   Cache,
-  Container,
   FederatedPointerEvent,
   Graphics,
   Rectangle,
@@ -41,14 +42,11 @@ import type { ModActionBtn } from "../shell/modActions";
 import { modGutterActions } from "../shell/modActions";
 import { modGutterIconTexture } from "../shell/modGutterIcons";
 import type {
-  AutomodRange,
   Badge,
   ChatEvent,
   EmoteSpan,
   LinkSpan,
   MentionSpan,
-  NickPaint,
-  UsernoticeParams,
 } from "./types";
 import {
   paintRepresentativeRgb,
@@ -81,7 +79,6 @@ import {
   createClipCardWidgets,
   paintClipCard,
   releaseClipThumb,
-  type ClipCardWidgets,
 } from "./clipCardPixi";
 import { EmoteFrameTicker, isRenderableTexture, TextureLru } from "./textures";
 import {
@@ -216,135 +213,7 @@ export type SlotContext = {
   shiftOnly: boolean;
 };
 
-type Slot = {
-  root: Container;
-  highlight: Graphics;
-  highlightPainted: boolean;
-  systemCloud: Graphics;
-  mentions: Graphics;
-  linksPainted: boolean;
-  disabledGfx: Graphics;
-  disabledPaint: { w: number; h: number; color: number; alpha: number } | null;
-  time: BitmapText;
-  nick: BitmapText;
-  /** Gradient nick overlay (7TV paint); BitmapText hidden when visible. */
-  nickPaintSpr: Sprite;
-  nickPaint: NickPaint | null;
-  nickPaintKey: string;
-  /** First wrap line (x after nick). */
-  body: BitmapText;
-  /** Wrap lines 2+ (x under timestamp); empty when single-line. */
-  bodyCont: BitmapText;
-  replyHeader: BitmapText;
-  mentionTexts: BitmapText[];
-  hostTexts: BitmapText[];
-  bitsLabel: BitmapText;
-  emotes: Sprite[];
-  emoteKeys: string[];
-  badges: Sprite[];
-  badgeKeys: string[];
-  badgesRaw: Badge[];
-  modBtns: BitmapText[];
-  modIcons: Sprite[];
-  modBtnHits: Array<{ x0: number; x1: number; action: string }>;
-  automodBtnHits: Array<{
-    x0: number;
-    x1: number;
-    y0: number;
-    y1: number;
-    action: "allow" | "deny";
-  }>;
-  automodMessageId: string;
-  automodStatus: string;
-  automodCaught: AutomodRange[];
-  /** Low Trust status for streamer-mode hide (`restricted` | `monitored` | ""). */
-  lowTrustStatus: string;
-  caughtTexts: BitmapText[];
-  clipUi: ClipCardWidgets | null;
-  msgId: string;
-  login: string;
-  /** Текст до host-display transform (whisper/action lead). */
-  bodySource: string;
-  /** Painted body (may lowercase link hosts). */
-  bodyRaw: string;
-  nickRaw: string;
-  copyText: string;
-  replyToId: string;
-  timestampMs: number;
-  spansRaw: EmoteSpan[];
-  linkSpans: LinkSpan[];
-  hostSpans: HostSpanRange[];
-  mentionSpans: MentionSpan[];
-  clipCard: ClipCardInfo | null;
-  clipCardRows: number;
-  /** True after title/host rewrite; displayBody must not rebuild from bodySource. */
-  linkEnriched: boolean;
-  wrapLines: WrapLine[];
-  /** Per-line body row heights (tall GIF/emote rows expand beyond lineHeight). */
-  wrapLineHeights: number[];
-  /** false until paintClip finishes metrics for current bodyRaw. */
-  wrapReady: boolean;
-  lineCount: number;
-  /** Pixel origin of first body wrap line (ceil-aligned to char grid). */
-  bodyIndent: number;
-  /** Pixel origin of wrap lines 2+ (under timestamp / after mod gutter). */
-  bodyContIndent: number;
-  /** Left-aligned system cloud bounds (null when not a cloud). */
-  systemCloudBounds: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    radius: number;
-    /** Row height used inside the pill (fontSize − delta). */
-    lineHeight: number;
-    fontSize: number;
-  } | null;
-  /** Rows occupied by reply header above the main line. */
-  replyRows: number;
-  startRow: number;
-  scrollLayout: LaidSlot;
-  highlightColor: string;
-  disabled: boolean;
-  /** Scrollback snapshot (stock MessageFlag::RecentMessage). */
-  fromHistory: boolean;
-  /** Privmsg-like: stock MessageFlag::Collapsed + expand on click. */
-  collapsible: boolean;
-  expanded: boolean;
-  /** Set in paintClip when body is truncated this frame. */
-  collapsed: boolean;
-  /** System/timeout-like: не гасить при room CLEARCHAT (как MessageFlag::System). */
-  system: boolean;
-  /** Author nick chrome (privmsg); empty → system / fallback. */
-  nickUserId: string;
-  nickColorRaw: string;
-  nickLogin: string;
-  nickDisplay: string;
-  useNickStyle: boolean;
-  replyToLogin: string;
-  replyToText: string;
-  isAction: boolean;
-  isWhisper: boolean;
-  /** Символы до reply/action + copyText (Whisper: / system lead usernotice). */
-  leadLen: number;
-  /** Rebuild CLEARCHAT/CLEARMSG/USERNOTICE/NOTICE body on locale change. */
-  systemTextKind: "" | "clearchat" | "clearmsg" | "usernotice" | "notice";
-  clearLogin: string;
-  clearDurationSec: number | undefined;
-  clearStackCount: number;
-  clearSourceLogin: string;
-  clearModeratorLogin: string;
-  clearmsgBody: string;
-  usernoticeMsgId: string;
-  usernoticeSystemText: string;
-  usernoticeLogin: string;
-  usernoticeParams: UsernoticeParams | null;
-  /** Attached USERNOTICE privmsg body (action prefix included); survives locale switch. */
-  usernoticeInnerBody: string;
-  noticeMsgId: string;
-  noticeFallback: string;
-  noticeTimeoutSec: number | undefined;
-};
+type Slot = MessageRow & MessageRowView;
 
 type Drawn = {
   time: string;
@@ -2231,202 +2100,16 @@ export class MessageRing {
     const stage = this.app.stage;
     stage.eventMode = "static";
     for (let i = 0; i < this.poolSize; i += 1) {
-      const root = new Container();
-      root.visible = false;
-      root.eventMode = "static";
-      root.hitArea = new Rectangle(0, 0, 1, this.lineHeight);
-      const hl = new Graphics();
-      hl.eventMode = "none";
-      const systemCloud = new Graphics();
-      systemCloud.eventMode = "none";
-      const mentions = new Graphics();
-      mentions.eventMode = "none";
-      const disabledGfx = new Graphics();
-      disabledGfx.eventMode = "none";
-      const time = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatFont",
-          fontSize: this.fontSize,
-          lineHeight: this.lineHeight,
-          fill: this.themeFills.timestamp,
-        },
-      });
-      const nick = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatNickFont",
-          fontSize: this.fontSize,
-          lineHeight: this.lineHeight,
-          fill: 0xffffff,
-        },
-      });
-      const nickPaintSpr = new Sprite(Texture.EMPTY);
-      nickPaintSpr.visible = false;
-      nickPaintSpr.eventMode = "none";
-      const body = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatFont",
-          fontSize: this.fontSize,
-          fill: this.themeFills.body,
-          lineHeight: this.lineHeight,
-        },
-      });
-      body.eventMode = "none";
-      const bodyCont = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatFont",
-          fontSize: this.fontSize,
-          fill: this.themeFills.body,
-          lineHeight: this.lineHeight,
-        },
-      });
-      bodyCont.visible = false;
-      bodyCont.eventMode = "none";
-      const replyHeader = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatFont",
-          fontSize: Math.max(8, Math.round(this.fontSize * 0.85)),
-          fill: this.themeFills.timestamp,
-        },
-      });
-      replyHeader.visible = false;
-      replyHeader.eventMode = "none";
-      const emotes: Sprite[] = [];
-      const mentionTexts: BitmapText[] = [];
-      const hostTexts: BitmapText[] = [];
-      const bitsLabel = new BitmapText({
-        text: "",
-        style: {
-          fontFamily: "ChatFont",
-          fontSize: this.fontSize,
-          lineHeight: this.lineHeight,
-          fill: 0x9c34ff,
-        },
-      });
-      bitsLabel.visible = false;
-      bitsLabel.eventMode = "none";
-      const badges: Sprite[] = [];
-      const modBtns: BitmapText[] = [];
-      const modIcons: Sprite[] = [];
-      const caughtTexts: BitmapText[] = [];
-      // body / bodyCont under nick so nick stays readable if chrome widths drift
-      root.addChild(
-        systemCloud,
-        hl,
-        mentions,
-        ...modBtns,
-        ...modIcons,
-        replyHeader,
-        time,
-        body,
-        bodyCont,
-        nick,
-        nickPaintSpr,
-        ...mentionTexts,
-        ...hostTexts,
-        ...caughtTexts,
-        bitsLabel,
-        ...badges,
-        ...emotes,
-        disabledGfx,
-      );
       const slot: Slot = {
-        root,
-        highlight: hl,
-        highlightPainted: false,
-        systemCloud,
-        mentions,
-        linksPainted: false,
-        disabledGfx,
-        disabledPaint: null,
-        time,
-        nick,
-        nickPaintSpr,
-        nickPaint: null,
-        nickPaintKey: "",
-        body,
-        bodyCont,
-        replyHeader,
-        mentionTexts,
-        hostTexts,
-        bitsLabel,
-        emotes,
-        emoteKeys: [],
-        badges,
-        badgeKeys: [],
-        badgesRaw: [],
-        modBtns,
-        modIcons,
-        modBtnHits: [],
-        automodBtnHits: [],
-        automodMessageId: "",
-        automodStatus: "",
-        automodCaught: [],
-        lowTrustStatus: "",
-        caughtTexts,
-        clipUi: null,
-        msgId: "",
-        login: "",
-        bodySource: "",
-        bodyRaw: "",
-        nickRaw: "",
-        copyText: "",
-        replyToId: "",
-        timestampMs: 0,
-        spansRaw: [],
-        linkSpans: [],
-        hostSpans: [],
-        mentionSpans: [],
-        clipCard: null,
-        clipCardRows: 0,
-        linkEnriched: false,
-        wrapLines: [{ start: 0, end: 0 }],
-        wrapLineHeights: [],
-        wrapReady: false,
-        lineCount: 1,
-        bodyIndent: 0,
-        bodyContIndent: 0,
-        systemCloudBounds: null,
-        replyRows: 0,
-        startRow: 0,
-        scrollLayout: { msgId: "", startRow: 0, lineCount: 0 },
-        highlightColor: "",
-        disabled: false,
-        fromHistory: false,
-        collapsible: false,
-        expanded: false,
-        collapsed: false,
-        system: false,
-        nickUserId: "",
-        nickColorRaw: "",
-        nickLogin: "",
-        nickDisplay: "",
-        useNickStyle: false,
-        replyToLogin: "",
-        replyToText: "",
-        isAction: false,
-        isWhisper: false,
-        leadLen: 0,
-        systemTextKind: "",
-        clearLogin: "",
-        clearDurationSec: undefined,
-        clearStackCount: 0,
-        clearSourceLogin: "",
-        clearModeratorLogin: "",
-        clearmsgBody: "",
-        usernoticeMsgId: "",
-        usernoticeSystemText: "",
-        usernoticeLogin: "",
-        usernoticeParams: null,
-        usernoticeInnerBody: "",
-        noticeMsgId: "",
-        noticeFallback: "",
-        noticeTimeoutSec: undefined,
+        ...createMessageRow(),
+        ...createMessageRowView({
+          fontSize: this.fontSize,
+          lineHeight: this.lineHeight,
+          timestampFill: this.themeFills.timestamp,
+          bodyFill: this.themeFills.body,
+        }),
       };
+      const { root } = slot;
       root.on("pointertap", (ev: FederatedPointerEvent) => {
         this.onSlotTap(slot, ev);
       });
