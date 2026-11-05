@@ -13,6 +13,7 @@ import { checkMediaOverload } from "./browserMediaOverload";
 import { checkHistoryWidgets } from "./browserHistoryWidgets";
 import { checkFontMeasurements } from "./browserFontMeasurements";
 import { checkImageSprites } from "./browserImageSprites";
+import { checkHistoryLayout } from "./browserHistoryLayout";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -27,6 +28,7 @@ const fixtureWindow = window as Window & {
     historyWidgets: () => Promise<void>;
     fontMeasurements: () => Promise<void>;
     imageSprites: () => Promise<void>;
+    historyLayout: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -124,6 +126,25 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  async historyLayout() {
+    const previous = settings.hideModerated;
+    const previousDeletion = settings.knobs["appearance.hideDeletionActions"];
+    try {
+      settings.knobs["appearance.hideDeletionActions"] = true;
+      await checkHistoryLayout(fixtureWindow.__crt!.ring, async (hidden) => {
+        settings.hideModerated = hidden;
+        await emit(SETTINGS_PREVIEW_EVENT, settings);
+        await sleep(100);
+      });
+    } finally {
+      settings.hideModerated = previous;
+      if (previousDeletion === undefined) delete settings.knobs["appearance.hideDeletionActions"];
+      else settings.knobs["appearance.hideDeletionActions"] = previousDeletion;
+      await emit(SETTINGS_PREVIEW_EVENT, settings);
+      fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!);
+      fixtureWindow.__crt!.ring.goToBottom();
+    }
+  },
   async imageSprites() {
     const previous = settings.knobs["emotes.enableEmoteImages"];
     try {

@@ -45,10 +45,11 @@ export async function checkImageSprites(ring: MessageRing, send: (event: ChatEve
     release();
     await until(() => slot.badges[0]?.visible === true);
     ring.setCanModerate(true); ring.setModerationMode(true);
-    await frame();
+    await until(() => slot.modIcons.length === 2 && slot.modIcons.every((sprite) => sprite.visible));
     check(slot.modIcons.length === 2 && slot.modIcons.every((sprite) => sprite.visible), "moderation icons are created on demand");
     const icons = [...slot.modIcons];
     ring.setModerationMode(false);
+    await until(() => slot.modIcons.length === 0);
     check(slot.modIcons.length === 0 && icons.every((sprite) => sprite.destroyed), "disabling moderation releases its sprites");
     const oldEmotes = [...slot.emotes];
     await images(false);

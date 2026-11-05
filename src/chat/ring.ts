@@ -300,6 +300,7 @@ type Slot = {
   /** Rows occupied by reply header above the main line. */
   replyRows: number;
   startRow: number;
+  scrollLayout: LaidSlot;
   highlightColor: string;
   disabled: boolean;
   /** Scrollback snapshot (stock MessageFlag::RecentMessage). */
@@ -1015,28 +1016,8 @@ export class MessageRing {
     sealed: true;
   }): void {
     const anchors = pair ?? this.captureScrollAnchors();
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    const visible: Slot[] = [];
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      const live = slot.msgId.length > 0;
-      const show = live && !this.isSlotHiddenByPrivacy(slot);
-      slot.root.visible = show;
-      if (show) {
-        visible.push(slot);
-      }
-    }
-    const gapPx = this.messageGapPx();
-    let y = 0;
-    for (let i = 0; i < visible.length; i += 1) {
-      const slot = visible[i];
-      slot.startRow = i;
-      slot.root.y = y;
-      y += this.slotPixelHeight(slot);
-      if (i + 1 < visible.length) {
-        y += gapPx;
-      }
-    }
+    this.updateSlotVisibility();
+    const y = this.positionVisibleSlots();
     const viewRows = this.app.screen.height / this.lineHeight;
     this.scroll.applyLayout(
       this.lineHeight > 0 ? y / this.lineHeight : 0,
@@ -1049,6 +1030,35 @@ export class MessageRing {
       false,
     );
     this.afterScrollChange();
+  }
+
+  private updateSlotVisibility(): void {
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      slot.root.visible = !this.isSlotHiddenByPrivacy(slot);
+    }
+  }
+
+  private positionVisibleSlots(): number {
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    const gapPx = this.messageGapPx();
+    let y = 0;
+    let shown = 0;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      if (!slot.root.visible) {
+        continue;
+      }
+      if (shown > 0) {
+        y += gapPx;
+      }
+      slot.startRow = shown;
+      slot.root.y = y;
+      y += this.slotPixelHeight(slot);
+      shown += 1;
+    }
+    return y;
   }
 
   private loadBadgeSprites(slot: Slot): void {
@@ -2382,6 +2392,7 @@ export class MessageRing {
         systemCloudBounds: null,
         replyRows: 0,
         startRow: 0,
+        scrollLayout: { msgId: "", startRow: 0, lineCount: 0 },
         highlightColor: "",
         disabled: false,
         fromHistory: false,
@@ -2984,6 +2995,7 @@ export class MessageRing {
     slot.bodyContIndent = 0;
     slot.replyRows = 0;
     slot.startRow = 0;
+    slot.scrollLayout.msgId = "";
     slot.highlightColor = "";
     slot.disabled = false;
     slot.fromHistory = false;
@@ -4657,38 +4669,14 @@ export class MessageRing {
     followSmooth = true,
   ): void {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    const visible: Slot[] = [];
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      const live = slot.msgId.length > 0;
-      const show = live && !this.isSlotHiddenByPrivacy(slot);
-      slot.root.visible = show;
-      if (show) {
-        visible.push(slot);
-      }
-    }
-    const gapPx = this.messageGapPx();
-
-    const placeY = (): number => {
-      let y = 0;
-      for (let i = 0; i < visible.length; i += 1) {
-        const slot = visible[i];
-        slot.startRow = i;
-        slot.root.y = y;
-        y += this.slotPixelHeight(slot);
-        if (i + 1 < visible.length) {
-          y += gapPx;
-        }
-      }
-      return y;
-    };
-
-    let totalY = placeY();
+    this.updateSlotVisibility();
+    let totalY = this.positionVisibleSlots();
 
     if (paintOnly) {
       let heightsChanged = false;
-      for (const slot of visible) {
-        if (!paintOnly.has(slot)) {
+      for (let i = 0; i < this.occupied; i += 1) {
+        const slot = this.slots[(start + i) % this.poolSize];
+        if (!slot.root.visible || !paintOnly.has(slot)) {
           continue;
         }
         const prev = slot.lineCount;
@@ -4698,7 +4686,7 @@ export class MessageRing {
         }
       }
       if (heightsChanged) {
-        totalY = placeY();
+        totalY = this.positionVisibleSlots();
       }
     } else {
       const paintBudgetMs = 14;
@@ -4707,8 +4695,9 @@ export class MessageRing {
       for (let iter = 0; iter < 4; iter += 1) {
         const band = this.viewportPaintBand(totalY);
         let heightsChanged = false;
-        for (const slot of visible) {
-          if (this.slotWrapValid(slot)) {
+        for (let i = 0; i < this.occupied; i += 1) {
+          const slot = this.slots[(start + i) % this.poolSize];
+          if (!slot.root.visible || this.slotWrapValid(slot)) {
             continue;
           }
           if (!this.slotYIntersects(slot, band.top, band.bottom)) {
@@ -4724,7 +4713,7 @@ export class MessageRing {
             heightsChanged = true;
           }
         }
-        totalY = placeY();
+        totalY = this.positionVisibleSlots();
         if (budgetHit || !heightsChanged) {
           break;
         }
@@ -4962,27 +4951,28 @@ export class MessageRing {
     this.scrollRaf = requestAnimationFrame(step);
   }
 
+  /** Borrowed geometry; anchors copy values before any row can be changed. */
   private laidSlots(): LaidSlot[] {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    this.laidBuf.length = 0;
-    const shown: Slot[] = [];
+    const gapRows =
+      this.lineHeight > 0 ? this.messageGapPx() / this.lineHeight : 0;
+    let shown = 0;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       if (this.isSlotHiddenByPrivacy(slot)) {
         continue;
       }
-      shown.push(slot);
+      const row = slot.scrollLayout;
+      row.msgId = slot.msgId;
+      row.startRow = this.slotScrollRow(slot);
+      row.lineCount = slot.lineCount;
+      if (shown > 0) {
+        this.laidBuf[shown - 1].lineCount += gapRows;
+      }
+      this.laidBuf[shown] = row;
+      shown += 1;
     }
-    const gapRows =
-      this.lineHeight > 0 ? this.messageGapPx() / this.lineHeight : 0;
-    for (let i = 0; i < shown.length; i += 1) {
-      const slot = shown[i];
-      this.laidBuf.push({
-        msgId: slot.msgId,
-        startRow: this.slotScrollRow(slot),
-        lineCount: slot.lineCount + (i + 1 < shown.length ? gapRows : 0),
-      });
-    }
+    this.laidBuf.length = shown;
     return this.laidBuf;
   }
 
