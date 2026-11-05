@@ -4923,8 +4923,7 @@ export class MessageRing {
       shown += 1;
     }
     const band = this.viewportPaintBand(contentH);
-    // Anchors must be taken before paintClip mutates lineCount under stale root.y.
-    const anchors = this.captureScrollAnchors();
+    let anchors: ReturnType<MessageRing["captureScrollAnchors"]> | undefined;
     const paintStarted = performance.now();
     const paintBudgetMs = 14;
     let heightsChanged = false;
@@ -4945,6 +4944,8 @@ export class MessageRing {
         break;
       }
       const prev = slot.lineCount;
+      // Capture once, before the first paint can change row heights.
+      anchors ??= this.captureScrollAnchors();
       this.paintClip(slot);
       if (slot.lineCount !== prev) {
         heightsChanged = true;
