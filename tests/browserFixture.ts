@@ -9,6 +9,7 @@ import type { Sprite } from "pixi.js";
 import type { SendResult } from "../src/shell/sendStatus";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
+import { checkMediaOverload } from "./browserMediaOverload";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -19,6 +20,7 @@ const fixtureWindow = window as Window & {
     viewportRendering: () => { history: number; top: number; bottom: number };
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
+    mediaOverload: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -116,6 +118,12 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  mediaOverload: () => checkMediaOverload(fixtureWindow.__crt!.ring, (event) => {
+    const channel = active();
+    const seq = (sequences.get(channel) ?? 1) + 1;
+    sequences.set(channel, seq);
+    channelPipe!.onmessage(encode({ channelId: channel, seq, dropped: 0, events: [event] }));
+  }, (response) => { gifResponse = response; }),
   textureLifecycle: () => checkTextureLifecycle((response) => { gifResponse = response; }, fixtureWindow.__crt!.ring),
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
   async chatGifs() {

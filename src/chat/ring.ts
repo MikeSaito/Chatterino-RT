@@ -2585,7 +2585,6 @@ export class MessageRing {
       }
       if (doomedSet.has(slot.clipUi.thumb.texture)) {
         detachSpriteTexture(slot.clipUi.thumb);
-        slot.clipUi.thumbKey = "";
       }
     }
   }
@@ -2613,12 +2612,6 @@ export class MessageRing {
         if (slot.nick.text) {
           slot.nick.visible = true;
         }
-      }
-      if (
-        slot.clipUi.thumbKey &&
-        !isRenderableTexture(slot.clipUi.thumb.texture)
-      ) {
-        slot.clipUi.thumbKey = "";
       }
     }
   }
@@ -3869,9 +3862,6 @@ export class MessageRing {
       cleanseSpriteTexture(spr);
     }
     cleanseSpriteTexture(slot.clipUi.thumb);
-    if (!isRenderableTexture(slot.clipUi.thumb.texture)) {
-      slot.clipUi.thumbKey = "";
-    }
   }
 
   private paintClip(slot: Slot): void {
@@ -5023,10 +5013,24 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       const renderable = slot.root.visible && this.slotYIntersects(slot, top, bottom);
-      if (renderable && !slot.root.renderable) {
+      const entering = renderable && !slot.root.renderable;
+      if (entering) {
         this.lastSanitizeTickerTime = Number.NaN;
       }
       slot.root.renderable = renderable;
+      if (entering) this.refreshMissingSlotMedia(slot);
+    }
+  }
+
+  private refreshMissingSlotMedia(slot: Slot): void {
+    if (slot.badgeKeys.some((key, i) => key && !isRenderableTexture(slot.badges[i].texture))) {
+      this.loadBadgeSprites(slot);
+    }
+    if (this.enableEmoteImages && slot.emoteKeys.some((key, i) => key && !isRenderableTexture(slot.emotes[i].texture))) {
+      this.repaintSlotMedia(slot);
+    }
+    if (slot.clipCard?.thumbnailUrl && !isRenderableTexture(slot.clipUi.thumb.texture)) {
+      this.paintSlotClipCard(slot);
     }
   }
 

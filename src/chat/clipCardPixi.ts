@@ -32,6 +32,7 @@ export type ClipCardWidgets = {
   root: Container;
   bg: Graphics;
   thumb: Sprite;
+  /** Owns one LRU reference even while the thumbnail is pending or unavailable. */
   thumbKey: string;
   durationBg: Graphics;
   duration: BitmapText;
@@ -223,18 +224,19 @@ export function paintClipCard(opts: {
       releaseClipThumb(clip, textures);
       clip.thumbKey = key;
       textures.acquire(key);
+    }
+    if (isRenderableTexture(clip.thumb.texture)) {
+      applySprite(clip.thumb, clip.thumb.texture, thumbW, CLIP_CARD_HEIGHT_PX);
+      clip.thumb.visible = true;
+    } else {
+      clip.thumb.visible = false;
+      clip.thumb.texture = Texture.EMPTY;
       void textures.load(key, info.thumbnailUrl, false).then((tex) => {
         if (tex && clip.thumbKey === key && stillCurrent()) {
           applySprite(clip.thumb, tex, thumbW, CLIP_CARD_HEIGHT_PX);
           clip.thumb.visible = true;
         }
       });
-    } else if (isRenderableTexture(clip.thumb.texture)) {
-      applySprite(clip.thumb, clip.thumb.texture, thumbW, CLIP_CARD_HEIGHT_PX);
-      clip.thumb.visible = true;
-    } else {
-      clip.thumb.visible = false;
-      clip.thumb.texture = Texture.EMPTY;
     }
   } else {
     releaseClipThumb(clip, textures);

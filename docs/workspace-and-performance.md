@@ -36,6 +36,22 @@ started write waits for its own eight-second socket timeout. Leaving a channel
 or changing account cancels its queued messages. Uncertain socket writes and
 Helix POST requests are never replayed automatically.
 
+# Media loading
+
+Chat emotes, badges and clip thumbnails share a limit of 8 active loads and 128
+queued requests per texture cache. A load holds its place through network retries,
+fallback URLs and decoding. Duplicate requests share work; a queued request for
+an older URL or animation mode is replaced by the latest one for that key.
+
+When the queue is full, new requests return no texture and the message remains
+readable. Missing images are requested again when the row reenters the visible
+area. Releasing the last owner cancels queued work. Clearing the cache cancels
+all queued work and discards late results. An already running Tauri request keeps
+its place until completion; clearing cannot bypass the concurrency limit.
+
+The debug resource report exposes `loading` and `queued` separately from
+`inflight`, which counts current load records by key.
+
 # Performance checks
 
 Run `npm run test:browser` with an installed Chromium browser. On Windows the
