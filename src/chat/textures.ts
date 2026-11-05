@@ -5,6 +5,7 @@ import { isAllowedEmoteCdnUrl } from "./emoteCdnAllowlist";
 import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 import { lruVictimsToSize } from "./textureLruPolicy";
 import { resolveEmoteUrl } from "./emoteUrl";
+import { MediaLoadQueue } from "./mediaLoadQueue";
 
 import { isRenderableTexture } from "./textureGuards";
 
@@ -146,6 +147,7 @@ export class TextureLru {
   private readonly refs = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<Texture | null>>();
   private readonly generation = new Map<string, symbol>();
+  private readonly loads = new MediaLoadQueue<EmoteFrameSet>();
   private readonly maxEntries: number;
   private invalidateListener: TextureInvalidateListener | null = null;
 
@@ -199,12 +201,13 @@ export class TextureLru {
     return isRenderableTexture(frame) ? frame : undefined;
   }
 
-  diagnostics(): { textures: number; animatedSets: number; animationFrames: number; inflight: number } {
+  diagnostics(): { textures: number; animatedSets: number; animationFrames: number; inflight: number; loading: number; queued: number } {
     return {
       textures: this.map.size,
       animatedSets: [...this.frameSets.values()].filter((set) => set.frames.length > 1).length,
       animationFrames: [...this.frameSets.values()].reduce((sum, set) => sum + set.frames.length, 0),
       inflight: this.inflight.size,
+      ...this.loads.diagnostics(),
     };
   }
 
@@ -221,6 +224,11 @@ export class TextureLru {
     const n = this.refs.get(id) ?? 0;
     if (n <= 1) {
       this.refs.delete(id);
+      if (n === 1 && this.loads.cancelPending(id) > 0) {
+        this.inflight.delete(id);
+        const token = this.generation.get(id);
+        if (token) this.forgetRequest(id, token);
+      }
     } else {
       this.refs.set(id, n - 1);
     }
@@ -256,18 +264,32 @@ export class TextureLru {
     this.urls.set(id, resolved);
     this.modes.set(id, animate);
     // Keep both URLs in the same load job so other slots reuse the result.
-    const load = loadTextureSet(resolved, animate);
-    const job = (fallbackUrl && fallbackUrl !== resolved
-      ? load.catch((error: unknown) => {
+    const load = this.loads.enqueue(id, async () => {
+      try {
+        return await loadTextureSet(resolved, animate, () => this.generation.get(id) === token);
+      } catch (error) {
+        if (fallbackUrl && fallbackUrl !== resolved) {
           if (this.generation.get(id) !== token) {
             throw error;
           }
-          return loadTextureSet(fallbackUrl, animate);
-        })
-      : load)
+          return loadTextureSet(fallbackUrl, animate, () => this.generation.get(id) === token);
+        }
+        throw error;
+      }
+    });
+    if (!load) {
+      this.inflight.delete(id);
+      this.forgetRequest(id, token);
+      return null;
+    }
+    const job = load
       .then((set) => {
         if (this.inflight.get(id) === job) {
           this.inflight.delete(id);
+        }
+        if (!set) {
+          this.forgetRequest(id, token);
+          return null;
         }
         if (this.generation.get(id) !== token) {
           destroyFrameSet(set, null, (texs) => this.invalidateTextures(id, texs));
@@ -278,11 +300,7 @@ export class TextureLru {
         if (!this.set(id, set.frames[0])) {
           destroyFrameSet(set, null, (texs) => this.invalidateTextures(id, texs));
           // Cap full under pin: drop meta so retries cannot leak Map entries.
-          if (this.generation.get(id) === token) {
-            this.urls.delete(id);
-            this.modes.delete(id);
-            this.generation.delete(id);
-          }
+          this.forgetRequest(id, token);
           return null;
         }
         this.frameSets.set(id, set);
@@ -305,11 +323,7 @@ export class TextureLru {
         if (this.inflight.get(id) === job) {
           this.inflight.delete(id);
         }
-        if (this.generation.get(id) === token) {
-          this.urls.delete(id);
-          this.modes.delete(id);
-          this.generation.delete(id);
-        }
+        this.forgetRequest(id, token);
         return null;
       });
     this.inflight.set(id, job);
@@ -317,6 +331,7 @@ export class TextureLru {
   }
 
   clear(): void {
+    this.loads.cancelPending();
     for (const id of [...this.map.keys()]) {
       this.dropEntry(id);
     }
@@ -325,6 +340,13 @@ export class TextureLru {
     this.modes.clear();
     this.generation.clear();
     this.refs.clear();
+  }
+
+  private forgetRequest(id: string, token: symbol): void {
+    if (this.generation.get(id) !== token) return;
+    this.urls.delete(id);
+    this.modes.delete(id);
+    this.generation.delete(id);
   }
 
   /** Insert only if under hard LRU cap; unpinned entries are evicted first. */
@@ -465,12 +487,14 @@ async function bytesToBitmap(buf: ArrayBuffer, mime: string): Promise<ImageBitma
   }
 }
 
-async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrameSet> {
+async function loadTextureSet(url: string, animate: boolean, isCurrent: () => boolean): Promise<EmoteFrameSet> {
   let delay = 200;
   let last: unknown = new Error("texture load failed");
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
     try {
+      if (!isCurrent()) throw new Error("Texture load superseded");
       const { buf, mime } = await fetchEmoteBytes(url);
+      if (!isCurrent()) throw new Error("Texture load superseded");
       if (animate) {
         const decoded = await decodeAnimated(buf, mime);
         if (decoded) {
@@ -482,6 +506,7 @@ async function loadTextureSet(url: string, animate: boolean): Promise<EmoteFrame
       return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
       last = err;
+      if (!isCurrent()) throw err;
       if (attempt + 1 < ATTEMPTS) {
         await sleep(delay);
         delay *= 2;

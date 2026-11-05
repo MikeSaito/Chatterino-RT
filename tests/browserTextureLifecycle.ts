@@ -23,6 +23,74 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
   const wasTauri = host.isTauri;
   host.isTauri = true;
   try {
+    const burst = new TextureLru(16);
+    const releaseBurst = deferred<ImageBytes>();
+    let burstActive = 0;
+    let burstPeak = 0;
+    setResponse(async () => {
+      burstActive += 1;
+      burstPeak = Math.max(burstPeak, burstActive);
+      try { return await releaseBurst.promise; } finally { burstActive -= 1; }
+    });
+    const burstLoads = Array.from({ length: 300 }, (_, i) => burst.load(`burst-${i}`, url, false));
+    try {
+      check(burstPeak <= 8, `burst starts at most eight requests, got ${burstPeak}`);
+      check(burst.diagnostics().inflight <= 136, "active and queued load records stay bounded");
+      releaseBurst.resolve(image);
+      const results = await Promise.all(burstLoads);
+      check(results.some((texture) => texture === null), "overload rejects requests beyond the bounded queue");
+      check(burstPeak <= 8, "draining the queue preserves the concurrency bound");
+      check(isRenderableTexture(await burst.load("burst-299", url, false)), "a rejected image can be requested again after draining");
+    } finally {
+      releaseBurst.resolve(image);
+      await Promise.all(burstLoads);
+      burst.clear();
+    }
+
+    const cleared = new TextureLru(16);
+    const oldBurst = deferred<ImageBytes>();
+    let clearCalls = 0;
+    setResponse(async () => { clearCalls += 1; return clearCalls <= 8 ? oldBurst.promise : image; });
+    const oldBurstLoads = Array.from({ length: 20 }, (_, i) => cleared.load(`old-${i}`, url, false));
+    cleared.clear();
+    const afterClear = cleared.load("after-clear", url, false);
+    try {
+      check(clearCalls === 8 && cleared.diagnostics().loading === 8, "clearing cannot bypass occupied load permits");
+      check(cleared.diagnostics().queued === 1, "only the new request remains queued");
+      oldBurst.resolve(image);
+      check((await Promise.all(oldBurstLoads)).every((texture) => texture === null), "all cleared jobs settle without acceptance");
+      check(isRenderableTexture(await afterClear) && Number(clearCalls) === 9, "only the new queued request starts after clear");
+    } finally {
+      oldBurst.resolve(image);
+      await Promise.all([...oldBurstLoads, afterClear]);
+      cleared.clear();
+    }
+
+    const referenced = new TextureLru(16);
+    const occupied = deferred<ImageBytes>();
+    let referenceCalls = 0;
+    setResponse(async () => { referenceCalls += 1; return referenceCalls <= 8 ? occupied.promise : image; });
+    const blockers = Array.from({ length: 8 }, (_, i) => referenced.load(`blocker-${i}`, url, false));
+    referenced.acquire("shared");
+    const released = referenced.load("shared", url, false);
+    referenced.release("shared");
+    referenced.acquire("shared");
+    const requeued = referenced.load("shared", url, false);
+    const duplicate = referenced.load("shared", url, false);
+    const animation = referenced.load("shared", url, true);
+    try {
+      check(referenced.diagnostics().queued === 1, "only the newest mode for a queued key is retained");
+      check(await released === null && await requeued === null && await duplicate === null, "released and superseded queued consumers all settle");
+      occupied.resolve(image);
+      await Promise.all(blockers);
+      check(isRenderableTexture(await animation) && referenced.isAnimated("shared"), "immediate reacquisition uses the latest animation mode");
+      check(Number(referenceCalls) === 9, "deduplication and cancelled queue entries do not issue requests");
+    } finally {
+      occupied.resolve(image);
+      await Promise.all([...blockers, released, requeued, duplicate, animation]);
+      referenced.clear();
+    }
+
     for (const oldFirst of [false, true]) {
       const cache = new TextureLru(2);
       const oldResponse = deferred<ImageBytes>();
