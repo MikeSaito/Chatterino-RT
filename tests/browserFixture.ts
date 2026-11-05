@@ -14,6 +14,7 @@ import { checkHistoryWidgets } from "./browserHistoryWidgets";
 import { checkFontMeasurements } from "./browserFontMeasurements";
 import { checkImageSprites } from "./browserImageSprites";
 import { checkHistoryLayout } from "./browserHistoryLayout";
+import { checkRenderReuse } from "./browserRenderReuse";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -29,6 +30,7 @@ const fixtureWindow = window as Window & {
     fontMeasurements: () => Promise<void>;
     imageSprites: () => Promise<void>;
     historyLayout: () => Promise<void>;
+    renderReuse: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -126,6 +128,7 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  renderReuse: () => checkRenderReuse(fixtureWindow.__crt!.ring, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   async historyLayout() {
     const previous = settings.hideModerated;
     const previousDeletion = settings.knobs["appearance.hideDeletionActions"];

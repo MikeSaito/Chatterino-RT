@@ -1295,7 +1295,6 @@ export class MessageRing {
           fallback: this.themeFills.nickFallback,
         });
       }
-      dirtyBitmapText(slot.nick);
     }
   }
 
@@ -1581,10 +1580,6 @@ export class MessageRing {
       } else if (!slot.msgId) {
         slot.nick.tint = this.themeFills.nickFallback;
       }
-      dirtyBitmapText(slot.time);
-      dirtyBitmapText(slot.nick);
-      dirtyBitmapText(slot.body);
-      dirtyBitmapText(slot.bodyCont);
     }
     this.markLayoutFullPaint();
     this.layout();
@@ -3659,7 +3654,6 @@ export class MessageRing {
       slot.spansRaw,
       layoutOpts,
     );
-    dirtyBitmapText(slot.body);
     if (restLines.length === 0) {
       slot.bodyCont.visible = false;
       slot.bodyCont.text = "";
@@ -3674,7 +3668,6 @@ export class MessageRing {
         layoutOpts,
         false,
       );
-      dirtyBitmapText(slot.bodyCont);
     }
 
     slot.systemCloudBounds = {
@@ -3892,7 +3885,6 @@ export class MessageRing {
     } else {
       slot.nick.text = nickForWidth;
     }
-    dirtyBitmapText(slot.nick);
     const nickW = this.applyNickPaintChrome(slot, contentY);
     const firstOriginX = gutterW + timeW + badgeBand + nickW + gap;
     const contOriginX = gutterW;
@@ -3913,7 +3905,6 @@ export class MessageRing {
         fullWidthPx,
         (s) => this.measureBitmapTextWidth("ChatFont", s),
       );
-      dirtyBitmapText(slot.replyHeader);
     }
     const layoutOpts = this.wrapOpts(slot, undefined, firstWidthPx);
     const wrapped = wrapBody(
@@ -3971,7 +3962,6 @@ export class MessageRing {
       renderWrapped(slot.bodyRaw, firstOnly, slot.spansRaw, renderOpts),
       collapsed && restLines.length === 0,
     );
-    dirtyBitmapText(slot.body);
     if (restLines.length === 0) {
       slot.bodyCont.visible = false;
       slot.bodyCont.text = "";
@@ -3986,7 +3976,6 @@ export class MessageRing {
         renderOpts,
         collapsed,
       );
-      dirtyBitmapText(slot.bodyCont);
     }
     if (slot.root.hitArea instanceof Rectangle) {
       slot.root.hitArea.height = this.slotPixelHeight(slot);
@@ -4386,7 +4375,6 @@ export class MessageRing {
           wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
         ht.y = this.wrapLineY(contentY, pos.line, slot);
         ht.visible = true;
-        dirtyBitmapText(ht);
       }
     }
     this.trimOverlayTexts(slot.hostTexts, used);
@@ -4448,7 +4436,6 @@ export class MessageRing {
         // glyphs like ChatFont (unset lineHeight sat mentions above body).
         mt.y = this.wrapLineY(contentY, pos.line, slot);
         mt.visible = true;
-        dirtyBitmapText(mt);
       }
     }
     this.trimOverlayTexts(slot.mentionTexts, used);
@@ -4464,7 +4451,6 @@ export class MessageRing {
   ): void {
     for (const ct of slot.caughtTexts) {
       ct.visible = false;
-      ct.text = "";
     }
     if (slot.automodCaught.length === 0) {
       this.trimOverlayTexts(slot.caughtTexts, 0);
@@ -4502,7 +4488,6 @@ export class MessageRing {
         ct.x = wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
         ct.y = this.wrapLineY(contentY, pos.line, slot);
         ct.visible = true;
-        dirtyBitmapText(ct);
       }
     }
     this.trimOverlayTexts(slot.caughtTexts, used);
@@ -4546,7 +4531,6 @@ export class MessageRing {
       mt.tint = def.color;
       mt.x = x;
       mt.y = y;
-      dirtyBitmapText(mt);
       const w = measureTextWidth(
         this.chatFontFamily,
         qtWeightToCss(this.chatFontWeight),
@@ -5242,7 +5226,6 @@ export class MessageRing {
     slot.modBtnHits = [];
     for (const mt of slot.modBtns) {
       mt.visible = false;
-      mt.text = "";
     }
     for (const spr of slot.modIcons) {
       spr.visible = false;

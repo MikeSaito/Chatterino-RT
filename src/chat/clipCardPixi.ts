@@ -126,12 +126,6 @@ export function hideClipCard(clip: ClipCardWidgets): void {
   clip.foot.text = "";
 }
 
-function dirtyBitmapText(bt: BitmapText): void {
-  const prev = bt.text;
-  bt.text = prev.length > 0 ? "" : " ";
-  bt.text = prev;
-}
-
 function clipTextToWidth(
   text: string,
   maxPx: number,
@@ -246,7 +240,6 @@ export function paintClipCard(opts: {
   clip.duration.style.fontSize = 11;
   clip.duration.style.fill = 0xffffff;
   clip.duration.text = durText;
-  dirtyBitmapText(clip.duration);
   const durW = Math.ceil(measure(durText) + 10);
   const durH = 16;
   const durX = thumbW - durW - 6;
@@ -265,7 +258,6 @@ export function paintClipCard(opts: {
   clip.title.style.fontSize = metaFont;
   clip.title.style.fill = CLIP_CARD_TITLE_COLOR;
   clip.title.text = clipTextToWidth(info.title, metaW, measure);
-  dirtyBitmapText(clip.title);
   clip.title.x = metaX;
   clip.title.y = 10;
 
@@ -277,7 +269,6 @@ export function paintClipCard(opts: {
     clip.game.style.fontSize = Math.max(9, metaFont - 1);
     clip.game.style.fill = mutedFill;
     clip.game.text = clipTextToWidth(gameLine, metaW, measure);
-    dirtyBitmapText(clip.game);
     clip.game.x = metaX;
     clip.game.y = 28;
   } else {
@@ -292,7 +283,6 @@ export function paintClipCard(opts: {
   clip.foot.style.fontSize = Math.max(9, metaFont - 1);
   clip.foot.style.fill = mutedFill;
   clip.foot.text = clipTextToWidth(foot, metaW, measure);
-  dirtyBitmapText(clip.foot);
   clip.foot.x = metaX;
   clip.foot.y = gameLine ? 46 : 32;
 }
