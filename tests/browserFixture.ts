@@ -12,6 +12,7 @@ import { checkTextureLifecycle } from "./browserTextureLifecycle";
 import { checkMediaOverload } from "./browserMediaOverload";
 import { checkHistoryWidgets } from "./browserHistoryWidgets";
 import { checkFontMeasurements } from "./browserFontMeasurements";
+import { checkImageSprites } from "./browserImageSprites";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -25,6 +26,7 @@ const fixtureWindow = window as Window & {
     mediaOverload: () => Promise<void>;
     historyWidgets: () => Promise<void>;
     fontMeasurements: () => Promise<void>;
+    imageSprites: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -122,6 +124,25 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  async imageSprites() {
+    const previous = settings.knobs["emotes.enableEmoteImages"];
+    try {
+      await checkImageSprites(fixtureWindow.__crt!.ring, (event) => {
+        const channel = active();
+        const seq = (sequences.get(channel) ?? 1) + 1;
+        sequences.set(channel, seq);
+        channelPipe!.onmessage(encode({ channelId: channel, seq, dropped: 0, events: [event] }));
+      }, (response) => { gifResponse = response; }, async (enabled) => {
+        settings.knobs["emotes.enableEmoteImages"] = enabled;
+        await emit(SETTINGS_PREVIEW_EVENT, settings);
+        await sleep(100);
+      }, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!));
+    } finally {
+      if (previous === undefined) delete settings.knobs["emotes.enableEmoteImages"];
+      else settings.knobs["emotes.enableEmoteImages"] = previous;
+      await emit(SETTINGS_PREVIEW_EVENT, settings);
+    }
+  },
   async fontMeasurements() {
     const previous = settings.knobs["appearance.chatFontFamily"];
     const changeFont = async (family: string) => {

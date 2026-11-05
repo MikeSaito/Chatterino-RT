@@ -1061,8 +1061,9 @@ export class MessageRing {
         this.textures.release(key);
       }
     }
-    slot.badgeKeys = new Array(slot.badges.length).fill("");
     const visible = this.visibleBadges(slot);
+    this.resizeMediaSprites(slot, slot.badges, visible.length);
+    slot.badgeKeys = new Array(slot.badges.length).fill("");
     const msgId = slot.msgId;
     for (let i = 0; i < slot.badges.length; i += 1) {
       const spr = slot.badges[i];
@@ -1074,7 +1075,7 @@ export class MessageRing {
       slot.badgeKeys[i] = key;
       this.textures.acquire(key);
       void this.textures.load(key, badge.url, false).then((tex) => {
-        if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key) {
+        if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key && slot.badges[i] === spr) {
           applySpriteTexture(spr, tex, this.badgeSize, this.badgeSize);
           this.repaintSlotMedia(slot);
         }
@@ -2287,13 +2288,6 @@ export class MessageRing {
       replyHeader.visible = false;
       replyHeader.eventMode = "none";
       const emotes: Sprite[] = [];
-      for (let e = 0; e < EMOTE_SLOTS_PER_ROW; e += 1) {
-        const spr = new Sprite(Texture.EMPTY);
-        spr.visible = false;
-        spr.eventMode = "none";
-        spr.y = 1;
-        emotes.push(spr);
-      }
       const mentionTexts: BitmapText[] = [];
       const hostTexts: BitmapText[] = [];
       const bitsLabel = new BitmapText({
@@ -2308,21 +2302,8 @@ export class MessageRing {
       bitsLabel.visible = false;
       bitsLabel.eventMode = "none";
       const badges: Sprite[] = [];
-      for (let b = 0; b < BADGE_SLOTS_PER_ROW; b += 1) {
-        const spr = new Sprite(Texture.EMPTY);
-        spr.visible = false;
-        spr.eventMode = "none";
-        spr.y = this.lineMediaY(0, this.badgeSize);
-        badges.push(spr);
-      }
       const modBtns: BitmapText[] = [];
       const modIcons: Sprite[] = [];
-      for (let m = 0; m < MOD_GUTTER_ICON_COUNT; m += 1) {
-        const spr = new Sprite(Texture.EMPTY);
-        spr.visible = false;
-        spr.eventMode = "none";
-        modIcons.push(spr);
-      }
       const caughtTexts: BitmapText[] = [];
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
@@ -2510,9 +2491,9 @@ export class MessageRing {
   ): void {
     const doomedSet = new Set(doomed);
     for (const slot of this.slots) {
-      for (let e = 0; e < slot.emoteKeys.length; e += 1) {
-        if (doomedSet.has(slot.emotes[e].texture)) {
-          detachSpriteTexture(slot.emotes[e]);
+      for (const spr of slot.emotes) {
+        if (doomedSet.has(spr.texture)) {
+          detachSpriteTexture(spr);
         }
       }
       for (const spr of slot.badges) {
@@ -2965,6 +2946,9 @@ export class MessageRing {
     }
     slot.emoteKeys = [];
     slot.badgeKeys = [];
+    this.resizeMediaSprites(slot, slot.emotes, 0);
+    this.resizeMediaSprites(slot, slot.badges, 0);
+    this.resizeMediaSprites(slot, slot.modIcons, 0);
     slot.badgesRaw = [];
     slot.root.cursor = "default";
     slot.time.text = "";
@@ -3264,6 +3248,7 @@ export class MessageRing {
         this.textures.release(key);
       }
     }
+    this.resizeMediaSprites(slot, slot.emotes, this.enableEmoteImages ? Math.min(drawn.spans.length, EMOTE_SLOTS_PER_ROW) : 0);
     slot.emoteKeys = new Array(slot.emotes.length).fill("");
     slot.badgeKeys = [];
     if (this.enableEmoteImages) {
@@ -3280,6 +3265,7 @@ export class MessageRing {
     }
     if (this.isSystemCloud(slot)) {
       slot.badgesRaw = [];
+      this.resizeMediaSprites(slot, slot.badges, 0);
     } else {
       this.loadBadgeSprites(slot);
     }
@@ -3562,6 +3548,7 @@ export class MessageRing {
    */
   private paintSystemCloud(slot: Slot): void {
     this.releaseSlotClipCard(slot);
+    this.resizeMediaSprites(slot, slot.modIcons, 0);
     const padX = Math.max(6, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
     const padY = Math.max(1, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
     const radius = Math.max(6, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
@@ -4293,6 +4280,24 @@ export class MessageRing {
     }
   }
 
+  private resizeMediaSprites(slot: Slot, sprites: Sprite[], count: number): void {
+    while (sprites.length > count) {
+      const sprite = sprites.pop()!;
+      detachSpriteTexture(sprite);
+      sprite.destroy();
+    }
+    while (sprites.length < count) {
+      const sprite = new Sprite(Texture.EMPTY);
+      sprite.visible = false;
+      sprite.eventMode = "none";
+      const anchor = sprites === slot.modIcons ? slot.replyHeader
+        : sprites === slot.badges ? slot.emotes[0] ?? slot.clipUi?.root ?? slot.disabledGfx
+        : slot.clipUi?.root ?? slot.disabledGfx;
+      slot.root.addChildAt(sprite, slot.root.getChildIndex(anchor));
+      sprites.push(sprite);
+    }
+  }
+
   private overlayText(slot: Slot, texts: BitmapText[], index: number): BitmapText {
     if (!texts[index]) {
       const text = new BitmapText({
@@ -4301,7 +4306,7 @@ export class MessageRing {
       });
       text.eventMode = "none";
       text.visible = false;
-      const anchor = texts === slot.modBtns ? slot.modIcons[0]
+      const anchor = texts === slot.modBtns ? slot.modIcons[0] ?? slot.replyHeader
         : texts === slot.mentionTexts ? slot.hostTexts[0] ?? slot.caughtTexts[0] ?? slot.bitsLabel
         : texts === slot.hostTexts ? slot.caughtTexts[0] ?? slot.bitsLabel
         : slot.bitsLabel;
@@ -5253,8 +5258,10 @@ export class MessageRing {
       spr.visible = false;
     }
     if (!this.showModGutter(slot)) {
+      this.resizeMediaSprites(slot, slot.modIcons, 0);
       return 0;
     }
+    this.resizeMediaSprites(slot, slot.modIcons, MOD_GUTTER_ICON_COUNT);
     const actions = modGutterActions();
     const iconSize = Math.max(14, Math.round(this.fontSize * 1.05));
     const padX = Math.max(2, Math.round(2 * this.fontScale));
@@ -5799,6 +5806,7 @@ export class MessageRing {
           this.textures.release(key);
         }
       }
+      this.resizeMediaSprites(slot, slot.emotes, this.enableEmoteImages ? Math.min(slot.spansRaw.length, EMOTE_SLOTS_PER_ROW) : 0);
       slot.emoteKeys = new Array(slot.emotes.length).fill("");
       if (!this.enableEmoteImages) {
         continue;

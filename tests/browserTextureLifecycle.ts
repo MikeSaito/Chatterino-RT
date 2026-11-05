@@ -1,5 +1,5 @@
 import { TextureLru, isRenderableTexture } from "../src/chat/textures";
-import { Texture, type Sprite } from "pixi.js";
+import { Texture, Sprite, type Container } from "pixi.js";
 import type { MessageRing } from "../src/chat/ring";
 
 type ImageBytes = { bytes: number[]; contentType: string };
@@ -151,11 +151,13 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
     }
 
     const owner = ring as unknown as {
-      slots: { root: { visible: boolean; renderable: boolean }; emotes: Sprite[]; emoteKeys: string[] }[];
+      slots: { root: Container; emotes: Sprite[]; emoteKeys: string[] }[];
       onTexturesInvalidated: (id: string, textures: readonly Texture[]) => void;
     };
     const slot = owner.slots.find((row) => row.root.visible && row.root.renderable)!;
-    const sprite = slot.emotes[0];
+    const created = !slot.emotes[0];
+    const sprite = slot.emotes[0] ?? new Sprite(Texture.EMPTY);
+    if (created) { slot.root.addChild(sprite); slot.emotes.push(sprite); }
     const saved = { texture: sprite.texture, visible: sprite.visible, keys: slot.emoteKeys };
     const shared = new TextureLru(2);
     shared.setInvalidateListener((id, textures) => owner.onTexturesInvalidated(id, textures));
@@ -185,6 +187,7 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
       slot.emoteKeys = saved.keys;
       sprite.texture = saved.texture;
       sprite.visible = saved.visible;
+      if (created) { slot.emotes.pop(); sprite.destroy(); }
     }
   } finally {
     setResponse(undefined);

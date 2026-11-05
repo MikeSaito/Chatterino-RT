@@ -113,6 +113,8 @@ try {
   console.log("UI history text layers passed");
   await evaluate("window.__fixture.fontMeasurements()");
   console.log("UI font measurement invalidation passed");
+  await evaluate("window.__fixture.imageSprites()");
+  console.log("UI image sprite lifecycle passed");
   await evaluate("window.__fixture.mediaOverload()");
   console.log("UI media overload recovery passed");
   assert.deepEqual(failures, [], "no unhandled browser exceptions");

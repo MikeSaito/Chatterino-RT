@@ -1,16 +1,17 @@
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
-import type { BitmapText } from "pixi.js";
+import type { BitmapText, Sprite } from "pixi.js";
 
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 export async function checkHistoryWidgets(ring: MessageRing, send: (event: ChatEvent) => void, restore: () => void) {
   const owner = ring as unknown as {
-    slots: { msgId: string; mentionTexts: BitmapText[]; hostTexts: BitmapText[]; caughtTexts: BitmapText[]; modBtns: BitmapText[]; clipUi: unknown }[];
+    slots: { msgId: string; mentionTexts: BitmapText[]; hostTexts: BitmapText[]; caughtTexts: BitmapText[]; modBtns: BitmapText[]; clipUi: unknown; emotes: Sprite[]; badges: Sprite[]; modIcons: Sprite[] }[];
   };
   check(owner.slots.every((slot) => slot.mentionTexts.length + slot.hostTexts.length + slot.caughtTexts.length + slot.modBtns.length === 0), "plain history must not preallocate optional text layers");
   check(owner.slots.every((slot) => slot.clipUi === null), "plain history must not preallocate clip cards");
+  check(owner.slots.every((slot) => slot.emotes.length + slot.badges.length + slot.modIcons.length === 0), "plain history must not preallocate image sprites");
   const base: Extract<ChatEvent, { kind: "privmsg" }> = {
     kind: "privmsg", id: "memory-mention", timestampMs: Date.now(), userId: "1", login: "viewer", displayName: "Viewer", color: "#6699ff", badges: [],
     text: "@Other hello", emoteSpans: [], mentionSpans: [{ start: 0, end: 6, login: "other" }], action: false,
