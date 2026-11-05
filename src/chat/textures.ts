@@ -352,7 +352,7 @@ export class TextureLru {
     this.modes.delete(victim);
     this.frameSets.delete(victim);
     this.generation.delete(victim);
-    // refs === 0 (evict only), but sprites may still hold Texture — invalidate first.
+    // Pinned stale entries can still be displayed; detach before destruction.
     if (droppedSet) {
       destroyFrameSet(droppedSet, null, (texs) =>
         this.invalidateTextures(victim, texs),
@@ -367,23 +367,9 @@ export class TextureLru {
     }
   }
 
-  /** Drop LRU map entry for an already-destroyed texture without double-destroy. */
+  /** A dead base frame does not imply that the remaining animation frames are dead. */
   private purgeDeadEntry(id: string): void {
-    const set = this.frameSets.get(id);
-    if (set) {
-      // Frames already dead; detach sprites without destroyFrameSet GPU pass.
-      this.invalidateTextures(id, set.frames.filter((t) => t !== Texture.EMPTY));
-    } else {
-      const dropped = this.map.get(id);
-      if (dropped && dropped !== Texture.EMPTY) {
-        this.invalidateTextures(id, [dropped]);
-      }
-    }
-    this.map.delete(id);
-    this.urls.delete(id);
-    this.modes.delete(id);
-    this.frameSets.delete(id);
-    this.generation.delete(id);
+    this.dropEntry(id);
   }
 
   private evict(maxSize = this.maxEntries): void {

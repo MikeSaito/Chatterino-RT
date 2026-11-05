@@ -69,6 +69,19 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
     check(metadata.generation.size === 0, "failed unique loads do not retain generation records");
     cache.clear();
 
+    const animated = new TextureLru(2);
+    setResponse(async () => image);
+    try {
+      check(await animated.load("partial-dead", url, true), "animated texture loads");
+      const frames = animated.frameSet("partial-dead")!.frames;
+      check(frames.length > 1, "fixture has multiple decoded frames");
+      frames[0].destroy(true);
+      check(animated.get("partial-dead") === undefined, "dead base texture is removed");
+      check(frames.every((frame) => frame.destroyed), "purging a partially dead animation releases all remaining frames");
+    } finally {
+      animated.clear();
+    }
+
     const owner = ring as unknown as {
       slots: { root: { visible: boolean; renderable: boolean }; emotes: Sprite[]; emoteKeys: string[] }[];
       onTexturesInvalidated: (id: string, textures: readonly Texture[]) => void;
