@@ -116,7 +116,7 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
-  textureLifecycle: () => checkTextureLifecycle((response) => { gifResponse = response; }),
+  textureLifecycle: () => checkTextureLifecycle((response) => { gifResponse = response; }, fixtureWindow.__crt!.ring),
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
   async chatGifs() {
     const host = window as Window & { isTauri?: boolean };

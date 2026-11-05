@@ -1,4 +1,6 @@
 import { TextureLru, isRenderableTexture } from "../src/chat/textures";
+import { Texture, type Sprite } from "pixi.js";
+import type { MessageRing } from "../src/chat/ring";
 
 type ImageBytes = { bytes: number[]; contentType: string };
 type Response = (url: string) => Promise<ImageBytes>;
@@ -13,7 +15,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-export async function checkTextureLifecycle(setResponse: (response?: Response) => void): Promise<void> {
+export async function checkTextureLifecycle(setResponse: (response?: Response) => void, ring: MessageRing): Promise<void> {
   const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
   const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
   const url = "https://cdn.7tv.app/emote/lifecycle/1x.gif";
@@ -66,6 +68,43 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
     for (let i = 0; i < 3; i += 1) await cache.load(`failed-${i}`, url, false);
     check(metadata.generation.size === 0, "failed unique loads do not retain generation records");
     cache.clear();
+
+    const owner = ring as unknown as {
+      slots: { root: { visible: boolean; renderable: boolean }; emotes: Sprite[]; emoteKeys: string[] }[];
+      onTexturesInvalidated: (id: string, textures: readonly Texture[]) => void;
+    };
+    const slot = owner.slots.find((row) => row.root.visible && row.root.renderable)!;
+    const sprite = slot.emotes[0];
+    const saved = { texture: sprite.texture, visible: sprite.visible, keys: slot.emoteKeys };
+    const shared = new TextureLru(2);
+    shared.setInvalidateListener((id, textures) => owner.onTexturesInvalidated(id, textures));
+    const staleResponse = deferred<ImageBytes>();
+    const freshResponse = deferred<ImageBytes>();
+    let calls = 0;
+    setResponse(async () => ++calls === 1 ? staleResponse.promise : freshResponse.promise);
+    const staleLoad = shared.load("media-reload", url, false);
+    const freshLoad = shared.load("media-reload", url.replace("lifecycle", "lifecycle-fresh"), false);
+    try {
+      freshResponse.resolve(image);
+      const current = await freshLoad;
+      check(isRenderableTexture(current), "shared key replacement is usable");
+      slot.emoteKeys = ["media-reload", ...saved.keys.slice(1)];
+      sprite.texture = current;
+      sprite.visible = true;
+      staleResponse.resolve(image);
+      check(await staleLoad === null, "superseded asset is discarded");
+      check(sprite.texture === current && sprite.visible, "discarding old frames cannot hide the current image with the same key");
+      shared.clear();
+      check(sprite.texture === Texture.EMPTY && !sprite.visible, "current frames are detached before their cache is cleared");
+    } finally {
+      staleResponse.resolve(image);
+      freshResponse.resolve(image);
+      await Promise.all([staleLoad, freshLoad]);
+      shared.clear();
+      slot.emoteKeys = saved.keys;
+      sprite.texture = saved.texture;
+      sprite.visible = saved.visible;
+    }
   } finally {
     setResponse(undefined);
     host.isTauri = wasTauri;

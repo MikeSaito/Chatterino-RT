@@ -2556,15 +2556,13 @@ export class MessageRing {
   }
 
   private onTexturesInvalidated(
-    id: string,
+    _id: string,
     doomed: readonly Texture[],
   ): void {
     const doomedSet = new Set(doomed);
     for (const slot of this.slots) {
       for (let e = 0; e < slot.emoteKeys.length; e += 1) {
-        if (slot.emoteKeys[e] === id) {
-          detachSpriteTexture(slot.emotes[e]);
-        } else if (doomedSet.has(slot.emotes[e].texture)) {
+        if (doomedSet.has(slot.emotes[e].texture)) {
           detachSpriteTexture(slot.emotes[e]);
         }
       }
