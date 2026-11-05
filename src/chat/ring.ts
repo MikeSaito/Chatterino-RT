@@ -79,7 +79,6 @@ import {
   clipCardContains,
   clipCardRowCount,
   createClipCardWidgets,
-  hideClipCard,
   paintClipCard,
   releaseClipThumb,
   type ClipCardWidgets,
@@ -258,7 +257,7 @@ type Slot = {
   /** Low Trust status for streamer-mode hide (`restricted` | `monitored` | ""). */
   lowTrustStatus: string;
   caughtTexts: BitmapText[];
-  clipUi: ClipCardWidgets;
+  clipUi: ClipCardWidgets | null;
   msgId: string;
   login: string;
   /** Текст до host-display transform (whisper/action lead). */
@@ -1377,8 +1376,7 @@ export class MessageRing {
         }
         if (slot.linkEnriched) {
           slot.hostSpans = [];
-          releaseClipThumb(slot.clipUi, this.textures);
-          hideClipCard(slot.clipUi);
+          this.releaseSlotClipCard(slot);
           slot.clipCard = null;
           slot.clipCardRows = 0;
           slot.linkEnriched = false;
@@ -2058,10 +2056,12 @@ export class MessageRing {
           dirtyBitmapText(mt);
         }
         dirtyBitmapText(slot.bitsLabel);
-        dirtyBitmapText(slot.clipUi.duration);
-        dirtyBitmapText(slot.clipUi.title);
-        dirtyBitmapText(slot.clipUi.game);
-        dirtyBitmapText(slot.clipUi.foot);
+        if (slot.clipUi) {
+          dirtyBitmapText(slot.clipUi.duration);
+          dirtyBitmapText(slot.clipUi.title);
+          dirtyBitmapText(slot.clipUi.game);
+          dirtyBitmapText(slot.clipUi.foot);
+        }
         for (const ct of slot.caughtTexts) {
           dirtyBitmapText(ct);
         }
@@ -2324,7 +2324,6 @@ export class MessageRing {
         modIcons.push(spr);
       }
       const caughtTexts: BitmapText[] = [];
-      const clipUi = createClipCardWidgets(this.themeFills.timestamp);
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
         systemCloud,
@@ -2344,7 +2343,6 @@ export class MessageRing {
         bitsLabel,
         ...badges,
         ...emotes,
-        clipUi.root,
         disabledGfx,
       );
       const slot: Slot = {
@@ -2378,7 +2376,7 @@ export class MessageRing {
         automodCaught: [],
         lowTrustStatus: "",
         caughtTexts,
-        clipUi,
+        clipUi: null,
         msgId: "",
         login: "",
         bodySource: "",
@@ -2534,7 +2532,7 @@ export class MessageRing {
           slot.nick.visible = true;
         }
       }
-      if (doomedSet.has(slot.clipUi.thumb.texture)) {
+      if (slot.clipUi && doomedSet.has(slot.clipUi.thumb.texture)) {
         detachSpriteTexture(slot.clipUi.thumb);
       }
     }
@@ -2940,7 +2938,7 @@ export class MessageRing {
   private clearSlot(slot: Slot): void {
     this.releaseOverlayTexts(slot);
     slot.root.visible = false;
-    hideClipCard(slot.clipUi);
+    this.releaseSlotClipCard(slot);
     for (const spr of slot.emotes) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
@@ -2955,7 +2953,6 @@ export class MessageRing {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
     }
-    releaseClipThumb(slot.clipUi, this.textures);
     for (const key of slot.emoteKeys) {
       if (key) {
         this.textures.release(key);
@@ -3135,8 +3132,7 @@ export class MessageRing {
     slot.copyText = drawn.copyText;
     slot.linkSpans = drawn.links;
     slot.hostSpans = [];
-    releaseClipThumb(slot.clipUi, this.textures);
-    hideClipCard(slot.clipUi);
+    this.releaseSlotClipCard(slot);
     slot.clipCard = null;
     slot.clipCardRows = 0;
     slot.linkEnriched = false;
@@ -3565,8 +3561,7 @@ export class MessageRing {
    * (Twitch web-style system “cloud”).
    */
   private paintSystemCloud(slot: Slot): void {
-    releaseClipThumb(slot.clipUi, this.textures);
-    hideClipCard(slot.clipUi);
+    this.releaseSlotClipCard(slot);
     const padX = Math.max(6, Math.round(SYSTEM_CLOUD_PAD_X * this.fontScale));
     const padY = Math.max(1, Math.round(SYSTEM_CLOUD_PAD_Y * this.fontScale));
     const radius = Math.max(6, Math.round(SYSTEM_CLOUD_RADIUS * this.fontScale));
@@ -3791,7 +3786,7 @@ export class MessageRing {
     for (const spr of slot.modIcons) {
       cleanseSpriteTexture(spr);
     }
-    cleanseSpriteTexture(slot.clipUi.thumb);
+    if (slot.clipUi) cleanseSpriteTexture(slot.clipUi.thumb);
   }
 
   private paintClip(slot: Slot): void {
@@ -4095,11 +4090,28 @@ export class MessageRing {
     this.paintSlotClipCard(slot);
   }
 
+  private releaseSlotClipCard(slot: Slot): void {
+    const clip = slot.clipUi;
+    if (!clip) return;
+    slot.clipUi = null;
+    releaseClipThumb(clip, this.textures);
+    clip.root.destroy({ children: true, style: true });
+  }
+
   private paintSlotClipCard(slot: Slot): void {
+    if (!slot.clipCard || slot.clipCardRows <= 0) {
+      this.releaseSlotClipCard(slot);
+      return;
+    }
+    if (!slot.clipUi) {
+      slot.clipUi = createClipCardWidgets(this.themeFills.timestamp);
+      slot.root.addChildAt(slot.clipUi.root, slot.root.getChildIndex(slot.disabledGfx));
+    }
+    const clip = slot.clipUi;
     const msgId = slot.msgId;
     const clipId = slot.clipCard?.clipId ?? "";
     paintClipCard({
-      clip: slot.clipUi,
+      clip,
       info: slot.clipCard,
       clipCardRows: slot.clipCardRows,
       lineCount: slot.lineCount,
@@ -4115,7 +4127,7 @@ export class MessageRing {
         slot.msgId === msgId &&
         !!slot.clipCard &&
         slot.clipCard.clipId === clipId &&
-        slot.clipUi.thumbKey === `clip:${clipId}`,
+        slot.clipUi === clip && clip.thumbKey === `clip:${clipId}`,
     });
   }
 
@@ -4995,7 +5007,7 @@ export class MessageRing {
     if (this.enableEmoteImages && slot.emoteKeys.some((key, i) => key && !isRenderableTexture(slot.emotes[i].texture))) {
       this.repaintSlotMedia(slot);
     }
-    if (slot.clipCard?.thumbnailUrl && !isRenderableTexture(slot.clipUi.thumb.texture)) {
+    if (slot.clipCard?.thumbnailUrl && (!slot.clipUi || !isRenderableTexture(slot.clipUi.thumb.texture))) {
       this.paintSlotClipCard(slot);
     }
   }
@@ -5089,7 +5101,7 @@ export class MessageRing {
     }
     {
       const local = ev.getLocalPosition(slot.root);
-      if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+      if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
         // Card is layout chrome, not a body link: always single-click open.
         const clipUrl = slot.clipCard.url;
         if (this.onOpenChatLink) {
@@ -5167,7 +5179,7 @@ export class MessageRing {
       this.makeSlotContext(slot, ev, {
         linkUrl: (() => {
           const local = ev.getLocalPosition(slot.root);
-          if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+          if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
             return slot.clipCard.url;
           }
           return this.linkAt(slot, ev) ?? "";
@@ -5202,7 +5214,7 @@ export class MessageRing {
     }
     {
       const local = ev.getLocalPosition(slot.root);
-      if (slot.clipCard && clipCardContains(slot.clipUi, local.x, local.y)) {
+      if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
         slot.root.cursor = "pointer";
         return;
       }

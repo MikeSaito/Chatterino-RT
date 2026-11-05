@@ -7,9 +7,10 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 
 export async function checkHistoryWidgets(ring: MessageRing, send: (event: ChatEvent) => void, restore: () => void) {
   const owner = ring as unknown as {
-    slots: { msgId: string; mentionTexts: BitmapText[]; hostTexts: BitmapText[]; caughtTexts: BitmapText[]; modBtns: BitmapText[] }[];
+    slots: { msgId: string; mentionTexts: BitmapText[]; hostTexts: BitmapText[]; caughtTexts: BitmapText[]; modBtns: BitmapText[]; clipUi: unknown }[];
   };
   check(owner.slots.every((slot) => slot.mentionTexts.length + slot.hostTexts.length + slot.caughtTexts.length + slot.modBtns.length === 0), "plain history must not preallocate optional text layers");
+  check(owner.slots.every((slot) => slot.clipUi === null), "plain history must not preallocate clip cards");
   const base: Extract<ChatEvent, { kind: "privmsg" }> = {
     kind: "privmsg", id: "memory-mention", timestampMs: Date.now(), userId: "1", login: "viewer", displayName: "Viewer", color: "#6699ff", badges: [],
     text: "@Other hello", emoteSpans: [], mentionSpans: [{ start: 0, end: 6, login: "other" }], action: false,

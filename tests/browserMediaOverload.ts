@@ -1,6 +1,6 @@
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
-import type { Sprite } from "pixi.js";
+import type { Container, Sprite } from "pixi.js";
 import type { TextureLru } from "../src/chat/textures";
 
 type Response = (url: string) => Promise<{ bytes: number[]; contentType: string }>;
@@ -17,12 +17,13 @@ async function until(test: () => boolean) {
 export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEvent) => void, setResponse: (response?: Response) => void) {
   const owner = ring as unknown as {
     textures: TextureLru;
-    slots: { msgId: string; emotes: Sprite[]; badges: Sprite[]; clipUi: { thumb: Sprite } }[];
+    slots: { msgId: string; emotes: Sprite[]; badges: Sprite[]; clipUi: { thumb: Sprite; root: Container } | null }[];
   };
   const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
   const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
   const base = "https://cdn.7tv.app/emote";
   let release!: () => void;
+  let releaseLate = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const host = window as Window & { isTauri?: boolean };
   const wasTauri = host.isTauri;
@@ -39,23 +40,38 @@ export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEv
     ring.goToBottom();
     send(event);
     await until(() => owner.slots.some((slot) => slot.msgId === event.id));
+    const clipInfo = { clipId: "recovery-clip", url: "https://clips.twitch.tv/Fixture", title: "Fixture clip", host: "clips.twitch.tv", thumbnailUrl: `${base}/recovery-thumb/1x.gif`, durationSec: 10, viewCount: 1, creatorName: "Viewer", broadcasterName: "Channel", gameName: null, createdAt: null };
     ring.applyLinkEnrichment(event.id, {
       body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [],
-      clip: { clipId: "recovery-clip", url: "https://clips.twitch.tv/Fixture", title: "Fixture clip", host: "clips.twitch.tv", thumbnailUrl: `${base}/recovery-thumb/1x.gif`, durationSec: 10, viewCount: 1, creatorName: "Viewer", broadcasterName: "Channel", gameName: null, createdAt: null },
+      clip: clipInfo,
     });
     await frame(); await frame();
     const slot = owner.slots.find((row) => row.msgId === event.id)!;
-    check(!slot.emotes[0].visible && !slot.badges[0].visible && !slot.clipUi.thumb.visible, "overload leaves image placeholders");
+    const clip = slot.clipUi!;
+    check(!slot.emotes[0].visible && !slot.badges[0].visible && !clip.thumb.visible, "overload leaves image placeholders");
     release();
     await Promise.all(loads);
     ring.setDesired(0, false);
     await frame(); await frame();
     ring.goToBottom();
-    await until(() => slot.emotes[0].visible && slot.badges[0].visible && slot.clipUi.thumb.visible);
+    await until(() => slot.emotes[0].visible && slot.badges[0].visible && clip.thumb.visible);
     const refs = (owner.textures as unknown as { refs: Map<string, number> }).refs;
     check(refs.get("clip:recovery-clip") === 1, "clip retries retain exactly one owner reference");
+    ring.applyLinkEnrichment(event.id, { body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [], clip: null });
+    check(slot.clipUi === null && clip.root.destroyed, "removing a clip destroys its widgets");
+    check(!refs.has("clip:recovery-clip"), "removing a clip releases its thumbnail owner");
+    const late = new Promise<void>((resolve) => { releaseLate = resolve; });
+    setResponse(async () => { await late; return image; });
+    ring.applyLinkEnrichment(event.id, { body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [], clip: { ...clipInfo, clipId: "late-clip" } });
+    const stale = slot.clipUi!;
+    ring.applyLinkEnrichment(event.id, { body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [], clip: null });
+    releaseLate();
+    await until(() => owner.textures.diagnostics().loading === 0 && owner.textures.diagnostics().queued === 0);
+    check(stale.root.destroyed && slot.clipUi === null, "late thumbnail completion cannot restore a removed card");
+    check(!refs.has("clip:late-clip"), "late completion cannot retain a removed thumbnail owner");
   } finally {
     release();
+    releaseLate();
     await Promise.all(loads);
     setResponse(undefined);
     host.isTauri = wasTauri;
