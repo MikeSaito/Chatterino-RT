@@ -15,6 +15,7 @@ const fixtureWindow = window as Window & {
     ready: () => boolean;
     chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
+    viewportRendering: () => { history: number; top: number; bottom: number };
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -256,6 +257,28 @@ fixtureWindow.__fixture = {
     check(selected.atBottom, "initial follow");
     checks.push("workspace flushed before restart");
     return checks;
+  },
+  viewportRendering() {
+    const ring = fixtureWindow.__crt!.ring;
+    const { slots } = ring as unknown as {
+      slots: { msgId: string; root: { visible: boolean; renderable: boolean; y: number } }[];
+    };
+    const history = slots.filter((slot) => slot.root.visible).sort((a, b) => a.root.y - b.root.y);
+    const first = history[0];
+    const last = history[history.length - 1];
+    check(first && last && history.length > 100, "fixture history exceeds the viewport");
+    const countRenderable = () => history.filter((slot) => slot.root.renderable).length;
+
+    ring.setDesired(0, false);
+    const top = countRenderable();
+    check(first.root.renderable && !last.root.renderable, "scrolling to the start renders old rows");
+    check(ring.contextForMsgId(last.msgId, 0, 0)?.msgId === last.msgId, "offscreen rows remain addressable");
+
+    ring.goToBottom();
+    const bottom = countRenderable();
+    check(!first.root.renderable && last.root.renderable, "returning to the bottom renders new rows");
+    check(ring.contextForMsgId(first.msgId, 0, 0)?.msgId === first.msgId, "history is kept after scrolling");
+    return { history: history.length, top, bottom };
   },
   async load(rate, seconds, scroll) {
     const trace = fixtureWindow.__crt!.performance;

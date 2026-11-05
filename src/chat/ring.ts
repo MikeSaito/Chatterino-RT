@@ -5015,7 +5015,17 @@ export class MessageRing {
   }
 
   private applyStageY(): void {
-    this.app.stage.y = this.scroll.stageY(this.lineHeight);
+    const stageY = this.scroll.stageY(this.lineHeight);
+    this.app.stage.y = stageY;
+    const padding = this.lineHeight * 8;
+    const top = -stageY - padding;
+    const bottom = -stageY + this.app.screen.height + padding;
+    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
+    for (let i = 0; i < this.occupied; i += 1) {
+      const slot = this.slots[(start + i) % this.poolSize];
+      slot.root.renderable =
+        slot.root.visible && this.slotYIntersects(slot, top, bottom);
+    }
   }
 
   private notifyScroll(): void {

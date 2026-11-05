@@ -103,9 +103,11 @@ try {
     loads.push(report);
     console.log(`Load ${rate}/s scroll=${scrolling}: processing p95=${report.processing.p95Ms.toFixed(2)}ms, receipt→frame p95=${report.receiptToFrame.p95Ms.toFixed(2)}ms, frame p95=${report.frames.p95Ms.toFixed(2)}ms`);
   }
+  const viewportRendering = await evaluate("window.__fixture.viewportRendering()");
+  console.log("UI viewport rendering:", viewportRendering);
   assert.deepEqual(failures, [], "no unhandled browser exceptions");
   const out = join(root, "artifacts"); mkdirSync(out, { recursive: true });
-  if (!uiOnly) writeFileSync(join(out, "browser-performance.json"), JSON.stringify({ environment: "Chromium headless, SwiftShader software GPU, 1280×800, DPR 1, synthetic text messages, mocked Tauri transport", smoke, restored, loads }, null, 2));
+  if (!uiOnly) writeFileSync(join(out, "browser-performance.json"), JSON.stringify({ environment: "Chromium headless, SwiftShader software GPU, 1280×800, DPR 1, synthetic text messages, mocked Tauri transport", smoke, restored, viewportRendering, loads }, null, 2));
   const capture = async (name) => {
     const shot = await command("Page.captureScreenshot", { format: "png" });
     writeFileSync(join(out, `${name}.png`), Buffer.from(shot.data, "base64"));
