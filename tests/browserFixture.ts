@@ -10,6 +10,7 @@ import type { SendResult } from "../src/shell/sendStatus";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
 import { checkMediaOverload } from "./browserMediaOverload";
+import { checkHistoryWidgets } from "./browserHistoryWidgets";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -21,6 +22,7 @@ const fixtureWindow = window as Window & {
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
     mediaOverload: () => Promise<void>;
+    historyWidgets: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -118,6 +120,12 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  historyWidgets: () => checkHistoryWidgets(fixtureWindow.__crt!.ring, (event) => {
+    const channel = active();
+    const seq = (sequences.get(channel) ?? 1) + 1;
+    sequences.set(channel, seq);
+    channelPipe!.onmessage(encode({ channelId: channel, seq, dropped: 0, events: [event] }));
+  }, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   mediaOverload: () => checkMediaOverload(fixtureWindow.__crt!.ring, (event) => {
     const channel = active();
     const seq = (sequences.get(channel) ?? 1) + 1;

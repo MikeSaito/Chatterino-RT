@@ -109,6 +109,8 @@ try {
   console.log("UI culled texture recovery passed");
   await evaluate("window.__fixture.textureLifecycle()");
   console.log("UI texture cache lifecycle passed");
+  await evaluate("window.__fixture.historyWidgets()");
+  console.log("UI history text layers passed");
   await evaluate("window.__fixture.mediaOverload()");
   console.log("UI media overload recovery passed");
   assert.deepEqual(failures, [], "no unhandled browser exceptions");

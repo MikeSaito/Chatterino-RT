@@ -2288,35 +2288,7 @@ export class MessageRing {
         emotes.push(spr);
       }
       const mentionTexts: BitmapText[] = [];
-      for (let m = 0; m < MENTION_SLOTS_PER_ROW; m += 1) {
-        const mt = new BitmapText({
-          text: "",
-          style: {
-            fontFamily: "ChatFont",
-            fontSize: this.fontSize,
-            lineHeight: this.lineHeight,
-            fill: 0xffffff,
-          },
-        });
-        mt.visible = false;
-        mt.eventMode = "none";
-        mentionTexts.push(mt);
-      }
       const hostTexts: BitmapText[] = [];
-      for (let h = 0; h < MENTION_SLOTS_PER_ROW; h += 1) {
-        const ht = new BitmapText({
-          text: "",
-          style: {
-            fontFamily: "ChatFont",
-            fontSize: this.fontSize,
-            lineHeight: this.lineHeight,
-            fill: this.themeFills.timestamp,
-          },
-        });
-        ht.visible = false;
-        ht.eventMode = "none";
-        hostTexts.push(ht);
-      }
       const bitsLabel = new BitmapText({
         text: "",
         style: {
@@ -2337,20 +2309,6 @@ export class MessageRing {
         badges.push(spr);
       }
       const modBtns: BitmapText[] = [];
-      for (let m = 0; m < MOD_ACTION_SLOTS_PER_ROW; m += 1) {
-        const mt = new BitmapText({
-          text: "",
-          style: {
-            fontFamily: "ChatFont",
-            fontSize: this.fontSize,
-            lineHeight: this.lineHeight,
-            fill: 0xffaa88,
-          },
-        });
-        mt.visible = false;
-        mt.eventMode = "none";
-        modBtns.push(mt);
-      }
       const modIcons: Sprite[] = [];
       for (let m = 0; m < MOD_GUTTER_ICON_COUNT; m += 1) {
         const spr = new Sprite(Texture.EMPTY);
@@ -2359,20 +2317,6 @@ export class MessageRing {
         modIcons.push(spr);
       }
       const caughtTexts: BitmapText[] = [];
-      for (let c = 0; c < MENTION_SLOTS_PER_ROW; c += 1) {
-        const ct = new BitmapText({
-          text: "",
-          style: {
-            fontFamily: "ChatFont",
-            fontSize: this.fontSize,
-            lineHeight: this.lineHeight,
-            fill: 0xffffff,
-          },
-        });
-        ct.visible = false;
-        ct.eventMode = "none";
-        caughtTexts.push(ct);
-      }
       const clipUi = createClipCardWidgets(this.themeFills.timestamp);
       // body / bodyCont under nick so nick stays readable if chrome widths drift
       root.addChild(
@@ -2986,6 +2930,7 @@ export class MessageRing {
   }
 
   private clearSlot(slot: Slot): void {
+    this.releaseOverlayTexts(slot);
     slot.root.visible = false;
     hideClipCard(slot.clipUi);
     for (const spr of slot.emotes) {
@@ -3042,14 +2987,6 @@ export class MessageRing {
     slot.automodMessageId = "";
     slot.automodStatus = "";
     slot.automodCaught = [];
-    for (const mt of slot.modBtns) {
-      mt.visible = false;
-      mt.text = "";
-    }
-    for (const ct of slot.caughtTexts) {
-      ct.visible = false;
-      ct.text = "";
-    }
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.wrapLineHeights = [];
     slot.wrapReady = false;
@@ -3100,22 +3037,6 @@ export class MessageRing {
     slot.systemCloudBounds = null;
     slot.mentions.clear();
     slot.disabledGfx.clear();
-    for (const mt of slot.mentionTexts) {
-      mt.visible = false;
-      mt.text = "";
-    }
-    for (const ht of slot.hostTexts) {
-      ht.visible = false;
-      ht.text = "";
-    }
-    for (const mt of slot.modBtns) {
-      mt.visible = false;
-      mt.text = "";
-    }
-    for (const ct of slot.caughtTexts) {
-      ct.visible = false;
-      ct.text = "";
-    }
     slot.modBtnHits = [];
     slot.automodBtnHits = [];
     slot.bitsLabel.visible = false;
@@ -3123,6 +3044,7 @@ export class MessageRing {
   }
 
   private write(slot: Slot, event: ChatEvent): void {
+    this.releaseOverlayTexts(slot);
     slot.root.visible = true;
     slot.disabled =
       (event.kind === "privmsg" && !!event.disabled) ||
@@ -4351,6 +4273,35 @@ export class MessageRing {
     }
   }
 
+  private overlayText(slot: Slot, texts: BitmapText[], index: number): BitmapText {
+    if (!texts[index]) {
+      const text = new BitmapText({
+        text: "",
+        style: { fontFamily: "ChatFont", fontSize: this.fontSize, lineHeight: this.lineHeight, fill: 0xffffff },
+      });
+      text.eventMode = "none";
+      text.visible = false;
+      const anchor = texts === slot.modBtns ? slot.modIcons[0]
+        : texts === slot.mentionTexts ? slot.hostTexts[0] ?? slot.caughtTexts[0] ?? slot.bitsLabel
+        : texts === slot.hostTexts ? slot.caughtTexts[0] ?? slot.bitsLabel
+        : slot.bitsLabel;
+      slot.root.addChildAt(text, slot.root.getChildIndex(anchor));
+      texts.push(text);
+    }
+    return texts[index];
+  }
+
+  private trimOverlayTexts(texts: BitmapText[], used: number): void {
+    while (texts.length > used) texts.pop()!.destroy({ style: true });
+  }
+
+  private releaseOverlayTexts(slot: Slot): void {
+    this.trimOverlayTexts(slot.mentionTexts, 0);
+    this.trimOverlayTexts(slot.hostTexts, 0);
+    this.trimOverlayTexts(slot.caughtTexts, 0);
+    this.trimOverlayTexts(slot.modBtns, 0);
+  }
+
   /** Dimmed `(host)` suffix after resolved link titles. */
   private paintHostTexts(
     slot: Slot,
@@ -4363,12 +4314,13 @@ export class MessageRing {
       ht.visible = false;
     }
     if (slot.hostSpans.length === 0) {
+      this.trimOverlayTexts(slot.hostTexts, 0);
       return;
     }
     let used = 0;
     for (const span of slot.hostSpans) {
       for (const line of slot.wrapLines) {
-        if (used >= slot.hostTexts.length) {
+        if (used >= MENTION_SLOTS_PER_ROW) {
           return;
         }
         const a = Math.max(span.start, line.start);
@@ -4386,7 +4338,7 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const ht = slot.hostTexts[used];
+        const ht = this.overlayText(slot, slot.hostTexts, used);
         used += 1;
         ht.text = slot.bodyRaw.slice(a, b);
         ht.style.fontFamily = "ChatFont";
@@ -4400,6 +4352,7 @@ export class MessageRing {
         dirtyBitmapText(ht);
       }
     }
+    this.trimOverlayTexts(slot.hostTexts, used);
   }
 
   private paintMentionTexts(
@@ -4415,13 +4368,14 @@ export class MessageRing {
       mt.visible = false;
     }
     if (!this.boldUsernames && !this.colorUsernames) {
+      this.trimOverlayTexts(slot.mentionTexts, 0);
       return;
     }
     const fontFamily = this.boldUsernames ? "ChatNickFont" : "ChatFont";
     let used = 0;
     for (const span of overlayMentions) {
       for (const line of lines) {
-        if (used >= slot.mentionTexts.length) {
+        if (used >= MENTION_SLOTS_PER_ROW) {
           return;
         }
         const a = Math.max(span.start, line.start);
@@ -4439,7 +4393,7 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const mt = slot.mentionTexts[used];
+        const mt = this.overlayText(slot, slot.mentionTexts, used);
         used += 1;
         mt.text = slot.bodyRaw.slice(a, b);
         mt.style.fontFamily = fontFamily;
@@ -4460,6 +4414,7 @@ export class MessageRing {
         dirtyBitmapText(mt);
       }
     }
+    this.trimOverlayTexts(slot.mentionTexts, used);
   }
 
   private paintCaughtTexts(
@@ -4475,12 +4430,13 @@ export class MessageRing {
       ct.text = "";
     }
     if (slot.automodCaught.length === 0) {
+      this.trimOverlayTexts(slot.caughtTexts, 0);
       return;
     }
     let used = 0;
     for (const span of slot.automodCaught) {
       for (const line of lines) {
-        if (used >= slot.caughtTexts.length) {
+        if (used >= MENTION_SLOTS_PER_ROW) {
           return;
         }
         const a = Math.max(span.start, line.start);
@@ -4498,11 +4454,12 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const ct = slot.caughtTexts[used]!;
+        const ct = this.overlayText(slot, slot.caughtTexts, used);
         used += 1;
         ct.text = slot.bodyRaw.slice(a, b);
         ct.style.fontFamily = "ChatFont";
         ct.style.fontSize = this.fontSize;
+        ct.style.lineHeight = this.lineHeight;
         ct.style.fill = 0xffffff;
         ct.tint = AUTOMOD_CAUGHT_COLOR;
         ct.x = wrapLineOriginX(firstOriginX, pos.line, contOriginX) + pos.col;
@@ -4511,6 +4468,7 @@ export class MessageRing {
         dirtyBitmapText(ct);
       }
     }
+    this.trimOverlayTexts(slot.caughtTexts, used);
   }
 
   private paintAutomodActions(
@@ -4524,9 +4482,11 @@ export class MessageRing {
       !slot.automodMessageId ||
       slot.automodStatus.toLowerCase() !== "pending"
     ) {
+      this.trimOverlayTexts(slot.modBtns, 0);
       return;
     }
     if (lines.length < 2) {
+      this.trimOverlayTexts(slot.modBtns, 0);
       return;
     }
     const allowLabel = t("chat.automod.allow");
@@ -4542,10 +4502,7 @@ export class MessageRing {
     ];
     for (let i = 0; i < btns.length; i += 1) {
       const def = btns[i]!;
-      const mt = slot.modBtns[i];
-      if (!mt) {
-        break;
-      }
+      const mt = this.overlayText(slot, slot.modBtns, i);
       mt.text = def.label;
       mt.visible = true;
       mt.style.fill = 0xffffff;
@@ -4568,6 +4525,7 @@ export class MessageRing {
       });
       x += w + gap;
     }
+    this.trimOverlayTexts(slot.modBtns, btns.length);
   }
 
   /** Mentions, для которых хватает overlay-слотов (по числу line∩span). */
