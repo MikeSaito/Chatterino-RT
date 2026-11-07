@@ -48,12 +48,14 @@ export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEv
     const data = historyRows(ring).find((row) => row.msgId === event.id)!;
     let slot = requireRowView(ring, data);
     let clip = slot.clipUi!;
+    const offscreenContexts = [clip.bg.context, clip.durationBg.context];
     check(!slot.emotes[0].visible && !slot.badges[0].visible && !clip.thumb.visible, "overload leaves image placeholders");
     release();
     await Promise.all(loads);
     ring.setDesired(0, false);
     await frame(); await frame();
     check(!rowView(ring, data) && clip.root.destroyed, "offscreen rows release media widgets");
+    check(offscreenContexts.every((context) => context.destroyed), "offscreen clip disposal destroys its owned graphics contexts");
     ring.goToBottom();
     await until(() => {
       const current = rowView(ring, data);
@@ -61,10 +63,12 @@ export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEv
     });
     slot = requireRowView(ring, data);
     clip = slot.clipUi!;
+    const removedContexts = [clip.bg.context, clip.durationBg.context];
     const refs = (owner.textures as unknown as { refs: Map<string, number> }).refs;
     check(refs.get("clip:recovery-clip") === 1, "clip retries retain exactly one owner reference");
     ring.applyLinkEnrichment(event.id, { body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [], clip: null });
     check(slot.clipUi === null && clip.root.destroyed, "removing a clip destroys its widgets");
+    check(removedContexts.every((context) => context.destroyed), "removing a clip destroys its owned graphics contexts");
     check(!refs.has("clip:recovery-clip"), "removing a clip releases its thumbnail owner");
     const late = new Promise<void>((resolve) => { releaseLate = resolve; });
     setResponse(async () => { await late; return image; });

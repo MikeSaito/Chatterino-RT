@@ -134,8 +134,17 @@ export async function checkViewPool(ring: MessageRing, restore: () => void) {
       "late shared-asset replies cannot repaint the new owner with the old cloud metrics");
     check(requireRowView(ring, current!.owner) === reused, "stale presses do not replace or act on a new owner");
     checkBudget();
+    const ownedContexts = new Map(Array.from(owner.viewPool.views, (view) => [view,
+      [view.highlight.context, view.systemCloud.context, view.mentions.context, view.disabledGfx.context]]));
     ring.reset();
     check(owner.viewPool.views.size > 0 && owner.viewPool.bindings.size === 0, "reset retains only unbound spare views");
+    let disposed = 0;
+    for (const [view, contexts] of ownedContexts) {
+      const kept = owner.viewPool.views.has(view);
+      check(contexts.every((context) => context.destroyed === !kept), "trimmed views destroy owned graphics contexts while spare views retain theirs");
+      if (!kept) disposed++;
+    }
+    check(disposed > 0, "reset exercises actual view destruction");
     ring.configureChatFont({ ...font, size: font.size + 2 });
     check(Array.from(owner.viewPool.views).every((view) => view.time.style.fontSize === owner.fontSize),
       "font changes update spare views before they are reused");

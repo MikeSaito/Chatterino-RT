@@ -239,7 +239,8 @@ export class MessageRing {
     create: () => this.createRowView(),
     bind: (slot, view) => this.bindRowView(slot, view),
     unbind: (slot, view) => this.releaseRowView(slot, view),
-    destroy: (view) => view.root.destroy({ children: true, style: true }),
+    // Row graphics own their contexts; an options object must destroy them explicitly.
+    destroy: (view) => view.root.destroy({ children: true, context: true, style: true }),
   });
   private readonly textures: TextureLru;
   private readonly emoteTicker = new EmoteFrameTicker();
@@ -2216,7 +2217,7 @@ export class MessageRing {
       const clip = view.clipUi;
       view.clipUi = null;
       releaseClipThumb(clip, this.textures);
-      clip.root.destroy({ children: true, style: true });
+      clip.root.destroy({ children: true, context: true, style: true });
     }
     for (const keys of [view.emoteKeys, view.badgeKeys]) {
       for (const key of keys) if (key) this.textures.release(key);
@@ -3702,7 +3703,7 @@ export class MessageRing {
     if (!clip) return;
     view.clipUi = null;
     releaseClipThumb(clip, this.textures);
-    clip.root.destroy({ children: true, style: true });
+    clip.root.destroy({ children: true, context: true, style: true });
   }
 
   private paintSlotClipCard(slot: Slot): void {
