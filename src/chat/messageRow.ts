@@ -186,3 +186,12 @@ export function createMessageRow(): MessageRow {
     noticeTimeoutSec: undefined,
   };
 }
+
+export function resetMessageRow(row: MessageRow): void {
+  const geometry = row.scrollLayout;
+  Object.assign(row, createMessageRow());
+  row.scrollLayout = geometry;
+  geometry.msgId = "";
+  geometry.startRow = 0;
+  geometry.lineCount = 0;
+}

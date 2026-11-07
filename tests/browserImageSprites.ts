@@ -1,7 +1,7 @@
-import type { BitmapText, Sprite } from "pixi.js";
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
 import type { BadgeVisibilityFlags } from "../src/chat/badgeVisibility";
+import { historyRows, requireRowView } from "./browserRows";
 
 type Response = (url: string) => Promise<{ bytes: number[]; contentType: string }>;
 function check(value: unknown, message: string): void { if (!value) throw new Error(message); }
@@ -14,7 +14,6 @@ async function until(test: () => boolean) {
 export async function checkImageSprites(ring: MessageRing, send: (event: ChatEvent) => void, setResponse: (response?: Response) => void, images: (enabled: boolean) => Promise<void>, restore: () => void) {
   const owner = ring as unknown as {
     badgeVisibility: BadgeVisibilityFlags;
-    slots: { msgId: string; emotes: Sprite[]; badges: Sprite[]; modIcons: Sprite[]; body: BitmapText; bodyCont: BitmapText }[];
   };
   const flags = { ...owner.badgeVisibility };
   const wasMod = ring.moderationModeOn();
@@ -34,14 +33,18 @@ export async function checkImageSprites(ring: MessageRing, send: (event: ChatEve
       text: "Wave Glow", badges: [{ set: "subscriber", version: "1", url: `${base}/slow-badge/1x.gif` }],
       emoteSpans: [{ start: 0, end: 4, provider: "7tv", emoteId: "sprite-wave", url: `${base}/sprite-wave/1x.gif`, zeroWidth: false }, { start: 5, end: 9, provider: "7tv", emoteId: "sprite-glow", url: `${base}/sprite-glow/1x.gif`, zeroWidth: true }],
     });
-    await until(() => owner.slots.some((slot) => slot.msgId === "sprite-lifecycle"));
-    const slot = owner.slots.find((row) => row.msgId === "sprite-lifecycle")!;
+    await until(() => historyRows(ring).some((slot) => slot.msgId === "sprite-lifecycle"));
+    const data = historyRows(ring).find((row) => row.msgId === "sprite-lifecycle")!;
+    const slot = requireRowView(ring, data);
     await until(() => slot.emotes.length === 2 && slot.emotes.every((sprite) => sprite.visible));
+    const originalIndent = data.bodyIndent;
     const oldBadge = slot.badges[0];
     ring.configureBadgeVisibility({ ...flags, subscription: false });
     check(slot.badges.length === 0 && oldBadge.destroyed, "hiding badges destroys unused sprites");
+    await until(() => data.bodyIndent < originalIndent);
     ring.configureBadgeVisibility(flags);
     check(slot.badges[0] !== oldBadge, "restoring visibility creates a fresh badge sprite");
+    await until(() => data.bodyIndent === originalIndent);
     release();
     await until(() => slot.badges[0]?.visible === true);
     ring.setCanModerate(true); ring.setModerationMode(true);

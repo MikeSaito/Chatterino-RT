@@ -36,6 +36,22 @@ started write waits for its own eight-second socket timeout. Leaving a channel
 or changing account cancels its queued messages. Uncertain socket writes and
 Helix POST requests are never replayed automatically.
 
+# History rendering
+
+Message data and measured geometry remain available until scrollback eviction.
+Message lookup and copy/reply context do not require a display object.
+
+Display objects cover the current viewport with eight row heights of overscan on
+each side. Smooth following can retain both the current and target viewport
+bands. Up to eight unused views are cached; unused capacity is trimmed as the
+viewport shrinks. Offscreen messages release their media references, and missing
+images are requested when their views are bound again.
+
+The debug hook exposes `window.__crt.ring.renderStats()`: `historyRows` counts
+retained messages, `views` counts allocated display objects including spare
+views, and `boundViews` counts views assigned to messages. These counts exclude
+texture-cache entries and native WebView resources.
+
 # Media loading
 
 Chat emotes, badges and clip thumbnails share a limit of 8 active loads and 128
@@ -93,5 +109,4 @@ Collection is opt-in, with bounded samples and pending callbacks.
 The local synthetic baseline uses Chromium headless with SwiftShader, 1280×800,
 DPR 1. It exercises text messages with short/long lines; it is not a benchmark of
 animated emotes, video playback, or a production WebView on a hardware GPU.
-At 200 messages/sec the measured layout work is the main CPU cost; use repeated
-runs in the target WebView to assess optimization and real scroll smoothness.
+Use repeated runs in the target WebView to assess CPU costs and scroll smoothness.

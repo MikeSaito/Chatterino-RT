@@ -115,6 +115,8 @@ try {
   console.log("UI history geometry reuse and anchors passed");
   await evaluate("window.__fixture.renderReuse()");
   console.log("UI text geometry reuse and invalidation passed");
+  await evaluate("window.__fixture.viewPool()");
+  console.log("UI bounded view pool, reading position and ownership passed");
   await evaluate("window.__fixture.fontMeasurements()");
   console.log("UI font measurement invalidation passed");
   await evaluate("window.__fixture.imageSprites()");

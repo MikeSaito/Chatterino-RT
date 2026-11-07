@@ -1,8 +1,13 @@
 import { BitmapText, Container, Graphics, Rectangle, Sprite, Texture } from "pixi.js";
 import type { ClipCardWidgets } from "./clipCardPixi";
+import type { NickPaint } from "./types";
 
 export type MessageRowView = {
   root: Container;
+  painted: boolean;
+  pressToken: symbol | undefined;
+  pressPointerId: number | undefined;
+  nickPaint: NickPaint | null;
   highlight: Graphics;
   highlightPainted: boolean;
   systemCloud: Graphics;
@@ -153,6 +158,10 @@ export function createMessageRowView(opts: {
   );
   return {
     root,
+    painted: false,
+    pressToken: undefined,
+    pressPointerId: undefined,
+    nickPaint: null,
     highlight: hl,
     highlightPainted: false,
     systemCloud,

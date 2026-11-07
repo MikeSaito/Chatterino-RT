@@ -12,9 +12,9 @@ type NickPaintSlot = {
 export class NickPaintResources {
   private textures = new Map<string, Texture>();
   private order: string[] = [];
-  private slots: () => readonly NickPaintSlot[];
+  private slots: () => Iterable<NickPaintSlot>;
   private limit: number;
-  constructor(slots: () => readonly NickPaintSlot[], limit = 64) { this.slots = slots; this.limit = limit; }
+  constructor(slots: () => Iterable<NickPaintSlot>, limit = 64) { this.slots = slots; this.limit = limit; }
   /** Show gradient Sprite or keep BitmapText; returns nick column width (BitmapText). */
   apply(slot: NickPaintSlot, contentY: number, options: {
     fontFamily: string; fontWeight: number; fontSize: number; measure: (text: string) => number;

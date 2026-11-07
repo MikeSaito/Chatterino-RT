@@ -1,7 +1,7 @@
 import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
-import type { Container, Sprite } from "pixi.js";
 import type { TextureLru } from "../src/chat/textures";
+import { historyRows, requireRowView, rowView } from "./browserRows";
 
 type Response = (url: string) => Promise<{ bytes: number[]; contentType: string }>;
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
@@ -17,7 +17,6 @@ async function until(test: () => boolean) {
 export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEvent) => void, setResponse: (response?: Response) => void) {
   const owner = ring as unknown as {
     textures: TextureLru;
-    slots: { msgId: string; emotes: Sprite[]; badges: Sprite[]; clipUi: { thumb: Sprite; root: Container } | null }[];
   };
   const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
   const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
@@ -39,22 +38,29 @@ export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEv
     };
     ring.goToBottom();
     send(event);
-    await until(() => owner.slots.some((slot) => slot.msgId === event.id));
+    await until(() => historyRows(ring).some((slot) => slot.msgId === event.id));
     const clipInfo = { clipId: "recovery-clip", url: "https://clips.twitch.tv/Fixture", title: "Fixture clip", host: "clips.twitch.tv", thumbnailUrl: `${base}/recovery-thumb/1x.gif`, durationSec: 10, viewCount: 1, creatorName: "Viewer", broadcasterName: "Channel", gameName: null, createdAt: null };
     ring.applyLinkEnrichment(event.id, {
       body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [],
       clip: clipInfo,
     });
     await frame(); await frame();
-    const slot = owner.slots.find((row) => row.msgId === event.id)!;
-    const clip = slot.clipUi!;
+    const data = historyRows(ring).find((row) => row.msgId === event.id)!;
+    let slot = requireRowView(ring, data);
+    let clip = slot.clipUi!;
     check(!slot.emotes[0].visible && !slot.badges[0].visible && !clip.thumb.visible, "overload leaves image placeholders");
     release();
     await Promise.all(loads);
     ring.setDesired(0, false);
     await frame(); await frame();
+    check(!rowView(ring, data) && clip.root.destroyed, "offscreen rows release media widgets");
     ring.goToBottom();
-    await until(() => slot.emotes[0].visible && slot.badges[0].visible && clip.thumb.visible);
+    await until(() => {
+      const current = rowView(ring, data);
+      return Boolean(current?.emotes[0]?.visible && current.badges[0]?.visible && current.clipUi?.thumb.visible);
+    });
+    slot = requireRowView(ring, data);
+    clip = slot.clipUi!;
     const refs = (owner.textures as unknown as { refs: Map<string, number> }).refs;
     check(refs.get("clip:recovery-clip") === 1, "clip retries retain exactly one owner reference");
     ring.applyLinkEnrichment(event.id, { body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [], clip: null });

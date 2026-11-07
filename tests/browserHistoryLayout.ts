@@ -1,6 +1,8 @@
 import type { MessageRing } from "../src/chat/ring";
 import type { LaidSlot } from "../src/chat/scroll";
 import type { ChatEvent } from "../src/chat/types";
+import type { MessageRow } from "../src/chat/messageRow";
+import { rowView } from "./browserRows";
 
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -9,7 +11,7 @@ const near = (actual: number, expected: number, message: string) => check(Math.a
 export async function checkHistoryLayout(ring: MessageRing, hideModerated: (hidden: boolean) => Promise<void>) {
   const owner = ring as unknown as {
     poolSize: number; occupied: number; head: number; lineHeight: number;
-    slots: { msgId: string; lineCount: number; root: { visible: boolean; y: number } }[];
+    slots: MessageRow[];
     laidSlots: () => LaidSlot[];
     messageGapPx: () => number;
   };
@@ -19,16 +21,18 @@ export async function checkHistoryLayout(ring: MessageRing, hideModerated: (hidd
   });
   const verifyGeometry = () => {
     const start = (owner.head - owner.occupied + owner.poolSize) % owner.poolSize;
-    const shown = Array.from({ length: owner.occupied }, (_, i) => owner.slots[(start + i) % owner.poolSize]).filter((slot) => slot.root.visible);
+    const shown = Array.from({ length: owner.occupied }, (_, i) => owner.slots[(start + i) % owner.poolSize]).filter((slot) => slot.visible);
     const laid = owner.laidSlots();
     check(laid.length === shown.length, "scroll geometry contains exactly the visible history");
     let y = 0;
     for (let i = 0; i < shown.length; i += 1) {
       if (i > 0) y += owner.messageGapPx();
-      near(shown[i].root.y, y, "plain text rows form a continuous stack with one gap between messages");
+      near(shown[i].y, y, "plain text rows form a continuous stack with one gap between messages");
+      const view = rowView(ring, shown[i]);
+      if (view) near(view.root.y, shown[i].y, "bound display agrees with retained row geometry");
       y += shown[i].lineCount * owner.lineHeight;
       check(laid[i].msgId === shown[i].msgId, "scroll geometry follows history order after eviction and filtering");
-      near(laid[i].startRow, shown[i].root.y / owner.lineHeight, "scroll geometry agrees with painted positions");
+      near(laid[i].startRow, shown[i].y / owner.lineHeight, "scroll geometry agrees with retained positions");
       near(laid[i].lineCount, shown[i].lineCount + (i + 1 < shown.length ? owner.messageGapPx() / owner.lineHeight : 0), "only non-final visible rows include the message gap");
     }
     near(ring.scrollSnapshot().contentRows, y / owner.lineHeight, "content height ends at the final visible row");

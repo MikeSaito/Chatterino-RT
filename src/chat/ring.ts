@@ -1,4 +1,5 @@
-import { createMessageRow, type MessageRow } from "./messageRow";
+import { ViewPool } from "./viewPool";
+import { createMessageRow, resetMessageRow, type MessageRow } from "./messageRow";
 import { createMessageRowView, type MessageRowView } from "./messageRowView";
 import { bodyIndexAt, inside } from "./rowHitTest";
 import { NickPaintResources } from "./nickPaintResources";
@@ -213,7 +214,7 @@ export type SlotContext = {
   shiftOnly: boolean;
 };
 
-type Slot = MessageRow & MessageRowView;
+type Slot = MessageRow;
 
 type Drawn = {
   time: string;
@@ -233,6 +234,13 @@ type Drawn = {
 export class MessageRing {
   private readonly poolSize: number;
   private readonly slots: Slot[] = [];
+  private readonly wantedViews: Slot[] = [];
+  private readonly viewPool = new ViewPool<Slot, MessageRowView>({
+    create: () => this.createRowView(),
+    bind: (slot, view) => this.bindRowView(slot, view),
+    unbind: (slot, view) => this.releaseRowView(slot, view),
+    destroy: (view) => view.root.destroy({ children: true, style: true }),
+  });
   private readonly textures: TextureLru;
   private readonly emoteTicker = new EmoteFrameTicker();
   private readonly scroll = new ScrollModel();
@@ -327,7 +335,7 @@ export class MessageRing {
   private colorUsernames = true;
   private readonly nickColorCache = new NickColorCache(500);
   /** Canvas textures for 7TV nick paints (key → Texture). */
-  private readonly nickPaintResources = new NickPaintResources(() => this.slots);
+  private readonly nickPaintResources = new NickPaintResources(() => this.viewPool.views);
   private hideReplyContext = false;
   private badgeVisibility: BadgeVisibilityFlags = { ...DEFAULT_BADGE_VISIBILITY };
   private pauseMouse = false;
@@ -441,6 +449,7 @@ export class MessageRing {
     if (!slot || !this.ready) {
       return;
     }
+    const anchors = this.captureScrollAnchors();
     slot.bodyRaw = payload.body;
     slot.linkSpans = payload.links;
     slot.hostSpans = payload.hosts;
@@ -450,10 +459,10 @@ export class MessageRing {
     slot.clipCardRows = payload.clip ? clipCardRowCount(this.lineHeight) : 0;
     slot.linkEnriched = true;
     // Only this row needs wrap recompute; dual-anchor layout preserves scroll.
-    slot.wrapReady = false;
+    this.invalidateSlotWrap(slot);
     slot.wrapLineHeights = [];
     slot.lineCount = this.estimateSlotLineCount(slot);
-    this.layout(undefined, new Set([slot]));
+    this.layout(anchors, new Set([slot]));
   }
 
   /** Highlight colors in scrollback order (empty string = no mark). Stock 1:1 with messages. */
@@ -705,18 +714,18 @@ export class MessageRing {
       this.mediaRepaintSlots.clear();
       // Capture while root.y and lineCount still agree; paint may change heights.
       const anchors = this.captureScrollAnchors();
-      let lineCountChanged = false;
+      let heightChanged = false;
       for (const s of batch) {
-        if (!s.msgId || !s.root.visible) {
+        if (!s.msgId || !s.visible) {
           continue;
         }
-        const prev = s.lineCount;
+        const prev = this.slotPixelHeight(s);
         this.repositionSlotMedia(s);
-        if (s.lineCount !== prev) {
-          lineCountChanged = true;
+        if (this.slotPixelHeight(s) !== prev) {
+          heightChanged = true;
         }
       }
-      if (lineCountChanged) {
+      if (heightChanged) {
         this.repositionRootsFromCache(anchors);
       }
     });
@@ -727,6 +736,8 @@ export class MessageRing {
    * Falls back to paintClip only when wrap metrics are missing.
    */
   private repositionSlotMedia(slot: Slot): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     if (this.isSystemCloud(slot)) {
       this.paintClip(slot);
       return;
@@ -751,19 +762,19 @@ export class MessageRing {
     const gutterW = this.paintModGutter(slot);
     const replyRows = slot.replyRows;
     const contentY = replyRows * this.lineHeight;
-    for (const mt of slot.modBtns) {
+    for (const mt of view.modBtns) {
       if (mt.visible) {
         mt.y = contentY;
       }
     }
-    for (const spr of slot.modIcons) {
+    for (const spr of view.modIcons) {
       if (spr.visible) {
         spr.y = this.lineMediaY(contentY, spr.height || this.fontSize);
       }
     }
     const badgeVisible = this.visibleBadges(slot);
-    for (let i = 0; i < slot.badges.length; i += 1) {
-      const spr = slot.badges[i];
+    for (let i = 0; i < view.badges.length; i += 1) {
+      const spr = view.badges[i];
       const badge = badgeVisible[i];
       if (!badge) {
         spr.visible = false;
@@ -787,8 +798,8 @@ export class MessageRing {
     let hasPrev = false;
     let prevEnd = 0;
     let bitsLabelShown = false;
-    for (let i = 0; i < slot.emotes.length; i += 1) {
-      const spr = slot.emotes[i];
+    for (let i = 0; i < view.emotes.length; i += 1) {
+      const spr = view.emotes[i];
       const span = slot.spansRaw[i];
       if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
         spr.visible = false;
@@ -835,18 +846,18 @@ export class MessageRing {
       ) {
         const tint = parseCheerColor(span.bitsColor);
         if (tint != null) {
-          slot.bitsLabel.visible = true;
-          slot.bitsLabel.text = ` ${span.bitsAmount}`;
-          slot.bitsLabel.tint = tint;
-          slot.bitsLabel.x = spr.x + paint.w + 2;
-          slot.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
+          view.bitsLabel.visible = true;
+          view.bitsLabel.text = ` ${span.bitsAmount}`;
+          view.bitsLabel.tint = tint;
+          view.bitsLabel.x = spr.x + paint.w + 2;
+          view.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
           bitsLabelShown = true;
         }
       }
     }
     if (!bitsLabelShown) {
-      slot.bitsLabel.visible = false;
-      slot.bitsLabel.text = "";
+      view.bitsLabel.visible = false;
+      view.bitsLabel.text = "";
     }
   }
 
@@ -909,7 +920,6 @@ export class MessageRing {
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       slot.visible = !this.isSlotHiddenByPrivacy(slot);
-      slot.root.visible = slot.visible;
     }
   }
 
@@ -928,7 +938,6 @@ export class MessageRing {
       }
       slot.startRow = shown;
       slot.y = y;
-      slot.root.y = y;
       y += this.slotPixelHeight(slot);
       shown += 1;
     }
@@ -936,30 +945,34 @@ export class MessageRing {
   }
 
   private loadBadgeSprites(slot: Slot): void {
-    for (const spr of slot.badges) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    const token = this.viewPool.tokenOf(slot);
+    for (const spr of view.badges) {
       spr.visible = false;
       spr.texture = Texture.EMPTY;
     }
-    for (const key of slot.badgeKeys) {
+    for (const key of view.badgeKeys) {
       if (key) {
         this.textures.release(key);
       }
     }
     const visible = this.visibleBadges(slot);
-    this.resizeMediaSprites(slot, slot.badges, visible.length);
-    slot.badgeKeys = new Array(slot.badges.length).fill("");
+    this.resizeMediaSprites(slot, view.badges, visible.length);
+    view.badgeKeys = new Array(view.badges.length).fill("");
     const msgId = slot.msgId;
-    for (let i = 0; i < slot.badges.length; i += 1) {
-      const spr = slot.badges[i];
+    for (let i = 0; i < view.badges.length; i += 1) {
+      const spr = view.badges[i];
       const badge = visible[i];
       if (!badge || !badge.url) {
         continue;
       }
       const key = `badge:${badge.url}`;
-      slot.badgeKeys[i] = key;
+      view.badgeKeys[i] = key;
       this.textures.acquire(key);
       void this.textures.load(key, badge.url, false).then((tex) => {
-        if (tex && slot.msgId === msgId && slot.badgeKeys[i] === key && slot.badges[i] === spr) {
+        if (tex && this.viewPool.owns(slot, view, token) && slot.msgId === msgId &&
+            view.badgeKeys[i] === key && view.badges[i] === spr) {
           applySpriteTexture(spr, tex, this.badgeSize, this.badgeSize);
           this.repaintSlotMedia(slot);
         }
@@ -1157,18 +1170,16 @@ export class MessageRing {
 
   private repaintNickChrome(): void {
     for (const slot of this.slots) {
-      slot.nick.style.fontFamily = "ChatNickFont";
-      slot.nick.style.fontSize = this.fontSize;
       if (slot.useNickStyle) {
         slot.nickRaw = this.paintedNick(slot.nickLogin, slot.nickDisplay);
-        slot.nick.text = slot.nickRaw;
-        slot.nick.tint = slot.nickTint = resolveNickColor({
-          color: slot.nickColorRaw,
-          userId: slot.nickUserId,
-          colorize: this.colorizeNicknames,
-          fallback: this.themeFills.nickFallback,
-        });
+        slot.nickTint = resolveNickColor({ color: slot.nickColorRaw, userId: slot.nickUserId,
+          colorize: this.colorizeNicknames, fallback: this.themeFills.nickFallback });
       }
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
+      view.nick.style.fontFamily = "ChatNickFont";
+      view.nick.style.fontSize = this.fontSize;
+      view.nick.tint = slot.nickTint;
     }
   }
 
@@ -1440,20 +1451,23 @@ export class MessageRing {
       return;
     }
     for (const slot of this.slots) {
-      slot.time.style.fill = this.themeFills.timestamp;
-      slot.body.style.fill = this.themeFills.body;
-      slot.bodyCont.style.fill = this.themeFills.body;
-      slot.nick.style.fill = 0xffffff;
+      const view = this.viewPool.get(slot);
       if (slot.useNickStyle) {
-        slot.nick.tint = slot.nickTint = resolveNickColor({
+        slot.nickTint = resolveNickColor({
           color: slot.nickColorRaw,
           userId: slot.nickUserId,
           colorize: this.colorizeNicknames,
           fallback: this.themeFills.nickFallback,
         });
       } else if (!slot.msgId) {
-        slot.nick.tint = slot.nickTint = this.themeFills.nickFallback;
+        slot.nickTint = this.themeFills.nickFallback;
       }
+      if (!view) continue;
+      view.time.style.fill = this.themeFills.timestamp;
+      view.body.style.fill = this.themeFills.body;
+      view.bodyCont.style.fill = this.themeFills.body;
+      view.nick.style.fill = 0xffffff;
+      view.nick.tint = slot.nickTint;
     }
     this.markLayoutFullPaint();
     this.layout();
@@ -1471,12 +1485,11 @@ export class MessageRing {
       family !== this.chatFontFamily ||
       size !== this.chatFontSize ||
       weight !== this.chatFontWeight;
+    if (!changed && this.atlasDesignSize > 0) return;
+    const anchors = this.ready ? this.captureScrollAnchors() : undefined;
     this.chatFontFamily = family;
     this.chatFontSize = size;
     this.chatFontWeight = weight;
-    if (!changed && this.atlasDesignSize > 0) {
-      return;
-    }
     this.nickPaintResources.clear();
     this.reinstallChatFont();
     this.refreshFontMetrics();
@@ -1484,6 +1497,8 @@ export class MessageRing {
       return;
     }
     this.applyFontStylesToSlots(true);
+    this.markLayoutFullPaint();
+    this.layout(anchors);
   }
 
   /** Масштаб шрифта, timestamps, emotes и hideModerated без destroy PIXI.Application. */
@@ -1514,6 +1529,7 @@ export class MessageRing {
     },
   ): void {
     const scale = Math.min(4, Math.max(0.5, fontScale));
+    const anchors = this.ready ? this.captureScrollAnchors() : undefined;
     const prevAnimate = this.animateEmotes;
     const prevImages = this.enableEmoteImages;
     const prevEmojiSet = this.emojiSet;
@@ -1566,9 +1582,11 @@ export class MessageRing {
       const slot = this.slots[(occStart + i) % this.poolSize];
       if (slot.msgId && slot.timestampMs) {
         slot.timeText = formatTime(slot.timestampMs, this.timestampFormat);
-        slot.time.text = slot.timeText;
       }
-      for (const spr of slot.badges) {
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
+      view.time.text = slot.timeText;
+      for (const spr of view.badges) {
         spr.y = this.lineMediaY(0, this.badgeSize);
         if (spr.visible && isRenderableTexture(spr.texture)) {
           applySpriteTexture(spr, spr.texture, this.badgeSize, this.badgeSize);
@@ -1577,8 +1595,8 @@ export class MessageRing {
           spr.texture = Texture.EMPTY;
         }
       }
-      for (let e = 0; e < slot.emotes.length; e += 1) {
-        const spr = slot.emotes[e];
+      for (let e = 0; e < view.emotes.length; e += 1) {
+        const spr = view.emotes[e];
         const span = slot.spansRaw[e];
         if (spr.visible && isRenderableTexture(spr.texture) && span) {
           const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
@@ -1600,7 +1618,7 @@ export class MessageRing {
       this.reloadVisibleEmotes();
     }
     this.markLayoutFullPaint();
-    this.layout();
+    this.layout(anchors);
   }
 
   private refreshFontMetrics(): void {
@@ -1707,7 +1725,9 @@ export class MessageRing {
     index: number,
     spr: Sprite,
   ): Texture {
-    const key = slot.emoteKeys[index];
+    const view = this.viewPool.get(slot);
+    if (!view) { return Texture.EMPTY; }
+    const key = view.emoteKeys[index];
     if (key) {
       if (this.textures.isAnimated(key) && this.animateEmotes) {
         const frame = this.textures.frameAt(key, this.emoteTicker.position());
@@ -1730,6 +1750,11 @@ export class MessageRing {
     span: EmoteSpan,
     msgId: string,
   ): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    const token = this.viewPool.tokenOf(slot);
+    const sprite = view.emotes[index];
+    if (!sprite) return;
     if (!this.enableEmoteImages || span.provider === "cheer-mask") {
       return;
     }
@@ -1737,8 +1762,8 @@ export class MessageRing {
       span.provider === "cheer"
         ? `cheer:${span.url}`
         : `${span.provider}:${span.emoteId}`;
-    if (slot.emoteKeys[index] !== key) {
-      slot.emoteKeys[index] = key;
+    if (view.emoteKeys[index] !== key) {
+      view.emoteKeys[index] = key;
       this.textures.acquire(key);
     }
     const fullUrl = this.emoteLoadUrl(span);
@@ -1747,14 +1772,16 @@ export class MessageRing {
     const onLoaded = (tex: Texture | null): void => {
       if (
         !tex ||
+        !this.viewPool.owns(slot, view, token) ||
         slot.msgId !== msgId ||
         !this.enableEmoteImages ||
-        slot.emoteKeys[index] !== key
+        view.emoteKeys[index] !== key ||
+        view.emotes[index] !== sprite || slot.spansRaw[index] !== span
       ) {
         return;
       }
       const paint = this.emotePaintSize(span, this.slotBodyFontSize(slot));
-      applySpriteTexture(slot.emotes[index], tex, paint.w, paint.h);
+      applySpriteTexture(view.emotes[index], tex, paint.w, paint.h);
       this.repaintSlotMedia(slot);
     };
     void this.textures.load(key, fullUrl, wantAnimate, fallbackUrl).then(onLoaded);
@@ -1889,61 +1916,59 @@ export class MessageRing {
   }
 
   private applyFontStylesToSlots(forceDirty: boolean): void {
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      slot.time.style.fontSize = this.fontSize;
-      slot.time.style.lineHeight = this.lineHeight;
-      slot.nick.style.fontFamily = "ChatNickFont";
-      slot.nick.style.fontSize = this.fontSize;
-      slot.nick.style.lineHeight = this.lineHeight;
-      slot.body.style.fontSize = this.fontSize;
-      slot.body.style.lineHeight = this.lineHeight;
-      slot.bodyCont.style.fontSize = this.fontSize;
-      slot.bodyCont.style.lineHeight = this.lineHeight;
-      slot.replyHeader.style.fontSize = Math.max(
+    for (const view of this.viewPool.views) {
+      view.time.style.fontSize = this.fontSize;
+      view.time.style.lineHeight = this.lineHeight;
+      view.nick.style.fontFamily = "ChatNickFont";
+      view.nick.style.fontSize = this.fontSize;
+      view.nick.style.lineHeight = this.lineHeight;
+      view.body.style.fontSize = this.fontSize;
+      view.body.style.lineHeight = this.lineHeight;
+      view.bodyCont.style.fontSize = this.fontSize;
+      view.bodyCont.style.lineHeight = this.lineHeight;
+      view.replyHeader.style.fontSize = Math.max(
         8,
         Math.round(this.fontSize * 0.85),
       );
-      slot.replyHeader.style.fill = this.themeFills.timestamp;
-      for (const mt of slot.mentionTexts) {
+      view.replyHeader.style.fill = this.themeFills.timestamp;
+      for (const mt of view.mentionTexts) {
         mt.style.fontSize = this.fontSize;
         mt.style.lineHeight = this.lineHeight;
       }
-      for (const ht of slot.hostTexts) {
+      for (const ht of view.hostTexts) {
         ht.style.fontSize = this.fontSize;
         ht.style.lineHeight = this.lineHeight;
         ht.style.fill = this.themeFills.timestamp;
       }
-      for (const mt of slot.modBtns) {
+      for (const mt of view.modBtns) {
         mt.style.fontSize = this.fontSize;
         mt.style.lineHeight = this.lineHeight;
       }
-      slot.bitsLabel.style.fontSize = this.fontSize;
-      slot.bitsLabel.style.lineHeight = this.lineHeight;
+      view.bitsLabel.style.fontSize = this.fontSize;
+      view.bitsLabel.style.lineHeight = this.lineHeight;
       if (forceDirty) {
-        dirtyBitmapText(slot.time);
-        dirtyBitmapText(slot.nick);
-        dirtyBitmapText(slot.body);
-        dirtyBitmapText(slot.bodyCont);
-        dirtyBitmapText(slot.replyHeader);
-        for (const mt of slot.mentionTexts) {
+        dirtyBitmapText(view.time);
+        dirtyBitmapText(view.nick);
+        dirtyBitmapText(view.body);
+        dirtyBitmapText(view.bodyCont);
+        dirtyBitmapText(view.replyHeader);
+        for (const mt of view.mentionTexts) {
           dirtyBitmapText(mt);
         }
-        for (const ht of slot.hostTexts) {
+        for (const ht of view.hostTexts) {
           dirtyBitmapText(ht);
         }
-        for (const mt of slot.modBtns) {
+        for (const mt of view.modBtns) {
           dirtyBitmapText(mt);
         }
-        dirtyBitmapText(slot.bitsLabel);
-        if (slot.clipUi) {
-          dirtyBitmapText(slot.clipUi.duration);
-          dirtyBitmapText(slot.clipUi.title);
-          dirtyBitmapText(slot.clipUi.game);
-          dirtyBitmapText(slot.clipUi.foot);
+        dirtyBitmapText(view.bitsLabel);
+        if (view.clipUi) {
+          dirtyBitmapText(view.clipUi.duration);
+          dirtyBitmapText(view.clipUi.title);
+          dirtyBitmapText(view.clipUi.game);
+          dirtyBitmapText(view.clipUi.foot);
         }
-        for (const ct of slot.caughtTexts) {
+        for (const ct of view.caughtTexts) {
           dirtyBitmapText(ct);
         }
       }
@@ -2094,6 +2119,122 @@ export class MessageRing {
     this.afterScrollChange();
   }
 
+  private createRowView(): MessageRowView {
+    const view = createMessageRowView({
+      fontSize: this.fontSize, lineHeight: this.lineHeight,
+      timestampFill: this.themeFills.timestamp, bodyFill: this.themeFills.body,
+    });
+    const { root } = view;
+    root.on("pointerdown", (ev: FederatedPointerEvent) => {
+      const owner = this.viewPool.ownerOf(view);
+      view.pressToken = owner ? this.viewPool.tokenOf(owner) : undefined;
+      view.pressPointerId = ev.pointerId;
+    });
+    const consumePress = (ev: FederatedPointerEvent): Slot | undefined => {
+      const owner = this.viewPool.ownerOf(view);
+      if (!owner || !view.painted || view.pressPointerId !== ev.pointerId ||
+          view.pressToken !== this.viewPool.tokenOf(owner)) return undefined;
+      view.pressToken = undefined;
+      return owner;
+    };
+    root.on("pointertap", (ev: FederatedPointerEvent) => {
+      if (ev.button !== 0) return;
+      const owner = consumePress(ev);
+      if (owner) this.onSlotTap(owner, ev);
+    });
+    root.on("rightclick", (ev: FederatedPointerEvent) => {
+      const owner = consumePress(ev);
+      if (owner) this.onSlotContext(owner, ev);
+    });
+    const cancelPress = () => { view.pressToken = undefined; view.pressPointerId = undefined; };
+    root.on("pointerupoutside", cancelPress);
+    root.on("pointercancel", cancelPress);
+    root.on("rightupoutside", cancelPress);
+    root.on("pointermove", (ev: FederatedPointerEvent) => {
+      const owner = this.viewPool.ownerOf(view);
+      if (owner && view.painted) this.onSlotMove(owner, ev);
+    });
+    root.on("pointerover", (ev: FederatedPointerEvent) => {
+      const owner = this.viewPool.ownerOf(view);
+      if (!owner || !view.painted || !owner.msgId) return;
+      if (owner.systemCloudBounds) {
+        const local = ev.getLocalPosition(root);
+        if (this.pointInSystemCloud(owner, local.x, local.y)) this.setHoveredMsgId(owner.msgId);
+      } else if (!owner.system && owner.login && !(owner.disabled && this.hideModerated)) {
+        this.setHoveredMsgId(owner.msgId);
+      }
+    });
+    root.on("pointerout", () => {
+      const owner = this.viewPool.ownerOf(view);
+      if (!owner || this.hoveredMsgId !== owner.msgId || this.hoverGuard?.()) return;
+      this.clearHover();
+    });
+    this.app.stage.addChild(root);
+    return view;
+  }
+
+  private bindRowView(slot: Slot, view: MessageRowView): void {
+    view.painted = false;
+    view.root.visible = false;
+    view.root.renderable = false;
+    view.root.y = slot.y;
+    view.time.text = slot.timeText;
+    view.time.style.fill = this.themeFills.timestamp;
+    view.nick.tint = slot.nickTint;
+    view.nickPaint = slot.nickPaint;
+    this.resizeMediaSprites(slot, view.emotes,
+      this.enableEmoteImages ? Math.min(slot.spansRaw.length, EMOTE_SLOTS_PER_ROW) : 0);
+    view.emoteKeys.length = view.emotes.length;
+    view.emoteKeys.fill("");
+    if (this.enableEmoteImages) {
+      for (let i = 0; i < view.emotes.length; i += 1) {
+        const span = slot.spansRaw[i];
+        if (span && span.provider !== "cheer-mask") this.scheduleEmoteLoad(slot, i, span, slot.msgId);
+      }
+    }
+    if (!this.isSystemCloud(slot)) this.loadBadgeSprites(slot);
+    this.scheduleViewportPaint();
+  }
+
+  private releaseRowView(slot: Slot, view: MessageRowView): void {
+    this.mediaRepaintSlots.delete(slot);
+    if (this.hoveredMsgId === slot.msgId) this.hoveredMsgId = "";
+    view.root.visible = false;
+    view.root.renderable = false;
+    view.root.cursor = "default";
+    view.painted = false;
+    view.pressToken = undefined;
+    view.pressPointerId = undefined;
+    detachSpriteTexture(view.nickPaintSpr);
+    view.nickPaintKey = "";
+    view.nickPaint = null;
+    for (const sprites of [view.emotes, view.badges, view.modIcons]) {
+      for (const sprite of sprites) { detachSpriteTexture(sprite); sprite.destroy(); }
+      sprites.length = 0;
+    }
+    if (view.clipUi) {
+      const clip = view.clipUi;
+      view.clipUi = null;
+      releaseClipThumb(clip, this.textures);
+      clip.root.destroy({ children: true, style: true });
+    }
+    for (const keys of [view.emoteKeys, view.badgeKeys]) {
+      for (const key of keys) if (key) this.textures.release(key);
+      keys.length = 0;
+    }
+    for (const texts of [view.mentionTexts, view.hostTexts, view.caughtTexts, view.modBtns]) {
+      this.trimOverlayTexts(texts, 0);
+    }
+    if (view.highlightPainted) { view.highlight.clear(); view.highlightPainted = false; }
+    if (view.linksPainted) { view.mentions.clear(); view.linksPainted = false; }
+    if (view.cloudPaintBounds) { view.systemCloud.clear(); view.cloudPaintBounds = null; }
+    if (view.disabledPaint) { view.disabledGfx.clear(); view.disabledPaint = null; }
+    view.modBtnHits.length = 0;
+    view.automodBtnHits.length = 0;
+    view.replyHeader.visible = false;
+    view.bitsLabel.visible = false;
+  }
+
   async init(): Promise<void> {
     if (this.ready) {
       return;
@@ -2102,57 +2243,7 @@ export class MessageRing {
     this.refreshFontMetrics();
     const stage = this.app.stage;
     stage.eventMode = "static";
-    for (let i = 0; i < this.poolSize; i += 1) {
-      const slot: Slot = {
-        ...createMessageRow(),
-        ...createMessageRowView({
-          fontSize: this.fontSize,
-          lineHeight: this.lineHeight,
-          timestampFill: this.themeFills.timestamp,
-          bodyFill: this.themeFills.body,
-        }),
-      };
-      const { root } = slot;
-      root.on("pointertap", (ev: FederatedPointerEvent) => {
-        this.onSlotTap(slot, ev);
-      });
-      root.on("rightclick", (ev: FederatedPointerEvent) => {
-        this.onSlotContext(slot, ev);
-      });
-      root.on("pointermove", (ev: FederatedPointerEvent) => {
-        this.onSlotMove(slot, ev);
-      });
-      root.on("pointerover", (ev: FederatedPointerEvent) => {
-        if (!slot.msgId) {
-          return;
-        }
-        if (slot.systemCloudBounds) {
-          const local = ev.getLocalPosition(slot.root);
-          if (this.pointInSystemCloud(slot, local.x, local.y)) {
-            this.setHoveredMsgId(slot.msgId);
-          }
-          return;
-        }
-        if (
-          !slot.system &&
-          slot.login &&
-          !(slot.disabled && this.hideModerated)
-        ) {
-          this.setHoveredMsgId(slot.msgId);
-        }
-      });
-      root.on("pointerout", () => {
-        if (this.hoveredMsgId !== slot.msgId) {
-          return;
-        }
-        if (this.hoverGuard?.()) {
-          return;
-        }
-        this.clearHover();
-      });
-      stage.addChild(root);
-      this.slots.push(slot);
-    }
+    for (let i = 0; i < this.poolSize; i += 1) this.slots.push(createMessageRow());
     this.ready = true;
     this.resizeDebounce = trailingDebounce(() => {
       this.markLayoutFullPaint();
@@ -2189,30 +2280,32 @@ export class MessageRing {
   ): void {
     const doomedSet = new Set(doomed);
     for (const slot of this.slots) {
-      for (const spr of slot.emotes) {
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
+      for (const spr of view.emotes) {
         if (doomedSet.has(spr.texture)) {
           detachSpriteTexture(spr);
         }
       }
-      for (const spr of slot.badges) {
+      for (const spr of view.badges) {
         if (doomedSet.has(spr.texture)) {
           detachSpriteTexture(spr);
         }
       }
-      for (const spr of slot.modIcons) {
+      for (const spr of view.modIcons) {
         if (doomedSet.has(spr.texture)) {
           detachSpriteTexture(spr);
         }
       }
-      if (doomedSet.has(slot.nickPaintSpr.texture)) {
-        detachSpriteTexture(slot.nickPaintSpr);
-        slot.nickPaintKey = "";
-        if (slot.nick.text) {
-          slot.nick.visible = true;
+      if (doomedSet.has(view.nickPaintSpr.texture)) {
+        detachSpriteTexture(view.nickPaintSpr);
+        view.nickPaintKey = "";
+        if (view.nick.text) {
+          view.nick.visible = true;
         }
       }
-      if (slot.clipUi && doomedSet.has(slot.clipUi.thumb.texture)) {
-        detachSpriteTexture(slot.clipUi.thumb);
+      if (view.clipUi && doomedSet.has(view.clipUi.thumb.texture)) {
+        detachSpriteTexture(view.clipUi.thumb);
       }
     }
   }
@@ -2228,17 +2321,19 @@ export class MessageRing {
     }
     this.lastSanitizeTickerTime = tickerTime;
     for (const slot of this.slots) {
-      if (!slot.msgId || !slot.visible || !slot.root.renderable) {
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
+      if (!slot.msgId || !slot.visible || !view.root.renderable) {
         continue;
       }
-      sanitizeStageSprites(slot.root);
+      sanitizeStageSprites(view.root);
       if (
-        slot.nickPaintSpr.visible &&
-        !isRenderableTexture(slot.nickPaintSpr.texture)
+        view.nickPaintSpr.visible &&
+        !isRenderableTexture(view.nickPaintSpr.texture)
       ) {
-        slot.nickPaintKey = "";
-        if (slot.nick.text) {
-          slot.nick.visible = true;
+        view.nickPaintKey = "";
+        if (view.nick.text) {
+          view.nick.visible = true;
         }
       }
     }
@@ -2339,6 +2434,7 @@ export class MessageRing {
     }
     this.mediaRepaintSlots.clear();
     this.clearSlots();
+    this.viewPool.destroy();
   }
 
   applySnapshot(events: ChatEvent[]): void {
@@ -2416,6 +2512,16 @@ export class MessageRing {
       this.clearSlot(slot);
     }
     this.bumpHighlightMarks();
+    this.wantedViews.length = 0;
+    this.viewPool.clear();
+    for (const view of this.viewPool.views) {
+      view.time.text = "";
+      view.nick.text = "";
+      view.body.text = "";
+      view.bodyCont.text = "";
+      view.replyHeader.text = "";
+      view.bitsLabel.text = "";
+    }
   }
 
   private resetSlots(): void {
@@ -2615,146 +2721,20 @@ export class MessageRing {
   }
 
   private clearSlot(slot: Slot): void {
-    this.releaseOverlayTexts(slot);
-    slot.visible = false;
-    slot.root.visible = false;
-    this.releaseSlotClipCard(slot);
-    for (const spr of slot.emotes) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    for (const spr of slot.badges) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    slot.nickPaintSpr.visible = false;
-    slot.nickPaintSpr.texture = Texture.EMPTY;
-    for (const spr of slot.modIcons) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    for (const key of slot.emoteKeys) {
-      if (key) {
-        this.textures.release(key);
-      }
-    }
-    for (const key of slot.badgeKeys) {
-      if (key) {
-        this.textures.release(key);
-      }
-    }
-    slot.emoteKeys = [];
-    slot.badgeKeys = [];
-    this.resizeMediaSprites(slot, slot.emotes, 0);
-    this.resizeMediaSprites(slot, slot.badges, 0);
-    this.resizeMediaSprites(slot, slot.modIcons, 0);
-    slot.badgesRaw = [];
-    slot.root.cursor = "default";
-    slot.timeText = "";
-    slot.nickText = "";
-    slot.nickTint = 0xffffff;
-    slot.y = 0;
-    slot.gutterWidth = 0;
-    slot.timeWidth = 0;
-    slot.nickX = 0;
-    slot.bodyY = 0;
-    slot.lineWidth = 0;
-    slot.firstLineWidth = 0;
-    slot.time.text = "";
-    slot.nick.text = "";
-    slot.body.text = "";
-    slot.bodyCont.text = "";
-    slot.bodyCont.visible = false;
-    slot.msgId = "";
-    slot.login = "";
-    slot.bodySource = "";
-    slot.bodyRaw = "";
-    slot.nickRaw = "";
-    slot.copyText = "";
-    slot.replyToId = "";
-    slot.timestampMs = 0;
-    slot.spansRaw = [];
-    slot.linkSpans = [];
-    slot.hostSpans = [];
-    slot.mentionSpans = [];
-    slot.clipCard = null;
-    slot.clipCardRows = 0;
-    slot.linkEnriched = false;
-    slot.modBtnHits = [];
-    slot.automodBtnHits = [];
-    slot.automodMessageId = "";
-    slot.automodStatus = "";
-    slot.automodCaught = [];
-    slot.wrapLines = [{ start: 0, end: 0 }];
-    slot.wrapLineHeights = [];
-    slot.wrapReady = false;
-    slot.lineCount = this.estimateSlotLineCount(slot);
-    slot.bodyIndent = 0;
-    slot.bodyContIndent = 0;
-    slot.replyRows = 0;
-    slot.startRow = 0;
-    slot.scrollLayout.msgId = "";
-    slot.highlightColor = "";
-    slot.disabled = false;
-    slot.fromHistory = false;
-    slot.collapsible = false;
-    slot.expanded = false;
-    slot.collapsed = false;
-    slot.system = false;
-    slot.nickUserId = "";
-    slot.nickColorRaw = "";
-    slot.nickLogin = "";
-    slot.nickDisplay = "";
-    slot.useNickStyle = false;
-    slot.nickPaint = null;
-    slot.nickPaintKey = "";
-    slot.nick.visible = true;
-    slot.replyToLogin = "";
-    slot.replyToText = "";
-    slot.isAction = false;
-    slot.isWhisper = false;
-    slot.leadLen = 0;
-    slot.systemTextKind = "";
-    slot.clearLogin = "";
-    slot.clearDurationSec = undefined;
-    slot.clearStackCount = 0;
-    slot.clearSourceLogin = "";
-    slot.clearModeratorLogin = "";
-    slot.clearmsgBody = "";
-    slot.usernoticeMsgId = "";
-    slot.usernoticeSystemText = "";
-    slot.usernoticeLogin = "";
-    slot.usernoticeParams = null;
-    slot.usernoticeInnerBody = "";
-    slot.noticeMsgId = "";
-    slot.noticeFallback = "";
-    slot.noticeTimeoutSec = undefined;
-    slot.replyHeader.visible = false;
-    slot.replyHeader.text = "";
-    if (slot.highlightPainted) {
-      slot.highlight.clear();
-      slot.highlightPainted = false;
-    }
-    this.clearSystemCloud(slot);
-    slot.systemCloudBounds = null;
-    this.clearSlotLinks(slot);
-    this.clearDisabledBackground(slot);
-    slot.modBtnHits = [];
-    slot.automodBtnHits = [];
-    slot.bitsLabel.visible = false;
-    slot.bitsLabel.text = "";
+    this.viewPool.release(slot);
+    this.mediaRepaintSlots.delete(slot);
+    resetMessageRow(slot);
   }
 
   private write(slot: Slot, event: ChatEvent): void {
-    this.releaseOverlayTexts(slot);
+    this.viewPool.release(slot);
+    this.mediaRepaintSlots.delete(slot);
     slot.visible = true;
-    slot.root.visible = true;
     slot.disabled =
       (event.kind === "privmsg" && !!event.disabled) ||
       (event.kind === "usernotice" &&
         event.privmsg?.kind === "privmsg" &&
         !!event.privmsg.disabled);
-    this.clearDisabledBackground(slot);
     slot.expanded = false;
     slot.collapsed = false;
     // PRIVMSG only — USERNOTICE/NOTICE/CLEARCHAT = System в эталоне
@@ -2785,9 +2765,8 @@ export class MessageRing {
     }
     const drawn = this.line(event);
     slot.timeText = drawn.time;
-    slot.time.text = slot.timeText;
     slot.nickRaw = drawn.nick;
-    slot.nick.tint = slot.nickTint = drawn.nickColor;
+    slot.nickTint = drawn.nickColor;
     if (event.kind === "privmsg") {
       slot.useNickStyle = true;
       slot.nickUserId = event.userId;
@@ -2800,7 +2779,7 @@ export class MessageRing {
         : drawn.nickColor;
       this.nickColorCache.set(event.login, cacheColor);
       if (!event.paint) {
-        slot.nick.tint = slot.nickTint = drawn.nickColor;
+        slot.nickTint = drawn.nickColor;
       }
     } else if (event.kind === "automodHeld") {
       slot.useNickStyle = true;
@@ -2830,7 +2809,6 @@ export class MessageRing {
     slot.copyText = drawn.copyText;
     slot.linkSpans = drawn.links;
     slot.hostSpans = [];
-    this.releaseSlotClipCard(slot);
     slot.clipCard = null;
     slot.clipCardRows = 0;
     slot.linkEnriched = false;
@@ -2838,7 +2816,7 @@ export class MessageRing {
     // Recycled slots keep stale wrapLines; cull must see them as dirty.
     slot.wrapLines = [{ start: 0, end: 0 }];
     slot.wrapLineHeights = [];
-    slot.wrapReady = false;
+    this.invalidateSlotWrap(slot);
     slot.leadLen = drawn.leadLen;
     if (event.kind === "privmsg") {
       slot.replyToId = event.replyToId ?? "";
@@ -2943,46 +2921,7 @@ export class MessageRing {
       slot.noticeFallback = event.text;
       slot.noticeTimeoutSec = event.timeoutRemainingSec;
     }
-    const msgId = slot.msgId;
-    for (const spr of slot.emotes) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    for (const spr of slot.badges) {
-      spr.visible = false;
-      spr.texture = Texture.EMPTY;
-    }
-    for (const key of slot.emoteKeys) {
-      if (key) {
-        this.textures.release(key);
-      }
-    }
-    for (const key of slot.badgeKeys) {
-      if (key) {
-        this.textures.release(key);
-      }
-    }
-    this.resizeMediaSprites(slot, slot.emotes, this.enableEmoteImages ? Math.min(drawn.spans.length, EMOTE_SLOTS_PER_ROW) : 0);
-    slot.emoteKeys = new Array(slot.emotes.length).fill("");
-    slot.badgeKeys = [];
-    if (this.enableEmoteImages) {
-      for (let i = 0; i < slot.emotes.length; i += 1) {
-        const span = drawn.spans[i];
-        if (!span) {
-          continue;
-        }
-        if (span.provider === "cheer-mask") {
-          continue;
-        }
-        this.scheduleEmoteLoad(slot, i, span, msgId);
-      }
-    }
-    if (this.isSystemCloud(slot)) {
-      slot.badgesRaw = [];
-      this.resizeMediaSprites(slot, slot.badges, 0);
-    } else {
-      this.loadBadgeSprites(slot);
-    }
+    if (this.isSystemCloud(slot)) slot.badgesRaw = [];
   }
 
   private line(event: ChatEvent): Drawn {
@@ -3347,8 +3286,10 @@ export class MessageRing {
   }
 
   private paintSystemCloud(slot: Slot): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     this.releaseSlotClipCard(slot);
-    this.resizeMediaSprites(slot, slot.modIcons, 0);
+    this.resizeMediaSprites(slot, view.modIcons, 0);
     const cloud = slot.systemCloudBounds!;
     const { x: cloudX, y: cloudY, w: cloudW, h: cloudH, radius,
       fontSize: cloudFontSize, lineHeight: cloudLineHeight } = cloud;
@@ -3358,58 +3299,58 @@ export class MessageRing {
     const contentY = slot.bodyY;
     const lines = slot.wrapLines;
     const layoutOpts = this.wrapOpts(slot, [], slot.lineWidth, cloudFontSize);
-    slot.root.cursor = "default";
+    view.root.cursor = "default";
 
-    slot.time.visible = false;
-    slot.nick.visible = false;
-    slot.nickPaintSpr.visible = false;
-    slot.nick.text = "";
-    slot.replyHeader.visible = false;
-    slot.replyHeader.text = "";
-    for (const spr of slot.badges) {
+    view.time.visible = false;
+    view.nick.visible = false;
+    view.nickPaintSpr.visible = false;
+    view.nick.text = "";
+    view.replyHeader.visible = false;
+    view.replyHeader.text = "";
+    for (const spr of view.badges) {
       spr.visible = false;
     }
-    for (const mt of slot.modBtns) {
+    for (const mt of view.modBtns) {
       mt.visible = false;
       mt.text = "";
     }
-    for (const spr of slot.modIcons) {
+    for (const spr of view.modIcons) {
       spr.visible = false;
     }
-    for (const ct of slot.caughtTexts) {
+    for (const ct of view.caughtTexts) {
       ct.visible = false;
       ct.text = "";
     }
-    slot.modBtnHits = [];
-    slot.automodBtnHits = [];
-    slot.bitsLabel.visible = false;
-    slot.bitsLabel.text = "";
-    slot.body.style.fontSize = cloudFontSize;
-    slot.body.style.lineHeight = cloudLineHeight;
-    slot.body.style.fill = SYSTEM_CLOUD_FG;
-    slot.bodyCont.style.fontSize = cloudFontSize;
-    slot.bodyCont.style.lineHeight = cloudLineHeight;
-    slot.bodyCont.style.fill = SYSTEM_CLOUD_FG;
+    view.modBtnHits = [];
+    view.automodBtnHits = [];
+    view.bitsLabel.visible = false;
+    view.bitsLabel.text = "";
+    view.body.style.fontSize = cloudFontSize;
+    view.body.style.lineHeight = cloudLineHeight;
+    view.body.style.fill = SYSTEM_CLOUD_FG;
+    view.bodyCont.style.fontSize = cloudFontSize;
+    view.bodyCont.style.lineHeight = cloudLineHeight;
+    view.bodyCont.style.fill = SYSTEM_CLOUD_FG;
 
-    slot.body.x = textOriginX;
-    slot.body.y = contentY;
-    slot.bodyCont.x = textOriginX;
-    slot.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? cloudLineHeight);
+    view.body.x = textOriginX;
+    view.body.y = contentY;
+    view.bodyCont.x = textOriginX;
+    view.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? cloudLineHeight);
 
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
-    slot.body.text = renderWrapped(
+    view.body.text = renderWrapped(
       slot.bodyRaw,
       firstOnly,
       slot.spansRaw,
       layoutOpts,
     );
     if (restLines.length === 0) {
-      slot.bodyCont.visible = false;
-      slot.bodyCont.text = "";
+      view.bodyCont.visible = false;
+      view.bodyCont.text = "";
     } else {
-      slot.bodyCont.visible = true;
-      slot.bodyCont.text = renderWrappedContinuation(
+      view.bodyCont.visible = true;
+      view.bodyCont.text = renderWrappedContinuation(
         slot.bodyRaw,
         restLines,
         slot.wrapLineHeights,
@@ -3420,27 +3361,27 @@ export class MessageRing {
       );
     }
 
-    const previousCloud = slot.cloudPaintBounds;
+    const previousCloud = view.cloudPaintBounds;
     if (!previousCloud || previousCloud.x !== cloudX || previousCloud.y !== cloudY ||
         previousCloud.w !== cloudW || previousCloud.h !== cloudH || previousCloud.radius !== radius) {
-      slot.systemCloud.clear();
-      slot.systemCloud.roundRect(cloudX, cloudY, cloudW, cloudH, radius)
+      view.systemCloud.clear();
+      view.systemCloud.roundRect(cloudX, cloudY, cloudW, cloudH, radius)
         .fill({ color: SYSTEM_CLOUD_BG, alpha: 1 });
-      slot.cloudPaintBounds = { x: cloudX, y: cloudY, w: cloudW, h: cloudH, radius };
+      view.cloudPaintBounds = { x: cloudX, y: cloudY, w: cloudW, h: cloudH, radius };
     }
 
-    if (slot.root.hitArea instanceof Rectangle) {
-      slot.root.hitArea.width = paneW;
-      slot.root.hitArea.height = allocatedH;
+    if (view.root.hitArea instanceof Rectangle) {
+      view.root.hitArea.width = paneW;
+      view.root.hitArea.height = allocatedH;
     }
 
     this.paintHighlight(slot);
     this.clearSlotLinks(slot);
-    for (const mt of slot.mentionTexts) {
+    for (const mt of view.mentionTexts) {
       mt.visible = false;
       mt.text = "";
     }
-    for (const ht of slot.hostTexts) {
+    for (const ht of view.hostTexts) {
       ht.visible = false;
       ht.text = "";
     }
@@ -3459,8 +3400,8 @@ export class MessageRing {
     let prevY = 0;
     let hasPrev = false;
     let prevEnd = 0;
-    for (let i = 0; i < slot.emotes.length; i += 1) {
-      const spr = slot.emotes[i];
+    for (let i = 0; i < view.emotes.length; i += 1) {
+      const spr = view.emotes[i];
       const span = slot.spansRaw[i];
       if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
         spr.visible = false;
@@ -3499,85 +3440,91 @@ export class MessageRing {
       hasPrev = true;
       prevEnd = span.end;
     }
-    slot.bitsLabel.visible = false;
-    slot.bitsLabel.text = "";
+    view.bitsLabel.visible = false;
+    view.bitsLabel.text = "";
   }
 
   private sanitizeSlotRenderableTextures(slot: Slot): void {
-    cleanseSpriteTexture(slot.nickPaintSpr);
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    cleanseSpriteTexture(view.nickPaintSpr);
     if (
-      slot.nickPaintSpr.visible &&
-      !isRenderableTexture(slot.nickPaintSpr.texture)
+      view.nickPaintSpr.visible &&
+      !isRenderableTexture(view.nickPaintSpr.texture)
     ) {
-      slot.nickPaintKey = "";
-      if (slot.nick.text) {
-        slot.nick.visible = true;
+      view.nickPaintKey = "";
+      if (view.nick.text) {
+        view.nick.visible = true;
       }
     }
-    for (const spr of slot.badges) {
+    for (const spr of view.badges) {
       cleanseSpriteTexture(spr);
     }
-    for (const spr of slot.emotes) {
+    for (const spr of view.emotes) {
       cleanseSpriteTexture(spr);
     }
-    for (const spr of slot.modIcons) {
+    for (const spr of view.modIcons) {
       cleanseSpriteTexture(spr);
     }
-    if (slot.clipUi) cleanseSpriteTexture(slot.clipUi.thumb);
+    if (view.clipUi) cleanseSpriteTexture(view.clipUi.thumb);
   }
 
   private paintClip(slot: Slot): void {
-    this.sanitizeSlotRenderableTextures(slot);
     if (!slot.wrapReady) this.measureSlot(slot);
+    const view = this.viewPool.get(slot);
+    if (!view) return;
+    this.sanitizeSlotRenderableTextures(slot);
     if (this.isSystemCloud(slot)) {
       this.paintSystemCloud(slot);
+      view.painted = true;
+      view.root.visible = slot.visible;
       return;
     }
-    slot.time.style.fontSize = this.fontSize;
-    slot.time.style.lineHeight = this.lineHeight;
-    slot.nick.style.fontFamily = "ChatNickFont";
-    slot.nick.style.fontSize = this.fontSize;
-    slot.nick.style.lineHeight = this.lineHeight;
-    slot.body.style.fontSize = this.fontSize;
-    slot.body.style.lineHeight = this.lineHeight;
-    slot.bodyCont.style.fontSize = this.fontSize;
-    slot.bodyCont.style.lineHeight = this.lineHeight;
-    slot.bitsLabel.style.fontSize = this.fontSize;
-    slot.bitsLabel.style.lineHeight = this.lineHeight;
+    view.time.style.fontSize = this.fontSize;
+    view.time.style.lineHeight = this.lineHeight;
+    view.nick.style.fontFamily = "ChatNickFont";
+    view.nick.style.fontSize = this.fontSize;
+    view.nick.style.lineHeight = this.lineHeight;
+    view.body.style.fontSize = this.fontSize;
+    view.body.style.lineHeight = this.lineHeight;
+    view.bodyCont.style.fontSize = this.fontSize;
+    view.bodyCont.style.lineHeight = this.lineHeight;
+    view.bitsLabel.style.fontSize = this.fontSize;
+    view.bitsLabel.style.lineHeight = this.lineHeight;
     this.clearSystemCloud(slot);
-    slot.body.style.fill = this.themeFills.body;
-    slot.bodyCont.style.fill = this.themeFills.body;
+    view.body.style.fill = this.themeFills.body;
+    view.bodyCont.style.fill = this.themeFills.body;
     const gutterW = this.paintModGutter(slot);
     const timeW = slot.timeWidth;
     const showReply = slot.replyRows > 0;
     const contentY = slot.bodyY;
     if (showReply) {
-      slot.replyHeader.visible = true;
-      slot.replyHeader.style.fontSize = Math.max(
+      view.replyHeader.visible = true;
+      view.replyHeader.style.fontSize = Math.max(
         8,
         Math.round(this.fontSize * 0.85),
       );
-      slot.replyHeader.style.fill = this.themeFills.timestamp;
-      slot.replyHeader.x = 0;
-      slot.replyHeader.y = Math.max(
+      view.replyHeader.style.fill = this.themeFills.timestamp;
+      view.replyHeader.x = 0;
+      view.replyHeader.y = Math.max(
         0,
-        (this.lineHeight - slot.replyHeader.style.fontSize) / 2,
+        (this.lineHeight - view.replyHeader.style.fontSize) / 2,
       );
     } else {
-      slot.replyHeader.visible = false;
-      slot.replyHeader.text = "";
+      view.replyHeader.visible = false;
+      view.replyHeader.text = "";
     }
-    for (const mt of slot.modBtns) {
+    for (const mt of view.modBtns) {
       if (mt.visible) {
         mt.y = contentY;
       }
     }
-    slot.time.x = gutterW;
-    slot.time.y = contentY;
-    slot.time.visible = this.timestampsVisible();
+    view.time.x = gutterW;
+    view.time.y = contentY;
+    view.time.visible = this.timestampsVisible();
     const badgeVisible = this.visibleBadges(slot);
-    for (let i = 0; i < slot.badges.length; i += 1) {
-      const spr = slot.badges[i];
+    for (let i = 0; i < view.badges.length; i += 1) {
+      const spr = view.badges[i];
       const badge = badgeVisible[i];
       if (!badge) {
         spr.visible = false;
@@ -3592,23 +3539,23 @@ export class MessageRing {
       spr.x = gutterW + timeW + i * (this.badgeSize + BADGE_GAP);
       spr.y = this.lineMediaY(contentY, this.badgeSize);
     }
-    slot.nick.x = slot.nickX;
-    slot.nick.y = contentY;
-    slot.nick.text = slot.nickText;
+    view.nick.x = slot.nickX;
+    view.nick.y = contentY;
+    view.nick.text = slot.nickText;
     this.applyNickPaintChrome(slot, contentY);
     const firstOriginX = slot.bodyIndent;
     const contOriginX = slot.bodyContIndent;
-    slot.body.x = firstOriginX;
-    slot.body.y = contentY;
-    slot.bodyCont.x = contOriginX;
-    if (slot.root.hitArea instanceof Rectangle) {
-      slot.root.hitArea.width = this.app.screen.width;
+    view.body.x = firstOriginX;
+    view.body.y = contentY;
+    view.bodyCont.x = contOriginX;
+    if (view.root.hitArea instanceof Rectangle) {
+      view.root.hitArea.width = this.app.screen.width;
     }
     const fullWidthPx = slot.lineWidth;
     const firstWidthPx = slot.firstLineWidth;
     if (showReply) {
-      slot.replyHeader.x = contOriginX;
-      slot.replyHeader.text = clipReplyHeaderToWidth(
+      view.replyHeader.x = contOriginX;
+      view.replyHeader.text = clipReplyHeaderToWidth(
         formatReplyHeader(slot.replyToLogin, slot.replyToText),
         fullWidthPx,
         (s) => this.measureBitmapTextWidth("ChatFont", s),
@@ -3617,25 +3564,25 @@ export class MessageRing {
     const layoutOpts = this.wrapOpts(slot, undefined, firstWidthPx);
     const lines = slot.wrapLines;
     const collapsed = slot.collapsed;
-    slot.root.cursor = collapsed || slot.modBtnHits.length > 0 ? "pointer" : "default";
+    view.root.cursor = collapsed || view.modBtnHits.length > 0 ? "pointer" : "default";
     const overlayMentions =
       this.boldUsernames || this.colorUsernames
         ? this.mentionSpansForOverlay(slot.mentionSpans, lines)
         : [];
     const renderOpts = this.wrapOpts(slot, overlayMentions, firstWidthPx);
-    slot.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? this.lineHeight);
+    view.bodyCont.y = contentY + (slot.wrapLineHeights[0] ?? this.lineHeight);
     const firstOnly = lines.length > 0 ? [lines[0]] : [{ start: 0, end: 0 }];
     const restLines = lines.slice(1);
-    slot.body.text = withCollapsedEllipsis(
+    view.body.text = withCollapsedEllipsis(
       renderWrapped(slot.bodyRaw, firstOnly, slot.spansRaw, renderOpts),
       collapsed && restLines.length === 0,
     );
     if (restLines.length === 0) {
-      slot.bodyCont.visible = false;
-      slot.bodyCont.text = "";
+      view.bodyCont.visible = false;
+      view.bodyCont.text = "";
     } else {
-      slot.bodyCont.visible = true;
-      slot.bodyCont.text = renderWrappedContinuation(
+      view.bodyCont.visible = true;
+      view.bodyCont.text = renderWrappedContinuation(
         slot.bodyRaw,
         restLines,
         slot.wrapLineHeights,
@@ -3645,8 +3592,8 @@ export class MessageRing {
         collapsed,
       );
     }
-    if (slot.root.hitArea instanceof Rectangle) {
-      slot.root.hitArea.height = this.slotPixelHeight(slot);
+    if (view.root.hitArea instanceof Rectangle) {
+      view.root.hitArea.height = this.slotPixelHeight(slot);
     }
     this.paintHighlight(slot);
     this.clearSlotLinks(slot);
@@ -3682,8 +3629,8 @@ export class MessageRing {
     let hasPrev = false;
     let prevEnd = 0;
     let bitsLabelShown = false;
-    for (let i = 0; i < slot.emotes.length; i += 1) {
-      const spr = slot.emotes[i];
+    for (let i = 0; i < view.emotes.length; i += 1) {
+      const spr = view.emotes[i];
       const span = slot.spansRaw[i];
       if (!span || !this.enableEmoteImages || span.provider === "cheer-mask") {
         spr.visible = false;
@@ -3730,40 +3677,47 @@ export class MessageRing {
       ) {
         const tint = parseCheerColor(span.bitsColor);
         if (tint != null) {
-          slot.bitsLabel.visible = true;
-          slot.bitsLabel.text = ` ${span.bitsAmount}`;
-          slot.bitsLabel.tint = tint;
-          slot.bitsLabel.x = spr.x + paint.w + 2;
-          slot.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
+          view.bitsLabel.visible = true;
+          view.bitsLabel.text = ` ${span.bitsAmount}`;
+          view.bitsLabel.tint = tint;
+          view.bitsLabel.x = spr.x + paint.w + 2;
+          view.bitsLabel.y = this.wrapLineY(contentY, pos.line, slot);
           bitsLabelShown = true;
         }
       }
     }
     if (!bitsLabelShown) {
-      slot.bitsLabel.visible = false;
-      slot.bitsLabel.text = "";
+      view.bitsLabel.visible = false;
+      view.bitsLabel.text = "";
     }
     this.paintSlotClipCard(slot);
+    view.painted = true;
+    view.root.visible = slot.visible;
   }
 
   private releaseSlotClipCard(slot: Slot): void {
-    const clip = slot.clipUi;
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    const clip = view.clipUi;
     if (!clip) return;
-    slot.clipUi = null;
+    view.clipUi = null;
     releaseClipThumb(clip, this.textures);
     clip.root.destroy({ children: true, style: true });
   }
 
   private paintSlotClipCard(slot: Slot): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    const token = this.viewPool.tokenOf(slot);
     if (!slot.clipCard || slot.clipCardRows <= 0) {
       this.releaseSlotClipCard(slot);
       return;
     }
-    if (!slot.clipUi) {
-      slot.clipUi = createClipCardWidgets(this.themeFills.timestamp);
-      slot.root.addChildAt(slot.clipUi.root, slot.root.getChildIndex(slot.disabledGfx));
+    if (!view.clipUi) {
+      view.clipUi = createClipCardWidgets(this.themeFills.timestamp);
+      view.root.addChildAt(view.clipUi.root, view.root.getChildIndex(view.disabledGfx));
     }
-    const clip = slot.clipUi;
+    const clip = view.clipUi;
     const msgId = slot.msgId;
     const clipId = slot.clipCard?.clipId ?? "";
     paintClipCard({
@@ -3780,14 +3734,17 @@ export class MessageRing {
       measure: (text) => this.measureBitmapTextWidth("ChatFont", text),
       applySprite: applySpriteTexture,
       stillCurrent: () =>
+        this.viewPool.owns(slot, view, token) &&
         slot.msgId === msgId &&
         !!slot.clipCard &&
         slot.clipCard.clipId === clipId &&
-        slot.clipUi === clip && clip.thumbKey === `clip:${clipId}`,
+        view.clipUi === clip && clip.thumbKey === `clip:${clipId}`,
     });
   }
 
   private paintHighlight(slot: Slot): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     const cloud = slot.systemCloudBounds;
     let color: number | undefined;
     let alpha = 0;
@@ -3811,35 +3768,35 @@ export class MessageRing {
     const lastRead = this.showLastRead && !!this.lastReadMsgId &&
       slot.msgId === this.lastReadMsgId;
     if (color === undefined && !separator && !lastRead) {
-      if (slot.highlightPainted) {
-        slot.highlight.clear();
-        slot.highlightPainted = false;
+      if (view.highlightPainted) {
+        view.highlight.clear();
+        view.highlightPainted = false;
       }
       return;
     }
-    slot.highlight.clear();
-    slot.highlightPainted = true;
+    view.highlight.clear();
+    view.highlightPainted = true;
     const h = this.slotPixelHeight(slot);
     const w = this.app.screen.width;
     if (color !== undefined) {
       if (cloud) {
-        slot.highlight
+        view.highlight
           .roundRect(cloud.x, cloud.y, cloud.w, cloud.h, cloud.radius)
           .fill({ color, alpha });
       } else {
-        slot.highlight
+        view.highlight
           .rect(0, 0, w, h)
           .fill({ color, alpha });
       }
     }
     if (separator) {
-      slot.highlight
+      view.highlight
         .moveTo(0, h - 0.5)
         .lineTo(w, h - 0.5)
         .stroke({ width: 1, color: this.themeFills.separator, alpha: 0.9 });
     }
     if (lastRead) {
-      this.paintLastReadLine(slot.highlight, w, h);
+      this.paintLastReadLine(view.highlight, w, h);
     }
   }
 
@@ -3870,20 +3827,26 @@ export class MessageRing {
   }
 
   private clearSystemCloud(slot: Slot): void {
-    if (slot.cloudPaintBounds) {
-      slot.systemCloud.clear();
-      slot.cloudPaintBounds = null;
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    if (view.cloudPaintBounds) {
+      view.systemCloud.clear();
+      view.cloudPaintBounds = null;
     }
   }
 
   private clearDisabledBackground(slot: Slot): void {
-    if (slot.disabledPaint) {
-      slot.disabledGfx.clear();
-      slot.disabledPaint = null;
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    if (view.disabledPaint) {
+      view.disabledGfx.clear();
+      view.disabledPaint = null;
     }
   }
 
   private paintDisabled(slot: Slot): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     const dim =
       slot.disabled || (this.fadeMessageHistory && slot.fromHistory);
     if (!dim) {
@@ -3894,28 +3857,30 @@ export class MessageRing {
     const h = this.slotPixelHeight(slot);
     const color = this.themeFills.disabled;
     const alpha = this.themeFills.disabledAlpha;
-    const previous = slot.disabledPaint;
+    const previous = view.disabledPaint;
     if (
       previous && previous.w === w && previous.h === h &&
       previous.color === color && previous.alpha === alpha
     ) {
       return;
     }
-    const paint = previous ?? (slot.disabledPaint = { w: 0, h: 0, color: 0, alpha: 0 });
+    const paint = previous ?? (view.disabledPaint = { w: 0, h: 0, color: 0, alpha: 0 });
     paint.w = w;
     paint.h = h;
     paint.color = color;
     paint.alpha = alpha;
-    slot.disabledGfx.clear();
-    slot.disabledGfx
+    view.disabledGfx.clear();
+    view.disabledGfx
       .rect(0, 0, w, h)
       .fill({ color, alpha });
   }
 
   private clearSlotLinks(slot: Slot): void {
-    if (slot.linksPainted) {
-      slot.mentions.clear();
-      slot.linksPainted = false;
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    if (view.linksPainted) {
+      view.mentions.clear();
+      view.linksPainted = false;
     }
   }
 
@@ -3929,6 +3894,8 @@ export class MessageRing {
     rowLineHeight: number = this.lineHeight,
     measureFontSize: number = this.fontSize,
   ): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     if (slot.linkSpans.length === 0) {
       return;
     }
@@ -3969,8 +3936,8 @@ export class MessageRing {
           wrapLineOriginX(firstOriginX, start.line, contOriginX) + start.col;
         const rowH = slot.wrapLineHeights[start.line] ?? rowLineHeight;
         const y = this.wrapLineY(contentY, start.line, slot) + rowH - 2;
-        slot.linksPainted = true;
-        slot.mentions
+        view.linksPainted = true;
+        view.mentions
           .moveTo(x0, y)
           .lineTo(x0 + linkW, y)
           .stroke({ width: 1, color: linkColor, alpha: 0.95 });
@@ -3979,6 +3946,8 @@ export class MessageRing {
   }
 
   private resizeMediaSprites(slot: Slot, sprites: Sprite[], count: number): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     while (sprites.length > count) {
       const sprite = sprites.pop()!;
       detachSpriteTexture(sprite);
@@ -3988,15 +3957,17 @@ export class MessageRing {
       const sprite = new Sprite(Texture.EMPTY);
       sprite.visible = false;
       sprite.eventMode = "none";
-      const anchor = sprites === slot.modIcons ? slot.replyHeader
-        : sprites === slot.badges ? slot.emotes[0] ?? slot.clipUi?.root ?? slot.disabledGfx
-        : slot.clipUi?.root ?? slot.disabledGfx;
-      slot.root.addChildAt(sprite, slot.root.getChildIndex(anchor));
+      const anchor = sprites === view.modIcons ? view.replyHeader
+        : sprites === view.badges ? view.emotes[0] ?? view.clipUi?.root ?? view.disabledGfx
+        : view.clipUi?.root ?? view.disabledGfx;
+      view.root.addChildAt(sprite, view.root.getChildIndex(anchor));
       sprites.push(sprite);
     }
   }
 
   private overlayText(slot: Slot, texts: BitmapText[], index: number): BitmapText {
+    const view = this.viewPool.get(slot);
+    if (!view) { throw new Error("Message view is not bound"); }
     if (!texts[index]) {
       const text = new BitmapText({
         text: "",
@@ -4004,11 +3975,11 @@ export class MessageRing {
       });
       text.eventMode = "none";
       text.visible = false;
-      const anchor = texts === slot.modBtns ? slot.modIcons[0] ?? slot.replyHeader
-        : texts === slot.mentionTexts ? slot.hostTexts[0] ?? slot.caughtTexts[0] ?? slot.bitsLabel
-        : texts === slot.hostTexts ? slot.caughtTexts[0] ?? slot.bitsLabel
-        : slot.bitsLabel;
-      slot.root.addChildAt(text, slot.root.getChildIndex(anchor));
+      const anchor = texts === view.modBtns ? view.modIcons[0] ?? view.replyHeader
+        : texts === view.mentionTexts ? view.hostTexts[0] ?? view.caughtTexts[0] ?? view.bitsLabel
+        : texts === view.hostTexts ? view.caughtTexts[0] ?? view.bitsLabel
+        : view.bitsLabel;
+      view.root.addChildAt(text, view.root.getChildIndex(anchor));
       texts.push(text);
     }
     return texts[index];
@@ -4018,14 +3989,6 @@ export class MessageRing {
     while (texts.length > used) texts.pop()!.destroy({ style: true });
   }
 
-  private releaseOverlayTexts(slot: Slot): void {
-    this.trimOverlayTexts(slot.mentionTexts, 0);
-    this.trimOverlayTexts(slot.hostTexts, 0);
-    this.trimOverlayTexts(slot.caughtTexts, 0);
-    this.trimOverlayTexts(slot.modBtns, 0);
-  }
-
-  /** Dimmed `(host)` suffix after resolved link titles. */
   private paintHostTexts(
     slot: Slot,
     firstOriginX: number,
@@ -4033,11 +3996,13 @@ export class MessageRing {
     contentY: number,
     wrapOpts: WrapOptions,
   ): void {
-    for (const ht of slot.hostTexts) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    for (const ht of view.hostTexts) {
       ht.visible = false;
     }
     if (slot.hostSpans.length === 0) {
-      this.trimOverlayTexts(slot.hostTexts, 0);
+      this.trimOverlayTexts(view.hostTexts, 0);
       return;
     }
     let used = 0;
@@ -4061,7 +4026,7 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const ht = this.overlayText(slot, slot.hostTexts, used);
+        const ht = this.overlayText(slot, view.hostTexts, used);
         used += 1;
         ht.text = slot.bodyRaw.slice(a, b);
         ht.style.fontFamily = "ChatFont";
@@ -4074,7 +4039,7 @@ export class MessageRing {
         ht.visible = true;
       }
     }
-    this.trimOverlayTexts(slot.hostTexts, used);
+    this.trimOverlayTexts(view.hostTexts, used);
   }
 
   private paintMentionTexts(
@@ -4086,11 +4051,13 @@ export class MessageRing {
     wrapOpts: WrapOptions,
     overlayMentions: readonly MentionSpan[],
   ): void {
-    for (const mt of slot.mentionTexts) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    for (const mt of view.mentionTexts) {
       mt.visible = false;
     }
     if (!this.boldUsernames && !this.colorUsernames) {
-      this.trimOverlayTexts(slot.mentionTexts, 0);
+      this.trimOverlayTexts(view.mentionTexts, 0);
       return;
     }
     const fontFamily = this.boldUsernames ? "ChatNickFont" : "ChatFont";
@@ -4115,7 +4082,7 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const mt = this.overlayText(slot, slot.mentionTexts, used);
+        const mt = this.overlayText(slot, view.mentionTexts, used);
         used += 1;
         mt.text = slot.bodyRaw.slice(a, b);
         mt.style.fontFamily = fontFamily;
@@ -4135,7 +4102,7 @@ export class MessageRing {
         mt.visible = true;
       }
     }
-    this.trimOverlayTexts(slot.mentionTexts, used);
+    this.trimOverlayTexts(view.mentionTexts, used);
   }
 
   private paintCaughtTexts(
@@ -4146,11 +4113,13 @@ export class MessageRing {
     lines: readonly WrapLine[],
     wrapOpts: WrapOptions,
   ): void {
-    for (const ct of slot.caughtTexts) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    for (const ct of view.caughtTexts) {
       ct.visible = false;
     }
     if (slot.automodCaught.length === 0) {
-      this.trimOverlayTexts(slot.caughtTexts, 0);
+      this.trimOverlayTexts(view.caughtTexts, 0);
       return;
     }
     let used = 0;
@@ -4174,7 +4143,7 @@ export class MessageRing {
         if (!pos) {
           continue;
         }
-        const ct = this.overlayText(slot, slot.caughtTexts, used);
+        const ct = this.overlayText(slot, view.caughtTexts, used);
         used += 1;
         ct.text = slot.bodyRaw.slice(a, b);
         ct.style.fontFamily = "ChatFont";
@@ -4187,7 +4156,7 @@ export class MessageRing {
         ct.visible = true;
       }
     }
-    this.trimOverlayTexts(slot.caughtTexts, used);
+    this.trimOverlayTexts(view.caughtTexts, used);
   }
 
   private paintAutomodActions(
@@ -4196,16 +4165,18 @@ export class MessageRing {
     contentY: number,
     lines: readonly WrapLine[],
   ): void {
-    slot.automodBtnHits = [];
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    view.automodBtnHits = [];
     if (
       !slot.automodMessageId ||
       slot.automodStatus.toLowerCase() !== "pending"
     ) {
-      this.trimOverlayTexts(slot.modBtns, 0);
+      this.trimOverlayTexts(view.modBtns, 0);
       return;
     }
     if (lines.length < 2) {
-      this.trimOverlayTexts(slot.modBtns, 0);
+      this.trimOverlayTexts(view.modBtns, 0);
       return;
     }
     const allowLabel = t("chat.automod.allow");
@@ -4221,7 +4192,7 @@ export class MessageRing {
     ];
     for (let i = 0; i < btns.length; i += 1) {
       const def = btns[i]!;
-      const mt = this.overlayText(slot, slot.modBtns, i);
+      const mt = this.overlayText(slot, view.modBtns, i);
       mt.text = def.label;
       mt.visible = true;
       mt.style.fill = 0xffffff;
@@ -4234,7 +4205,7 @@ export class MessageRing {
         this.fontSize,
         def.label,
       );
-      slot.automodBtnHits.push({
+      view.automodBtnHits.push({
         x0: x,
         x1: x + w,
         y0: y,
@@ -4243,7 +4214,7 @@ export class MessageRing {
       });
       x += w + gap;
     }
-    this.trimOverlayTexts(slot.modBtns, btns.length);
+    this.trimOverlayTexts(view.modBtns, btns.length);
   }
 
   /** Mentions, для которых хватает overlay-слотов (по числу line∩span). */
@@ -4299,19 +4270,31 @@ export class MessageRing {
     this.invalidateAllWraps();
   }
 
+  private invalidateSlotWrap(slot: Slot): void {
+    slot.wrapReady = false;
+    const view = this.viewPool.get(slot);
+    if (view) {
+      view.painted = false;
+      view.pressToken = undefined;
+      view.pressPointerId = undefined;
+      view.root.visible = false;
+      view.root.renderable = false;
+    }
+  }
+
   private invalidateAllWraps(): void {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
       if (slot.msgId) {
-        slot.wrapReady = false;
+        this.invalidateSlotWrap(slot);
       }
     }
   }
 
   /** Wrap metrics present so paintClip can be skipped until width/font/theme change. */
   private slotWrapValid(slot: Slot): boolean {
-    return slot.wrapReady;
+    return slot.wrapReady && this.viewPool.get(slot)?.painted === true;
   }
 
   private slotYIntersects(slot: Slot, top: number, bottom: number): boolean {
@@ -4360,9 +4343,9 @@ export class MessageRing {
         if (!slot.visible || !paintOnly.has(slot)) {
           continue;
         }
-        const prev = slot.lineCount;
-        this.paintClip(slot);
-        if (slot.lineCount !== prev) {
+        const prev = this.slotPixelHeight(slot);
+        this.measureSlot(slot);
+        if (this.slotPixelHeight(slot) !== prev) {
           heightsChanged = true;
         }
       }
@@ -4378,7 +4361,7 @@ export class MessageRing {
         let heightsChanged = false;
         for (let i = 0; i < this.occupied; i += 1) {
           const slot = this.slots[(start + i) % this.poolSize];
-          if (!slot.visible || this.slotWrapValid(slot)) {
+          if (!slot.visible || slot.wrapReady) {
             continue;
           }
           if (!this.slotYIntersects(slot, band.top, band.bottom)) {
@@ -4388,9 +4371,9 @@ export class MessageRing {
             budgetHit = true;
             break;
           }
-          const prev = slot.lineCount;
-          this.paintClip(slot);
-          if (slot.lineCount !== prev) {
+          const prev = this.slotPixelHeight(slot);
+          this.measureSlot(slot);
+          if (this.slotPixelHeight(slot) !== prev) {
             heightsChanged = true;
           }
         }
@@ -4416,6 +4399,7 @@ export class MessageRing {
       followSmooth,
     );
     this.afterScrollChange();
+    this.paintSlotsEnteringViewport();
   }
 
   private perfEnabled(): boolean {
@@ -4545,59 +4529,22 @@ export class MessageRing {
 
   /** Lazy paintClip for scrollback rows that enter the viewport unpainted. */
   private paintSlotsEnteringViewport(): void {
-    if (!this.ready || this.occupied === 0) {
-      return;
-    }
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    const gapPx = this.messageGapPx();
-    let contentH = 0;
-    let shown = 0;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.visible) {
-        continue;
-      }
-      if (shown > 0) {
-        contentH += gapPx;
-      }
-      contentH += this.slotPixelHeight(slot);
-      shown += 1;
-    }
-    const band = this.viewportPaintBand(contentH);
+    if (!this.ready || this.occupied === 0) return;
     let anchors: ReturnType<MessageRing["captureScrollAnchors"]> | undefined;
-    const paintStarted = performance.now();
-    const paintBudgetMs = 14;
+    const started = performance.now();
     let heightsChanged = false;
     let unfinished = false;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      if (!slot.msgId || !slot.visible) {
-        continue;
-      }
-      if (this.slotWrapValid(slot)) {
-        continue;
-      }
-      if (!this.slotYIntersects(slot, band.top, band.bottom)) {
-        continue;
-      }
-      if (performance.now() - paintStarted > paintBudgetMs) {
-        unfinished = true;
-        break;
-      }
-      const prev = slot.lineCount;
-      // Capture once, before the first paint can change row heights.
-      anchors ??= this.captureScrollAnchors();
+    for (const { owner: slot } of this.viewPool.bindings.values()) {
+      if (!slot.msgId || !slot.visible || this.slotWrapValid(slot)) continue;
+      if (performance.now() - started > 14) { unfinished = true; break; }
+      if (!slot.wrapReady) anchors ??= this.captureScrollAnchors();
+      const previous = this.slotPixelHeight(slot);
       this.paintClip(slot);
-      if (slot.lineCount !== prev) {
-        heightsChanged = true;
-      }
+      if (previous !== this.slotPixelHeight(slot)) heightsChanged = true;
     }
-    if (heightsChanged) {
-      this.repositionRootsFromCache(anchors);
-    }
-    if (unfinished) {
-      this.scheduleViewportPaint();
-    }
+    if (heightsChanged) this.repositionRootsFromCache(anchors);
+    else this.applyStageY();
+    if (unfinished) this.scheduleViewportPaint();
   }
 
   private ensureScrollTick(): void {
@@ -4646,7 +4593,7 @@ export class MessageRing {
       const row = slot.scrollLayout;
       row.msgId = slot.msgId;
       row.startRow = this.slotScrollRow(slot);
-      row.lineCount = slot.lineCount;
+      row.lineCount = this.lineHeight > 0 ? this.slotPixelHeight(slot) / this.lineHeight : 0;
       if (shown > 0) {
         this.laidBuf[shown - 1].lineCount += gapRows;
       }
@@ -4663,27 +4610,42 @@ export class MessageRing {
     const padding = this.lineHeight * 8;
     const top = -stageY - padding;
     const bottom = -stageY + this.app.screen.height + padding;
+    const target = this.viewportPaintBand(this.scroll.contentRows * this.lineHeight);
+    this.wantedViews.length = 0;
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      const renderable = slot.visible && this.slotYIntersects(slot, top, bottom);
-      const entering = renderable && !slot.root.renderable;
+      if (slot.visible && (this.slotYIntersects(slot, top, bottom) ||
+          this.slotYIntersects(slot, target.top, target.bottom))) this.wantedViews.push(slot);
+    }
+    this.viewPool.sync(this.wantedViews);
+    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
+      const renderable = slot.visible && view.painted && this.slotYIntersects(slot, top, bottom);
+      const entering = renderable && !view.root.renderable;
+      view.root.y = slot.y;
+      view.root.visible = slot.visible && view.painted;
+      view.root.renderable = renderable;
       if (entering) {
         this.lastSanitizeTickerTime = Number.NaN;
+        this.refreshMissingSlotMedia(slot);
       }
-      slot.root.renderable = renderable;
-      if (entering) this.refreshMissingSlotMedia(slot);
     }
   }
 
+  renderStats(): { historyRows: number; views: number; boundViews: number } {
+    return { historyRows: this.occupied, views: this.viewPool.views.size, boundViews: this.viewPool.bindings.size };
+  }
+
   private refreshMissingSlotMedia(slot: Slot): void {
-    if (slot.badgeKeys.some((key, i) => key && !isRenderableTexture(slot.badges[i].texture))) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
+    if (view.badgeKeys.some((key, i) => key && !isRenderableTexture(view.badges[i].texture))) {
       this.loadBadgeSprites(slot);
     }
-    if (this.enableEmoteImages && slot.emoteKeys.some((key, i) => key && !isRenderableTexture(slot.emotes[i].texture))) {
+    if (this.enableEmoteImages && view.emoteKeys.some((key, i) => key && !isRenderableTexture(view.emotes[i].texture))) {
       this.repaintSlotMedia(slot);
     }
-    if (slot.clipCard?.thumbnailUrl && (!slot.clipUi || !isRenderableTexture(slot.clipUi.thumb.texture))) {
+    if (slot.clipCard?.thumbnailUrl && (!view.clipUi || !isRenderableTexture(view.clipUi.thumb.texture))) {
       this.paintSlotClipCard(slot);
     }
   }
@@ -4757,6 +4719,8 @@ export class MessageRing {
   }
 
   private onSlotTap(slot: Slot, ev: FederatedPointerEvent): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     // Pixi fires pointertap after rightclick; only LMB opens UserCard / links.
     if (ev.button !== 0) {
       return;
@@ -4776,8 +4740,8 @@ export class MessageRing {
       return;
     }
     {
-      const local = ev.getLocalPosition(slot.root);
-      if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
+      const local = ev.getLocalPosition(view.root);
+      if (slot.clipCard && view.clipUi && clipCardContains(view.clipUi, local.x, local.y)) {
         // Card is layout chrome, not a body link: always single-click open.
         const clipUrl = slot.clipCard.url;
         if (this.onOpenChatLink) {
@@ -4791,7 +4755,7 @@ export class MessageRing {
     if (slot.collapsed && !slot.expanded) {
       slot.expanded = true;
       // Invalidate wrap so layoutInner paints after sealed anchors are captured.
-      slot.wrapReady = false;
+      this.invalidateSlotWrap(slot);
       this.layout();
       return;
     }
@@ -4826,6 +4790,8 @@ export class MessageRing {
   }
 
   private onSlotContext(slot: Slot, ev: FederatedPointerEvent): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     if (!slot.msgId) {
       return;
     }
@@ -4854,8 +4820,8 @@ export class MessageRing {
     this.onContext(
       this.makeSlotContext(slot, ev, {
         linkUrl: (() => {
-          const local = ev.getLocalPosition(slot.root);
-          if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
+          const local = ev.getLocalPosition(view.root);
+          if (slot.clipCard && view.clipUi && clipCardContains(view.clipUi, local.x, local.y)) {
             return slot.clipCard.url;
           }
           return this.linkAt(slot, ev) ?? "";
@@ -4868,8 +4834,10 @@ export class MessageRing {
   }
 
   private onSlotMove(slot: Slot, ev: FederatedPointerEvent): void {
+    const view = this.viewPool.get(slot);
+    if (!view) { return; }
     if (slot.systemCloudBounds && slot.msgId) {
-      const local = ev.getLocalPosition(slot.root);
+      const local = ev.getLocalPosition(view.root);
       if (this.pointInSystemCloud(slot, local.x, local.y)) {
         this.setHoveredMsgId(slot.msgId);
       } else if (this.hoveredMsgId === slot.msgId && !this.hoverGuard?.()) {
@@ -4877,29 +4845,29 @@ export class MessageRing {
       }
     }
     if (this.automodActionAt(slot, ev) || this.modActionAt(slot, ev)) {
-      slot.root.cursor = "pointer";
+      view.root.cursor = "pointer";
       return;
     }
     if (this.nickAt(slot, ev) && slot.login) {
-      slot.root.cursor = "pointer";
+      view.root.cursor = "pointer";
       return;
     }
     if (this.mentionLoginAt(slot, ev)) {
-      slot.root.cursor = "pointer";
+      view.root.cursor = "pointer";
       return;
     }
     {
-      const local = ev.getLocalPosition(slot.root);
-      if (slot.clipCard && slot.clipUi && clipCardContains(slot.clipUi, local.x, local.y)) {
-        slot.root.cursor = "pointer";
+      const local = ev.getLocalPosition(view.root);
+      if (slot.clipCard && view.clipUi && clipCardContains(view.clipUi, local.x, local.y)) {
+        view.root.cursor = "pointer";
         return;
       }
     }
     if (slot.collapsed && !slot.expanded) {
-      slot.root.cursor = "pointer";
+      view.root.cursor = "pointer";
       return;
     }
-    slot.root.cursor = this.linkAt(slot, ev) ? "pointer" : "default";
+    view.root.cursor = this.linkAt(slot, ev) ? "pointer" : "default";
   }
 
   private showModGutter(slot: MessageRow): boolean {
@@ -4920,18 +4888,20 @@ export class MessageRing {
 
   /** Left moderation buttons; returns gutter width in px. */
   private paintModGutter(slot: Slot): number {
-    slot.modBtnHits = [];
-    for (const mt of slot.modBtns) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return 0; }
+    view.modBtnHits = [];
+    for (const mt of view.modBtns) {
       mt.visible = false;
     }
-    for (const spr of slot.modIcons) {
+    for (const spr of view.modIcons) {
       spr.visible = false;
     }
     if (!this.showModGutter(slot)) {
-      this.resizeMediaSprites(slot, slot.modIcons, 0);
+      this.resizeMediaSprites(slot, view.modIcons, 0);
       return 0;
     }
-    this.resizeMediaSprites(slot, slot.modIcons, MOD_GUTTER_ICON_COUNT);
+    this.resizeMediaSprites(slot, view.modIcons, MOD_GUTTER_ICON_COUNT);
     const actions = modGutterActions();
     const iconSize = Math.max(14, Math.round(this.fontSize * 1.05));
     const padX = Math.max(2, Math.round(2 * this.fontScale));
@@ -4940,7 +4910,7 @@ export class MessageRing {
     let x = 0;
     for (let i = 0; i < MOD_GUTTER_ICON_COUNT; i += 1) {
       const action = actions[i];
-      const spr = slot.modIcons[i];
+      const spr = view.modIcons[i];
       if (!action || !spr) {
         continue;
       }
@@ -4954,7 +4924,7 @@ export class MessageRing {
       spr.x = x + padX;
       spr.y = this.lineMediaY(0, iconSize);
       const btnW = iconSize + padX * 2;
-      slot.modBtnHits.push({
+      view.modBtnHits.push({
         x0: x,
         x1: x + btnW,
         action: action.action,
@@ -4965,15 +4935,17 @@ export class MessageRing {
   }
 
   private modActionAt(slot: Slot, ev: FederatedPointerEvent): string | null {
-    if (slot.modBtnHits.length === 0) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return null; }
+    if (view.modBtnHits.length === 0) {
       return null;
     }
-    const local = ev.getLocalPosition(slot.root);
+    const local = ev.getLocalPosition(view.root);
     const y0 = slot.replyRows * this.lineHeight;
     if (local.y < y0 || local.y >= y0 + this.lineHeight) {
       return null;
     }
-    for (const hit of slot.modBtnHits) {
+    for (const hit of view.modBtnHits) {
       if (local.x >= hit.x0 && local.x < hit.x1) {
         return hit.action;
       }
@@ -4985,11 +4957,13 @@ export class MessageRing {
     slot: Slot,
     ev: FederatedPointerEvent,
   ): "allow" | "deny" | null {
-    if (slot.automodBtnHits.length === 0) {
+    const view = this.viewPool.get(slot);
+    if (!view) { return null; }
+    if (view.automodBtnHits.length === 0) {
       return null;
     }
-    const local = ev.getLocalPosition(slot.root);
-    for (const hit of slot.automodBtnHits) {
+    const local = ev.getLocalPosition(view.root);
+    for (const hit of view.automodBtnHits) {
       if (
         local.x >= hit.x0 &&
         local.x < hit.x1 &&
@@ -5003,25 +4977,30 @@ export class MessageRing {
   }
 
   private nickAt(slot: Slot, ev: FederatedPointerEvent): boolean {
+    const view = this.viewPool.get(slot);
+    if (!view) { return false; }
     if (!slot.login || slot.system || !slot.useNickStyle) {
       return false;
     }
-    const local = ev.getLocalPosition(slot.root);
+    const local = ev.getLocalPosition(view.root);
     const nickW = Math.max(
-      this.measureBitmapTextWidth("ChatNickFont", slot.nick.text),
+      this.measureBitmapTextWidth("ChatNickFont", view.nick.text),
       8,
     );
     const y0 = slot.replyRows * this.lineHeight;
     return (
-      local.x >= slot.nick.x &&
-      local.x < slot.nick.x + nickW &&
+      local.x >= view.nick.x &&
+      local.x < view.nick.x + nickW &&
       local.y >= y0 &&
       local.y < y0 + this.lineHeight
     );
   }
 
   private applyNickPaintChrome(slot: Slot, contentY: number): number {
-    return this.nickPaintResources.apply(slot, contentY, {
+    const view = this.viewPool.get(slot);
+    if (!view) return Math.max(this.measureBitmapTextWidth("ChatNickFont", slot.nickText), 8);
+    view.nickPaint = slot.nickPaint;
+    return this.nickPaintResources.apply(view, contentY, {
       fontFamily: this.chatFontFamily,
       fontWeight: qtWeightToCss(this.nickBoldScale),
       fontSize: this.fontSize,
@@ -5043,10 +5022,12 @@ export class MessageRing {
   }
 
   private mentionLoginAt(slot: Slot, ev: FederatedPointerEvent): string | null {
+    const view = this.viewPool.get(slot);
+    if (!view) { return null; }
     if (slot.mentionSpans.length === 0) {
       return null;
     }
-    const local = ev.getLocalPosition(slot.root);
+    const local = ev.getLocalPosition(view.root);
     const idx = this.bodyIndexAt(slot, local.x, local.y);
     if (idx === null) {
       return null;
@@ -5058,7 +5039,9 @@ export class MessageRing {
   }
 
   private linkAt(slot: Slot, ev: FederatedPointerEvent): string | undefined {
-    const local = ev.getLocalPosition(slot.root);
+    const view = this.viewPool.get(slot);
+    if (!view) { return undefined; }
+    const local = ev.getLocalPosition(view.root);
     const idx = this.bodyIndexAt(slot, local.x, local.y);
     if (idx === null) {
       return undefined;
@@ -5084,6 +5067,8 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
+      const view = this.viewPool.get(slot);
+      if (!view?.painted) continue;
       if (!slot.msgId || !slot.visible) {
         continue;
       }
@@ -5097,8 +5082,8 @@ export class MessageRing {
       }
       const slotLocalY = y - top;
       const badgeVisible = this.visibleBadges(slot);
-      for (let b = 0; b < slot.badges.length; b += 1) {
-        const spr = slot.badges[b];
+      for (let b = 0; b < view.badges.length; b += 1) {
+        const spr = view.badges[b];
         const badge = badgeVisible[b];
         if (!badge || !spr.visible) {
           continue;
@@ -5126,12 +5111,14 @@ export class MessageRing {
 
   /** Hit-test emote/badge под курсором для context menu (stock addImageContextMenuItems). */
   private imageHitAt(slot: Slot, ev: FederatedPointerEvent): ImageHit | null {
-    const local = ev.getLocalPosition(slot.root);
+    const view = this.viewPool.get(slot);
+    if (!view) { return null; }
+    const local = ev.getLocalPosition(view.root);
     const localX = local.x;
     const slotLocalY = local.y;
     const badgeVisible = this.visibleBadges(slot);
-    for (let b = 0; b < slot.badges.length; b += 1) {
-      const spr = slot.badges[b];
+    for (let b = 0; b < view.badges.length; b += 1) {
+      const spr = view.badges[b];
       const badge = badgeVisible[b];
       if (!badge?.url || !spr.visible) {
         continue;
@@ -5142,8 +5129,8 @@ export class MessageRing {
       return { url: badge.url, kind: "badge", provider: badge.source };
     }
     if (this.enableEmoteImages) {
-      for (let e = slot.emotes.length - 1; e >= 0; e -= 1) {
-        const spr = slot.emotes[e];
+      for (let e = view.emotes.length - 1; e >= 0; e -= 1) {
+        const spr = view.emotes[e];
         const span = slot.spansRaw[e];
         if (!span || !spr.visible) {
           continue;
@@ -5187,9 +5174,11 @@ export class MessageRing {
     localX: number,
     slotLocalY: number,
   ): TooltipHit | null {
+    const view = this.viewPool.get(slot);
+    if (!view) { return null; }
     if (this.enableEmoteImages) {
-      for (let e = slot.emotes.length - 1; e >= 0; e -= 1) {
-        const spr = slot.emotes[e];
+      for (let e = view.emotes.length - 1; e >= 0; e -= 1) {
+        const spr = view.emotes[e];
         const span = slot.spansRaw[e];
         if (!span || !spr.visible) {
           continue;
@@ -5306,7 +5295,7 @@ export class MessageRing {
 
   messageTopInViewport(msgId: string): number | null {
     const slot = this.findSlotByMsgId(msgId);
-    return slot?.root.visible ? slot.y + this.app.stage.y : null;
+    return slot?.visible ? slot.y + this.app.stage.y : null;
   }
 
   /** Build SlotContext for a message id (quick-actions "more"). */
@@ -5464,25 +5453,27 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
       if (!slot.msgId) {
         continue;
       }
-      for (const spr of slot.emotes) {
+      for (const spr of view.emotes) {
         spr.visible = false;
         spr.texture = Texture.EMPTY;
       }
-      for (const key of slot.emoteKeys) {
+      for (const key of view.emoteKeys) {
         if (key) {
           this.textures.release(key);
         }
       }
-      this.resizeMediaSprites(slot, slot.emotes, this.enableEmoteImages ? Math.min(slot.spansRaw.length, EMOTE_SLOTS_PER_ROW) : 0);
-      slot.emoteKeys = new Array(slot.emotes.length).fill("");
+      this.resizeMediaSprites(slot, view.emotes, this.enableEmoteImages ? Math.min(slot.spansRaw.length, EMOTE_SLOTS_PER_ROW) : 0);
+      view.emoteKeys = new Array(view.emotes.length).fill("");
       if (!this.enableEmoteImages) {
         continue;
       }
       const msgId = slot.msgId;
-      for (let e = 0; e < slot.emotes.length; e += 1) {
+      for (let e = 0; e < view.emotes.length; e += 1) {
         const span = slot.spansRaw[e];
         if (!span || span.provider === "cheer-mask") {
           continue;
@@ -5496,12 +5487,14 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
-      for (let e = 0; e < slot.emotes.length; e += 1) {
-        const key = slot.emoteKeys[e];
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
+      for (let e = 0; e < view.emotes.length; e += 1) {
+        const key = view.emoteKeys[e];
         if (!key) {
           continue;
         }
-        const spr = slot.emotes[e];
+        const spr = view.emotes[e];
         const span = slot.spansRaw[e];
         const tex = this.textures.frameAt(key, 0) ?? this.textures.get(key);
         if (isRenderableTexture(tex) && spr.visible && span) {
@@ -5522,15 +5515,17 @@ export class MessageRing {
     const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
     for (let i = 0; i < this.occupied; i += 1) {
       const slot = this.slots[(start + i) % this.poolSize];
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
       if (!slot.visible) {
         continue;
       }
-      for (let e = 0; e < slot.emotes.length; e += 1) {
-        const key = slot.emoteKeys[e];
+      for (let e = 0; e < view.emotes.length; e += 1) {
+        const key = view.emoteKeys[e];
         if (!key || !this.textures.isAnimated(key)) {
           continue;
         }
-        const spr = slot.emotes[e];
+        const spr = view.emotes[e];
         const span = slot.spansRaw[e];
         if (!spr.visible || !span) {
           continue;

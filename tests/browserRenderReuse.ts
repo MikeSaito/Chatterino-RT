@@ -3,6 +3,7 @@ import type { MessageRing } from "../src/chat/ring";
 import type { ChatEvent } from "../src/chat/types";
 import type { ThemePixiFills } from "../src/shell/theme";
 import { checkDetachedRowLayout } from "./browserDetachedRowLayout";
+import { historyRows, requireRowView, rowViews } from "./browserRows";
 
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -14,7 +15,6 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
   const owner = ring as unknown as {
     app: { renderer: { renderPipes: { bitmapText: TextPipe } } };
     themeFills: ThemePixiFills; chatFontFamily: string; chatFontSize: number; chatFontWeight: number;
-    slots: { msgId: string; time: BitmapText; nick: BitmapText; body: BitmapText; bodyCont: BitmapText; highlight: Graphics; systemCloud: Graphics; mentions: Graphics; disabledGfx: Graphics; clipUi: { bg: Graphics; durationBg: Graphics; duration: BitmapText; title: BitmapText; game: BitmapText; foot: BitmapText } | null }[];
   };
   const font = { family: owner.chatFontFamily, size: owner.chatFontSize, weight: owner.chatFontWeight };
   const theme = { ...owner.themeFills };
@@ -40,7 +40,7 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
     ring.applySnapshot([event]);
     ring.applyLinkEnrichment(event.id, payload);
     await settle();
-    const slot = owner.slots.find((row) => row.msgId === event.id)!;
+    const slot = requireRowView(ring, historyRows(ring).find((row) => row.msgId === event.id));
     const clip = slot.clipUi!;
     const texts = [slot.time, slot.nick, slot.body, slot.bodyCont, clip.duration, clip.title, clip.game, clip.foot];
     const graphics = [slot.highlight, slot.systemCloud, slot.mentions, slot.disabledGfx, clip.bg, clip.durationBg];
@@ -80,22 +80,24 @@ export async function checkRenderReuse(ring: MessageRing, restore: () => void) {
     ring.configureChatFont({ ...font, family: font.family === "monospace" ? "serif" : "monospace" });
     await settle();
     check((counts.get(slot.body) ?? 0) > 0 && (counts.get(clip.title) ?? 0) > 0, "replaced font atlases rebuild unchanged message and clip text");
-    ring.applySnapshot(Array.from({ length: owner.slots.length }, (_, i) => ({ ...event, id: `reuse-row-${i}`, text: `Message ${i}` })));
+    ring.applySnapshot(Array.from({ length: historyRows(ring).length }, (_, i) => ({ ...event, id: `reuse-row-${i}`, text: `Message ${i}` })));
     ring.setDesired(0, false);
     await settle();
-    const recycled = owner.slots.find((row) => row.msgId === "reuse-row-0")!;
+    const recycled = requireRowView(ring, historyRows(ring).find((row) => row.msgId === "reuse-row-0"));
     check(recycled.nick.text === "Viewer:", "oldest row has rendered nickname geometry before reuse");
     ring.goToBottom();
     await settle();
+    const allocated = new Set(rowViews(ring));
     counts.clear();
     ring.pushMany([{ ...event, id: "reuse-row-next", text: "Recycled body" }]);
     await settle();
-    check(owner.slots.find((row) => row.msgId === "reuse-row-next")?.nick === recycled.nick, "live append reuses the oldest row");
-    check(!counts.get(recycled.nick), "recycling a row for the same author retains its unchanged nickname geometry");
+    const incoming = requireRowView(ring, historyRows(ring).find((row) => row.msgId === "reuse-row-next"));
+    check(allocated.has(incoming), "live append reuses the bounded display pool");
+    check(!counts.get(incoming.nick), "recycling a view for the same author retains its unchanged nickname geometry");
     const notice = { kind: "notice" as const, id: "render-cloud", timestampMs: 1700000000000, text: "System message" };
     ring.applySnapshot([notice]);
     await settle();
-    const cloud = owner.slots.find((row) => row.msgId === notice.id)!;
+    const cloud = requireRowView(ring, historyRows(ring).find((row) => row.msgId === notice.id));
     let cloudUpdates = 0;
     const updated = () => cloudUpdates += 1;
     cloud.systemCloud.context.on("update", updated);

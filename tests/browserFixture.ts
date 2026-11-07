@@ -5,7 +5,6 @@ import { encode } from "@msgpack/msgpack";
 import type { ChatEvent } from "../src/chat/types";
 import type { MessageRing, SlotContext } from "../src/chat/ring";
 import type { ChatPerformance } from "../src/chat/performance";
-import type { Sprite } from "pixi.js";
 import type { SendResult } from "../src/shell/sendStatus";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
@@ -15,6 +14,8 @@ import { checkFontMeasurements } from "./browserFontMeasurements";
 import { checkImageSprites } from "./browserImageSprites";
 import { checkHistoryLayout } from "./browserHistoryLayout";
 import { checkRenderReuse } from "./browserRenderReuse";
+import { historyRows, requireRowView, rowView, rowViews } from "./browserRows";
+import { checkViewPool } from "./browserViewPool";
 
 const fixtureWindow = window as Window & {
   __crt?: { ring: MessageRing; performance: ChatPerformance };
@@ -22,7 +23,7 @@ const fixtureWindow = window as Window & {
     ready: () => boolean;
     chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
-    viewportRendering: () => { history: number; top: number; bottom: number };
+    viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
     mediaOverload: () => Promise<void>;
@@ -31,6 +32,7 @@ const fixtureWindow = window as Window & {
     imageSprites: () => Promise<void>;
     historyLayout: () => Promise<void>;
     renderReuse: () => Promise<void>;
+    viewPool: () => Promise<void>;
     load: (rate: number, seconds: number, scroll: boolean) => Promise<unknown>;
     appearance: (theme: string, layout: string, language?: string) => Promise<void>;
     addTabs: () => Promise<void>;
@@ -128,6 +130,7 @@ function selectReply() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  viewPool: () => checkViewPool(fixtureWindow.__crt!.ring, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   renderReuse: () => checkRenderReuse(fixtureWindow.__crt!.ring, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   async historyLayout() {
     const previous = settings.hideModerated;
@@ -211,9 +214,7 @@ fixtureWindow.__fixture = {
     const slowPreview = new Promise<void>((resolve) => { finishPreview = resolve; });
     const channel = active();
     const ring = fixtureWindow.__crt!.ring;
-    const sprites = (id: string) => (ring as unknown as {
-      slots: { msgId: string; root: { visible: boolean }; emotes: Sprite[] }[];
-    }).slots.find((slot) => slot.msgId === id && slot.root.visible)?.emotes;
+    const sprites = (id: string) => rowView(ring, historyRows(ring).find((slot) => slot.msgId === id))?.emotes;
     const append = (id: string, provider: string, url: string, text: string) => {
       const event = {
         ...message(channel, nextId++), id, text,
@@ -340,51 +341,59 @@ fixtureWindow.__fixture = {
     checks.push("workspace flushed before restart");
     return checks;
   },
-  viewportRendering() {
+  async viewportRendering() {
     const ring = fixtureWindow.__crt!.ring;
-    const { slots } = ring as unknown as {
-      slots: { msgId: string; root: { visible: boolean; renderable: boolean; y: number } }[];
-    };
-    const history = slots.filter((slot) => slot.root.visible).sort((a, b) => a.root.y - b.root.y);
+    const history = historyRows(ring).filter((slot) => slot.visible).sort((a, b) => a.y - b.y);
     const first = history[0];
     const last = history[history.length - 1];
     check(first && last && history.length > 100, "fixture history exceeds the viewport");
-    const countRenderable = () => history.filter((slot) => slot.root.renderable).length;
+    const countRenderable = () => Array.from(rowViews(ring)).filter((view) => view.root.renderable).length;
 
     ring.setDesired(0, false);
+    await until(() => Boolean(rowView(ring, first)?.painted));
     const top = countRenderable();
-    check(first.root.renderable && !last.root.renderable, "scrolling to the start renders old rows");
+    check(rowView(ring, first)?.root.renderable && !rowView(ring, last), "scrolling to the start renders old rows and releases distant views");
     check(ring.contextForMsgId(last.msgId, 0, 0)?.msgId === last.msgId, "offscreen rows remain addressable");
 
     ring.goToBottom();
+    await until(() => Boolean(rowView(ring, last)?.painted));
     const bottom = countRenderable();
-    check(!first.root.renderable && last.root.renderable, "returning to the bottom renders new rows");
+    check(!rowView(ring, first) && rowView(ring, last)?.root.renderable, "returning to the bottom rebinds new rows and releases old views");
     check(ring.contextForMsgId(first.msgId, 0, 0)?.msgId === first.msgId, "history is kept after scrolling");
+    check(ring.renderStats().views < history.length, "retained history does not allocate one view per message");
     return { history: history.length, top, bottom };
   },
   async viewportTextureSafety() {
     const { Sprite, Texture } = await import("pixi.js");
     const ring = fixtureWindow.__crt!.ring;
-    const { slots } = ring as unknown as {
-      slots: { root: import("pixi.js").Container }[];
-    };
-    const history = slots.filter((slot) => slot.root.visible).sort((a, b) => a.root.y - b.root.y);
+    const history = historyRows(ring).filter((slot) => slot.visible).sort((a, b) => a.y - b.y);
     const first = history[0];
     check(first && history.length > 100, "texture check requires offscreen history");
-    ring.goToBottom();
-    check(!first.root.renderable, "old row is culled before texture invalidation");
+    ring.setDesired(0, false);
+    await until(() => Boolean(rowView(ring, first)?.painted));
+    const view = requireRowView(ring, first);
     const texture = new Texture({ source: Texture.WHITE.source });
     const sprite = new Sprite(texture);
-    first.root.addChild(sprite);
-    // Simulate a cache eviction while the owning row is outside the viewport.
+    view.root.addChild(sprite);
+    view.emotes.push(sprite);
+    view.emoteKeys.push("");
     texture.destroy(false);
     try {
-      ring.setDesired(0, false);
       await until(() => sprite.texture === Texture.EMPTY);
-      check(!sprite.visible, "dead texture is detached before the old row is rendered");
+      check(!sprite.visible, "dead texture is detached before rendering");
+      ring.goToBottom();
+      check(sprite.destroyed && !rowView(ring, first), "leaving the viewport releases owned sprites");
+      ring.setDesired(0, false);
+      await until(() => Boolean(rowView(ring, first)?.painted));
+      check(requireRowView(ring, first).emotes.length === 0, "returning history cannot revive a released stale sprite");
     } finally {
-      first.root.removeChild(sprite);
-      sprite.destroy();
+      if (!sprite.destroyed) {
+        const current = rowView(ring, first);
+        const index = current?.emotes.indexOf(sprite) ?? -1;
+        if (current && index >= 0) { current.emotes.splice(index, 1); current.emoteKeys.splice(index, 1); }
+        sprite.parent?.removeChild(sprite);
+        sprite.destroy();
+      }
       ring.goToBottom();
     }
   },
