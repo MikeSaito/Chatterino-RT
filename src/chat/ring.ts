@@ -1669,7 +1669,9 @@ export class MessageRing {
 
   private slotBodyPixelHeight(slot: MessageRow): number {
     if (slot.wrapLineHeights.length > 0) {
-      return slot.wrapLineHeights.reduce((a, b) => a + b, 0);
+      let height = 0;
+      for (let i = 0; i < slot.wrapLineHeights.length; i += 1) height += slot.wrapLineHeights[i];
+      return height;
     }
     const bodyLines = Math.max(
       1,
@@ -4619,8 +4621,19 @@ export class MessageRing {
       if (slot.visible && (this.slotYIntersects(slot, top, bottom) ||
           this.slotYIntersects(slot, target.top, target.bottom))) this.wantedViews.push(slot);
     }
-    this.viewPool.sync(this.wantedViews);
-    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
+    const spareViews = 8;
+    let needsSync = this.wantedViews.length !== this.viewPool.bindings.size ||
+      this.viewPool.views.size > this.wantedViews.length + spareViews;
+    // Each ring row appears once, so equal size and membership imply the same owner set.
+    if (!needsSync) {
+      for (const slot of this.wantedViews) {
+        if (!this.viewPool.get(slot)) { needsSync = true; break; }
+      }
+    }
+    if (needsSync) this.viewPool.sync(this.wantedViews, spareViews);
+    for (const slot of this.wantedViews) {
+      const view = this.viewPool.get(slot);
+      if (!view) continue;
       const renderable = slot.visible && view.painted && this.slotYIntersects(slot, top, bottom);
       const entering = renderable && !view.root.renderable;
       view.root.y = slot.y;
