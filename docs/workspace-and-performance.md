@@ -110,3 +110,10 @@ The local synthetic baseline uses Chromium headless with SwiftShader, 1280×800,
 DPR 1. It exercises text messages with short/long lines; it is not a benchmark of
 animated emotes, video playback, or a production WebView on a hardware GPU.
 Use repeated runs in the target WebView to assess CPU costs and scroll smoothness.
+
+The offline desktop validation source schedules message counts from elapsed
+monotonic time. Late wakeups catch up by at most 100 messages per tick. A long
+stall can extend the run while the source drains its remaining work.
+Desktop reports include `source.elapsedMs`, `source.actualMessagesPerSecond`,
+`source.maxTickDelayMs` and `source.maxBatchMessages`. Check these alongside the
+requested rate and duration before comparing performance results.

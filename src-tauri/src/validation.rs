@@ -9,7 +9,23 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
+
+const LOAD_PERIOD: Duration = Duration::from_millis(50);
+const MAX_LOAD_BATCH: u64 = 100;
+
+fn due_messages(rate: u32, seconds: u32, elapsed: Duration) -> u64 {
+    let total = u64::from(rate) * u64::from(seconds);
+    let due = elapsed.as_nanos() * u128::from(rate) / 1_000_000_000;
+    due.min(u128::from(total)) as u64
+}
+
+fn batch_count(rate: u32, seconds: u32, elapsed: Duration, generated: u64) -> u64 {
+    due_messages(rate, seconds, elapsed)
+        .saturating_sub(generated)
+        .min(MAX_LOAD_BATCH)
+}
 
 pub const EMOTE_PREFIX: &str = "https://cdn.7tv.app/emote/validation-";
 static MESSAGE_IDS: AtomicU64 = AtomicU64::new(0);
@@ -25,6 +41,9 @@ pub struct Progress {
     release_build: bool,
     revision: String,
     dirty: bool,
+    elapsed_ms: u64,
+    max_tick_delay_ms: u64,
+    max_batch_messages: u64,
 }
 #[derive(Clone, Default)]
 pub struct Source(Arc<Mutex<Progress>>);
@@ -116,12 +135,15 @@ pub fn validation_start(
     let source = source.inner().clone();
     let state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
-        let mut timer = tokio::time::interval(std::time::Duration::from_millis(50));
-        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let started = tokio::time::Instant::now();
+        let mut timer = tokio::time::interval_at(started + LOAD_PERIOD, LOAD_PERIOD);
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut generated = 0;
-        for tick in 1..=seconds as u64 * 20 {
-            timer.tick().await;
-            let count = tick * rate as u64 / 20 - generated;
+        let total = u64::from(rate) * u64::from(seconds);
+        while generated < total {
+            let scheduled = timer.tick().await;
+            let now = tokio::time::Instant::now();
+            let count = batch_count(rate, seconds, now - started, generated);
             let mut batches = Vec::new();
             if let Ok(mut hub) = state.hub.lock() {
                 for _ in 0..count {
@@ -173,8 +195,44 @@ pub fn validation_start(
             progress.generated = generated;
             progress.delivered += delivered;
             progress.failed += failed;
+            progress.elapsed_ms = started.elapsed().as_millis() as u64;
+            progress.max_tick_delay_ms = progress
+                .max_tick_delay_ms
+                .max(now.saturating_duration_since(scheduled).as_millis() as u64);
+            progress.max_batch_messages = progress.max_batch_messages.max(count);
         }
         source.0.lock().unwrap().running = false;
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pacing_uses_elapsed_time_instead_of_wakeup_count() {
+        // A late wakeup owes the messages for all elapsed time, including skipped ticks.
+        assert_eq!(batch_count(200, 10, Duration::from_millis(63), 0), 12);
+        assert_eq!(batch_count(200, 10, Duration::from_millis(126), 12), 13);
+        assert_eq!(batch_count(200, 10, Duration::from_millis(189), 25), 12);
+        assert_eq!(batch_count(50, 10, Duration::from_millis(63), 0), 3);
+    }
+
+    #[test]
+    fn pacing_does_not_emit_early_or_exceed_requested_total() {
+        assert_eq!(batch_count(50, 1, Duration::ZERO, 0), 0);
+        assert_eq!(batch_count(50, 1, Duration::from_millis(19), 0), 0);
+        assert_eq!(batch_count(50, 1, Duration::from_millis(20), 0), 1);
+        assert_eq!(batch_count(50, 1, Duration::from_secs(5), 48), 2);
+        assert_eq!(batch_count(50, 1, Duration::from_secs(5), 50), 0);
+        assert_eq!(batch_count(50, 1, Duration::from_millis(500), 30), 0);
+    }
+
+    #[test]
+    fn catchup_batches_are_bounded_after_a_long_stall() {
+        assert_eq!(batch_count(200, 10, Duration::from_secs(5), 0), 100);
+        assert_eq!(batch_count(200, 10, Duration::from_secs(5), 100), 100);
+        assert_eq!(due_messages(200, 10, Duration::from_secs(60)), 2000);
+    }
 }
