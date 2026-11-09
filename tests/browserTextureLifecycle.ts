@@ -1,7 +1,8 @@
 import { TextureLru, isRenderableTexture } from "../src/chat/textures";
-import { Texture, Sprite } from "pixi.js";
+import { Texture, Sprite, type Renderer } from "pixi.js";
 import type { MessageRing } from "../src/chat/ring";
 import { rowViews } from "./browserRows";
+import { checkAnimationAtlas } from "./browserAnimationAtlas";
 
 type ImageBytes = { bytes: number[]; contentType: string };
 type Response = (url: string) => Promise<ImageBytes>;
@@ -17,6 +18,7 @@ function deferred<T>() {
 }
 
 export async function checkTextureLifecycle(setResponse: (response?: Response) => void, ring: MessageRing): Promise<void> {
+  await checkAnimationAtlas((ring as unknown as { app: { renderer: Renderer } }).app.renderer);
   const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
   const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
   const url = "https://cdn.7tv.app/emote/lifecycle/1x.gif";
@@ -144,6 +146,7 @@ export async function checkTextureLifecycle(setResponse: (response?: Response) =
       check(await animated.load("partial-dead", url, true), "animated texture loads");
       const frames = animated.frameSet("partial-dead")!.frames;
       check(frames.length > 1, "fixture has multiple decoded frames");
+      check(frames.every((frame) => frame.source === frames[0].source), "decoded GIF frames share one source");
       frames[0].destroy(true);
       check(animated.get("partial-dead") === undefined, "dead base texture is removed");
       check(frames.every((frame) => frame.destroyed), "purging a partially dead animation releases all remaining frames");

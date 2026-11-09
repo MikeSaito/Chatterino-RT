@@ -68,6 +68,11 @@ its place until completion; clearing cannot bypass the concurrency limit.
 The debug resource report exposes `loading` and `queued` separately from
 `inflight`, which counts current load records by key.
 
+Animation frames with matching dimensions can share a texture atlas of up to
+2048 pixels per side and 1,048,576 pixels in total. Each frame keeps its own
+dimensions and playback delay. Animations that do not fit or cannot be packed
+use individual frame textures.
+
 # Performance checks
 
 Run `npm run test:browser` with an installed Chromium browser. On Windows the

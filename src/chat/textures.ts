@@ -6,6 +6,8 @@ import { GIF_FRAME_LENGTH, gifFrameDelayMs } from "./gifFrameDelay";
 import { lruVictimsToSize } from "./textureLruPolicy";
 import { resolveEmoteUrl } from "./emoteUrl";
 import { MediaLoadQueue } from "./mediaLoadQueue";
+import { destroyTextureFrames } from "./textureFrames";
+import { ownedBitmapTexture, packAnimationFrames } from "./packAnimationFrames";
 
 import { isRenderableTexture } from "./textureGuards";
 
@@ -411,26 +413,7 @@ function destroyFrameSet(
   keep: EmoteFrameSet | null,
   beforeDestroy?: (textures: Texture[]) => void,
 ): void {
-  const doomed: Texture[] = [];
-  for (const tex of set.frames) {
-    if (keep && keep.frames.includes(tex)) {
-      continue;
-    }
-    if (tex !== Texture.EMPTY) {
-      doomed.push(tex);
-    }
-  }
-  if (doomed.length === 0) {
-    return;
-  }
-  beforeDestroy?.(doomed);
-  for (const tex of doomed) {
-    try {
-      tex.destroy(true);
-    } catch {
-      /* already gone */
-    }
-  }
+  destroyTextureFrames(set.frames, keep?.frames, beforeDestroy);
 }
 
 type CdnImageBytes = {
@@ -502,7 +485,7 @@ async function loadTextureSet(url: string, animate: boolean, isCurrent: () => bo
         }
       }
       const bitmap = await bytesToBitmap(buf, mime);
-      const tex = Texture.from(bitmap);
+      const tex = ownedBitmapTexture(bitmap);
       return { frames: [tex], delays: [GIF_FRAME_LENGTH], total: GIF_FRAME_LENGTH };
     } catch (err) {
       last = err;
@@ -526,6 +509,8 @@ async function decodeAnimated(
   }
   let decoder: ImageDecoderInstance | null = null;
   const frames: Texture[] = [];
+  const bitmaps: ImageBitmap[] = [];
+  let transferred = 0;
   const delays: number[] = [];
   try {
     decoder = new Ctor({ data: buf, type: mime, preferAnimation: true });
@@ -542,17 +527,16 @@ async function decodeAnimated(
       const ms = gifFrameDelayMs(image.duration);
       try {
         const bitmap = await createImageBitmap(image);
-        frames.push(Texture.from(bitmap));
+        bitmaps.push(bitmap);
         delays.push(ms);
         total += ms;
       } finally {
         image.close();
       }
     }
-    if (frames.length <= 1) {
-      destroyFrameSet({ frames, delays, total: GIF_FRAME_LENGTH }, null);
-      return null;
-    }
+    const packed = await packAnimationFrames(bitmaps);
+    if (packed) return { frames: packed, delays, total: Math.max(total, GIF_FRAME_LENGTH) };
+    while (transferred < bitmaps.length) frames.push(ownedBitmapTexture(bitmaps[transferred++]));
     return { frames, delays, total: Math.max(total, GIF_FRAME_LENGTH) };
   } catch {
     if (frames.length > 0) {
@@ -560,6 +544,7 @@ async function decodeAnimated(
     }
     return null;
   } finally {
+    for (let i = transferred; i < bitmaps.length; i++) bitmaps[i].close();
     decoder?.close();
   }
 }
