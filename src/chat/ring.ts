@@ -2282,9 +2282,7 @@ export class MessageRing {
     doomed: readonly Texture[],
   ): void {
     const doomedSet = new Set(doomed);
-    for (const slot of this.slots) {
-      const view = this.viewPool.get(slot);
-      if (!view) continue;
+    for (const { view } of this.viewPool.bindings.values()) {
       for (const spr of view.emotes) {
         if (doomedSet.has(spr.texture)) {
           detachSpriteTexture(spr);
@@ -2323,9 +2321,7 @@ export class MessageRing {
       return;
     }
     this.lastSanitizeTickerTime = tickerTime;
-    for (const slot of this.slots) {
-      const view = this.viewPool.get(slot);
-      if (!view) continue;
+    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
       if (!slot.msgId || !slot.visible || !view.root.renderable) {
         continue;
       }
@@ -5498,11 +5494,7 @@ export class MessageRing {
   }
 
   private snapEmotesToFirstFrame(): void {
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      const view = this.viewPool.get(slot);
-      if (!view) continue;
+    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
       for (let e = 0; e < view.emotes.length; e += 1) {
         const key = view.emoteKeys[e];
         if (!key) {
@@ -5526,11 +5518,7 @@ export class MessageRing {
       return;
     }
     const pos = this.emoteTicker.position();
-    const start = (this.head - this.occupied + this.poolSize) % this.poolSize;
-    for (let i = 0; i < this.occupied; i += 1) {
-      const slot = this.slots[(start + i) % this.poolSize];
-      const view = this.viewPool.get(slot);
-      if (!view) continue;
+    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
       if (!slot.visible) {
         continue;
       }
