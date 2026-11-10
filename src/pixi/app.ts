@@ -10,7 +10,11 @@ let app: Application | null = null;
 let hostResizeRo: ResizeObserver | null = null;
 let stopMinimizeWatch: (() => void) | undefined;
 
-export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement): Promise<Application> {
+export async function createChatApp(
+  canvas: HTMLCanvasElement,
+  host: HTMLElement,
+  onMinimized: (minimized: boolean) => void,
+): Promise<Application> {
   if (app) {
     return app;
   }
@@ -49,9 +53,9 @@ export async function createChatApp(canvas: HTMLCanvasElement, host: HTMLElement
       if (minimized) {
         resumeTicker = created.ticker.started;
         created.stop();
-      } else if (resumeTicker) {
-        created.start();
       }
+      onMinimized(minimized);
+      if (!minimized && resumeTicker) created.start();
     });
   }
   return created;

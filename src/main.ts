@@ -861,8 +861,10 @@ async function boot(): Promise<void> {
   }
 
   let app;
+  let viewportPaused = false;
+  let syncViewport = (paused: boolean): void => { viewportPaused = paused; };
   try {
-    app = await createChatApp(canvas, canvasHost);
+    app = await createChatApp(canvas, canvasHost, (paused) => syncViewport(paused));
   } catch (err) {
     teardownChat?.();
     teardownChat = null;
@@ -915,6 +917,8 @@ async function boot(): Promise<void> {
   chainTeardown(() => authActions.dispose());
   let authPaintGen = 0;
   const ring = new MessageRing(app, textures, poolSize);
+  ring.setViewportPaused(viewportPaused);
+  syncViewport = (paused) => ring.setViewportPaused(paused);
   const performanceTrace = new ChatPerformance();
   ring.performanceTrace = performanceTrace;
   const workspace = new Workspace(localStorage);

@@ -50,8 +50,8 @@ export async function checkViewPool(ring: MessageRing, restore: () => void) {
   };
   const checkReading = (before: ReturnType<MessageRing["workspaceScroll"]>) => {
     const after = ring.workspaceScroll();
-    check(after.anchor?.msgId === before.anchor?.msgId && after.anchor, "font changes preserve the reading message");
-    check(Math.abs(after.anchor!.offsetFrac - before.anchor!.offsetFrac) < 0.02, "font changes preserve the position within the message");
+    check(after.anchor?.msgId === before.anchor?.msgId && after.anchor, "the reading message stays anchored");
+    check(Math.abs(after.anchor!.offsetFrac - before.anchor!.offsetFrac) < 0.02, "the position within the message is preserved");
   };
   const originalLoad = owner.textures.load;
   let finishOld: (texture: Texture | null) => void = () => {};
@@ -134,6 +134,36 @@ export async function checkViewPool(ring: MessageRing, restore: () => void) {
       "late shared-asset replies cannot repaint the new owner with the old cloud metrics");
     check(requireRowView(ring, current!.owner) === reused, "stale presses do not replace or act on a new owner");
     checkBudget();
+
+    ring.setDesired(ring.scrollSnapshot().bottom / 2, false);
+    await settle();
+    const pausedReading = ring.workspaceScroll();
+    const pausedId = "pool-paused";
+    const pausedSpan = { ...span, emoteId: pausedId, url: "https://cdn.7tv.app/emote/pool-paused/1x.webp" };
+    const loadBeforePause = owner.textures.load;
+    let pausedImageLoads = 0;
+    owner.textures.load = function (...args) {
+      if (args[0] === `7tv:${pausedId}`) {
+        pausedImageLoads++;
+        return Promise.resolve(Texture.WHITE);
+      }
+      return loadBeforePause.apply(this, args);
+    };
+    ring.setViewportPaused(true);
+    ring.pushMany([{ ...message(count), id: pausedId, text: "Shared", emoteSpans: [pausedSpan] }]);
+    await frame(); await frame();
+    check(owner.viewPool.bindings.size === 0 && owner.viewPool.views.size <= 8, "paused history keeps only spare views");
+    check(historyRows(ring).some((row) => row.msgId === pausedId) && pausedImageLoads === 0, "paused history accepts messages without loading images");
+    ring.setViewportPaused(false);
+    await settle(); checkReading(pausedReading);
+    ring.setDesired(ring.scrollSnapshot().bottom, false);
+    await until(() => {
+      const row = historyRows(ring).find((entry) => entry.msgId === pausedId);
+      return Boolean(rowView(ring, row)?.emotes[0]?.visible);
+    });
+    check(pausedImageLoads > 0, "images load when the new row enters the restored viewport");
+    checkBudget();
+
     const ownedContexts = new Map(Array.from(owner.viewPool.views, (view) => [view,
       [view.highlight.context, view.systemCloud.context, view.mentions.context, view.disabledGfx.context]]));
     ring.reset();
@@ -155,6 +185,7 @@ export async function checkViewPool(ring: MessageRing, restore: () => void) {
   } finally {
     finishOld(Texture.WHITE);
     owner.textures.load = originalLoad;
+    ring.setViewportPaused(false);
     ring.configureChatFont(font);
     restore();
     ring.goToBottom();

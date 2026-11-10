@@ -351,6 +351,7 @@ export class MessageRing {
   private perfLogAt = 0;
   private readonly perfOn: boolean;
   private viewportPaintRaf = 0;
+  private viewportPaused = false;
   private readonly onRendererResize = (): void => {
     this.resizeDebounce?.schedule();
   };
@@ -4517,7 +4518,7 @@ export class MessageRing {
   }
 
   private scheduleViewportPaint(): void {
-    if (!this.ready || this.viewportPaintRaf !== 0) {
+    if (!this.ready || this.viewportPaused || this.viewportPaintRaf !== 0) {
       return;
     }
     this.viewportPaintRaf = requestAnimationFrame(() => {
@@ -4604,6 +4605,7 @@ export class MessageRing {
   }
 
   private applyStageY(): void {
+    if (this.viewportPaused) return;
     const stageY = this.scroll.stageY(this.lineHeight);
     this.app.stage.y = stageY;
     const padding = this.lineHeight * 8;
@@ -4639,6 +4641,17 @@ export class MessageRing {
         this.lastSanitizeTickerTime = Number.NaN;
         this.refreshMissingSlotMedia(slot);
       }
+    }
+  }
+
+  setViewportPaused(paused: boolean): void {
+    if (this.viewportPaused === paused) return;
+    this.viewportPaused = paused;
+    if (paused) {
+      this.viewPool.clear();
+    } else if (this.ready) {
+      this.applyStageY();
+      this.paintSlotsEnteringViewport();
     }
   }
 

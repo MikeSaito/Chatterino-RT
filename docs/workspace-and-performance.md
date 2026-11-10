@@ -52,8 +52,9 @@ retained messages, `views` counts allocated display objects including spare
 views, and `boundViews` counts views assigned to messages. These counts exclude
 texture-cache entries and native WebView resources.
 
-Minimizing the desktop chat window pauses canvas rendering. Messages continue
-to arrive in the background. Restoring the window displays the current history.
+Minimizing the desktop chat window pauses canvas rendering and releases its
+display rows. Messages continue to arrive in the background. Restoring the
+window binds the current viewport and loads any missing images.
 
 # Media loading
 
