@@ -36,7 +36,8 @@ export async function packAnimationFrames(bitmaps: readonly ImageBitmap[]): Prom
     canvas = document.createElement("canvas");
     canvas.width = layout.width;
     canvas.height = layout.height;
-    const context = canvas.getContext("2d");
+    // The atlas canvas is temporary. Keep its backing surface in system memory.
+    const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return null;
     context.imageSmoothingEnabled = false;
     const w = first.width, h = first.height;
