@@ -30,6 +30,25 @@ fn batch_count(rate: u32, seconds: u32, elapsed: Duration, generated: u64) -> u6
 pub const EMOTE_PREFIX: &str = "https://cdn.7tv.app/emote/validation-";
 static MESSAGE_IDS: AtomicU64 = AtomicU64::new(0);
 pub static FIXTURE_REQUESTS: AtomicU64 = AtomicU64::new(0);
+
+pub fn media_fixture(url: &str) -> Option<(&'static [u8], &'static str)> {
+    let path = url.strip_prefix(EMOTE_PREFIX)?;
+    let filename = path.split_once('/').map_or("", |(_, filename)| filename);
+    let fixture: (&[u8], &str) = match filename {
+        "still-32.png" => (include_bytes!("../fixtures/still-32.png"), "image/png"),
+        "still-64.png" => (include_bytes!("../fixtures/still-64.png"), "image/png"),
+        "thumbnail.png" => (include_bytes!("../fixtures/thumbnail.png"), "image/png"),
+        "motion-32.gif" => (include_bytes!("../fixtures/motion-32.gif"), "image/gif"),
+        "motion-64.gif" => (include_bytes!("../fixtures/motion-64.gif"), "image/gif"),
+        "motion-112.gif" => (include_bytes!("../fixtures/motion-112.gif"), "image/gif"),
+        _ => (
+            include_bytes!("../fixtures/animated-emote.gif"),
+            "image/gif",
+        ),
+    };
+    Some(fixture)
+}
+
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
