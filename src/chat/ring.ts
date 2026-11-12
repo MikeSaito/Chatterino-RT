@@ -4292,11 +4292,6 @@ export class MessageRing {
     }
   }
 
-  /** Wrap metrics present so paintClip can be skipped until width/font/theme change. */
-  private slotWrapValid(slot: Slot): boolean {
-    return slot.wrapReady && this.viewPool.get(slot)?.painted === true;
-  }
-
   private slotYIntersects(slot: Slot, top: number, bottom: number): boolean {
     const y0 = slot.y;
     const y1 = y0 + this.slotPixelHeight(slot);
@@ -4532,18 +4527,20 @@ export class MessageRing {
     if (!this.ready || this.occupied === 0) return;
     let anchors: ReturnType<MessageRing["captureScrollAnchors"]> | undefined;
     const started = performance.now();
+    let painted = false;
     let heightsChanged = false;
     let unfinished = false;
-    for (const { owner: slot } of this.viewPool.bindings.values()) {
-      if (!slot.msgId || !slot.visible || this.slotWrapValid(slot)) continue;
+    for (const { owner: slot, view } of this.viewPool.bindings.values()) {
+      if (!slot.msgId || !slot.visible || (slot.wrapReady && view.painted)) continue;
       if (performance.now() - started > 14) { unfinished = true; break; }
       if (!slot.wrapReady) anchors ??= this.captureScrollAnchors();
       const previous = this.slotPixelHeight(slot);
       this.paintClip(slot);
+      painted = true;
       if (previous !== this.slotPixelHeight(slot)) heightsChanged = true;
     }
     if (heightsChanged) this.repositionRootsFromCache(anchors);
-    else this.applyStageY();
+    else if (painted) this.applyStageY();
     if (unfinished) this.scheduleViewportPaint();
   }
 
