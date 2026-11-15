@@ -1830,9 +1830,6 @@ async function boot(): Promise<void> {
     modal: emotepopupModal,
     anchor: emoteOpen,
     activeChannel: () => ipc.active(),
-    canSend: () => lastAuth.canSend,
-    onGifSent: (channel) => toast.push({ kind: "success", text: t("emotes.gifs.sent", { channel }) }),
-    onGifError: (error) => toast.push({ kind: "danger", text: formatError(error) }),
     insertEmote: (code, url) => {
       if (url) {
         composerSprites.remember(code, url);
@@ -1945,7 +1942,6 @@ async function boot(): Promise<void> {
     invalidName: () => { holdStatus = true; setStatus(t("status.channelNameInvalid")); },
     error: (err) => { holdStatus = true; setStatus(formatError(err)); },
     cleared: () => {
-      emotePopup.contextChanged();
       replyThreadCtl?.close();
       channelInput.value = "";
       syncPlayerForLayout("");
@@ -1965,7 +1961,6 @@ async function boot(): Promise<void> {
       avatarUrlByLogin.delete(leftKey);
       avatarFetchInFlight.delete(leftKey);
       if (!next) {
-        emotePopup.contextChanged();
         replyThreadCtl?.close();
         channelInput.value = "";
         syncPlayerForLayout("");
@@ -2738,11 +2733,9 @@ async function boot(): Promise<void> {
     if (!ch) {
       return;
     }
-    const previousEmoteOnly = roomByChannel.get(ch)?.emoteOnly;
-    const emoteOnly = Boolean(ev.payload.emoteOnly);
     roomByChannel.set(ch, {
       channel: ch,
-      emoteOnly,
+      emoteOnly: Boolean(ev.payload.emoteOnly),
       subsOnly: Boolean(ev.payload.subsOnly),
       slowSec: Number(ev.payload.slowSec) || 0,
       followersOnly:
@@ -2754,7 +2747,6 @@ async function boot(): Promise<void> {
       return;
     }
     paintChatModes(headerChatModesEl, roomByChannel.get(ch) ?? null);
-    if (previousEmoteOnly !== emoteOnly) emotePopup.contextChanged();
   }).then(trackUnlisten);
 
   await listen<{ login: string; url: string }>("chat:profile_image", (ev) => {
@@ -3191,9 +3183,7 @@ async function boot(): Promise<void> {
   }
 
   function applyAuth(info: AuthInfo): void {
-    const gifContextChanged = lastAuth.login !== info.login || lastAuth.canSend !== info.canSend;
     lastAuth = info;
-    if (gifContextChanged) emotePopup.contextChanged();
     ring.setSelfLogin(info.login);
     userCard?.syncMod();
     syncModerationModeBtn();
@@ -3696,7 +3686,6 @@ async function boot(): Promise<void> {
   }
 
   function applyMounted(joined: string): void {
-    emotePopup.contextChanged();
     replyThreadCtl?.close();
     channels.remember(joined);
     ensureOpenChannelChrome();

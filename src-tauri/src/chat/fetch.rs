@@ -730,7 +730,7 @@ pub fn allowed_twitch_gif_url(raw: &str) -> Option<String> {
 }
 
 /// GIPHY uses both `/media/{id}/...` and `/media/v1.{metadata}/{id}/...`.
-pub(super) fn gif_media_id(url: &Url) -> Option<&str> {
+fn gif_media_id(url: &Url) -> Option<&str> {
     let mut path = url.path_segments()?;
     if path.next()? != "media" {
         return None;

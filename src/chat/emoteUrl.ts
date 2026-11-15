@@ -17,7 +17,7 @@ export function resolveGifFallbackUrl(url: string): string | null {
   }
   try {
     const u = new URL(trimmed.startsWith("//") ? `https:${trimmed}` : trimmed);
-    const m = u.pathname.match(/^(\/media\/[^/]+\/)giphy\.(gif|webp)$/i);
+    const m = u.pathname.match(/^(\/media\/(?:v1\.[^/]+\/)?[^/]+\/)giphy\.(gif|webp)$/i);
     if (!m) {
       return null;
     }

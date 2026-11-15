@@ -22,7 +22,6 @@ const fixtureWindow = window as Window & {
   __fixture?: {
     ready: () => boolean;
     chatGifs: () => Promise<void>;
-    gifPicker: () => Promise<void>;
     smoke: () => Promise<string[]>;
     viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
@@ -57,12 +56,6 @@ function message(channel: string, i: number): ChatEvent {
 }
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
-const recentGif = { messageId: "gif-source", sourceChannel: "beta", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
-const catalogGif = { gifId: "CatalogGif", title: "Catalog animation", url: "https://media2.giphy.com/media/v1.fixture/CatalogGif/giphy.gif?cid=original", previewUrl: "https://media2.giphy.com/media/v1.fixture/CatalogGif/100w.gif?cid=preview" };
-const catalogRequests: { query: unknown; offset: unknown }[] = [];
-const recentRequests: Record<string, unknown>[] = [];
-const pendingGifSends: { args: Record<string, unknown>; resolve: (id: string) => void; reject: (error: unknown) => void }[] = [];
-const pendingGifAccess = new Map<string, (available: boolean) => void>();
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
@@ -96,13 +89,6 @@ mockIPC(async (cmd, args) => {
   }
   if (cmd === "chat_snapshot") return { channelId: a.channel, seq: sequences.get(String(a.channel)) ?? 1, dropped: 0, events: history.get(String(a.channel)) ?? [] };
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
-  if (cmd === "chat_gif_available") return new Promise<boolean>((resolve) => pendingGifAccess.set(String(a.channel), resolve));
-  if (cmd === "chat_recent_gifs") { recentRequests.push(a); return [recentGif]; }
-  if (cmd === "chat_catalog_gifs") {
-    catalogRequests.push({ query: a.query, offset: a.offset });
-    return { items: [catalogGif], nextOffset: a.offset === 0 && !a.query ? 24 : null };
-  }
-  if (cmd === "chat_send_gif") return new Promise<string>((resolve, reject) => pendingGifSends.push({ args: a, resolve, reject }));
   if (cmd === "chat_viewer_role") return { isMod: false, isBroadcaster: false };
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
@@ -214,14 +200,15 @@ fixtureWindow.__fixture = {
   textureLifecycle: () => checkTextureLifecycle((response) => { gifResponse = response; }, fixtureWindow.__crt!.ring),
   ready: () => active() === session.lastChannel && !input().disabled && Boolean(fixtureWindow.__crt?.ring.scrollSnapshot().contentRows),
   async chatGifs() {
+    check(!document.querySelector('#emotepopup-modal [data-tab="gifs"]'), "received GIFs require no picker tab");
     const host = window as Window & { isTauri?: boolean };
     const wasTauri = host.isTauri;
     const bytes = await (await fetch("/src-tauri/fixtures/animated-emote.gif")).arrayBuffer();
     const image = { bytes: Array.from(new Uint8Array(bytes)), contentType: "image/gif" };
     const base = "https://media2.giphy.com/media";
     const fullUrl = `${base}/test-animation/giphy.gif?cid=fixture`;
-    const fallbackUrl = `${base}/test-fallback/giphy.webp?cid=fixture`;
-    const smallerUrl = `${base}/test-fallback/giphy-downsized.gif?cid=fixture`;
+    const fallbackUrl = `${base}/v1.fixture/test-fallback/giphy.webp?cid=fixture`;
+    const smallerUrl = `${base}/v1.fixture/test-fallback/giphy-downsized.gif?cid=fixture`;
     const emoteUrl = "https://cdn.7tv.app/emote/test-animation/1x.webp";
     const requests: string[] = [];
     let finishPreview!: () => void;
@@ -266,104 +253,6 @@ fixtureWindow.__fixture = {
       gifResponse = undefined;
       host.isTauri = wasTauri;
     }
-  },
-  async gifPicker() {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("chat_join", { channel: "beta", focus: false });
-    await until(() => Boolean(document.querySelector('[data-channel="beta"] .channel-item')));
-    await switchTo("alpha");
-    type("Text to keep");
-    selectReply();
-    document.querySelector<HTMLButtonElement>("#emote-open")!.click();
-    const gifs = document.querySelector<HTMLButtonElement>('[data-tab="gifs"]')!;
-    const shown = () => gifs.getClientRects().length > 0;
-    const access = (channel: string) => pendingGifAccess.get(channel);
-    await until(() => Boolean(access("alpha")));
-    const stale = access("alpha")!;
-    check(!shown(), "GIF tab is hidden while access is pending");
-    await switchTo("beta");
-    await until(() => Boolean(access("beta")));
-    access("beta")!(false);
-    stale(true);
-    await sleep(50);
-    check(!shown(), "denial and a stale approval from another channel keep GIF hidden");
-    await switchTo("alpha");
-    await until(() => access("alpha") !== stale);
-    access("alpha")!(true);
-    await until(shown);
-    gifs.click();
-    const tile = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-item");
-    const send = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-send")!;
-    const modal = document.querySelector<HTMLElement>("#emotepopup-modal")!;
-    const source = (name: string) => document.querySelector<HTMLButtonElement>(`[data-gif-source="${name}"]`)!;
-    const search = document.querySelector<HTMLInputElement>("#emotepopup-search")!;
-    const catalogRequest = () => catalogRequests[catalogRequests.length - 1];
-    source("catalog").click();
-    await until(() => tile()?.querySelector("img")?.src === catalogGif.previewUrl);
-    check(catalogRequest()?.query === "", "empty GIPHY query opens trending");
-    check(!document.querySelector<HTMLElement>("#emotepopup-giphy-logo")!.hidden, "catalog displays GIPHY attribution");
-    const next = Array.from(modal.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Next page");
-    check(next, "trending catalog offers the next page");
-    next.click();
-    await until(() => catalogRequest()?.offset === 24 && Boolean(tile()));
-    search.value = "кот & собака";
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-    await until(() => catalogRequest()?.query === search.value && Boolean(tile()));
-    check(catalogRequest()?.offset === 0, "search restarts at the first page");
-    tile()!.click();
-    send().click();
-    await until(() => pendingGifSends.length === 1);
-    const selected = pendingGifSends.shift()!;
-    check(selected.args.gifId === catalogGif.gifId && selected.args.originalUrl === catalogGif.url && selected.args.searchTerm === search.value && !selected.args.messageId, "catalog sends the original URL and the search term");
-    selected.reject({ code: "error.gif.wait", params: { seconds: "7" } });
-    await until(() => !send().disabled);
-    search.value = "";
-    source("recent").click();
-    await until(() => Boolean(tile()));
-    const checksBeforeFilter = recentRequests.length;
-    search.value = "no matching gif";
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-    await until(() => !tile());
-    check(recentRequests.length === checksBeforeFilter, "filtering recent GIFs does not repeat the catalog request");
-    search.value = "";
-    search.dispatchEvent(new Event("input", { bubbles: true }));
-    await until(() => Boolean(tile()));
-    check(send().disabled, "GIF send requires a selection");
-    tile()!.click();
-    check(tile()!.getAttribute("aria-pressed") === "true" && !send().disabled, "select a GIF");
-    check(pendingGifSends.length === 0, "selecting a GIF does not send it");
-    send().click();
-    send().click();
-    await until(() => pendingGifSends.length === 1);
-    const first = pendingGifSends[0];
-    check(first.args.channel === "alpha" && first.args.sourceChannel === "beta" && first.args.messageId === recentGif.messageId && first.args.gifId === recentGif.gifId, "send a GIF from beta to the current channel alpha");
-    check(send().disabled && !modal.hidden, "wait for Twitch confirmation before closing the picker");
-    first.reject({ code: "error.gif.wait", params: { seconds: "7" } });
-    await until(() => !send().disabled);
-    check(!modal.hidden && tile()!.getAttribute("aria-pressed") === "true", "a rejected GIF stays selected");
-    send().click();
-    await until(() => pendingGifSends.length === 2);
-    pendingGifSends[1].resolve("gif-receipt");
-    await until(() => modal.hidden === true);
-    check(input().value === "Text to keep" && !document.querySelector<HTMLElement>("#reply-bar")!.hidden, "GIF send preserves the text draft and reply");
-
-    const previous = access("alpha");
-    document.querySelector<HTMLButtonElement>("#emote-open")!.click();
-    await until(() => access("alpha") !== previous);
-    access("alpha")!(true);
-    await until(shown);
-    gifs.click();
-    await until(() => Boolean(tile()));
-    const savedIds = recentRequests[checksBeforeFilter].preferredIds;
-    check(Array.isArray(savedIds) && savedIds[0] === recentGif.gifId, "previous selection is restored in the next menu session");
-    tile()!.click();
-    send().click();
-    await until(() => pendingGifSends.length === 3);
-    pendingGifSends[2].reject({ code: "error.gif.unavailable" });
-    await until(() => !shown());
-    check(!modal.hidden && !tile(), "a new denial removes GIF controls from the open picker");
-    document.querySelector<HTMLButtonElement>("#emotepopup-close")!.click();
-    await until(() => modal.hidden === true);
   },
   async appearance(theme, layout, language = "en") {
     settings.knobs["appearance.theme"] = theme;

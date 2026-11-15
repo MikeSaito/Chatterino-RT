@@ -4508,38 +4508,6 @@ button.poll-panel-option-btn.is-selected {
   gap: 4px;
 }
 
-.emotepopup-gif-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-#emotepopup-gif-sources[hidden] {
-  display: none;
-}
-
-#emotepopup-giphy-logo {
-  width: 100px;
-  margin: 4px 0;
-  padding: 4px;
-  background: #151515;
-  border-radius: var(--radius-sm);
-}
-
-.emotepopup-gif-item img {
-  width: 100%;
-  height: 68px;
-  border-radius: var(--radius-sm);
-}
-
-.emotepopup-gif-item[aria-pressed="true"] {
-  border-color: var(--c-accent);
-  background: var(--c-surface-2);
-}
-
-.emotepopup-gif-send {
-  width: 100%;
-  margin-top: 8px;
-}
-
 .replythread-head {
   align-items: center;
 }

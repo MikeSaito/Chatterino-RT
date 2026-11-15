@@ -22,7 +22,7 @@ Windows installers: [GitHub Releases](https://github.com/MikeSaito/Chatterino-RT
 
 Use **`Chatterino.RT_*_x64-setup.exe`** (NSIS). The package embeds the WebView2 bootstrapper when the runtime is missing.
 
-After install: join a channel (anonymous read works). Use **Sign in** / **Войти** to send messages. Right-click an emote for **Open** / **Copy** CDN size links (1x–4x).
+After install: join a channel (anonymous read works). Use **Sign in** / **Войти** to send messages. Incoming Twitch GIFs play inline in chat. Right-click an emote for **Open** / **Copy** CDN size links (1x–4x).
 
 In-app updates use the same Releases feed (`latest.json`) after a draft release is published.
 
@@ -70,14 +70,6 @@ Optional process environment (see [`.env.example`](.env.example); not loaded fro
 - `TWITCH_OAUTH_TOKEN`
 - `TWITCH_LOGIN`
 - `TWITCH_CLIENT_ID` (only when replacing the Chatterino login flow with a custom Twitch application)
-
-## GIF catalog
-
-The GIF tab is available when Twitch confirms that the signed-in account can send GIFs in the current channel. Select **GIPHY** to browse trending GIFs or search the catalog. **Recent** lists GIFs from open channels and puts your last selections first. The app saves up to 24 selected IDs on this device. If you have a GIPHY key, the app can look up saved GIFs no longer in open channel history.
-
-Create an API key in the [GIPHY Developer Dashboard](https://developers.giphy.com/dashboard/) and set `GIPHY_API_KEY` in the environment before launching Chatterino RT. GIPHY beta keys allow 100 API requests per hour. The catalog requests results rated PG-13 or below.
-
-For packaged builds, set `GIPHY_RELEASE_API_KEY` at build time. The release workflow reads the optional GitHub Actions secret of the same name. Use a GIPHY production key for public builds. Installations share its quota, and the key can be extracted from the executable. `GIPHY_API_KEY` at launch overrides the bundled key.
 
 ## Layout
 

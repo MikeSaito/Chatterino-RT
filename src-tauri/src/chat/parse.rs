@@ -1468,10 +1468,11 @@ mod tests {
 
     #[test]
     fn parses_twitch_gifs_tag_on_privmsg() {
-        let url = "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc";
-        let text = "[Y A Y Yes GIF by Djemilah Birnie]";
+        let url = "https://media4.giphy.com/media/v1.fixture/SampleGif/giphy.gif?cid=fixture";
+        let text = "[Sample animated GIF by a user]";
         let line = format!(
-            "@display-name=Dev;emotes=;gifs=0-33|joSNxeswxuc74Juo8X|{url};id=g1;user-id=1 :dev!dev@dev.tmi.twitch.tv PRIVMSG #twitch :{text}"
+            "@display-name=Dev;emotes=;gifs=0-{}|SampleGif|{url};id=g1;user-id=1 :dev!dev@dev.tmi.twitch.tv PRIVMSG #fixture :{text}",
+            text.len() - 1
         );
         match parse_line(&line, 100) {
             ParsedLine::Event {
@@ -1486,7 +1487,7 @@ mod tests {
                 assert_eq!(body, text);
                 assert_eq!(emote_spans.len(), 1);
                 assert_eq!(emote_spans[0].provider, "twitch-gif");
-                assert_eq!(emote_spans[0].emote_id, "joSNxeswxuc74Juo8X");
+                assert_eq!(emote_spans[0].emote_id, "SampleGif");
                 assert_eq!(emote_spans[0].url, url);
                 assert_eq!(emote_spans[0].start, 0);
                 assert_eq!(emote_spans[0].end, utf16_units(text) as u32);
