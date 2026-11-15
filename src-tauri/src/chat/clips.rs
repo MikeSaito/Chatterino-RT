@@ -20,7 +20,11 @@ use super::state::Shared;
 
 const CACHE_LIMIT: usize = 128;
 const HELIX: &str = "https://api.twitch.tv/helix";
-const CLIP_THUMB_HOSTS: &[&str] = &["clips-media-assets2.twitch.tv", "static-cdn.jtvnw.net"];
+const CLIP_THUMB_HOSTS: &[&str] = &[
+    "clips-media-assets.twitch.tv",
+    "clips-media-assets2.twitch.tv",
+    "static-cdn.jtvnw.net",
+];
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -402,10 +406,24 @@ mod tests {
 
     #[test]
     fn allows_clip_cdn_thumb() {
-        assert!(allowed_clip_thumbnail_url(
-            "https://clips-media-assets2.twitch.tv/foo-preview-480x272.jpg"
-        )
-        .is_some());
+        for host in ["clips-media-assets.twitch.tv", "clips-media-assets2.twitch.tv"] {
+            let thumbnail = format!("https://{host}/fixture-preview-480x272.jpg");
+            let item = serde_json::json!({
+                "id": "FixtureClip",
+                "title": "Fixture",
+                "thumbnail_url": thumbnail,
+            });
+            let (clip, _) = parse_clip_item(&item, "https://clips.twitch.tv/FixtureClip").unwrap();
+            assert_eq!(clip.thumbnail_url.as_deref(), Some(thumbnail.as_str()));
+            assert_eq!(
+                super::super::fetch::allowed_emote_cdn_url(&thumbnail),
+                Some(thumbnail)
+            );
+        }
         assert!(allowed_clip_thumbnail_url("https://evil.example/x.jpg").is_none());
+        assert!(
+            allowed_clip_thumbnail_url("https://clips-media-assets.twitch.tv.evil.example/x.jpg")
+                .is_none()
+        );
     }
 }

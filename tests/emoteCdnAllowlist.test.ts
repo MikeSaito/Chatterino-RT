@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { isAllowedEmoteCdnUrl } from "../src/chat/emoteCdnAllowlist.ts";
 
 function assert(cond: boolean, msg: string): void {
@@ -33,6 +34,21 @@ assert(
 );
 assert(!isAllowedEmoteCdnUrl("https://evil.example/emote/x.png"), "foreign host");
 assert(!isAllowedEmoteCdnUrl("http://cdn.betterttv.net/emote/abc/1x"), "http denied");
+const { csp, devCsp } = JSON.parse(
+  readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
+).app.security;
+for (const host of ["clips-media-assets.twitch.tv", "clips-media-assets2.twitch.tv"]) {
+  assert(isAllowedEmoteCdnUrl(`https://${host}/fixture-preview-480x272.jpg`), "clip thumbnail");
+  for (const policy of [csp, devCsp]) {
+    for (const directive of ["connect-src", "img-src"]) {
+      assert(policy[directive].split(" ").includes(`https://${host}`), `${directive} allows ${host}`);
+    }
+  }
+}
+assert(
+  !isAllowedEmoteCdnUrl("https://clips-media-assets.twitch.tv.evil.example/fixture.jpg"),
+  "foreign clip host denied",
+);
 assert(
   isAllowedEmoteCdnUrl(
     "https://media4.giphy.com/media/joSNxeswxuc74Juo8X/giphy.gif?cid=abc",

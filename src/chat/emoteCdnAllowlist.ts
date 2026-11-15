@@ -81,7 +81,7 @@ export function isAllowedEmoteCdnUrl(raw: string): boolean {
   if (host === "cdn.jsdelivr.net") {
     return allowedJsdelivrEmoji(path);
   }
-  if (host === "clips-media-assets2.twitch.tv") {
+  if (host === "clips-media-assets.twitch.tv" || host === "clips-media-assets2.twitch.tv") {
     const lower = path.toLowerCase();
     return (
       lower.endsWith(".jpg") ||
