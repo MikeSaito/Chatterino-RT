@@ -104,18 +104,6 @@ impl AuthFail {
         }
     }
 
-    pub fn coded_params(
-        code: impl Into<String>,
-        message_en: impl Into<String>,
-        params: BTreeMap<String, String>,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            message: message_en.into(),
-            params,
-        }
-    }
-
     fn internal(message: impl Into<String>) -> Self {
         Self {
             code: "internal".into(),

@@ -707,32 +707,6 @@ pub fn parse_twitch_gifs(raw: Option<&str>, text: &str) -> Vec<EmoteSpan> {
     spans
 }
 
-pub fn emote_span_for_gif(text: &str, gif_id: &str, url: &str) -> Option<EmoteSpan> {
-    if text.is_empty() || !safe_twitch_gif_id(gif_id) {
-        return None;
-    }
-    let allowed = super::fetch::allowed_twitch_gif_url(url)?;
-    if !super::fetch::gif_url_matches_id(&allowed, gif_id) {
-        return None;
-    }
-    let end = utf16_units(text) as u32;
-    if end == 0 {
-        return None;
-    }
-    Some(EmoteSpan {
-        start: 0,
-        end,
-        emote_id: gif_id.to_string(),
-        provider: "twitch-gif".to_string(),
-        url: allowed,
-        zero_width: false,
-        bits_amount: None,
-        bits_color: None,
-        display_width: Some(4),
-        display_height: Some(3),
-    })
-}
-
 fn safe_twitch_gif_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
