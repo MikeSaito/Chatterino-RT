@@ -58,6 +58,8 @@ function message(channel: string, i: number): ChatEvent {
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
 const recentGif = { messageId: "gif-source", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
+const catalogGif = { gifId: "CatalogGif", title: "Catalog animation", url: "https://media2.giphy.com/media/v1.fixture/CatalogGif/giphy.gif?cid=original", previewUrl: "https://media2.giphy.com/media/v1.fixture/CatalogGif/100w.gif?cid=preview" };
+const catalogRequests: { query: unknown; offset: unknown }[] = [];
 const pendingGifSends: { args: Record<string, unknown>; resolve: (id: string) => void; reject: (error: unknown) => void }[] = [];
 const pendingGifAccess = new Map<string, (available: boolean) => void>();
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
@@ -95,6 +97,10 @@ mockIPC(async (cmd, args) => {
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
   if (cmd === "chat_gif_available") return new Promise<boolean>((resolve) => pendingGifAccess.set(String(a.channel), resolve));
   if (cmd === "chat_recent_gifs") return a.channel === "alpha" && recentGif.title.toLowerCase().includes(String(a.query).toLowerCase()) ? [recentGif] : [];
+  if (cmd === "chat_catalog_gifs") {
+    catalogRequests.push({ query: a.query, offset: a.offset });
+    return { items: [catalogGif], nextOffset: a.offset === 0 && !a.query ? 24 : null };
+  }
   if (cmd === "chat_send_gif") return new Promise<string>((resolve, reject) => pendingGifSends.push({ args: a, resolve, reject }));
   if (cmd === "chat_viewer_role") return { isMod: false, isBroadcaster: false };
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
@@ -288,6 +294,29 @@ fixtureWindow.__fixture = {
     const tile = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-item");
     const send = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-send")!;
     const modal = document.querySelector<HTMLElement>("#emotepopup-modal")!;
+    const source = (name: string) => document.querySelector<HTMLButtonElement>(`[data-gif-source="${name}"]`)!;
+    const search = document.querySelector<HTMLInputElement>("#emotepopup-search")!;
+    const catalogRequest = () => catalogRequests[catalogRequests.length - 1];
+    await until(() => tile()?.querySelector("img")?.src === catalogGif.previewUrl);
+    check(catalogRequest()?.query === "", "empty GIPHY query opens trending");
+    check(!document.querySelector<HTMLElement>("#emotepopup-giphy-logo")!.hidden, "catalog displays GIPHY attribution");
+    const next = Array.from(modal.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Next page");
+    check(next, "trending catalog offers the next page");
+    next.click();
+    await until(() => catalogRequest()?.offset === 24 && Boolean(tile()));
+    search.value = "кот & собака";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => catalogRequest()?.query === search.value && Boolean(tile()));
+    check(catalogRequest()?.offset === 0, "search restarts at the first page");
+    tile()!.click();
+    send().click();
+    await until(() => pendingGifSends.length === 1);
+    const selected = pendingGifSends.shift()!;
+    check(selected.args.gifId === catalogGif.gifId && selected.args.originalUrl === catalogGif.url && selected.args.searchTerm === search.value && !selected.args.messageId, "catalog sends the original URL and the search term");
+    selected.reject({ code: "error.gif.wait", params: { seconds: "7" } });
+    await until(() => !send().disabled);
+    search.value = "";
+    source("recent").click();
     await until(() => Boolean(tile()));
     check(send().disabled, "GIF send requires a selection");
     tile()!.click();

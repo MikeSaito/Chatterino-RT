@@ -387,7 +387,12 @@
           <button type="button" class="emotepopup-tab" data-tab="emojis" role="tab" aria-selected="false" data-i18n="emotes.tab.emojis">Emojis</button>
           <button type="button" class="emotepopup-tab" data-tab="gifs" role="tab" aria-selected="false" hidden>GIF</button>
         </div>
+        <div id="emotepopup-gif-sources" class="emotepopup-tabs" hidden>
+          <button type="button" class="emotepopup-tab" data-gif-source="catalog" aria-pressed="true">GIPHY</button>
+          <button type="button" class="emotepopup-tab" data-gif-source="recent" aria-pressed="false" data-i18n="emotes.gifs.recent">Recent</button>
+        </div>
         <input id="emotepopup-search" type="search" data-i18n-placeholder="emotes.search.placeholder" placeholder="Search emotes" autocomplete="off" spellcheck="false" />
+        <img id="emotepopup-giphy-logo" src="/powered-by-giphy.png" alt="Powered By GIPHY" hidden />
         <div id="emotepopup-view" role="tabpanel"></div>
       </div>
     </div>

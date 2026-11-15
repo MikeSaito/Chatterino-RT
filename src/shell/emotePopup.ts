@@ -4,7 +4,7 @@ import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
 import { t, type MessageKey } from "../i18n";
-import type { InvokeErrorShape } from "../i18n/formatError";
+import { formatInvokeError, type InvokeErrorShape } from "../i18n/formatError";
 
 type EmotePopupTab =
   | "favourite"
@@ -21,7 +21,8 @@ type EmotePopupItem = {
   favourite: boolean;
 };
 
-type RecentGif = { messageId: string; gifId: string; title: string; url: string };
+type GifChoice = { messageId?: string; gifId: string; title: string; url: string; previewUrl?: string };
+type GifPage = { items: GifChoice[]; nextOffset: number | null };
 
 const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis", "gifs"];
 
@@ -61,7 +62,9 @@ export function bindEmotePopup(opts: {
     modal.querySelectorAll<HTMLButtonElement>(".emotepopup-tab[data-tab]"),
   );
   const gifTab = tabButtons.find((btn) => btn.dataset.tab === "gifs");
-  if (!dialog || !backdrop || !closeBtn || !title || !search || !view || !gifTab) {
+  const gifSources = modal.querySelector<HTMLElement>("#emotepopup-gif-sources");
+  const giphyLogo = modal.querySelector<HTMLElement>("#emotepopup-giphy-logo");
+  if (!dialog || !backdrop || !closeBtn || !title || !search || !view || !gifTab || !gifSources || !giphyLogo) {
     return {
       open: () => undefined,
       close: () => undefined,
@@ -75,11 +78,17 @@ export function bindEmotePopup(opts: {
   let seq = 0;
   let gifAccessSeq = 0;
   let tab: EmotePopupTab = "subs";
+  let gifSource: "catalog" | "recent" = "catalog";
   let busyFav = false;
   let sendingGif = false;
 
   const labelSearch = () => {
-    search.placeholder = t(tab === "gifs" ? "emotes.gifs.search" : "emotes.search.placeholder");
+    search.placeholder = t(tab === "gifs"
+      ? gifSource === "catalog" ? "emotes.gifs.catalog.search" : "emotes.gifs.search"
+      : "emotes.search.placeholder");
+    search.setAttribute("aria-label", search.placeholder);
+    gifSources.hidden = tab !== "gifs";
+    giphyLogo.hidden = tab !== "gifs" || gifSource !== "catalog";
   };
 
   const setTab = (next: EmotePopupTab): void => {
@@ -253,9 +262,17 @@ export function bindEmotePopup(opts: {
     close();
   };
 
-  const paintGifs = (items: RecentGif[], channel: string, token: number): void => {
+  const paintGifNotice = (text: string): void => {
+    const notice = document.createElement("div");
+    notice.className = "emotepopup-empty";
+    notice.setAttribute("role", "status");
+    notice.textContent = text;
+    view.replaceChildren(notice);
+  };
+
+  const paintGifs = (items: GifChoice[], channel: string, token: number, query: string): void => {
     if (!items.length) {
-      paint([]);
+      paintGifNotice(t(gifSource === "catalog" ? "emotes.gifs.catalog.empty" : "emotes.gifs.empty"));
       return;
     }
     const grid = document.createElement("div");
@@ -265,9 +282,10 @@ export function bindEmotePopup(opts: {
     send.className = "btn btn-primary emotepopup-gif-send";
     send.textContent = t("emotes.gifs.send", { channel });
     send.disabled = true;
-    let selected: RecentGif | undefined;
+    let selected: GifChoice | undefined;
     for (const item of items) {
-      if (!isAllowedEmoteCdnUrl(item.url)) {
+      const previewUrl = item.previewUrl ?? item.url;
+      if (!isAllowedEmoteCdnUrl(previewUrl)) {
         continue;
       }
       const tile = document.createElement("button");
@@ -276,7 +294,7 @@ export function bindEmotePopup(opts: {
       tile.setAttribute("aria-pressed", "false");
       tile.title = item.title || "GIF";
       const img = document.createElement("img");
-      img.src = item.url;
+      img.src = previewUrl;
       img.alt = tile.title;
       img.loading = "lazy";
       img.decoding = "async";
@@ -303,12 +321,14 @@ export function bindEmotePopup(opts: {
         void reload();
         return;
       }
-      const { messageId, gifId } = selected;
+      const { messageId, gifId, url } = selected;
       const accessToken = gifAccessSeq;
       sendingGif = true;
       send.disabled = true;
       send.textContent = t("emotes.gifs.sending");
-      void invoke<string>("chat_send_gif", { channel, messageId, gifId }).then(
+      void invoke<string>("chat_send_gif", messageId
+        ? { channel, messageId, gifId }
+        : { channel, gifId, originalUrl: url, searchTerm: query }).then(
         () => {
           if (token === seq) close();
           opts.onGifSent(channel);
@@ -328,19 +348,44 @@ export function bindEmotePopup(opts: {
     view.replaceChildren(grid, send);
   };
 
-  const reload = async (): Promise<void> => {
+  const paintPages = (offsets: number[], nextOffset: number | null): void => {
+    const navigation = document.createElement("div");
+    navigation.className = "emotepopup-tabs";
+    const pageButton = (label: MessageKey, pages: number[]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "emotepopup-tab";
+      button.textContent = t(label);
+      button.addEventListener("click", () => { if (!sendingGif) void reload(pages); });
+      navigation.append(button);
+    };
+    if (offsets.length > 1) pageButton("emotes.gifs.catalog.previous", offsets.slice(0, -1));
+    if (nextOffset !== null) pageButton("emotes.gifs.catalog.next", [...offsets, nextOffset]);
+    if (navigation.childElementCount) view.append(navigation);
+  };
+
+  const reload = async (offsets: number[] = [0]): Promise<void> => {
     const token = ++seq;
     const query = search.value.trim();
     const channel = activeChannel()?.trim() || "";
     if (tab === "gifs") {
-      view.replaceChildren();
+      const catalog = gifSource === "catalog";
+      const gifQuery = catalog ? Array.from(query).slice(0, 50).join("") : query;
+      paintGifNotice(t("emotes.gifs.catalog.loading"));
       try {
-        const items = channel ? await invoke<RecentGif[]>("chat_recent_gifs", { channel, query }) : [];
+        const page = catalog
+          ? await invoke<GifPage>("chat_catalog_gifs", { query: gifQuery, offset: offsets[offsets.length - 1] })
+          : { items: await invoke<GifChoice[]>("chat_recent_gifs", { channel, query }), nextOffset: null };
         if (token === seq && (activeChannel()?.trim() || "") === channel) {
-          paintGifs(items, channel, token);
+          paintGifs(page.items, channel, token, gifQuery);
+          if (catalog) {
+            paintPages(offsets, page.nextOffset);
+            view.scrollTop = 0;
+            positionNearAnchor();
+          }
         }
       } catch (error) {
-        if (token === seq) opts.onGifError(error);
+        if (token === seq) paintGifNotice(formatInvokeError(error));
       }
       return;
     }
@@ -405,15 +450,34 @@ export function bindEmotePopup(opts: {
     });
   }
 
-  search.addEventListener("input", () => {
+  for (const button of gifSources.querySelectorAll<HTMLButtonElement>("[data-gif-source]")) {
+    button.addEventListener("click", () => {
+      const source = button.dataset.gifSource;
+      if (tab !== "gifs" || (source !== "catalog" && source !== "recent") || source === gifSource) return;
+      gifSource = source;
+      gifSources.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+      button.setAttribute("aria-pressed", "true");
+      window.clearTimeout(timer);
+      labelSearch();
+      void reload();
+    });
+  }
+
+  search.addEventListener("input", (event) => {
+    if (event instanceof InputEvent && event.isComposing) return;
     window.clearTimeout(timer);
+    const catalogSearch = tab === "gifs" && gifSource === "catalog";
+    if (catalogSearch) {
+      seq += 1;
+      paintGifNotice(t("emotes.gifs.catalog.loading"));
+    }
     timer = window.setTimeout(() => {
       void reload().then(() => {
         if (!modal.hidden) {
           positionNearAnchor();
         }
       });
-    }, 100);
+    }, catalogSearch ? 350 : 100);
   });
 
   closeBtn.addEventListener("click", () => {

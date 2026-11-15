@@ -5,12 +5,15 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::commands::{normalize_channel, ApiError};
-use super::fetch::{allowed_twitch_gif_url, gif_url_matches_id};
+use super::fetch::{allowed_twitch_gif_url, gif_media_id, gif_url_matches_id};
 use super::hub::Hub;
 use super::state::Shared;
 use super::types::{ChatEvent, EmoteSpan};
 
 const GQL: &str = "https://gql.twitch.tv/gql";
+const GIPHY: &str = "https://api.giphy.com/v1/gifs";
+const GIPHY_PAGE_SIZE: u32 = 24;
+const GIPHY_QUERY_LIMIT: usize = 50;
 const GIF_AVAILABILITY: &str = r#"
 query ChatGifAvailability($channelID: ID!) {
     currentUser { id }
@@ -36,6 +39,119 @@ pub struct RecentGif {
     gif_id: String,
     title: String,
     url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGif {
+    gif_id: String,
+    title: String,
+    url: String,
+    preview_url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GifPage {
+    items: Vec<CatalogGif>,
+    next_offset: Option<u32>,
+}
+
+fn catalog_url(url: &str, id: &str) -> Option<String> {
+    if url.len() > 2048 || id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let validated = allowed_twitch_gif_url(url)?;
+    let parsed = reqwest::Url::parse(&validated).ok()?;
+    (url.starts_with("https://") && parsed.port().is_none() && gif_media_id(&parsed) == Some(id))
+        .then(|| url.to_owned())
+}
+
+fn catalog_item(gif: &Value) -> Option<CatalogGif> {
+    let gif_id = gif["id"].as_str()?;
+    let images = &gif["images"];
+    let url = catalog_url(images["original"]["url"].as_str()?, gif_id)?;
+    let preview_url = images["fixed_width_small"]["url"]
+        .as_str()
+        .and_then(|preview| catalog_url(preview, gif_id))
+        .unwrap_or_else(|| url.clone());
+    Some(CatalogGif {
+        gif_id: gif_id.to_owned(),
+        title: gif["title"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(120)
+            .collect(),
+        url,
+        preview_url,
+    })
+}
+
+fn catalog_error() -> ApiError {
+    ApiError::coded("error.gif.catalog", "The GIPHY catalog is unavailable")
+}
+
+fn catalog_page(body: &Value, offset: u32, max_offset: u32) -> Result<GifPage, ApiError> {
+    let data = body["data"].as_array().ok_or_else(catalog_error)?;
+    let next = offset + data.len().min(GIPHY_PAGE_SIZE as usize) as u32;
+    Ok(GifPage {
+        items: data
+            .iter()
+            .take(GIPHY_PAGE_SIZE as usize)
+            .filter_map(catalog_item)
+            .collect(),
+        next_offset: (next > offset
+            && next <= max_offset
+            && body["pagination"]["total_count"]
+                .as_u64()
+                .is_some_and(|total| u64::from(next) < total))
+        .then_some(next),
+    })
+}
+
+#[tauri::command]
+pub async fn chat_catalog_gifs(query: String, offset: u32) -> Result<GifPage, ApiError> {
+    let key = super::auth::env_secret("GIPHY_API_KEY").ok_or_else(|| {
+        ApiError::coded("error.gif.catalog_key", "GIPHY_API_KEY is not configured")
+    })?;
+    let query: String = query.trim().chars().take(GIPHY_QUERY_LIMIT).collect();
+    let (endpoint, max_offset) = if query.is_empty() {
+        ("trending", 499)
+    } else {
+        ("search", 4999)
+    };
+    if offset > max_offset {
+        return Err(catalog_error());
+    }
+    let mut url =
+        reqwest::Url::parse(&format!("{GIPHY}/{endpoint}")).map_err(|_| catalog_error())?;
+    {
+        let mut params = url.query_pairs_mut();
+        params
+            .append_pair("api_key", &key)
+            .append_pair("limit", &GIPHY_PAGE_SIZE.to_string())
+            .append_pair("offset", &offset.to_string())
+            .append_pair("rating", "pg-13");
+        if !query.is_empty() {
+            params.append_pair("q", &query);
+        }
+    }
+    let client = super::http_client::build_no_redirect(Duration::from_secs(8));
+    let response = client.get(url).send().await.map_err(|_| catalog_error())?;
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(ApiError::coded(
+            "error.gif.catalog_rate",
+            "GIPHY rate limit reached",
+        ));
+    }
+    let body = response
+        .error_for_status()
+        .map_err(|_| catalog_error())?
+        .json::<Value>()
+        .await
+        .map_err(|_| catalog_error())?;
+    catalog_page(&body, offset, max_offset)
 }
 
 fn gifs_in(event: &ChatEvent) -> impl Iterator<Item = &EmoteSpan> {
@@ -188,10 +304,18 @@ pub async fn chat_gif_available(
         && current_context(&state, &channel, &room_id, &creds))
 }
 
-fn send_payload(channel_id: &str, gif_id: &str, url: &str) -> Value {
+fn send_payload(channel_id: &str, gif_id: &str, url: &str, search_term: Option<&str>) -> Value {
+    let mut input = json!({ "channelID": channel_id, "gifID": gif_id, "gifURL": url });
+    if let Some(search_term) = search_term.filter(|term| !term.is_empty()) {
+        input["searchTerm"] = json!(search_term
+            .trim()
+            .chars()
+            .take(GIPHY_QUERY_LIMIT)
+            .collect::<String>());
+    }
     json!({
         "operationName": "sendGifMessage",
-        "variables": { "input": { "channelID": channel_id, "gifID": gif_id, "gifURL": url } },
+        "variables": { "input": input },
         "query": SEND_GIF,
     })
 }
@@ -252,8 +376,10 @@ fn accepted_id(body: &Value) -> Result<String, ApiError> {
 pub async fn chat_send_gif(
     state: tauri::State<'_, Shared>,
     channel: String,
-    message_id: String,
+    message_id: Option<String>,
     gif_id: String,
+    original_url: Option<String>,
+    search_term: Option<String>,
 ) -> Result<String, ApiError> {
     let channel = normalize_channel(&channel)?;
     let creds = super::auth::oauth_graph_creds(&state)
@@ -267,18 +393,24 @@ pub async fn chat_send_gif(
             ));
         }
         let room_id = gif_room_id(&hub, &channel).ok_or_else(unavailable)?;
-        let url = hub
-            .channel_events(&channel)
-            .rev()
-            .find(|event| event.id() == message_id)
-            .and_then(|event| gifs_in(event).find(|span| span.emote_id == gif_id))
-            .and_then(gif_url)
-            .ok_or_else(|| {
-                ApiError::coded(
-                    "error.gif.missing",
-                    "This GIF is no longer in the channel history",
-                )
-            })?;
+        let url = if let Some(message_id) = message_id {
+            hub.channel_events(&channel)
+                .rev()
+                .find(|event| event.id() == message_id)
+                .and_then(|event| gifs_in(event).find(|span| span.emote_id == gif_id))
+                .and_then(gif_url)
+                .ok_or_else(|| {
+                    ApiError::coded(
+                        "error.gif.missing",
+                        "This GIF is no longer in the channel history",
+                    )
+                })?
+        } else {
+            original_url
+                .as_deref()
+                .and_then(|url| catalog_url(url, &gif_id))
+                .ok_or_else(catalog_error)?
+        };
         (room_id.to_string(), url)
     };
     let client = super::http_client::build_no_redirect(Duration::from_secs(12));
@@ -288,10 +420,14 @@ pub async fn chat_send_gif(
         return Err(unavailable());
     }
     // A lost response can follow an accepted send, so do not retry the mutation.
-    let response = graph_request(&client, &creds, send_payload(&room_id, &gif_id, &url))
-        .send()
-        .await
-        .map_err(|_| unknown_delivery())?;
+    let response = graph_request(
+        &client,
+        &creds,
+        send_payload(&room_id, &gif_id, &url, search_term.as_deref()),
+    )
+    .send()
+    .await
+    .map_err(|_| unknown_delivery())?;
     if response.status().is_client_error() {
         return Err(unavailable());
     }
@@ -309,6 +445,44 @@ pub async fn chat_send_gif(
 mod tests {
     use super::*;
     use crate::chat::parse::{parse_line, ParsedLine};
+
+    #[test]
+    fn catalog_preserves_original_and_preview_urls() {
+        let original =
+            "https://media2.giphy.com/media/v1.fixture/CatalogGif/giphy.gif?cid=fixture&ct=g";
+        let preview = "https://media3.giphy.com/media/v1.fixture/CatalogGif/100w.gif?cid=preview";
+        let page = catalog_page(
+            &json!({
+                "data": [{"id": "CatalogGif", "title": "Sample", "images": {
+                    "original": {"url": original}, "fixed_width_small": {"url": preview}
+                }}],
+                "pagination": {"total_count": 30}
+            }),
+            24,
+            499,
+        )
+        .unwrap();
+        assert_eq!(page.next_offset, Some(25));
+        let item = &page.items[0];
+        assert_eq!(item.preview_url, preview);
+        assert_eq!(item.url, original);
+        assert!(gif_url_matches_id(original, &item.gif_id));
+        assert_eq!(
+            send_payload("42", &item.gif_id, &item.url, Some("cat & dog"))["variables"]["input"],
+            json!({"channelID": "42", "gifID": "CatalogGif", "gifURL": original, "searchTerm": "cat & dog"})
+        );
+        assert!(catalog_url(original, "cataloggif").is_none());
+        assert!(catalog_url(
+            "https://media2.giphy.com/media/Other/giphy.gif?fake=/media/CatalogGif/",
+            "CatalogGif"
+        )
+        .is_none());
+        assert!(catalog_url(
+            "https://media2.giphy.com:9443/media/CatalogGif/giphy.gif",
+            "CatalogGif"
+        )
+        .is_none());
+    }
 
     #[test]
     fn access_requires_an_authenticated_tier_and_enabled_channel() {
@@ -355,7 +529,7 @@ mod tests {
         let choice = &choices[0];
         assert_eq!(choice.message_id, "fixture");
         assert_eq!(choice.gif_id, "FixtureGif");
-        let input = &send_payload("42", &choice.gif_id, &choice.url)["variables"]["input"];
+        let input = &send_payload("42", &choice.gif_id, &choice.url, None)["variables"]["input"];
         assert_eq!(
             input,
             &json!({"channelID":"42", "gifID":"FixtureGif", "gifURL":url})

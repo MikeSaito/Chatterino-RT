@@ -729,15 +729,28 @@ pub fn allowed_twitch_gif_url(raw: &str) -> Option<String> {
     None
 }
 
-/// GIF id from Giphy must appear in the CDN path segment `/media/{id}/`.
-pub fn gif_url_matches_id(url: &str, gif_id: &str) -> bool {
-    if gif_id.is_empty() {
-        return false;
+/// GIPHY uses both `/media/{id}/...` and `/media/v1.{metadata}/{id}/...`.
+pub(super) fn gif_media_id(url: &Url) -> Option<&str> {
+    let mut path = url.path_segments()?;
+    if path.next()? != "media" {
+        return None;
     }
-    let url_lower = url.to_ascii_lowercase();
-    let id_lower = gif_id.to_ascii_lowercase();
-    let needle = format!("/media/{id_lower}/");
-    url_lower.contains(&needle)
+    let segment = path.next()?;
+    let id = if segment.starts_with("v1.") {
+        path.next()?
+    } else {
+        segment
+    };
+    let file = path.next()?;
+    (!id.is_empty() && !file.is_empty() && path.next().is_none()).then_some(id)
+}
+
+pub fn gif_url_matches_id(url: &str, gif_id: &str) -> bool {
+    Url::parse(url)
+        .ok()
+        .as_ref()
+        .and_then(gif_media_id)
+        .is_some_and(|id| id.eq_ignore_ascii_case(gif_id))
 }
 
 /// Allowlist CDN картинок эмодзи/бейджей для `fetch_emote_cdn` (CORS fallback).

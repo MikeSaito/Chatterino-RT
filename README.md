@@ -71,6 +71,12 @@ Optional process environment (see [`.env.example`](.env.example); not loaded fro
 - `TWITCH_LOGIN`
 - `TWITCH_CLIENT_ID` (only when replacing the Chatterino login flow with a custom Twitch application)
 
+## GIF catalog
+
+The GIF tab is available when Twitch confirms that the signed-in account can send GIFs in the current channel. Select **GIPHY** to browse trending GIFs or search the catalog. **Recent** lists GIFs from the current channel's history.
+
+Create an API key in the [GIPHY Developer Dashboard](https://developers.giphy.com/dashboard/) and set `GIPHY_API_KEY` in the environment before launching Chatterino RT. GIPHY beta keys allow 100 API requests per hour. The catalog requests results rated PG-13 or below.
+
 ## Layout
 
 | Path | Role |
