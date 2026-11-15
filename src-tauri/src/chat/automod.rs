@@ -1,36 +1,39 @@
 // SPDX-FileCopyrightText: 2017 Contributors to Chatterino <https://chatterino.com>
 // SPDX-License-Identifier: MIT
 //
-// Reimplementation of Chatterino AutoMod PubSub queue + Helix manage action.
+// Twitch AutoMod queue and Helix moderation actions.
 // No C++/Qt source or assets are copied.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures_util::{Sink, SinkExt, StreamExt};
+use futures_util::{stream::FuturesUnordered, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::commands::ApiError;
 use super::state::{BatchSend, Shared};
 use super::types::{AutomodRange, ChatEvent, ChatPipe, ChatSendWait};
 
-const PUBSUB_URL: &str = "wss://pubsub-edge.twitch.tv";
+const EVENTSUB_WS: &str = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
+const HELIX_EVENTSUB: &str = "https://api.twitch.tv/helix/eventsub/subscriptions";
+const HOLD_TOPIC: &str = "automod.message.hold";
+const UPDATE_TOPIC: &str = "automod.message.update";
 const HELIX_AUTOMOD_MESSAGE: &str = "https://api.twitch.tv/helix/moderation/automod/message";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 const HTTP_ATTEMPTS: u32 = 3;
 const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
 const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
-const WS_PING_INTERVAL: Duration = Duration::from_secs(240);
 const WANTED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_WS_MESSAGE: usize = 256 * 1024;
 const MAX_WS_FRAME: usize = 64 * 1024;
 
 static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static NONCE_SEQ: AtomicU64 = AtomicU64::new(1);
 static STATUS_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,14 +48,7 @@ struct AutomodWanted {
 #[derive(Debug, Default)]
 struct ScopeCache {
     token: String,
-    user_id: Option<String>,
-    scopes_ok: bool,
-}
-
-#[derive(Debug)]
-struct ParsedAutomod {
-    channel_id: Option<String>,
-    event: ChatEvent,
+    identity: Option<(String, String)>,
 }
 
 pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
@@ -104,582 +100,453 @@ pub async fn manage_message(
 async fn run_loop(app: AppHandle, shared: Shared) {
     let mut backoff = Duration::from_secs(1);
     let mut scope_cache = ScopeCache::default();
-    loop {
-        if shutting_down() {
-            break;
-        }
-        let wanted = resolve_wanted(&shared, &mut scope_cache).await;
-        let Some(wanted) = wanted else {
-            sleep_or_shutdown(WANTED_POLL_INTERVAL).await;
+    let mut seen = VecDeque::new();
+    while !shutting_down() {
+        let Some(wanted) = resolve_wanted(&shared, &mut scope_cache).await else {
+            tokio::time::sleep(WANTED_POLL_INTERVAL).await;
             backoff = Duration::from_secs(1);
             continue;
         };
-        match connect_session(&app, &shared, wanted, &mut scope_cache).await {
-            SessionEnd::Shutdown => break,
-            SessionEnd::Reconnect { wait } => {
-                if wait {
-                    sleep_or_shutdown(backoff).await;
-                    backoff = (backoff * 2).min(Duration::from_secs(60));
-                } else {
-                    backoff = Duration::from_secs(1);
+        let Some(mut session) = open_eventsub(EVENTSUB_WS).await else {
+            wait_to_retry(&mut backoff).await;
+            continue;
+        };
+        if !still_wanted(&shared, &wanted) {
+            continue;
+        }
+        if create_subscriptions(&wanted, &session.id).await.is_err() {
+            drop(session);
+            wait_to_retry(&mut backoff).await;
+            continue;
+        }
+
+        backoff = Duration::from_secs(1);
+        let result = listen_eventsub(
+            &mut session,
+            |url| async move { open_eventsub(&url).await },
+            || still_wanted(&shared, &wanted),
+            |value| {
+                if let Some((event_id, mut event)) = parse_notification(value, &wanted) {
+                    if remember_notification(&mut seen, event_id, &mut event) {
+                        ingest_event(&app, &shared, &wanted.channel_login, event);
+                    }
                 }
-            }
+            },
+        )
+        .await;
+        drop(session);
+        if result.is_err() {
+            wait_to_retry(&mut backoff).await;
         }
     }
 }
 
-enum SessionEnd {
-    Shutdown,
-    Reconnect { wait: bool },
+async fn wait_to_retry(backoff: &mut Duration) {
+    tokio::time::sleep(*backoff).await;
+    *backoff = (*backoff * 2).min(Duration::from_secs(60));
 }
 
-async fn connect_session(
-    app: &AppHandle,
-    shared: &Shared,
-    wanted: AutomodWanted,
-    scope_cache: &mut ScopeCache,
-) -> SessionEnd {
+struct EventSubSession<S = MaybeTlsStream<tokio::net::TcpStream>> {
+    socket: WebSocketStream<S>,
+    id: String,
+    heartbeat: Duration,
+}
+
+async fn open_eventsub(url: &str) -> Option<EventSubSession> {
     let cfg = WebSocketConfig::default()
         .max_message_size(Some(MAX_WS_MESSAGE))
         .max_frame_size(Some(MAX_WS_FRAME))
         .read_buffer_size(32 * 1024);
-    let Ok(Ok((stream, _))) = tokio::time::timeout(
-        WS_CONNECT_TIMEOUT,
-        tokio_tungstenite::connect_async_with_config(PUBSUB_URL, Some(cfg), false),
-    )
+    tokio::time::timeout(WS_CONNECT_TIMEOUT, async {
+        let (mut socket, _) = tokio_tungstenite::connect_async_with_config(url, Some(cfg), false)
+            .await
+            .ok()?;
+        let welcome = read_eventsub(&mut socket).await?;
+        let (id, heartbeat) = parse_welcome(&welcome)?;
+        Some(EventSubSession {
+            socket,
+            id,
+            heartbeat,
+        })
+    })
     .await
-    else {
-        return SessionEnd::Reconnect { wait: true };
-    };
-    let (mut write, mut read) = stream.split();
-    if listen(&mut write, &wanted).await.is_err() {
-        let _ = send_ws(&mut write, Message::Close(None)).await;
-        return SessionEnd::Reconnect { wait: true };
+    .ok()
+    .flatten()
+}
+
+fn parse_welcome(value: &Value) -> Option<(String, Duration)> {
+    if message_type(value) != Some("session_welcome") {
+        return None;
     }
-    let mut ping_at = tokio::time::interval(WS_PING_INTERVAL);
-    ping_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut poll_at = tokio::time::interval(WANTED_POLL_INTERVAL);
-    poll_at.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let session = value.pointer("/payload/session")?;
+    let id = session.get("id")?.as_str().filter(|id| !id.is_empty())?;
+    let seconds = session
+        .get("keepalive_timeout_seconds")
+        .and_then(Value::as_u64)
+        .filter(|n| (10..=600).contains(n))
+        .unwrap_or(30);
+    Some((id.to_string(), Duration::from_secs(seconds + 5)))
+}
+
+async fn create_subscriptions(wanted: &AutomodWanted, session_id: &str) -> Result<(), ()> {
+    let client = super::http_client::build(WS_WRITE_TIMEOUT);
+    let subscribe = |topic| {
+        let request = client
+            .post(HELIX_EVENTSUB)
+            .header("Client-Id", &wanted.client_id)
+            .bearer_auth(&wanted.token)
+            .json(&subscription_body(wanted, session_id, topic));
+        async move {
+            let response = request.send().await.map_err(|_| ())?;
+            // A conflict may belong to another socket, so it cannot confirm this subscription.
+            if response.status() == reqwest::StatusCode::ACCEPTED {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+    };
+    tokio::try_join!(subscribe(HOLD_TOPIC), subscribe(UPDATE_TOPIC))?;
+    Ok(())
+}
+
+fn subscription_body(wanted: &AutomodWanted, session_id: &str, topic: &str) -> Value {
+    json!({
+        "type": topic,
+        "version": "2",
+        "condition": {
+            "broadcaster_user_id": wanted.channel_id,
+            "moderator_user_id": wanted.moderator_id,
+        },
+        "transport": { "method": "websocket", "session_id": session_id },
+    })
+}
+
+async fn listen_eventsub<S, F>(
+    session: &mut EventSubSession<S>,
+    open_replacement: impl Fn(String) -> F,
+    is_current: impl Fn() -> bool,
+    mut notify: impl FnMut(&Value),
+) -> Result<(), ()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    F: Future<Output = Option<EventSubSession<S>>>,
+{
+    let mut poll = tokio::time::interval(WANTED_POLL_INTERVAL);
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut deadline = tokio::time::Instant::now() + session.heartbeat;
+    let mut replacement = FuturesUnordered::new();
+    let mut old_open = true;
 
     loop {
-        if shutting_down() {
-            let _ = send_ws(&mut write, Message::Close(None)).await;
-            return SessionEnd::Shutdown;
-        }
         tokio::select! {
-            _ = ping_at.tick() => {
-                if send_ws(&mut write, Message::Text(json!({"type":"PING"}).to_string().into())).await.is_err() {
-                    return SessionEnd::Reconnect { wait: true };
+            _ = poll.tick() => {
+                if !is_current() {
+                    return Ok(());
                 }
             }
-            _ = poll_at.tick() => {
-                match resolve_wanted(shared, scope_cache).await {
-                    Some(next) if next == wanted => {}
-                    _ => {
-                        let _ = send_ws(&mut write, Message::Close(None)).await;
-                        return SessionEnd::Reconnect { wait: false };
-                    }
-                }
+            _ = tokio::time::sleep_until(deadline), if replacement.is_empty() => return Err(()),
+            next = replacement.next(), if !replacement.is_empty() => {
+                *session = next.flatten().ok_or(())?;
+                old_open = true;
+                deadline = tokio::time::Instant::now() + session.heartbeat;
             }
-            msg = read.next() => {
-                match msg {
-                    None => return SessionEnd::Reconnect { wait: true },
-                    Some(Ok(Message::Text(text))) => {
-                        if !handle_pubsub_text(app, shared, &wanted, text.as_ref()) {
-                            return SessionEnd::Reconnect { wait: true };
-                        }
+            frame = read_eventsub(&mut session.socket), if old_open => {
+                let Some(frame) = frame else {
+                    if replacement.is_empty() {
+                        return Err(());
                     }
-                    Some(Ok(Message::Binary(bin))) => {
-                        if let Ok(text) = std::str::from_utf8(&bin) {
-                            if !handle_pubsub_text(app, shared, &wanted, text) {
-                                return SessionEnd::Reconnect { wait: true };
-                            }
-                        }
+                    old_open = false;
+                    continue;
+                };
+                match message_type(&frame) {
+                    Some("session_keepalive") => {
+                        deadline = tokio::time::Instant::now() + session.heartbeat;
                     }
-                    Some(Ok(Message::Ping(p))) => {
-                        if send_ws(&mut write, Message::Pong(p)).await.is_err() {
-                            return SessionEnd::Reconnect { wait: true };
+                    Some("notification") => {
+                        deadline = tokio::time::Instant::now() + session.heartbeat;
+                        if !is_current() {
+                            return Ok(());
                         }
+                        notify(&frame);
                     }
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) => return SessionEnd::Reconnect { wait: true },
-                    Some(Ok(_)) => {}
+                    Some("session_reconnect") if replacement.is_empty() => {
+                        let url = reconnect_url(&frame).ok_or(())?;
+                        // Keep consuming the old socket until Twitch welcomes its replacement.
+                        replacement.push(open_replacement(url));
+                    }
+                    Some("revocation") => return Err(()),
+                    _ => {}
                 }
             }
         }
     }
 }
 
-async fn listen<S>(write: &mut S, wanted: &AutomodWanted) -> Result<(), ()>
+async fn read_eventsub<S>(socket: &mut WebSocketStream<S>) -> Option<Value>
 where
-    S: Sink<Message> + Unpin,
-    S::Error: std::fmt::Debug,
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let topic = format!(
-        "automod-queue.{}.{}",
-        wanted.moderator_id, wanted.channel_id
-    );
-    let nonce = format!(
-        "crt-{}-{}",
-        unix_ms(),
-        NONCE_SEQ.fetch_add(1, Ordering::Relaxed)
-    );
-    let payload = json!({
-        "type": "LISTEN",
-        "nonce": nonce,
-        "data": {
-            "topics": [topic],
-            "auth_token": wanted.token,
-        },
-    });
-    send_ws(write, Message::Text(payload.to_string().into())).await
+    loop {
+        match socket.next().await?.ok()? {
+            Message::Text(text) => {
+                if let Ok(value) = serde_json::from_str(text.as_str()) {
+                    return Some(value);
+                }
+            }
+            Message::Ping(_) => {
+                // Tungstenite queues the Pong while reading.
+                tokio::time::timeout(WS_WRITE_TIMEOUT, socket.flush())
+                    .await
+                    .ok()?
+                    .ok()?;
+            }
+            Message::Close(_) => return None,
+            _ => {}
+        }
+    }
 }
 
-async fn send_ws<S>(write: &mut S, msg: Message) -> Result<(), ()>
-where
-    S: Sink<Message> + Unpin,
-    S::Error: std::fmt::Debug,
-{
-    tokio::time::timeout(WS_WRITE_TIMEOUT, write.send(msg))
-        .await
-        .map_err(|_| ())?
-        .map_err(|_| ())
+fn message_type(value: &Value) -> Option<&str> {
+    value.pointer("/metadata/message_type")?.as_str()
+}
+
+fn reconnect_url(value: &Value) -> Option<String> {
+    let raw = value.pointer("/payload/session/reconnect_url")?.as_str()?;
+    let url = url::Url::parse(raw).ok()?;
+    if url.scheme() == "wss"
+        && url.host_str() == Some("eventsub.wss.twitch.tv")
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/ws"
+        && url.fragment().is_none()
+    {
+        return Some(raw.to_string());
+    }
+    None
+}
+
+struct SeenNotification {
+    id: String,
+    decision: Option<(String, String)>,
+}
+
+fn remember_notification(
+    seen: &mut VecDeque<SeenNotification>,
+    event_id: &str,
+    event: &mut ChatEvent,
+) -> bool {
+    if seen.iter().any(|recent| recent.id == event_id) {
+        return false;
+    }
+    let decision = match event {
+        ChatEvent::AutomodStatus {
+            target_id, status, ..
+        } => Some((target_id.clone(), status.clone())),
+        ChatEvent::AutomodHeld { id, status, .. } => {
+            if let Some((_, decision)) = seen
+                .iter()
+                .rev()
+                .filter_map(|recent| recent.decision.as_ref())
+                .find(|(target_id, _)| target_id == id)
+            {
+                // Hold and update are delivered by different subscriptions.
+                status.clone_from(decision);
+            }
+            None
+        }
+        _ => None,
+    };
+    if seen.len() == 512 {
+        seen.pop_front();
+    }
+    seen.push_back(SeenNotification {
+        id: event_id.to_string(),
+        decision,
+    });
+    true
 }
 
 async fn resolve_wanted(shared: &Shared, cache: &mut ScopeCache) -> Option<AutomodWanted> {
-    let channel_login = shared.hub.lock().ok().and_then(|h| h.active.clone())?;
-    let channel_id = shared
-        .hub
-        .lock()
-        .ok()
-        .and_then(|h| h.room_id(&channel_login).map(str::to_string))?;
+    let (channel_login, channel_id) = {
+        let hub = shared.hub.lock().ok()?;
+        let login = hub.active.as_ref()?;
+        let id = hub.room_id(login)?;
+        (login.clone(), id.to_string())
+    };
     if !valid_twitch_id(&channel_id) {
         return None;
     }
     let token = super::auth::oauth_token(shared)?;
     if cache.token != token {
-        match validate_automod_token(&token).await {
-            Ok(next) => *cache = next,
-            Err(()) => {
-                // Keep previous scopes_ok only if token unchanged; on new token
-                // leave cache empty so the next poll retries validation.
-                *cache = ScopeCache::default();
-                return None;
-            }
-        }
-        if let Some(user_id) = cache.user_id.clone() {
-            super::auth::set_cached_twitch_user_id(shared, user_id);
-        }
+        *cache = validate_automod_token(&token).await.ok()?;
     }
-    if !cache.scopes_ok {
-        return None;
-    }
-    let moderator_id = cache
-        .user_id
-        .clone()
-        .or_else(|| super::auth::resolved_twitch_user_id(shared))?;
-    let role = shared
-        .hub
-        .lock()
-        .ok()?
-        .viewer_role(&channel_login, Some(&moderator_id));
-    if !(role.is_mod || role.is_broadcaster) {
-        return None;
-    }
-    Some(AutomodWanted {
+    let (moderator_id, client_id) = cache.identity.as_ref()?;
+    let wanted = AutomodWanted {
         channel_login,
         channel_id,
-        moderator_id,
+        moderator_id: moderator_id.clone(),
         token,
-        client_id: super::auth::resolved_client_id(shared),
-    })
+        client_id: client_id.clone(),
+    };
+    still_wanted(shared, &wanted).then_some(wanted)
+}
+
+fn still_wanted(shared: &Shared, wanted: &AutomodWanted) -> bool {
+    if shutting_down() || super::auth::oauth_token(shared).as_deref() != Some(&wanted.token) {
+        return false;
+    }
+    let Ok(hub) = shared.hub.lock() else {
+        return false;
+    };
+    if hub.active.as_deref() != Some(&wanted.channel_login)
+        || hub.room_id(&wanted.channel_login) != Some(&wanted.channel_id)
+    {
+        return false;
+    }
+    let role = hub.viewer_role(&wanted.channel_login, Some(&wanted.moderator_id));
+    role.is_mod || role.is_broadcaster
 }
 
 async fn validate_automod_token(token: &str) -> Result<ScopeCache, ()> {
-    let client = super::http_client::build(Duration::from_secs(12));
-    let mut delay = Duration::from_millis(200);
-    for attempt in 0..HTTP_ATTEMPTS {
-        match client
-            .get(VALIDATE_URL)
-            .header("Authorization", format!("OAuth {token}"))
-            .header("Accept", "application/json")
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                let Ok(v) = resp.json::<Value>().await else {
-                    return Err(());
-                };
-                let scopes: HashSet<String> = v
-                    .get("scopes")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect();
-                let scopes_ok = scopes.contains("channel:moderate")
-                    && scopes.contains("moderator:manage:automod");
-                let user_id = v
-                    .get("user_id")
-                    .and_then(Value::as_str)
-                    .filter(|s| valid_twitch_id(s))
-                    .map(str::to_string);
-                return Ok(ScopeCache {
-                    token: token.to_string(),
-                    user_id,
-                    scopes_ok,
-                });
-            }
-            _ => {}
-        }
-        if attempt + 1 < HTTP_ATTEMPTS {
-            tokio::time::sleep(delay).await;
-            delay *= 2;
-        }
-    }
-    Err(())
-}
-
-fn handle_pubsub_text(app: &AppHandle, shared: &Shared, wanted: &AutomodWanted, raw: &str) -> bool {
-    let Ok(v) = serde_json::from_str::<Value>(raw) else {
-        return true;
-    };
-    match v.get("type").and_then(Value::as_str).unwrap_or("") {
-        "RECONNECT" => false,
-        "PONG" => true,
-        "RESPONSE" => v
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .is_empty(),
-        "MESSAGE" => {
-            let data = v.get("data").unwrap_or(&Value::Null);
-            let topic_ok = data
-                .get("topic")
-                .and_then(Value::as_str)
-                .is_some_and(|topic| topic.ends_with(&format!(".{}", wanted.channel_id)));
-            if !topic_ok {
-                return true;
-            }
-            let Some(message) = data.get("message").and_then(Value::as_str) else {
-                return true;
-            };
-            if let Some(parsed) = parse_pubsub_automod(message, &wanted.channel_login) {
-                if parsed
-                    .channel_id
-                    .as_deref()
-                    .is_some_and(|id| id != wanted.channel_id)
-                {
-                    return true;
-                }
-                ingest_event(app, shared, &wanted.channel_login, parsed.event);
-            }
-            true
-        }
-        _ => true,
-    }
-}
-
-fn parse_pubsub_automod(raw: &str, channel_login: &str) -> Option<ParsedAutomod> {
-    let value = serde_json::from_str::<Value>(raw).ok()?;
-    let event_type = value
-        .get("type")
-        .or_else(|| value.get("event_type"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let data = value.get("data").unwrap_or(&value);
-    let status = automod_status(data, event_type)?;
-    let message_id = first_string(
-        data,
-        &[
-            "message_id",
-            "msg_id",
-            "id",
-            "message.id",
-            "message.message_id",
-            "automod_message_id",
-        ],
-    )?;
-    let id = format!("automod_{message_id}");
-    if status != "pending" {
-        return Some(ParsedAutomod {
-            channel_id: first_string(
-                data,
-                &[
-                    "channel_id",
-                    "broadcaster_user_id",
-                    "broadcaster.id",
-                    "message.channel_id",
-                ],
-            ),
-            event: ChatEvent::AutomodStatus {
-                id: format!("{id}:{status}:{}", unix_ms()),
-                timestamp_ms: unix_ms(),
-                target_id: id,
-                status,
-            },
-        });
-    }
-    let text = first_string(
-        data,
-        &[
-            "message",
-            "message_text",
-            "text",
-            "content.text",
-            "message.text",
-            "message.content.text",
-        ],
-    )?;
-    let author_login = first_string(
-        data,
-        &[
-            "sender.login",
-            "sender.user_login",
-            "user_login",
-            "user.login",
-            "message.sender.login",
-            "message.user_login",
-        ],
-    )
-    .unwrap_or_else(|| channel_login.to_string());
-    let author_display_name = first_string(
-        data,
-        &[
-            "sender.display_name",
-            "sender.user_name",
-            "user_name",
-            "display_name",
-            "user.display_name",
-            "message.sender.display_name",
-        ],
-    )
-    .unwrap_or_else(|| author_login.clone());
-    let author_user_id = first_string(
-        data,
-        &[
-            "sender.user_id",
-            "sender.id",
-            "user_id",
-            "user.id",
-            "message.sender.user_id",
-            "message.sender.id",
-            "message.user_id",
-        ],
-    )
-    .unwrap_or_default();
-    Some(ParsedAutomod {
-        channel_id: first_string(
-            data,
-            &[
-                "channel_id",
-                "broadcaster_user_id",
-                "broadcaster.id",
-                "message.channel_id",
-            ],
-        ),
-        event: ChatEvent::AutomodHeld {
-            id,
-            timestamp_ms: unix_ms(),
-            message_id,
-            channel_id: first_string(
-                data,
-                &[
-                    "channel_id",
-                    "broadcaster_user_id",
-                    "broadcaster.id",
-                    "message.channel_id",
-                ],
-            )
-            .unwrap_or_default(),
-            author_user_id,
-            author_login,
-            author_display_name,
-            caught_ranges: extract_ranges(data, &text),
-            reason: first_string(
-                data,
-                &[
-                    "reason",
-                    "reason_code",
-                    "content_classification.category",
-                    "classification.category",
-                    "message.reason",
-                ],
-            ),
-            text,
-            status,
-        },
+    let response = super::http_client::build(WS_CONNECT_TIMEOUT)
+        .get(VALIDATE_URL)
+        .header("Authorization", format!("OAuth {token}"))
+        .send()
+        .await
+        .map_err(|_| ())?
+        .error_for_status()
+        .map_err(|_| ())?;
+    let value = response.json::<Value>().await.map_err(|_| ())?;
+    Ok(ScopeCache {
+        token: token.to_string(),
+        identity: automod_identity(&value),
     })
 }
 
-fn automod_status(data: &Value, event_type: &str) -> Option<String> {
-    let raw = first_string(
-        data,
-        &[
-            "status",
-            "message.status",
-            "moderation_status",
-            "automod_status",
-            "action",
-        ],
-    )
-    .unwrap_or_else(|| event_type.to_string());
-    let raw = raw.to_ascii_lowercase();
-    if raw.contains("allow") || raw.contains("approve") || raw == "allowed" {
-        return Some("allowed".into());
+fn automod_identity(value: &Value) -> Option<(String, String)> {
+    let scopes = value.get("scopes")?.as_array()?;
+    if !scopes
+        .iter()
+        .any(|scope| scope.as_str() == Some("moderator:manage:automod"))
+    {
+        return None;
     }
-    if raw.contains("deny") || raw.contains("reject") || raw == "denied" {
-        return Some("denied".into());
-    }
-    if raw.contains("expir") {
-        return Some("expired".into());
-    }
-    if raw.contains("hold") || raw.contains("caught") || raw.contains("pending") {
-        return Some("pending".into());
-    }
-    None
+    let user_id = value
+        .get("user_id")?
+        .as_str()
+        .filter(|id| valid_twitch_id(id))?;
+    let client_id = value
+        .get("client_id")?
+        .as_str()
+        .filter(|id| !id.is_empty())?;
+    Some((user_id.to_string(), client_id.to_string()))
 }
 
-fn first_string(value: &Value, paths: &[&str]) -> Option<String> {
-    for path in paths {
-        let mut cur = value;
-        let mut ok = true;
-        for part in path.split('.') {
-            match cur.get(part) {
-                Some(next) => cur = next,
-                None => {
-                    ok = false;
-                    break;
-                }
+fn parse_notification<'a>(
+    value: &'a Value,
+    wanted: &AutomodWanted,
+) -> Option<(&'a str, ChatEvent)> {
+    let subscription = value.pointer("/payload/subscription")?;
+    let condition = subscription.get("condition")?;
+    let event = value.pointer("/payload/event")?;
+    if subscription.get("version")?.as_str()? != "2"
+        || condition.get("broadcaster_user_id")?.as_str()? != wanted.channel_id
+        || condition.get("moderator_user_id")?.as_str()? != wanted.moderator_id
+        || event.get("broadcaster_user_id")?.as_str()? != wanted.channel_id
+    {
+        return None;
+    }
+    let event_id = value.pointer("/metadata/message_id")?.as_str()?;
+    if event_id.is_empty() {
+        return None;
+    }
+    let message_id = validate_msg_id(event.get("message_id")?.as_str()?).ok()?;
+    let id = format!("automod_{message_id}");
+    let update_timestamp = || timestamp_ms(value.pointer("/metadata/message_timestamp"));
+    let parsed = match subscription.get("type")?.as_str()? {
+        HOLD_TOPIC => {
+            let text = event.pointer("/message/text")?.as_str()?;
+            let reason = event
+                .pointer("/automod/category")
+                .and_then(Value::as_str)
+                .or_else(|| event.get("reason").and_then(Value::as_str));
+            ChatEvent::AutomodHeld {
+                id,
+                timestamp_ms: parse_timestamp_ms(event.get("held_at"))
+                    .unwrap_or_else(update_timestamp),
+                message_id,
+                channel_id: wanted.channel_id.clone(),
+                author_user_id: event.get("user_id")?.as_str()?.to_string(),
+                author_login: event.get("user_login")?.as_str()?.to_string(),
+                author_display_name: event.get("user_name")?.as_str()?.to_string(),
+                caught_ranges: extract_ranges(event, text),
+                reason: reason.map(str::to_string),
+                text: text.to_string(),
+                status: "pending".to_string(),
             }
         }
-        if !ok {
-            continue;
+        UPDATE_TOPIC => {
+            let status = match event.get("status")?.as_str()?.to_ascii_lowercase().as_str() {
+                "approved" => "allowed",
+                "denied" => "denied",
+                "expired" => "expired",
+                _ => return None,
+            };
+            ChatEvent::AutomodStatus {
+                id: format!("{id}:{status}:{event_id}"),
+                timestamp_ms: update_timestamp(),
+                target_id: id,
+                status: status.to_string(),
+            }
         }
-        if let Some(s) = cur.as_str().map(str::trim).filter(|s| !s.is_empty()) {
-            return Some(s.to_string());
-        }
-        if let Some(n) = cur.as_u64() {
-            return Some(n.to_string());
-        }
-    }
-    None
+        _ => return None,
+    };
+    Some((event_id, parsed))
 }
 
-fn extract_ranges(data: &Value, text: &str) -> Vec<AutomodRange> {
-    let mut ranges = Vec::new();
-    collect_ranges(data.get("fragments"), text, &mut ranges);
-    collect_ranges(data.pointer("/message/fragments"), text, &mut ranges);
-    collect_ranges(data.pointer("/content/fragments"), text, &mut ranges);
-    collect_terms(data.get("terms"), text, &mut ranges);
-    collect_terms(
-        data.pointer("/content_classification/terms"),
-        text,
-        &mut ranges,
-    );
-    collect_terms(
-        data.pointer("/caught_message_reason/blocked_term_failure/terms_found"),
-        text,
-        &mut ranges,
-    );
-    collect_terms(
-        data.pointer("/reason/blocked_term_failure/terms_found"),
-        text,
-        &mut ranges,
-    );
-    collect_terms(
-        data.pointer("/message/caught_message_reason/blocked_term_failure/terms_found"),
-        text,
-        &mut ranges,
-    );
-    ranges.sort_by_key(|r| (r.start, r.end));
+fn timestamp_ms(value: Option<&Value>) -> u64 {
+    parse_timestamp_ms(value).unwrap_or_else(unix_ms)
+}
+
+fn parse_timestamp_ms(value: Option<&Value>) -> Option<u64> {
+    let timestamp = chrono::DateTime::parse_from_rfc3339(value?.as_str()?).ok()?;
+    u64::try_from(timestamp.timestamp_millis()).ok()
+}
+
+fn extract_ranges(event: &Value, text: &str) -> Vec<AutomodRange> {
+    let boundaries = event
+        .pointer("/automod/boundaries")
+        .and_then(Value::as_array);
+    let terms = event
+        .pointer("/blocked_term/terms_found")
+        .and_then(Value::as_array);
+    let mut ranges: Vec<_> = boundaries
+        .into_iter()
+        .flatten()
+        .chain(
+            terms
+                .into_iter()
+                .flatten()
+                .filter_map(|term| term.get("boundary")),
+        )
+        .filter_map(|boundary| {
+            let start = usize::try_from(boundary.get("start_pos")?.as_u64()?).ok()?;
+            let end = usize::try_from(boundary.get("end_pos")?.as_u64()?).ok()?;
+            // EventSub boundaries are inclusive. The renderer uses half-open UTF-16 ranges.
+            if end < start || end >= text.chars().count() {
+                return None;
+            }
+            Some(AutomodRange {
+                start: super::parse::scalar_to_utf16(text, start) as u32,
+                end: super::parse::scalar_to_utf16(text, end + 1) as u32,
+            })
+        })
+        .collect();
+    ranges.sort_by_key(|range| (range.start, range.end));
     ranges.dedup();
     ranges
-}
-
-fn collect_ranges(value: Option<&Value>, text: &str, out: &mut Vec<AutomodRange>) {
-    let Some(arr) = value.and_then(Value::as_array) else {
-        return;
-    };
-    for item in arr {
-        let flagged = item
-            .get("automod")
-            .or_else(|| item.get("is_flagged"))
-            .or_else(|| item.get("flagged"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if !flagged {
-            continue;
-        }
-        let start = item
-            .get("start")
-            .or_else(|| item.get("offset"))
-            .and_then(Value::as_u64);
-        let end = item.get("end").and_then(Value::as_u64).or_else(|| {
-            let len = item.get("length").and_then(Value::as_u64)?;
-            Some(start?.saturating_add(len))
-        });
-        if let (Some(start), Some(end)) = (start, end) {
-            push_range(out, text, start, end);
-        } else if let Some(term) = item
-            .get("text")
-            .or_else(|| item.get("term"))
-            .and_then(Value::as_str)
-        {
-            collect_term(term, text, out);
-        }
-    }
-}
-
-fn collect_terms(value: Option<&Value>, text: &str, out: &mut Vec<AutomodRange>) {
-    match value {
-        Some(Value::Array(arr)) => {
-            for item in arr {
-                if let Some(s) = item.as_str().or_else(|| {
-                    item.get("term")
-                        .or_else(|| item.get("text"))
-                        .or_else(|| item.get("phrase"))
-                        .and_then(Value::as_str)
-                }) {
-                    collect_term(s, text, out);
-                }
-            }
-        }
-        Some(Value::String(s)) => collect_term(s, text, out),
-        _ => {}
-    }
-}
-
-fn collect_term(term: &str, text: &str, out: &mut Vec<AutomodRange>) {
-    let needle = term.trim();
-    if needle.is_empty() {
-        return;
-    }
-    let text_lower = text.to_lowercase();
-    let needle_lower = needle.to_lowercase();
-    let mut from = 0usize;
-    while let Some(pos) = text_lower[from..].find(&needle_lower) {
-        let start = from + pos;
-        let end = start + needle_lower.len();
-        push_range(out, text, start as u64, end as u64);
-        from = end;
-    }
-}
-
-fn push_range(out: &mut Vec<AutomodRange>, text: &str, start: u64, end: u64) {
-    let Ok(start) = u32::try_from(start) else {
-        return;
-    };
-    let Ok(end) = u32::try_from(end) else {
-        return;
-    };
-    if start >= end || end as usize > text.len() {
-        return;
-    }
-    if !text.is_char_boundary(start as usize) || !text.is_char_boundary(end as usize) {
-        return;
-    }
-    out.push(AutomodRange { start, end });
 }
 
 async fn action_creds(shared: &Shared) -> Result<(String, String, String), ApiError> {
@@ -855,10 +722,6 @@ fn shutting_down() -> bool {
     SHUTDOWN.load(Ordering::SeqCst)
 }
 
-async fn sleep_or_shutdown(dur: Duration) {
-    tokio::time::sleep(dur).await;
-}
-
 fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -869,90 +732,324 @@ fn unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    fn wanted() -> AutomodWanted {
+        AutomodWanted {
+            channel_login: "fixture".into(),
+            channel_id: "42".into(),
+            moderator_id: "7".into(),
+            token: "fixture-token".into(),
+            client_id: "fixture-client".into(),
+        }
+    }
+
+    fn notification(topic: &str, event_id: &str, event: Value) -> Value {
+        json!({
+            "metadata": {
+                "message_type": "notification",
+                "message_id": event_id,
+                "message_timestamp": "2025-01-02T03:04:06.789123456Z"
+            },
+            "payload": {
+                "subscription": {
+                    "type": topic,
+                    "version": "2",
+                    "condition": { "broadcaster_user_id": "42", "moderator_user_id": "7" }
+                },
+                "event": event
+            }
+        })
+    }
+
+    fn hold(event_id: &str) -> Value {
+        notification(
+            HOLD_TOPIC,
+            event_id,
+            json!({
+                "broadcaster_user_id": "42",
+                "user_id": "19",
+                "user_login": "viewer",
+                "user_name": "Viewer",
+                "message_id": "held-1",
+                "message": { "text": "  🦊 тест " },
+                "reason": "automod",
+                "automod": {
+                    "category": "aggressive",
+                    "boundaries": [{ "start_pos": 4, "end_pos": 7 }, { "start_pos": 1, "end_pos": 99 }]
+                },
+                "blocked_term": null,
+                "held_at": "2025-01-02T03:04:05.123456789Z"
+            }),
+        )
+    }
+
+    fn update(status: &str) -> Value {
+        notification(
+            UPDATE_TOPIC,
+            "update-1",
+            json!({
+                "broadcaster_user_id": "42",
+                "moderator_user_id": "99",
+                "message_id": "held-1",
+                "status": status
+            }),
+        )
+    }
 
     #[test]
-    fn parses_held_message_with_flagged_fragment() {
-        let raw = r#"{
-            "type":"automod_caught_message",
-            "data":{
-                "message_id":"abc-123",
-                "channel_id":"42",
-                "sender":{"login":"sever_ok","display_name":"sever_ok","user_id":"9"},
-                "message":{"text":"normal rude word"},
-                "fragments":[{"text":"rude","start":7,"end":11,"automod":true}]
-            }
-        }"#;
-        let parsed = parse_pubsub_automod(raw, "channel").unwrap();
-        assert_eq!(parsed.channel_id.as_deref(), Some("42"));
-        match parsed.event {
-            ChatEvent::AutomodHeld {
-                id,
-                author_login,
-                text,
-                caught_ranges,
-                status,
-                ..
-            } => {
-                assert_eq!(id, "automod_abc-123");
-                assert_eq!(author_login, "sever_ok");
-                assert_eq!(text, "normal rude word");
-                assert_eq!(caught_ranges, vec![AutomodRange { start: 7, end: 11 }]);
-                assert_eq!(status, "pending");
-            }
-            _ => panic!("expected automod held"),
+    fn uses_eventsub_scope_and_validated_client_identity() {
+        let mut validation = json!({
+            "user_id": "7", "client_id": "fixture-client", "scopes": ["moderator:manage:automod"]
+        });
+        assert_eq!(
+            automod_identity(&validation),
+            Some(("7".into(), "fixture-client".into()))
+        );
+        validation["scopes"] = json!(["channel:moderate"]);
+        assert_eq!(automod_identity(&validation), None);
+
+        for topic in [HOLD_TOPIC, UPDATE_TOPIC] {
+            assert_eq!(
+                subscription_body(&wanted(), "session", topic),
+                json!({
+                    "type": topic,
+                    "version": "2",
+                    "condition": { "broadcaster_user_id": "42", "moderator_user_id": "7" },
+                    "transport": { "method": "websocket", "session_id": "session" }
+                })
+            );
         }
     }
 
     #[test]
-    fn parses_blocked_term_ranges_and_expired() {
-        let raw = r#"{
-            "type":"automod_caught_message",
-            "data":{
-                "message_id":"bt-1",
-                "channel_id":"7",
-                "sender":{"login":"u","display_name":"u","user_id":"1"},
-                "message":{"text":"buy spam now"},
-                "caught_message_reason":{
-                    "blocked_term_failure":{
-                        "terms_found":[{"text":"spam"}]
-                    }
+    fn parses_hold_with_original_text_and_utf16_highlight() {
+        let frame = hold("hold-1");
+        let (event_id, event) = parse_notification(&frame, &wanted()).unwrap();
+        assert_eq!(event_id, "hold-1");
+        let ChatEvent::AutomodHeld {
+            id,
+            message_id,
+            channel_id,
+            timestamp_ms,
+            author_user_id,
+            author_login,
+            author_display_name,
+            text,
+            caught_ranges,
+            reason,
+            status,
+        } = event
+        else {
+            panic!("expected held message");
+        };
+        assert_eq!(id, "automod_held-1");
+        assert_eq!(message_id, "held-1");
+        assert_eq!(channel_id, "42");
+        assert_eq!(timestamp_ms, 1_735_787_045_123);
+        assert_eq!(author_user_id, "19");
+        assert_eq!(author_login, "viewer");
+        assert_eq!(author_display_name, "Viewer");
+        assert_eq!(text, "  🦊 тест ");
+        assert_eq!(caught_ranges, vec![AutomodRange { start: 5, end: 9 }]);
+        assert_eq!(reason.as_deref(), Some("aggressive"));
+        assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn parses_blocked_term_and_link_boundaries() {
+        for why in ["blocked_term", "blocked_link"] {
+            let mut frame = hold("hold-1");
+            let event = &mut frame["payload"]["event"];
+            event["reason"] = json!(why);
+            event["automod"] = Value::Null;
+            event["blocked_term"] = json!({
+                "terms_found": [
+                    { "boundary": { "start_pos": 2, "end_pos": 2 } },
+                    { "boundary": { "start_pos": 2, "end_pos": 2 } },
+                    { "boundary": { "start_pos": 4, "end_pos": 3 } }
+                ]
+            });
+            let Some((
+                _,
+                ChatEvent::AutomodHeld {
+                    reason,
+                    caught_ranges,
+                    ..
+                },
+            )) = parse_notification(&frame, &wanted())
+            else {
+                panic!("expected held message");
+            };
+            assert_eq!(reason.as_deref(), Some(why));
+            assert_eq!(caught_ranges, vec![AutomodRange { start: 2, end: 4 }]);
+        }
+    }
+
+    #[test]
+    fn maps_status_from_another_moderator_and_rejects_other_rooms() {
+        for (upstream, expected) in [
+            ("Approved", "allowed"),
+            ("denied", "denied"),
+            ("expired", "expired"),
+        ] {
+            let frame = update(upstream);
+            let Some((
+                _,
+                ChatEvent::AutomodStatus {
+                    target_id,
+                    timestamp_ms,
+                    status,
+                    ..
+                },
+            )) = parse_notification(&frame, &wanted())
+            else {
+                panic!("expected status update");
+            };
+            assert_eq!(target_id, "automod_held-1");
+            assert_eq!(timestamp_ms, 1_735_787_046_789);
+            assert_eq!(status, expected);
+        }
+        assert!(parse_notification(&update("pending"), &wanted()).is_none());
+        let mut frame = update("denied");
+        frame["payload"]["subscription"]["condition"]["moderator_user_id"] = json!("99");
+        assert!(parse_notification(&frame, &wanted()).is_none());
+        frame = update("denied");
+        frame["payload"]["event"]["broadcaster_user_id"] = json!("99");
+        assert!(parse_notification(&frame, &wanted()).is_none());
+    }
+
+    #[test]
+    fn late_hold_keeps_decision_and_repeat_is_discarded() {
+        let mut seen = VecDeque::new();
+        let update = update("denied");
+        let (id, mut decision) = parse_notification(&update, &wanted()).unwrap();
+        assert!(remember_notification(&mut seen, id, &mut decision));
+        assert!(!remember_notification(&mut seen, id, &mut decision));
+
+        let frame = hold("hold-1");
+        let (id, mut message) = parse_notification(&frame, &wanted()).unwrap();
+        assert!(remember_notification(&mut seen, id, &mut message));
+        assert!(matches!(&message, ChatEvent::AutomodHeld {status, ..} if status == "denied"));
+        assert!(!remember_notification(&mut seen, id, &mut message));
+    }
+
+    fn reconnect_frame(url: &str) -> Value {
+        json!({
+            "metadata": { "message_type": "session_reconnect" },
+            "payload": { "session": { "reconnect_url": url } }
+        })
+    }
+
+    #[test]
+    fn passes_reconnect_url_unchanged_and_checks_the_origin() {
+        let raw = "wss://eventsub.wss.twitch.tv/ws?reconnect=a%2Fb&session_id=fixture";
+        assert_eq!(reconnect_url(&reconnect_frame(raw)).as_deref(), Some(raw));
+        for invalid in [
+            "https://eventsub.wss.twitch.tv/ws",
+            "wss://eventsub.wss.twitch.tv.example.org/ws",
+            "wss://eventsub.wss.twitch.tv:9000/ws",
+            "wss://eventsub.wss.twitch.tv/login",
+        ] {
+            assert!(reconnect_url(&reconnect_frame(invalid)).is_none());
+        }
+    }
+
+    async fn socket_pair() -> (
+        EventSubSession<tokio::io::DuplexStream>,
+        WebSocketStream<tokio::io::DuplexStream>,
+    ) {
+        let (client, server) = tokio::io::duplex(8 * 1024);
+        let socket = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+        let server = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+        (
+            EventSubSession {
+                socket,
+                id: "old".into(),
+                heartbeat: Duration::from_secs(35),
+            },
+            server,
+        )
+    }
+
+    #[tokio::test]
+    async fn handoff_receives_old_and_new_notifications_and_stops_after_tab_change() {
+        let (mut session, mut old_server) = socket_pair().await;
+        let (new_session, mut new_server) = socket_pair().await;
+        let replacement = RefCell::new(Some(new_session));
+        let current = Cell::new(true);
+        let received_old = tokio::sync::Notify::new();
+        let received_new = tokio::sync::Notify::new();
+        let mut ids = Vec::new();
+        let listen = listen_eventsub(
+            &mut session,
+            |_| {
+                let mut next = replacement.borrow_mut().take().unwrap();
+                async move {
+                    let (id, heartbeat) = parse_welcome(&read_eventsub(&mut next.socket).await?)?;
+                    next.id = id;
+                    next.heartbeat = heartbeat;
+                    Some(next)
                 }
-            }
-        }"#;
-        let parsed = parse_pubsub_automod(raw, "channel").unwrap();
-        match parsed.event {
-            ChatEvent::AutomodHeld {
-                caught_ranges,
-                author_user_id,
-                ..
-            } => {
-                assert_eq!(author_user_id, "1");
-                assert_eq!(caught_ranges, vec![AutomodRange { start: 4, end: 8 }]);
-            }
-            _ => panic!("expected automod held"),
-        }
-        let expired =
-            r#"{"type":"automod_message_update","data":{"message_id":"bt-1","status":"EXPIRED"}}"#;
-        let parsed = parse_pubsub_automod(expired, "channel").unwrap();
-        match parsed.event {
-            ChatEvent::AutomodStatus { status, .. } => assert_eq!(status, "expired"),
-            _ => panic!("expected status"),
-        }
-    }
+            },
+            || current.get(),
+            |frame| {
+                let (id, _) = parse_notification(frame, &wanted()).unwrap();
+                ids.push(id.to_string());
+                match id {
+                    "hold-1" => received_old.notify_one(),
+                    "update-1" => received_new.notify_one(),
+                    _ => panic!("stale notification delivered"),
+                }
+            },
+        );
+        let simulate_twitch = async {
+            old_server
+                .send(Message::Ping(vec![7].into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                old_server.next().await.unwrap().unwrap(),
+                Message::Pong(vec![7].into())
+            );
+            let redirect = reconnect_frame("wss://eventsub.wss.twitch.tv/ws?session_id=fixture");
+            old_server
+                .send(Message::Text(redirect.to_string().into()))
+                .await
+                .unwrap();
+            old_server
+                .send(Message::Text(hold("hold-1").to_string().into()))
+                .await
+                .unwrap();
+            received_old.notified().await;
+            let welcome = json!({
+                "metadata": { "message_type": "session_welcome" },
+                "payload": { "session": { "id": "new", "keepalive_timeout_seconds": 30 } }
+            });
+            new_server
+                .send(Message::Text(welcome.to_string().into()))
+                .await
+                .unwrap();
+            new_server
+                .send(Message::Text(update("approved").to_string().into()))
+                .await
+                .unwrap();
+            received_new.notified().await;
+            current.set(false);
+            new_server
+                .send(Message::Text(hold("stale").to_string().into()))
+                .await
+                .unwrap();
+        };
 
-    #[test]
-    fn parses_update_as_status_event() {
-        let raw =
-            r#"{"type":"automod_message_update","data":{"message_id":"abc","status":"DENIED"}}"#;
-        let parsed = parse_pubsub_automod(raw, "channel").unwrap();
-        match parsed.event {
-            ChatEvent::AutomodStatus {
-                target_id, status, ..
-            } => {
-                assert_eq!(target_id, "automod_abc");
-                assert_eq!(status, "denied");
-            }
-            _ => panic!("expected status"),
-        }
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(listen, simulate_twitch)
+        })
+        .await
+        .expect("handoff should complete");
+        assert!(result.is_ok());
+        assert_eq!(session.id, "new");
+        assert_eq!(ids, ["hold-1", "update-1"]);
     }
 }
