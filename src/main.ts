@@ -90,7 +90,6 @@ import { bindMentionToast } from "./shell/mentionToast";
 import { bindRaidToast } from "./shell/raidToast";
 import { bindGiftToast } from "./shell/giftToast";
 import { bindLinkEnrichment } from "./chat/linkEnrichment";
-import { bindPollPanel } from "./shell/polls";
 import { bindPinnedBanner } from "./shell/pinnedMessage";
 import { bindOutgoingRaidBanner } from "./shell/outgoingRaidBanner";
 import { bindUserCard } from "./shell/userCard";
@@ -267,7 +266,6 @@ async function boot(): Promise<void> {
   const chatEmpty = document.querySelector<HTMLElement>("#chat-empty");
   const chatA11yLive = document.querySelector<HTMLElement>("#chat-a11y-live");
   const pinnedMessageHost = document.querySelector<HTMLElement>("#pinned-message-host");
-  const pollPanelHost = document.querySelector<HTMLElement>("#poll-panel-host");
   const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
   const authChipAvatar = document.querySelector<HTMLImageElement>("#auth-chip-avatar");
   const authChipLetter = document.querySelector<HTMLElement>("#auth-chip-letter");
@@ -343,7 +341,6 @@ async function boot(): Promise<void> {
     !chatEmpty ||
     !chatA11yLive ||
     !pinnedMessageHost ||
-    !pollPanelHost ||
     !authChip ||
     !authChipAvatar ||
     !authChipLetter ||
@@ -1348,18 +1345,6 @@ async function boot(): Promise<void> {
     });
   }
   readActiveChannel = () => ipc.active().trim();
-  const pollPanel = bindPollPanel({
-    host: pollPanelHost,
-    chatColumn,
-    activeChannel: () => ipc.active(),
-    getAuth: () => lastAuth,
-    startLogin: () => {
-      void startLogin();
-    },
-    onStatus: (message, kind = "info") => {
-      toast.push({ kind, text: message });
-    },
-  });
   const pinnedBanner = bindPinnedBanner({
     host: pinnedMessageHost,
     chatColumn,
@@ -1372,7 +1357,6 @@ async function boot(): Promise<void> {
     chainTeardown(() => {
       pinnedBannerApi = null;
       pinnedBanner.stop();
-      pollPanel.stop();
     });
   }
   unbindImageUpload = bindImageUpload({
@@ -1948,7 +1932,6 @@ async function boot(): Promise<void> {
       repaintChannelTitle();
       chatFindCtl.onChannelChanged();
       applySendWaitForActive();
-      pollPanel.sync();
       pinnedBanner.sync();
     },
     left: (name, next, wasActive) => {
@@ -1967,7 +1950,6 @@ async function boot(): Promise<void> {
         repaintChannelTitle();
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
-        pollPanel.sync();
         pinnedBanner.sync();
         paintTypingStatus();
         quickActionsCtl?.hide();
@@ -1981,7 +1963,6 @@ async function boot(): Promise<void> {
       } else {
         channels.paint(ipc.active());
         applySendWaitForActive();
-        pollPanel.sync();
         pinnedBanner.sync();
       }
     },
@@ -3269,7 +3250,6 @@ async function boot(): Promise<void> {
       deviceEl.textContent = "";
     }
     syncComposer();
-    pollPanel.syncAuth();
   }
 
   async function paintAuthFromServer(message?: string): Promise<void> {
@@ -3698,7 +3678,6 @@ async function boot(): Promise<void> {
     repaintChannelTitle();
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
-    pollPanel.sync();
     pinnedBanner.sync();
     paintTypingStatus();
     userCard?.syncMod();

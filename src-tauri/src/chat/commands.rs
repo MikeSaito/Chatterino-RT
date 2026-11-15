@@ -77,16 +77,6 @@ impl From<AuthFail> for ApiError {
     }
 }
 
-impl From<super::poll_actions::PollActionsError> for ApiError {
-    fn from(e: super::poll_actions::PollActionsError) -> Self {
-        Self {
-            code: e.code,
-            message: e.message,
-            params: e.params,
-        }
-    }
-}
-
 #[tauri::command]
 pub async fn chat_join(
     app: AppHandle,
@@ -127,7 +117,6 @@ pub async fn chat_join(
     auth::emit(&app, &state);
     if do_focus {
         super::session::emit_roomstate(&app, &state, &normalized);
-        state.notify_polls(super::polls::PollsCmd::SetChannel(normalized.clone()));
         state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(
             normalized.clone(),
         ));
@@ -154,7 +143,6 @@ pub async fn chat_leave(
     if left_was_active {
         state.notify_event(EventCmd::ClearChannel);
         state.notify_bttv(BttvCmd::ClearChannel);
-        state.notify_polls(super::polls::PollsCmd::ClearChannel);
         state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
         state.notify_pins(super::pins::PinsCmd::ClearChannel);
         state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
@@ -198,13 +186,11 @@ pub async fn chat_leave(
             let _ = super::session::remember(&state, ch.clone(), true);
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
             super::session::emit_roomstate(&app, &state, ch);
-            state.notify_polls(super::polls::PollsCmd::SetChannel(ch.clone()));
             state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(ch.clone()));
             state.notify_pins(super::pins::PinsCmd::SetChannel(ch.clone()));
             state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(ch.clone()));
         } else {
             let _ = super::session::clear_last(&state);
-            state.notify_polls(super::polls::PollsCmd::ClearChannel);
             state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
             state.notify_pins(super::pins::PinsCmd::ClearChannel);
             state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
@@ -219,7 +205,6 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     send_cmd(&state, IrcCmd::Part).await?;
     state.notify_event(EventCmd::ClearChannel);
     state.notify_bttv(BttvCmd::ClearChannel);
-    state.notify_polls(super::polls::PollsCmd::ClearChannel);
     state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
     state.notify_pins(super::pins::PinsCmd::ClearChannel);
     state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
@@ -1490,25 +1475,6 @@ pub async fn auth_remove(
 ) -> Result<(), ApiError> {
     let out = auth::remove_account(app, state.inner().clone(), login).await;
     Ok(out?)
-}
-
-#[tauri::command]
-pub async fn polls_vote(
-    state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)] pollId: String,
-    #[allow(non_snake_case)] choiceId: String,
-) -> Result<super::poll_actions::PollVoteResult, ApiError> {
-    Ok(super::poll_actions::vote_in_poll(&state, &pollId, &choiceId).await?)
-}
-
-#[tauri::command]
-pub async fn polls_predict(
-    state: tauri::State<'_, Shared>,
-    #[allow(non_snake_case)] eventId: String,
-    #[allow(non_snake_case)] outcomeId: String,
-    points: u64,
-) -> Result<super::poll_actions::PredictionBetResult, ApiError> {
-    Ok(super::poll_actions::make_prediction(&state, &eventId, &outcomeId, points).await?)
 }
 
 #[tauri::command]

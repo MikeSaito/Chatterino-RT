@@ -107,8 +107,6 @@ fn main() {
         "auth_logout",
         "auth_select",
         "auth_remove",
-        "polls_vote",
-        "polls_predict",
         "filters_get",
         "filters_set",
         "settings_get",

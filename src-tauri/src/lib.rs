@@ -21,7 +21,7 @@ use chat::commands::{
     highlight_cancel_attention, highlight_request_attention, highlight_sound_pick,
     highlight_sound_read, image_upload, logging_pick_directory, open_chat_link,
     open_in_custom_player, open_in_streamlink, open_settings_directory, open_settings_window,
-    polls_predict, polls_vote, read_chatterino1_commands, session_get, session_reorder_open,
+    read_chatterino1_commands, session_get, session_reorder_open,
     settings_get, settings_set, settings_ui_closed, settings_ui_preview, settings_ui_saved,
     streamer_mode_detect, supports_incognito_links,
 };
@@ -34,7 +34,7 @@ use updater::{
     UpdaterGate,
 };
 
-/// Остановить фоновые IRC/7TV/BTTV/poll задачи перед выходом.
+/// Остановить фоновые IRC/7TV/BTTV задачи перед выходом.
 fn shutdown_background(app: &AppHandle) {
     if let Some(state) = app.try_state::<Shared>() {
         if let Ok(guard) = state.irc_tx.lock() {
@@ -44,7 +44,6 @@ fn shutdown_background(app: &AppHandle) {
         }
         state.notify_event(EventCmd::Shutdown);
         state.notify_bttv(BttvCmd::Shutdown);
-        state.notify_polls(chat::polls::PollsCmd::Shutdown);
         state.notify_low_trust(chat::low_trust::LowTrustCmd::Shutdown);
         state.notify_pins(chat::pins::PinsCmd::Shutdown);
         state.notify_shared_bans(chat::shared_bans::SharedBansCmd::Shutdown);
@@ -87,7 +86,6 @@ pub fn run() {
                 chat::toast_shortcut::apply_from_settings(&shared);
                 chat::eventapi::start(shared.clone())?;
                 chat::bttv_live::start(shared.clone())?;
-                chat::polls::start(app.handle().clone(), shared.clone())?;
                 chat::low_trust::start(app.handle().clone(), shared.clone())?;
                 chat::pins::start(app.handle().clone(), shared.clone())?;
                 chat::automod::start(app.handle().clone(), shared.clone())?;
@@ -166,8 +164,6 @@ pub fn run() {
             auth_logout,
             auth_select,
             auth_remove,
-            polls_vote,
-            polls_predict,
             filters_get,
             filters_set,
             settings_get,

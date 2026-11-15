@@ -24,7 +24,6 @@ use super::logging::Logging;
 use super::low_trust::LowTrustCmd;
 use super::membership_batch::MembershipBatcher;
 use super::pins::PinsCmd;
-use super::polls::PollsCmd;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
@@ -161,8 +160,6 @@ pub struct Shared {
     pub bttv_tx: Arc<Mutex<Option<mpsc::UnboundedSender<BttvCmd>>>>,
     pub bttv_wanted: Arc<Mutex<BttvWanted>>,
     pub bttv_shutdown: Arc<AtomicBool>,
-    pub polls_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PollsCmd>>>>,
-    pub polls_shutdown: Arc<AtomicBool>,
     pub low_trust_tx: Arc<Mutex<Option<mpsc::UnboundedSender<LowTrustCmd>>>>,
     pub low_trust_shutdown: Arc<AtomicBool>,
     pub pins_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PinsCmd>>>>,
@@ -240,8 +237,6 @@ impl Shared {
                 channel: None,
             })),
             bttv_shutdown: Arc::new(AtomicBool::new(false)),
-            polls_tx: Arc::new(Mutex::new(None)),
-            polls_shutdown: Arc::new(AtomicBool::new(false)),
             low_trust_tx: Arc::new(Mutex::new(None)),
             low_trust_shutdown: Arc::new(AtomicBool::new(false)),
             pins_tx: Arc::new(Mutex::new(None)),
@@ -475,17 +470,6 @@ impl Shared {
             self.apply_bttv_cmd(&cmd);
         }
         if let Ok(guard) = self.bttv_tx.lock() {
-            if let Some(tx) = guard.as_ref() {
-                let _ = tx.send(cmd);
-            }
-        }
-    }
-
-    pub fn notify_polls(&self, cmd: PollsCmd) {
-        if matches!(cmd, PollsCmd::Shutdown) {
-            self.polls_shutdown.store(true, Ordering::SeqCst);
-        }
-        if let Ok(guard) = self.polls_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }
