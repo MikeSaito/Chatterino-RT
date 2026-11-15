@@ -92,6 +92,15 @@ fn catalog_error() -> ApiError {
     ApiError::coded("error.gif.catalog", "The GIPHY catalog is unavailable")
 }
 
+fn catalog_api_key() -> Option<String> {
+    super::auth::env_secret("GIPHY_API_KEY").or_else(|| {
+        option_env!("GIPHY_RELEASE_API_KEY")
+            .map(str::trim)
+            .filter(|key| !key.is_empty() && *key != "YOUR_API_KEY_HERE")
+            .map(str::to_owned)
+    })
+}
+
 fn catalog_page(body: &Value, offset: u32, max_offset: u32) -> Result<GifPage, ApiError> {
     let data = body["data"].as_array().ok_or_else(catalog_error)?;
     let next = offset + data.len().min(GIPHY_PAGE_SIZE as usize) as u32;
@@ -112,7 +121,7 @@ fn catalog_page(body: &Value, offset: u32, max_offset: u32) -> Result<GifPage, A
 
 #[tauri::command]
 pub async fn chat_catalog_gifs(query: String, offset: u32) -> Result<GifPage, ApiError> {
-    let key = super::auth::env_secret("GIPHY_API_KEY").ok_or_else(|| {
+    let key = catalog_api_key().ok_or_else(|| {
         ApiError::coded("error.gif.catalog_key", "GIPHY_API_KEY is not configured")
     })?;
     let query: String = query.trim().chars().take(GIPHY_QUERY_LIMIT).collect();

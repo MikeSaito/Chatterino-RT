@@ -77,6 +77,8 @@ The GIF tab is available when Twitch confirms that the signed-in account can sen
 
 Create an API key in the [GIPHY Developer Dashboard](https://developers.giphy.com/dashboard/) and set `GIPHY_API_KEY` in the environment before launching Chatterino RT. GIPHY beta keys allow 100 API requests per hour. The catalog requests results rated PG-13 or below.
 
+For packaged builds, set `GIPHY_RELEASE_API_KEY` at build time. The release workflow reads the optional GitHub Actions secret of the same name. Use a GIPHY production key for public builds. Installations share its quota, and the key can be extracted from the executable. `GIPHY_API_KEY` at launch overrides the bundled key.
+
 ## Layout
 
 | Path | Role |
