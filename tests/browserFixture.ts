@@ -59,6 +59,7 @@ for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ lengt
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
 const recentGif = { messageId: "gif-source", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
 const pendingGifSends: { args: Record<string, unknown>; resolve: (id: string) => void; reject: (error: unknown) => void }[] = [];
+const pendingGifAccess = new Map<string, (available: boolean) => void>();
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
@@ -92,6 +93,7 @@ mockIPC(async (cmd, args) => {
   }
   if (cmd === "chat_snapshot") return { channelId: a.channel, seq: sequences.get(String(a.channel)) ?? 1, dropped: 0, events: history.get(String(a.channel)) ?? [] };
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
+  if (cmd === "chat_gif_available") return new Promise<boolean>((resolve) => pendingGifAccess.set(String(a.channel), resolve));
   if (cmd === "chat_recent_gifs") return a.channel === "alpha" && recentGif.title.toLowerCase().includes(String(a.query).toLowerCase()) ? [recentGif] : [];
   if (cmd === "chat_send_gif") return new Promise<string>((resolve, reject) => pendingGifSends.push({ args: a, resolve, reject }));
   if (cmd === "chat_viewer_role") return { isMod: false, isBroadcaster: false };
@@ -259,11 +261,30 @@ fixtureWindow.__fixture = {
     }
   },
   async gifPicker() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("chat_join", { channel: "beta", focus: false });
+    await until(() => Boolean(document.querySelector('[data-channel="beta"] .channel-item')));
     await switchTo("alpha");
     type("Text to keep");
     selectReply();
     document.querySelector<HTMLButtonElement>("#emote-open")!.click();
-    document.querySelector<HTMLButtonElement>('[data-tab="gifs"]')!.click();
+    const gifs = document.querySelector<HTMLButtonElement>('[data-tab="gifs"]')!;
+    const shown = () => gifs.getClientRects().length > 0;
+    const access = (channel: string) => pendingGifAccess.get(channel);
+    await until(() => Boolean(access("alpha")));
+    const stale = access("alpha")!;
+    check(!shown(), "GIF tab is hidden while access is pending");
+    await switchTo("beta");
+    await until(() => Boolean(access("beta")));
+    access("beta")!(false);
+    stale(true);
+    await sleep(50);
+    check(!shown(), "denial and a stale approval from another channel keep GIF hidden");
+    await switchTo("alpha");
+    await until(() => access("alpha") !== stale);
+    access("alpha")!(true);
+    await until(shown);
+    gifs.click();
     const tile = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-item");
     const send = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-send")!;
     const modal = document.querySelector<HTMLElement>("#emotepopup-modal")!;
@@ -286,6 +307,22 @@ fixtureWindow.__fixture = {
     pendingGifSends[1].resolve("gif-receipt");
     await until(() => modal.hidden === true);
     check(input().value === "Text to keep" && !document.querySelector<HTMLElement>("#reply-bar")!.hidden, "GIF send preserves the text draft and reply");
+
+    const previous = access("alpha");
+    document.querySelector<HTMLButtonElement>("#emote-open")!.click();
+    await until(() => access("alpha") !== previous);
+    access("alpha")!(true);
+    await until(shown);
+    gifs.click();
+    await until(() => Boolean(tile()));
+    tile()!.click();
+    send().click();
+    await until(() => pendingGifSends.length === 3);
+    pendingGifSends[2].reject({ code: "error.gif.unavailable" });
+    await until(() => !shown());
+    check(!modal.hidden && !tile(), "a new denial removes GIF controls from the open picker");
+    document.querySelector<HTMLButtonElement>("#emotepopup-close")!.click();
+    await until(() => modal.hidden === true);
   },
   async appearance(theme, layout, language = "en") {
     settings.knobs["appearance.theme"] = theme;

@@ -122,6 +122,7 @@ pub fn run() {
             chat_subscribe,
             chat_unsubscribe,
             chat_send,
+            chat::gif_send::chat_gif_available,
             chat::gif_send::chat_send_gif,
             chat::gif_send::chat_recent_gifs,
             chat_typing,

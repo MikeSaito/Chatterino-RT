@@ -4,6 +4,7 @@ import { isSettingsWindowOpen } from "./settings/settingsWindowState";
 import { closeModal, prepareModalOpen } from "./modalClose";
 import { bindFocusTrap } from "./focusTrap";
 import { t, type MessageKey } from "../i18n";
+import type { InvokeErrorShape } from "../i18n/formatError";
 
 type EmotePopupTab =
   | "favourite"
@@ -45,9 +46,10 @@ export function bindEmotePopup(opts: {
   anchor: HTMLElement;
   insertEmote: (code: string, url?: string | null) => void;
   activeChannel: () => string | null;
+  canSend: () => boolean;
   onGifSent: (channel: string) => void;
   onGifError: (error: unknown) => void;
-}): { open: () => void; close: () => void; toggle: () => void; relabel: () => void } {
+}): { open: () => void; close: () => void; toggle: () => void; relabel: () => void; contextChanged: () => void } {
   const { modal, anchor, insertEmote, activeChannel } = opts;
   const dialog = modal.querySelector<HTMLElement>("#emotepopup-dialog");
   const backdrop = modal.querySelector<HTMLElement>("#emotepopup-backdrop");
@@ -58,17 +60,20 @@ export function bindEmotePopup(opts: {
   const tabButtons = Array.from(
     modal.querySelectorAll<HTMLButtonElement>(".emotepopup-tab[data-tab]"),
   );
-  if (!dialog || !backdrop || !closeBtn || !title || !search || !view || tabButtons.length === 0) {
+  const gifTab = tabButtons.find((btn) => btn.dataset.tab === "gifs");
+  if (!dialog || !backdrop || !closeBtn || !title || !search || !view || !gifTab) {
     return {
       open: () => undefined,
       close: () => undefined,
       toggle: () => undefined,
       relabel: () => undefined,
+      contextChanged: () => undefined,
     };
   }
 
   let timer = 0;
   let seq = 0;
+  let gifAccessSeq = 0;
   let tab: EmotePopupTab = "subs";
   let busyFav = false;
   let sendingGif = false;
@@ -112,6 +117,7 @@ export function bindEmotePopup(opts: {
   const close = (): void => {
     window.clearTimeout(timer);
     seq += 1;
+    gifAccessSeq += 1;
     trap.deactivate();
     void closeModal(modal);
     anchor.setAttribute("aria-expanded", "false");
@@ -131,20 +137,12 @@ export function bindEmotePopup(opts: {
     if (isSettingsWindowOpen()) {
       return;
     }
-    const channel = activeChannel()?.trim() || "";
-    title.textContent = channel
-      ? t("emotes.title.channel", { channel })
-      : t("emotes.title");
     prepareModalOpen(modal);
     trap.activate();
     anchor.setAttribute("aria-expanded", "true");
     positionNearAnchor();
     search.focus();
-    void reload().then(() => {
-      if (!modal.hidden) {
-        positionNearAnchor();
-      }
-    });
+    contextChanged();
   };
 
   const toggle = (): void => {
@@ -306,6 +304,7 @@ export function bindEmotePopup(opts: {
         return;
       }
       const { messageId, gifId } = selected;
+      const accessToken = gifAccessSeq;
       sendingGif = true;
       send.disabled = true;
       send.textContent = t("emotes.gifs.sending");
@@ -314,7 +313,12 @@ export function bindEmotePopup(opts: {
           if (token === seq) close();
           opts.onGifSent(channel);
         },
-        opts.onGifError,
+        (error: unknown) => {
+          opts.onGifError(error);
+          if (accessToken === gifAccessSeq && (error as InvokeErrorShape | null)?.code === "error.gif.unavailable") {
+            hideGifTabAndReload();
+          }
+        },
       ).finally(() => {
         sendingGif = false;
         send.disabled = false;
@@ -358,10 +362,38 @@ export function bindEmotePopup(opts: {
     }
   };
 
+  const hideGifTabAndReload = (): void => {
+    gifTab.hidden = true;
+    if (tab === "gifs") {
+      setTab("subs");
+      view.replaceChildren();
+      if (dialog.contains(document.activeElement)) search.focus();
+    }
+    void reload().then(() => {
+      if (!modal.hidden) positionNearAnchor();
+    });
+  };
+
+  const contextChanged = (): void => {
+    const accessToken = ++gifAccessSeq;
+    if (modal.hidden || modal.classList.contains("is-closing")) return;
+    window.clearTimeout(timer);
+    relabel();
+    hideGifTabAndReload();
+    const channel = activeChannel()?.trim();
+    if (!channel || !opts.canSend()) return;
+    void invoke<boolean>("chat_gif_available", { channel }).then((available) => {
+      if (available === true && accessToken === gifAccessSeq && activeChannel()?.trim() === channel && opts.canSend()) {
+        gifTab.hidden = false;
+        positionNearAnchor();
+      }
+    }, () => undefined);
+  };
+
   for (const btn of tabButtons) {
     btn.addEventListener("click", () => {
       const id = btn.dataset.tab as EmotePopupTab | undefined;
-      if (!id || !TABS.includes(id) || id === tab) {
+      if (!id || btn.hidden || !TABS.includes(id) || id === tab) {
         return;
       }
       setTab(id);
@@ -412,5 +444,5 @@ export function bindEmotePopup(opts: {
   anchor.setAttribute("aria-expanded", "false");
   anchor.setAttribute("aria-controls", "emotepopup-dialog");
 
-  return { open, close, toggle, relabel };
+  return { open, close, toggle, relabel, contextChanged };
 }

@@ -213,7 +213,7 @@ try {
   await command("Network.setBlockedURLs", { urls: ["*://player.twitch.tv/*", "*://embed.twitch.tv/*", "*://media2.giphy.com/media/FixtureGif/*"] });
   await evaluate("window.__fixture.gifPicker()");
   console.log("UI GIFs: animated emote, original chat GIF, cache reuse, smaller GIF fallback");
-  console.log("GIF picker: selection, explicit send, rejection, confirmation and draft preservation");
+  console.log("GIF picker: channel access, stale approval, explicit send, rejection and draft preservation");
   assert.deepEqual(failures, [], "no unhandled browser exceptions during theme/layout and GIF checks");
   console.log("UI chrome: four themes, minimum sizes, high DPI, Russian, tab overflow, keyboard focus, send states");
   const screenshot = await command("Page.captureScreenshot", { format: "png" });

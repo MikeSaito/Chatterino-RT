@@ -6,10 +6,19 @@ use serde_json::{json, Value};
 
 use super::commands::{normalize_channel, ApiError};
 use super::fetch::{allowed_twitch_gif_url, gif_url_matches_id};
+use super::hub::Hub;
 use super::state::Shared;
 use super::types::{ChatEvent, EmoteSpan};
 
 const GQL: &str = "https://gql.twitch.tv/gql";
+const GIF_AVAILABILITY: &str = r#"
+query ChatGifAvailability($channelID: ID!) {
+    currentUser { id }
+    gifPickerConfig(channelID: $channelID) { isEnabled isAllowlisted }
+    user(id: $channelID) { self { subscriptionBenefit { tier } } }
+    channelShieldMode(channelID: $channelID) { isActive }
+}
+"#;
 const SEND_GIF: &str = r#"
 mutation sendGifMessage($input: SendGifMessageInput!) {
     sendGifMessage(input: $input) {
@@ -84,6 +93,101 @@ pub fn chat_recent_gifs(
     Ok(collect_recent(hub.channel_events(&channel).rev(), &query))
 }
 
+fn gif_room_id<'a>(hub: &'a Hub, channel: &str) -> Option<&'a str> {
+    hub.room_id(channel).filter(|_| {
+        hub.is_joined(channel)
+            && !hub
+                .room_modes(channel)
+                .is_some_and(|modes| modes.emote_only)
+    })
+}
+
+fn confirmed_access(body: &Value) -> bool {
+    let data = &body["data"];
+    let config = &data["gifPickerConfig"];
+    let tier = &data["user"]["self"]["subscriptionBenefit"]["tier"];
+    body.get("errors")
+        .is_none_or(|errors| errors.as_array().is_some_and(Vec::is_empty))
+        && data["currentUser"]["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+        && config["isEnabled"].as_bool() == Some(true)
+        && config["isAllowlisted"].as_bool() == Some(true)
+        && data["channelShieldMode"]["isActive"].as_bool() == Some(false)
+        && (matches!(tier.as_str(), Some("2000" | "3000"))
+            || matches!(tier.as_u64(), Some(2000 | 3000)))
+}
+
+fn graph_request(
+    client: &reqwest::Client,
+    creds: &(String, String),
+    body: Value,
+) -> reqwest::RequestBuilder {
+    client
+        .post(GQL)
+        .header("Client-Id", &creds.0)
+        .header(
+            "Authorization",
+            format!("OAuth {}", creds.1.trim_start_matches("oauth:")),
+        )
+        .json(&body)
+}
+
+async fn gif_access(client: &reqwest::Client, creds: &(String, String), room_id: &str) -> bool {
+    let body = json!({
+        "operationName": "ChatGifAvailability",
+        "variables": { "channelID": room_id },
+        "query": GIF_AVAILABILITY,
+    });
+    let Ok(response) = graph_request(client, creds, body)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+    else {
+        return false;
+    };
+    response.status().is_success()
+        && response
+            .json::<Value>()
+            .await
+            .is_ok_and(|body| confirmed_access(&body))
+}
+
+fn current_context(
+    shared: &Shared,
+    channel: &str,
+    room_id: &str,
+    creds: &(String, String),
+) -> bool {
+    super::auth::oauth_graph_creds(shared).as_ref() == Some(creds)
+        && shared
+            .hub
+            .lock()
+            .is_ok_and(|hub| gif_room_id(&hub, channel) == Some(room_id))
+}
+
+#[tauri::command]
+pub async fn chat_gif_available(
+    state: tauri::State<'_, Shared>,
+    channel: String,
+) -> Result<bool, ApiError> {
+    let channel = normalize_channel(&channel)?;
+    let Some(creds) = super::auth::oauth_graph_creds(&state) else {
+        return Ok(false);
+    };
+    let room_id = state
+        .hub
+        .lock()
+        .map(|hub| gif_room_id(&hub, &channel).map(str::to_owned))
+        .map_err(|_| ApiError::internal("lock"))?;
+    let Some(room_id) = room_id else {
+        return Ok(false);
+    };
+    let client = super::http_client::build_no_redirect(Duration::from_secs(6));
+    Ok(gif_access(&client, &creds, &room_id).await
+        && current_context(&state, &channel, &room_id, &creds))
+}
+
 fn send_payload(channel_id: &str, gif_id: &str, url: &str) -> Value {
     json!({
         "operationName": "sendGifMessage",
@@ -96,9 +200,19 @@ fn unknown_delivery() -> ApiError {
     ApiError::coded("error.gif.unknown", "Twitch did not confirm GIF delivery")
 }
 
+fn unavailable() -> ApiError {
+    ApiError::coded(
+        "error.gif.unavailable",
+        "Twitch did not allow GIF sending in this session",
+    )
+}
+
 fn accepted_id(body: &Value) -> Result<String, ApiError> {
     let payload = &body["data"]["sendGifMessage"];
     if let Some(error) = payload["error"].as_str().filter(|s| !s.is_empty()) {
+        if error == "TEMPORARILY_UNAVAILABLE" {
+            return Err(unavailable());
+        }
         if let Some(seconds) = payload["secondsUntilCanSend"].as_u64().filter(|n| *n > 0) {
             return Err(ApiError::coded_params(
                 "error.gif.wait",
@@ -125,10 +239,7 @@ fn accepted_id(body: &Value) -> Result<String, ApiError> {
         .as_array()
         .is_some_and(|errors| !errors.is_empty())
     {
-        return Err(ApiError::coded(
-            "error.gif.unavailable",
-            "Twitch did not allow GIF sending in this session",
-        ));
+        return Err(unavailable());
     }
     payload["message"]["id"]
         .as_str()
@@ -145,16 +256,17 @@ pub async fn chat_send_gif(
     gif_id: String,
 ) -> Result<String, ApiError> {
     let channel = normalize_channel(&channel)?;
-    let (client_id, token) = super::auth::oauth_graph_creds(&state)
+    let creds = super::auth::oauth_graph_creds(&state)
         .ok_or_else(|| ApiError::coded("error.auth.required_send", "Twitch login required"))?;
     let (room_id, url) = {
         let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-        let room_id = hub
-            .room_id(&channel)
-            .filter(|_| hub.is_joined(&channel))
-            .ok_or_else(|| {
-                ApiError::coded("error.gif.channel", "Join the channel before sending a GIF")
-            })?;
+        if !hub.is_joined(&channel) || hub.room_id(&channel).is_none() {
+            return Err(ApiError::coded(
+                "error.gif.channel",
+                "Join the channel before sending a GIF",
+            ));
+        }
+        let room_id = gif_room_id(&hub, &channel).ok_or_else(unavailable)?;
         let url = hub
             .channel_events(&channel)
             .rev()
@@ -170,23 +282,18 @@ pub async fn chat_send_gif(
         (room_id.to_string(), url)
     };
     let client = super::http_client::build_no_redirect(Duration::from_secs(12));
+    if !gif_access(&client, &creds, &room_id).await
+        || !current_context(&state, &channel, &room_id, &creds)
+    {
+        return Err(unavailable());
+    }
     // A lost response can follow an accepted send, so do not retry the mutation.
-    let response = client
-        .post(GQL)
-        .header("Client-Id", client_id)
-        .header(
-            "Authorization",
-            format!("OAuth {}", token.trim_start_matches("oauth:")),
-        )
-        .json(&send_payload(&room_id, &gif_id, &url))
+    let response = graph_request(&client, &creds, send_payload(&room_id, &gif_id, &url))
         .send()
         .await
         .map_err(|_| unknown_delivery())?;
     if response.status().is_client_error() {
-        return Err(ApiError::coded(
-            "error.gif.unavailable",
-            "Twitch did not allow GIF sending in this session",
-        ));
+        return Err(unavailable());
     }
     if !response.status().is_success() {
         return Err(unknown_delivery());
@@ -202,6 +309,37 @@ pub async fn chat_send_gif(
 mod tests {
     use super::*;
     use crate::chat::parse::{parse_line, ParsedLine};
+
+    #[test]
+    fn access_requires_an_authenticated_tier_and_enabled_channel() {
+        let allowed = json!({"data": {
+            "currentUser": {"id": "42"},
+            "gifPickerConfig": {"isEnabled": true, "isAllowlisted": true},
+            "channelShieldMode": {"isActive": false},
+            "user": {"self": {"subscriptionBenefit": {"tier": "2000"}}}
+        }});
+        assert!(confirmed_access(&allowed));
+        let mut tier_three = allowed.clone();
+        tier_three["data"]["user"]["self"]["subscriptionBenefit"]["tier"] = json!("3000");
+        assert!(confirmed_access(&tier_three));
+        for (path, value) in [
+            ("/data/currentUser", Value::Null),
+            ("/data/user/self/subscriptionBenefit/tier", json!("1000")),
+            ("/data/user/self/subscriptionBenefit", Value::Null),
+            ("/data/gifPickerConfig/isEnabled", json!(false)),
+            ("/data/gifPickerConfig/isAllowlisted", json!(false)),
+            ("/data/channelShieldMode/isActive", json!(true)),
+            ("/data/channelShieldMode", Value::Null),
+        ] {
+            let mut denied = allowed.clone();
+            *denied.pointer_mut(path).unwrap() = value;
+            assert!(!confirmed_access(&denied), "{path}");
+        }
+        let mut failed = allowed;
+        failed["errors"] = json!([{"message": "no access"}]);
+        assert!(!confirmed_access(&failed));
+        assert!(!confirmed_access(&Value::Null));
+    }
 
     #[test]
     fn selects_received_gifs_and_preserves_the_original_url() {

@@ -63,6 +63,7 @@ fn main() {
         "chat_subscribe",
         "chat_unsubscribe",
         "chat_send",
+        "chat_gif_available",
         "chat_send_gif",
         "chat_recent_gifs",
         "chat_typing",
