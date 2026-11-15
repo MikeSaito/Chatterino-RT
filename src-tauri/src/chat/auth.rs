@@ -15,7 +15,7 @@ const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 // Must match scopes Chatterino client_login can grant (same Client ID).
 // Twitch uses `chat:edit` (not `chat:write`). Prefer `moderator:manage:*` where
 // Chatterino login does not issue the corresponding `read` scope — Helix/EventSub
-// accept manage for pins, warn, AutoMod, shared channel.moderate.
+// accept manage for warnings, AutoMod, shared channel.moderate.
 // Existing sessions need re-login after scopes are added.
 const DEVICE_SCOPES: &str =
     "chat:read chat:edit user:read:blocked_users user:manage:blocked_users channel:manage:raids channel:moderate moderator:manage:chat_messages moderator:manage:automod moderator:manage:warnings moderator:read:suspicious_users moderator:manage:suspicious_users moderator:manage:blocked_terms moderator:manage:chat_settings moderator:manage:unban_requests moderator:manage:banned_users moderator:read:moderators moderator:read:vips";
@@ -45,7 +45,7 @@ pub struct AuthInner {
     pub pending_paste: bool,
     pub poll_gen: u64,
     pub last_message: Option<String>,
-    /// Token scopes missing vs DEVICE_SCOPES (pins/automod/warn/shared).
+    /// Token scopes missing vs DEVICE_SCOPES (AutoMod, warnings, shared moderation).
     pub scopes_incomplete: bool,
 }
 
@@ -831,7 +831,6 @@ async fn after_identity_change(shared: &Shared) {
     }
     let _ = ensure_twitch_user_id(shared).await;
     request_relogin(shared).await;
-    shared.notify_pins(super::pins::PinsCmd::Relogin);
     shared.notify_low_trust(super::low_trust::LowTrustCmd::Relogin);
     shared.notify_shared_bans(super::shared_bans::SharedBansCmd::Relogin);
     super::provider_activity::clear_identity_cache(shared);
@@ -1177,15 +1176,6 @@ fn apply_scope_check(shared: &Shared, scopes: &[String]) {
     let incomplete = !scopes_cover_device(scopes);
     if let Ok(mut inner) = shared.auth.lock() {
         inner.scopes_incomplete = incomplete;
-        // Do not stash English copy in last_message — UI uses t("auth.scopes.relogin").
-        if !incomplete
-            && inner
-                .last_message
-                .as_deref()
-                .is_some_and(|m| m.contains("unlock pins, AutoMod"))
-        {
-            inner.last_message = None;
-        }
     }
 }
 

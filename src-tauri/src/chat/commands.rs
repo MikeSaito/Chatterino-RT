@@ -120,7 +120,6 @@ pub async fn chat_join(
         state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(
             normalized.clone(),
         ));
-        state.notify_pins(super::pins::PinsCmd::SetChannel(normalized.clone()));
         state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(
             normalized.clone(),
         ));
@@ -144,7 +143,6 @@ pub async fn chat_leave(
         state.notify_event(EventCmd::ClearChannel);
         state.notify_bttv(BttvCmd::ClearChannel);
         state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
-        state.notify_pins(super::pins::PinsCmd::ClearChannel);
         state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
     }
     if let Ok(mut cat) = state.catalog.lock() {
@@ -187,12 +185,10 @@ pub async fn chat_leave(
             send_cmd(&state, IrcCmd::Join(ch.clone())).await?;
             super::session::emit_roomstate(&app, &state, ch);
             state.notify_low_trust(super::low_trust::LowTrustCmd::SetChannel(ch.clone()));
-            state.notify_pins(super::pins::PinsCmd::SetChannel(ch.clone()));
             state.notify_shared_bans(super::shared_bans::SharedBansCmd::SetChannel(ch.clone()));
         } else {
             let _ = super::session::clear_last(&state);
             state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
-            state.notify_pins(super::pins::PinsCmd::ClearChannel);
             state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
         }
     }
@@ -206,7 +202,6 @@ pub async fn chat_part(app: AppHandle, state: tauri::State<'_, Shared>) -> Resul
     state.notify_event(EventCmd::ClearChannel);
     state.notify_bttv(BttvCmd::ClearChannel);
     state.notify_low_trust(super::low_trust::LowTrustCmd::ClearChannel);
-    state.notify_pins(super::pins::PinsCmd::ClearChannel);
     state.notify_shared_bans(super::shared_bans::SharedBansCmd::ClearChannel);
     {
         let mut hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
@@ -336,25 +331,6 @@ pub async fn chat_automod_manage(
     channel: String,
 ) -> Result<(), ApiError> {
     super::automod::manage_message(app, state.inner().clone(), msgId, action, channel).await
-}
-
-#[tauri::command]
-pub async fn chat_pin_message(
-    state: tauri::State<'_, Shared>,
-    channel: String,
-    #[allow(non_snake_case)] messageId: String,
-    #[allow(non_snake_case)] durationSeconds: Option<u32>,
-) -> Result<(), ApiError> {
-    super::pins::pin_message(state.inner(), &channel, &messageId, durationSeconds).await
-}
-
-#[tauri::command]
-pub async fn chat_unpin_message(
-    state: tauri::State<'_, Shared>,
-    channel: String,
-    #[allow(non_snake_case)] messageId: String,
-) -> Result<(), ApiError> {
-    super::pins::unpin_message(state.inner(), &channel, &messageId).await
 }
 
 #[derive(Debug, Deserialize)]

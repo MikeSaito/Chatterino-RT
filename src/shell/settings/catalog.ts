@@ -1604,12 +1604,6 @@ const GENERAL_SECTIONS: SectionDef[] = [
         false,
       ),
       cb(
-        "always-show-pinned",
-        "behaviour.alwaysShowPinnedMessage",
-        "Always show pinned channel message (mods; Helix scope)",
-        false,
-      ),
-      cb(
         "lowercase-domains",
         "links.lowercaseDomains",
         "Lowercase domains (anti-phishing)",

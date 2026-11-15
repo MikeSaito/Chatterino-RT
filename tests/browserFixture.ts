@@ -289,6 +289,8 @@ fixtureWindow.__fixture = {
   },
   async smoke() {
     const checks: string[] = [];
+    check(!document.querySelector("#pinned-message-host, #poll-panel-host, #chat-context-pin"), "removed Twitch controls are absent");
+    check(document.querySelector("#usercard-pin") && document.querySelector("#replythread-pin"), "local popup pinning is still available");
     await switchTo("alpha");
     type("alpha original");
     selectReply();

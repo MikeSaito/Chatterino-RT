@@ -90,7 +90,6 @@ import { bindMentionToast } from "./shell/mentionToast";
 import { bindRaidToast } from "./shell/raidToast";
 import { bindGiftToast } from "./shell/giftToast";
 import { bindLinkEnrichment } from "./chat/linkEnrichment";
-import { bindPinnedBanner } from "./shell/pinnedMessage";
 import { bindOutgoingRaidBanner } from "./shell/outgoingRaidBanner";
 import { bindUserCard } from "./shell/userCard";
 import { parseTimeoutButtons } from "./shell/timeoutButtons";
@@ -265,7 +264,6 @@ async function boot(): Promise<void> {
   const chatQaMore = document.querySelector<HTMLButtonElement>("#chat-qa-more");
   const chatEmpty = document.querySelector<HTMLElement>("#chat-empty");
   const chatA11yLive = document.querySelector<HTMLElement>("#chat-a11y-live");
-  const pinnedMessageHost = document.querySelector<HTMLElement>("#pinned-message-host");
   const authChip = document.querySelector<HTMLButtonElement>("#auth-chip");
   const authChipAvatar = document.querySelector<HTMLImageElement>("#auth-chip-avatar");
   const authChipLetter = document.querySelector<HTMLElement>("#auth-chip-letter");
@@ -340,7 +338,6 @@ async function boot(): Promise<void> {
     !chatQaMore ||
     !chatEmpty ||
     !chatA11yLive ||
-    !pinnedMessageHost ||
     !authChip ||
     !authChipAvatar ||
     !authChipLetter ||
@@ -1127,12 +1124,6 @@ async function boot(): Promise<void> {
   if (!bootAlive()) {
     return;
   }
-  let alwaysShowPinnedMessage = false;
-  let pinnedBannerApi: {
-    sync: () => void;
-    setAlwaysShow: (value: boolean) => void;
-    stop: () => void;
-  } | null = null;
   let uiLayout: UiLayout = "Extended";
   let playerChatSplit = parsePlayerChatSplit(undefined);
   let mountedChannel = "";
@@ -1186,9 +1177,6 @@ async function boot(): Promise<void> {
         data.knobs["behaviour.autoCloseUserPopup"] !== false;
       autoCloseThreadPopup =
         data.knobs["behaviour.autoCloseThreadPopup"] === true;
-      alwaysShowPinnedMessage =
-        data.knobs["behaviour.alwaysShowPinnedMessage"] === true;
-      pinnedBannerApi?.setAlwaysShow(alwaysShowPinnedMessage);
       showTimestamps = data.showTimestamps;
       timestampFormat = data.timestampFormat || "hh:mm";
       hideTimestampsWhenLive =
@@ -1345,20 +1333,6 @@ async function boot(): Promise<void> {
     });
   }
   readActiveChannel = () => ipc.active().trim();
-  const pinnedBanner = bindPinnedBanner({
-    host: pinnedMessageHost,
-    chatColumn,
-    activeChannel: () => ipc.active(),
-    alwaysShow: () => alwaysShowPinnedMessage,
-  });
-  pinnedBannerApi = pinnedBanner;
-  pinnedBanner.setAlwaysShow(alwaysShowPinnedMessage);
-  {
-    chainTeardown(() => {
-      pinnedBannerApi = null;
-      pinnedBanner.stop();
-    });
-  }
   unbindImageUpload = bindImageUpload({
     input: messageInput,
     dragHost: composer,
@@ -1914,7 +1888,7 @@ async function boot(): Promise<void> {
     if (scrollRestoreTimer !== undefined) window.clearTimeout(scrollRestoreTimer);
   });
   let contextTarget: SlotContext | null = null;
-  /** Channel snapshot at menu open (pin/unpin must not follow tab switch). */
+  /** Channel snapshot for custom commands in the context menu. */
   let contextMenuChannel = "";
   const channelLifecycle = createChannelLifecycle({
     ipc,
@@ -1932,7 +1906,6 @@ async function boot(): Promise<void> {
       repaintChannelTitle();
       chatFindCtl.onChannelChanged();
       applySendWaitForActive();
-      pinnedBanner.sync();
     },
     left: (name, next, wasActive) => {
       const leftKey = name.toLowerCase();
@@ -1950,7 +1923,6 @@ async function boot(): Promise<void> {
         repaintChannelTitle();
         chatFindCtl.onChannelChanged();
         applySendWaitForActive();
-        pinnedBanner.sync();
         paintTypingStatus();
         quickActionsCtl?.hide();
         ring.clearHover();
@@ -1963,7 +1935,6 @@ async function boot(): Promise<void> {
       } else {
         channels.paint(ipc.active());
         applySendWaitForActive();
-        pinnedBanner.sync();
       }
     },
   });
@@ -2398,44 +2369,6 @@ async function boot(): Promise<void> {
           private: searchIncognito,
         }).catch(() => undefined);
       }
-      return;
-    }
-    if ((action === "pin" || action === "unpin") && target.msgId) {
-      const channel = snapshotModChannel(contextMenuChannel);
-      if (!channel) {
-        setStatus(t("status.noChannel"));
-        return;
-      }
-      if (!ring.canModerateOn()) {
-        setStatus(t("error.pin.forbidden"));
-        return;
-      }
-      const messageId = target.msgId;
-      void (async () => {
-        try {
-          if (action === "unpin") {
-            await invoke("chat_unpin_message", { channel, messageId });
-          } else {
-            const rawDuration = btn.dataset.duration?.trim() ?? "";
-            const durationSeconds =
-              rawDuration === "" ? null : Number.parseInt(rawDuration, 10);
-            if (
-              durationSeconds !== null &&
-              (!Number.isFinite(durationSeconds) || durationSeconds <= 0)
-            ) {
-              setStatus(t("error.pin.invalid_duration"));
-              return;
-            }
-            await invoke("chat_pin_message", {
-              channel,
-              messageId,
-              durationSeconds,
-            });
-          }
-        } catch (err) {
-          setStatus(formatError(err));
-        }
-      })();
       return;
     }
     if (action === "reply" && target.login && target.msgId && !target.disabled) {
@@ -3031,7 +2964,6 @@ async function boot(): Promise<void> {
     );
     const threadBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="thread"]');
     const userBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="user"]');
-    const moderateMenu = contextMenuEl.querySelector<HTMLElement>("#chat-context-moderate");
     const twitchBtn = contextMenuEl.querySelector<HTMLButtonElement>('[data-action="open-twitch"]');
     const streamlinkBtn = contextMenuEl.querySelector<HTMLButtonElement>(
       '[data-action="open-streamlink"]',
@@ -3058,9 +2990,6 @@ async function boot(): Promise<void> {
     }
     if (userBtn) {
       userBtn.hidden = !ctx.login;
-    }
-    if (moderateMenu) {
-      moderateMenu.hidden = !(ctx.msgId && !ctx.disabled && ring.canModerateOn());
     }
     if (twitchBtn) {
       twitchBtn.hidden = !ctx.login;
@@ -3678,7 +3607,6 @@ async function boot(): Promise<void> {
     repaintChannelTitle();
     chatFindCtl.onChannelChanged();
     applySendWaitForActive();
-    pinnedBanner.sync();
     paintTypingStatus();
     userCard?.syncMod();
     syncModerationModeBtn();

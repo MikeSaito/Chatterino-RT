@@ -46,7 +46,6 @@ pub mod low_trust;
 pub mod membership_batch;
 pub mod parse;
 pub mod pending;
-pub mod pins;
 pub mod profile_images;
 pub mod pronouns;
 pub mod provider_activity;

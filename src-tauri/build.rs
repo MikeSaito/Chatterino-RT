@@ -65,8 +65,6 @@ fn main() {
         "chat_send",
         "chat_typing",
         "chat_automod_manage",
-        "chat_pin_message",
-        "chat_unpin_message",
         "chat_exec_custom_command",
         "chat_complete",
         "chat_emote_icons",

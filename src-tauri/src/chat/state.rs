@@ -23,7 +23,6 @@ use super::live_notifications::LiveNotifyState;
 use super::logging::Logging;
 use super::low_trust::LowTrustCmd;
 use super::membership_batch::MembershipBatcher;
-use super::pins::PinsCmd;
 use super::session::SessionInner;
 use super::settings::SettingsInner;
 use super::seventv_badges::SeventvBadgeCatalog;
@@ -162,8 +161,6 @@ pub struct Shared {
     pub bttv_shutdown: Arc<AtomicBool>,
     pub low_trust_tx: Arc<Mutex<Option<mpsc::UnboundedSender<LowTrustCmd>>>>,
     pub low_trust_shutdown: Arc<AtomicBool>,
-    pub pins_tx: Arc<Mutex<Option<mpsc::UnboundedSender<PinsCmd>>>>,
-    pub pins_shutdown: Arc<AtomicBool>,
     pub shared_bans_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SharedBansCmd>>>>,
     pub shared_bans_shutdown: Arc<AtomicBool>,
     pub auth: Arc<Mutex<AuthInner>>,
@@ -239,8 +236,6 @@ impl Shared {
             bttv_shutdown: Arc::new(AtomicBool::new(false)),
             low_trust_tx: Arc::new(Mutex::new(None)),
             low_trust_shutdown: Arc::new(AtomicBool::new(false)),
-            pins_tx: Arc::new(Mutex::new(None)),
-            pins_shutdown: Arc::new(AtomicBool::new(false)),
             shared_bans_tx: Arc::new(Mutex::new(None)),
             shared_bans_shutdown: Arc::new(AtomicBool::new(false)),
             auth: Arc::new(Mutex::new(AuthInner::default())),
@@ -481,17 +476,6 @@ impl Shared {
             self.low_trust_shutdown.store(true, Ordering::SeqCst);
         }
         if let Ok(guard) = self.low_trust_tx.lock() {
-            if let Some(tx) = guard.as_ref() {
-                let _ = tx.send(cmd);
-            }
-        }
-    }
-
-    pub fn notify_pins(&self, cmd: PinsCmd) {
-        if matches!(cmd, PinsCmd::Shutdown) {
-            self.pins_shutdown.store(true, Ordering::SeqCst);
-        }
-        if let Ok(guard) = self.pins_tx.lock() {
             if let Some(tx) = guard.as_ref() {
                 let _ = tx.send(cmd);
             }
