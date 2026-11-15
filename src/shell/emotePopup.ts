@@ -21,7 +21,7 @@ type EmotePopupItem = {
   favourite: boolean;
 };
 
-type GifChoice = { messageId?: string; gifId: string; title: string; url: string; previewUrl?: string };
+type GifChoice = { messageId?: string | null; sourceChannel?: string | null; gifId: string; title: string; url: string; previewUrl?: string | null };
 type GifPage = { items: GifChoice[]; nextOffset: number | null };
 
 const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis", "gifs"];
@@ -37,6 +37,19 @@ const EMPTY_KEY: Record<EmotePopupTab, MessageKey> = {
 
 const VIEWPORT_PAD = 8;
 const ANCHOR_GAP = 6;
+const RECENT_GIF_IDS_KEY = "crt-recent-gif-ids-v1";
+const RECENT_GIF_LIMIT = 24;
+const validRecentGifId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9]{1,128}$/.test(id);
+
+function readRecentGifIds(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(RECENT_GIF_IDS_KEY) ?? "[]");
+    if (Array.isArray(saved)) return [...new Set(saved.filter(validRecentGifId))].slice(0, RECENT_GIF_LIMIT);
+  } catch {
+    // The picker still works without persistent browser storage.
+  }
+  return [];
+}
 
 /**
  * SPA EmotePopup: вкладки Favourite/Subs/Channel/Global/Emojis, поиск, insert, Ctrl+favourite.
@@ -78,9 +91,11 @@ export function bindEmotePopup(opts: {
   let seq = 0;
   let gifAccessSeq = 0;
   let tab: EmotePopupTab = "subs";
-  let gifSource: "catalog" | "recent" = "catalog";
+  let gifSource: "catalog" | "recent" = "recent";
   let busyFav = false;
   let sendingGif = false;
+  let preferredGifIds = readRecentGifIds();
+  let recentChoices: Promise<GifChoice[]> | undefined;
 
   const labelSearch = () => {
     search.placeholder = t(tab === "gifs"
@@ -88,11 +103,12 @@ export function bindEmotePopup(opts: {
       : "emotes.search.placeholder");
     search.setAttribute("aria-label", search.placeholder);
     gifSources.hidden = tab !== "gifs";
-    giphyLogo.hidden = tab !== "gifs" || gifSource !== "catalog";
+    giphyLogo.hidden = tab !== "gifs";
   };
 
   const setTab = (next: EmotePopupTab): void => {
     tab = next;
+    if (next !== "gifs") recentChoices = undefined;
     labelSearch();
     for (const btn of tabButtons) {
       const id = btn.dataset.tab as EmotePopupTab | undefined;
@@ -127,6 +143,7 @@ export function bindEmotePopup(opts: {
     window.clearTimeout(timer);
     seq += 1;
     gifAccessSeq += 1;
+    recentChoices = undefined;
     trap.deactivate();
     void closeModal(modal);
     anchor.setAttribute("aria-expanded", "false");
@@ -270,6 +287,12 @@ export function bindEmotePopup(opts: {
     view.replaceChildren(notice);
   };
 
+  const rememberGif = (id: string): void => {
+    if (!validRecentGifId(id) || preferredGifIds[0] === id) return;
+    preferredGifIds = [id, ...preferredGifIds.filter((previous) => previous !== id)].slice(0, RECENT_GIF_LIMIT);
+    try { localStorage.setItem(RECENT_GIF_IDS_KEY, JSON.stringify(preferredGifIds)); } catch { /* keep the order for this session */ }
+  };
+
   const paintGifs = (items: GifChoice[], channel: string, token: number, query: string): void => {
     if (!items.length) {
       paintGifNotice(t(gifSource === "catalog" ? "emotes.gifs.catalog.empty" : "emotes.gifs.empty"));
@@ -305,6 +328,7 @@ export function bindEmotePopup(opts: {
         grid.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
         tile.setAttribute("aria-pressed", "true");
         selected = item;
+        rememberGif(item.gifId);
         send.disabled = false;
       });
       grid.append(tile);
@@ -321,13 +345,13 @@ export function bindEmotePopup(opts: {
         void reload();
         return;
       }
-      const { messageId, gifId, url } = selected;
+      const { messageId, sourceChannel, gifId, url } = selected;
       const accessToken = gifAccessSeq;
       sendingGif = true;
       send.disabled = true;
       send.textContent = t("emotes.gifs.sending");
       void invoke<string>("chat_send_gif", messageId
-        ? { channel, messageId, gifId }
+        ? { channel, messageId, gifId, sourceChannel }
         : { channel, gifId, originalUrl: url, searchTerm: query }).then(
         () => {
           if (token === seq) close();
@@ -375,9 +399,12 @@ export function bindEmotePopup(opts: {
       try {
         const page = catalog
           ? await invoke<GifPage>("chat_catalog_gifs", { query: gifQuery, offset: offsets[offsets.length - 1] })
-          : { items: await invoke<GifChoice[]>("chat_recent_gifs", { channel, query }), nextOffset: null };
+          : { items: await (recentChoices ??= invoke<GifChoice[]>("chat_recent_gifs", { channel, preferredIds: preferredGifIds })), nextOffset: null };
         if (token === seq && (activeChannel()?.trim() || "") === channel) {
-          paintGifs(page.items, channel, token, gifQuery);
+          const needle = query.toLowerCase();
+          const items = catalog || !needle ? page.items : page.items.filter((item) =>
+            item.title.toLowerCase().includes(needle) || item.gifId.toLowerCase().includes(needle));
+          paintGifs(items, channel, token, catalog ? gifQuery : "");
           if (catalog) {
             paintPages(offsets, page.nextOffset);
             view.scrollTop = 0;
@@ -409,6 +436,7 @@ export function bindEmotePopup(opts: {
 
   const hideGifTabAndReload = (): void => {
     gifTab.hidden = true;
+    recentChoices = undefined;
     if (tab === "gifs") {
       setTab("subs");
       view.replaceChildren();
@@ -455,6 +483,7 @@ export function bindEmotePopup(opts: {
       const source = button.dataset.gifSource;
       if (tab !== "gifs" || (source !== "catalog" && source !== "recent") || source === gifSource) return;
       gifSource = source;
+      recentChoices = undefined;
       gifSources.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
       button.setAttribute("aria-pressed", "true");
       window.clearTimeout(timer);

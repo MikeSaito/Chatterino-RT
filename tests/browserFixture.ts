@@ -57,9 +57,10 @@ function message(channel: string, i: number): ChatEvent {
 }
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
-const recentGif = { messageId: "gif-source", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
+const recentGif = { messageId: "gif-source", sourceChannel: "beta", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
 const catalogGif = { gifId: "CatalogGif", title: "Catalog animation", url: "https://media2.giphy.com/media/v1.fixture/CatalogGif/giphy.gif?cid=original", previewUrl: "https://media2.giphy.com/media/v1.fixture/CatalogGif/100w.gif?cid=preview" };
 const catalogRequests: { query: unknown; offset: unknown }[] = [];
+const recentRequests: Record<string, unknown>[] = [];
 const pendingGifSends: { args: Record<string, unknown>; resolve: (id: string) => void; reject: (error: unknown) => void }[] = [];
 const pendingGifAccess = new Map<string, (available: boolean) => void>();
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
@@ -96,7 +97,7 @@ mockIPC(async (cmd, args) => {
   if (cmd === "chat_snapshot") return { channelId: a.channel, seq: sequences.get(String(a.channel)) ?? 1, dropped: 0, events: history.get(String(a.channel)) ?? [] };
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
   if (cmd === "chat_gif_available") return new Promise<boolean>((resolve) => pendingGifAccess.set(String(a.channel), resolve));
-  if (cmd === "chat_recent_gifs") return a.channel === "alpha" && recentGif.title.toLowerCase().includes(String(a.query).toLowerCase()) ? [recentGif] : [];
+  if (cmd === "chat_recent_gifs") { recentRequests.push(a); return [recentGif]; }
   if (cmd === "chat_catalog_gifs") {
     catalogRequests.push({ query: a.query, offset: a.offset });
     return { items: [catalogGif], nextOffset: a.offset === 0 && !a.query ? 24 : null };
@@ -297,6 +298,7 @@ fixtureWindow.__fixture = {
     const source = (name: string) => document.querySelector<HTMLButtonElement>(`[data-gif-source="${name}"]`)!;
     const search = document.querySelector<HTMLInputElement>("#emotepopup-search")!;
     const catalogRequest = () => catalogRequests[catalogRequests.length - 1];
+    source("catalog").click();
     await until(() => tile()?.querySelector("img")?.src === catalogGif.previewUrl);
     check(catalogRequest()?.query === "", "empty GIPHY query opens trending");
     check(!document.querySelector<HTMLElement>("#emotepopup-giphy-logo")!.hidden, "catalog displays GIPHY attribution");
@@ -318,6 +320,14 @@ fixtureWindow.__fixture = {
     search.value = "";
     source("recent").click();
     await until(() => Boolean(tile()));
+    const checksBeforeFilter = recentRequests.length;
+    search.value = "no matching gif";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => !tile());
+    check(recentRequests.length === checksBeforeFilter, "filtering recent GIFs does not repeat the catalog request");
+    search.value = "";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => Boolean(tile()));
     check(send().disabled, "GIF send requires a selection");
     tile()!.click();
     check(tile()!.getAttribute("aria-pressed") === "true" && !send().disabled, "select a GIF");
@@ -326,7 +336,7 @@ fixtureWindow.__fixture = {
     send().click();
     await until(() => pendingGifSends.length === 1);
     const first = pendingGifSends[0];
-    check(first.args.channel === "alpha" && first.args.messageId === recentGif.messageId && first.args.gifId === recentGif.gifId, "send selected GIF to the current channel");
+    check(first.args.channel === "alpha" && first.args.sourceChannel === "beta" && first.args.messageId === recentGif.messageId && first.args.gifId === recentGif.gifId, "send a GIF from beta to the current channel alpha");
     check(send().disabled && !modal.hidden, "wait for Twitch confirmation before closing the picker");
     first.reject({ code: "error.gif.wait", params: { seconds: "7" } });
     await until(() => !send().disabled);
@@ -344,6 +354,8 @@ fixtureWindow.__fixture = {
     await until(shown);
     gifs.click();
     await until(() => Boolean(tile()));
+    const savedIds = recentRequests[checksBeforeFilter].preferredIds;
+    check(Array.isArray(savedIds) && savedIds[0] === recentGif.gifId, "previous selection is restored in the next menu session");
     tile()!.click();
     send().click();
     await until(() => pendingGifSends.length === 3);

@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
@@ -14,6 +15,8 @@ const GQL: &str = "https://gql.twitch.tv/gql";
 const GIPHY: &str = "https://api.giphy.com/v1/gifs";
 const GIPHY_PAGE_SIZE: u32 = 24;
 const GIPHY_QUERY_LIMIT: usize = 50;
+const RECENT_LIMIT: usize = 24;
+const RECENT_HISTORY_SCAN: usize = 2000;
 const GIF_AVAILABILITY: &str = r#"
 query ChatGifAvailability($channelID: ID!) {
     currentUser { id }
@@ -35,10 +38,12 @@ mutation sendGifMessage($input: SendGifMessageInput!) {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentGif {
-    message_id: String,
+    message_id: Option<String>,
+    source_channel: Option<String>,
     gif_id: String,
     title: String,
     url: String,
+    preview_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -57,8 +62,12 @@ pub struct GifPage {
     next_offset: Option<u32>,
 }
 
+fn valid_catalog_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
 fn catalog_url(url: &str, id: &str) -> Option<String> {
-    if url.len() > 2048 || id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+    if url.len() > 2048 || !valid_catalog_id(id) {
         return None;
     }
     let validated = allowed_twitch_gif_url(url)?;
@@ -146,6 +155,10 @@ pub async fn chat_catalog_gifs(query: String, offset: u32) -> Result<GifPage, Ap
             params.append_pair("q", &query);
         }
     }
+    catalog_page(&giphy_get(url).await?, offset, max_offset)
+}
+
+async fn giphy_get(url: reqwest::Url) -> Result<Value, ApiError> {
     let client = super::http_client::build_no_redirect(Duration::from_secs(8));
     let response = client.get(url).send().await.map_err(|_| catalog_error())?;
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -154,13 +167,12 @@ pub async fn chat_catalog_gifs(query: String, offset: u32) -> Result<GifPage, Ap
             "GIPHY rate limit reached",
         ));
     }
-    let body = response
+    response
         .error_for_status()
         .map_err(|_| catalog_error())?
         .json::<Value>()
         .await
-        .map_err(|_| catalog_error())?;
-    catalog_page(&body, offset, max_offset)
+        .map_err(|_| catalog_error())
 }
 
 fn gifs_in(event: &ChatEvent) -> impl Iterator<Item = &EmoteSpan> {
@@ -175,29 +187,35 @@ fn gifs_in(event: &ChatEvent) -> impl Iterator<Item = &EmoteSpan> {
     spans.iter().filter(|span| span.provider == "twitch-gif")
 }
 
-fn collect_recent<'a>(events: impl Iterator<Item = &'a ChatEvent>, query: &str) -> Vec<RecentGif> {
+fn collect_recent<'a>(
+    channel: &str,
+    events: impl Iterator<Item = &'a ChatEvent>,
+) -> Vec<(u64, RecentGif)> {
     let mut seen = HashSet::new();
     events
+        .take(RECENT_HISTORY_SCAN)
         .flat_map(|event| gifs_in(event).map(move |span| (event, span)))
         .filter_map(|(event, span)| {
             let ChatEvent::Privmsg { text, .. } = event else {
                 return None;
             };
-            if !query.is_empty() && !text.to_lowercase().contains(query) {
-                return None;
-            }
             let url = gif_url(span)?;
             if !seen.insert(span.emote_id.as_str()) {
                 return None;
             }
-            Some(RecentGif {
-                message_id: event.id().to_string(),
-                gif_id: span.emote_id.clone(),
-                title: text.trim().chars().take(120).collect(),
-                url,
-            })
+            Some((
+                event.timestamp_ms(),
+                RecentGif {
+                    message_id: Some(event.id().to_string()),
+                    source_channel: Some(channel.to_owned()),
+                    gif_id: span.emote_id.clone(),
+                    title: text.trim().chars().take(120).collect(),
+                    url,
+                    preview_url: None,
+                },
+            ))
         })
-        .take(24)
+        .take(RECENT_LIMIT)
         .collect()
 }
 
@@ -206,16 +224,102 @@ fn gif_url(span: &EmoteSpan) -> Option<String> {
     gif_url_matches_id(&url, &span.emote_id).then_some(url)
 }
 
+fn recent_from_chats(hub: &Hub, active: &str) -> Vec<RecentGif> {
+    let mut choices: Vec<_> = hub
+        .joined_channels()
+        .into_iter()
+        .flat_map(|channel| collect_recent(&channel, hub.channel_events(&channel).rev()))
+        .collect();
+    choices.sort_by_key(|(time, item)| {
+        (
+            Reverse(*time),
+            item.source_channel.as_deref() != Some(active),
+        )
+    });
+    let mut seen = HashSet::new();
+    choices
+        .into_iter()
+        .filter_map(|(_, item)| seen.insert(item.gif_id.clone()).then_some(item))
+        .collect()
+}
+
+async fn recent_from_catalog(ids: &[&str]) -> Option<Vec<RecentGif>> {
+    if ids.is_empty() {
+        return Some(Vec::new());
+    }
+    let key = catalog_api_key()?;
+    let mut url = reqwest::Url::parse(GIPHY).ok()?;
+    url.query_pairs_mut()
+        .append_pair("api_key", &key)
+        .append_pair("ids", &ids.join(","))
+        .append_pair("rating", "pg-13");
+    let body = tokio::time::timeout(Duration::from_secs(2), giphy_get(url))
+        .await
+        .ok()?
+        .ok()?;
+    Some(
+        body["data"]
+            .as_array()?
+            .iter()
+            .take(RECENT_LIMIT)
+            .filter_map(catalog_item)
+            .map(|item| RecentGif {
+                message_id: None,
+                source_channel: None,
+                gif_id: item.gif_id,
+                title: item.title,
+                url: item.url,
+                preview_url: Some(item.preview_url),
+            })
+            .collect(),
+    )
+}
+
+fn rank_recent(
+    mut local: Vec<RecentGif>,
+    mut fetched: Vec<RecentGif>,
+    preferred: &[String],
+) -> Vec<RecentGif> {
+    let mut result = Vec::new();
+    for id in preferred {
+        if let Some(pos) = local.iter().position(|item| item.gif_id == *id) {
+            result.push(local.remove(pos));
+        } else if let Some(pos) = fetched.iter().position(|item| item.gif_id == *id) {
+            result.push(fetched.remove(pos));
+        }
+    }
+    result.extend(
+        local
+            .into_iter()
+            .take(RECENT_LIMIT.saturating_sub(result.len())),
+    );
+    result
+}
+
 #[tauri::command]
-pub fn chat_recent_gifs(
+pub async fn chat_recent_gifs(
     state: tauri::State<'_, Shared>,
     channel: String,
-    query: String,
+    preferred_ids: Vec<String>,
 ) -> Result<Vec<RecentGif>, ApiError> {
     let channel = normalize_channel(&channel)?;
-    let query: String = query.trim().to_lowercase().chars().take(120).collect();
-    let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
-    Ok(collect_recent(hub.channel_events(&channel).rev(), &query))
+    let mut seen = HashSet::new();
+    let preferred: Vec<_> = preferred_ids
+        .into_iter()
+        .take(RECENT_LIMIT)
+        .filter(|id| valid_catalog_id(id) && seen.insert(id.clone()))
+        .collect();
+    let local = {
+        let hub = state.hub.lock().map_err(|_| ApiError::internal("lock"))?;
+        recent_from_chats(&hub, &channel)
+    };
+    let missing: Vec<_> = preferred
+        .iter()
+        .filter(|id| !local.iter().any(|item| item.gif_id == **id))
+        .map(String::as_str)
+        .collect();
+    let fetched = recent_from_catalog(&missing).await.unwrap_or_default();
+    Ok(rank_recent(local, fetched, &preferred))
 }
 
 fn gif_room_id<'a>(hub: &'a Hub, channel: &str) -> Option<&'a str> {
@@ -386,11 +490,16 @@ pub async fn chat_send_gif(
     state: tauri::State<'_, Shared>,
     channel: String,
     message_id: Option<String>,
+    source_channel: Option<String>,
     gif_id: String,
     original_url: Option<String>,
     search_term: Option<String>,
 ) -> Result<String, ApiError> {
     let channel = normalize_channel(&channel)?;
+    let source_channel = source_channel
+        .as_deref()
+        .map(normalize_channel)
+        .transpose()?;
     let creds = super::auth::oauth_graph_creds(&state)
         .ok_or_else(|| ApiError::coded("error.auth.required_send", "Twitch login required"))?;
     let (room_id, url) = {
@@ -403,7 +512,8 @@ pub async fn chat_send_gif(
         }
         let room_id = gif_room_id(&hub, &channel).ok_or_else(unavailable)?;
         let url = if let Some(message_id) = message_id {
-            hub.channel_events(&channel)
+            let source = source_channel.as_deref().unwrap_or(&channel);
+            hub.channel_events(source)
                 .rev()
                 .find(|event| event.id() == message_id)
                 .and_then(|event| gifs_in(event).find(|span| span.emote_id == gif_id))
@@ -533,17 +643,50 @@ mod tests {
         let ParsedLine::Event { event, .. } = parse_line(&line, 42) else {
             panic!("expected a chat event");
         };
-        let choices = collect_recent([&event, &event].into_iter(), "gif");
+        let choices = collect_recent("fixture", [&event, &event].into_iter());
         assert_eq!(choices.len(), 1);
-        let choice = &choices[0];
-        assert_eq!(choice.message_id, "fixture");
+        let choice = &choices[0].1;
+        assert_eq!(choice.message_id.as_deref(), Some("fixture"));
+        assert_eq!(choice.source_channel.as_deref(), Some("fixture"));
         assert_eq!(choice.gif_id, "FixtureGif");
         let input = &send_payload("42", &choice.gif_id, &choice.url, None)["variables"]["input"];
         assert_eq!(
             input,
             &json!({"channelID":"42", "gifID":"FixtureGif", "gifURL":url})
         );
-        assert!(collect_recent([&event].into_iter(), "missing").is_empty());
+    }
+
+    #[test]
+    fn recent_gifs_cross_channels_and_prioritize_user_selections() {
+        let mut hub = Hub::default();
+        for (channel, id, timestamp) in [
+            ("alpha", "Older", 10),
+            ("beta", "Recent", 20),
+            ("gamma", "Outside", 30),
+        ] {
+            let url = format!("https://media2.giphy.com/media/{id}/giphy.gif");
+            let line = format!(
+                "@id={id};gifs=0-11|{id}|{url} :viewer!v@v PRIVMSG #{channel} :[GIF by You]"
+            );
+            let ParsedLine::Event { event, .. } = parse_line(&line, timestamp) else {
+                panic!("expected GIF fixture")
+            };
+            hub.buffer(channel)
+                .scrollback
+                .push(event, Default::default());
+            hub.set_joined(channel, channel != "gamma");
+        }
+        let recent = recent_from_chats(&hub, "alpha");
+        assert_eq!(
+            recent
+                .iter()
+                .map(|item| item.gif_id.as_str())
+                .collect::<Vec<_>>(),
+            ["Recent", "Older"]
+        );
+        let ordered = rank_recent(recent, Vec::new(), &["Older".into()]);
+        assert_eq!(ordered[0].gif_id, "Older");
+        assert_eq!(ordered[1].source_channel.as_deref(), Some("beta"));
     }
 
     #[test]

@@ -274,7 +274,7 @@ export const ru: Record<MessageKey, string> = {
   "emotes.tab.channel": "Канал",
   "emotes.tab.global": "Глобальные",
   "emotes.tab.emojis": "Эмодзи",
-  "emotes.gifs.empty": "В истории этого канала нет GIF.",
+  "emotes.gifs.empty": "В открытых каналах нет недавних GIF.",
   "emotes.gifs.search": "Поиск по недавним GIF",
   "emotes.gifs.catalog.search": "Поиск в GIPHY",
   "emotes.gifs.catalog.empty": "GIF не найдены.",

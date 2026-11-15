@@ -268,7 +268,7 @@ export const en = {
   "emotes.tab.channel": "Channel",
   "emotes.tab.global": "Global",
   "emotes.tab.emojis": "Emojis",
-  "emotes.gifs.empty": "No recent GIFs in this channel.",
+  "emotes.gifs.empty": "No recent GIFs in the open channels.",
   "emotes.gifs.search": "Search recent GIFs",
   "emotes.gifs.catalog.search": "Search GIPHY",
   "emotes.gifs.catalog.empty": "No GIFs found.",

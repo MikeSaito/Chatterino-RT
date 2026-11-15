@@ -73,7 +73,7 @@ Optional process environment (see [`.env.example`](.env.example); not loaded fro
 
 ## GIF catalog
 
-The GIF tab is available when Twitch confirms that the signed-in account can send GIFs in the current channel. Select **GIPHY** to browse trending GIFs or search the catalog. **Recent** lists GIFs from the current channel's history.
+The GIF tab is available when Twitch confirms that the signed-in account can send GIFs in the current channel. Select **GIPHY** to browse trending GIFs or search the catalog. **Recent** lists GIFs from open channels and puts your last selections first. The app saves up to 24 selected IDs on this device. If you have a GIPHY key, the app can look up saved GIFs no longer in open channel history.
 
 Create an API key in the [GIPHY Developer Dashboard](https://developers.giphy.com/dashboard/) and set `GIPHY_API_KEY` in the environment before launching Chatterino RT. GIPHY beta keys allow 100 API requests per hour. The catalog requests results rated PG-13 or below.
 
