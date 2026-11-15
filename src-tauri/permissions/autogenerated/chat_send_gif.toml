@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-send-gif"
+description = "Enables the chat_send_gif command without any pre-configured scope."
+commands.allow = ["chat_send_gif"]
+
+[[permission]]
+identifier = "deny-chat-send-gif"
+description = "Denies the chat_send_gif command without any pre-configured scope."
+commands.deny = ["chat_send_gif"]

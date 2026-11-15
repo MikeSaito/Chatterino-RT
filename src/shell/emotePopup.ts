@@ -10,7 +10,8 @@ type EmotePopupTab =
   | "subs"
   | "channel"
   | "global"
-  | "emojis";
+  | "emojis"
+  | "gifs";
 
 type EmotePopupItem = {
   code: string;
@@ -19,7 +20,9 @@ type EmotePopupItem = {
   favourite: boolean;
 };
 
-const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis"];
+type RecentGif = { messageId: string; gifId: string; title: string; url: string };
+
+const TABS: EmotePopupTab[] = ["favourite", "subs", "channel", "global", "emojis", "gifs"];
 
 const EMPTY_KEY: Record<EmotePopupTab, MessageKey> = {
   favourite: "emotes.empty.favourite",
@@ -27,6 +30,7 @@ const EMPTY_KEY: Record<EmotePopupTab, MessageKey> = {
   channel: "emotes.empty.channel",
   global: "emotes.empty.global",
   emojis: "emotes.empty.emojis",
+  gifs: "emotes.gifs.empty",
 };
 
 const VIEWPORT_PAD = 8;
@@ -41,6 +45,8 @@ export function bindEmotePopup(opts: {
   anchor: HTMLElement;
   insertEmote: (code: string, url?: string | null) => void;
   activeChannel: () => string | null;
+  onGifSent: (channel: string) => void;
+  onGifError: (error: unknown) => void;
 }): { open: () => void; close: () => void; toggle: () => void; relabel: () => void } {
   const { modal, anchor, insertEmote, activeChannel } = opts;
   const dialog = modal.querySelector<HTMLElement>("#emotepopup-dialog");
@@ -65,9 +71,15 @@ export function bindEmotePopup(opts: {
   let seq = 0;
   let tab: EmotePopupTab = "subs";
   let busyFav = false;
+  let sendingGif = false;
+
+  const labelSearch = () => {
+    search.placeholder = t(tab === "gifs" ? "emotes.gifs.search" : "emotes.search.placeholder");
+  };
 
   const setTab = (next: EmotePopupTab): void => {
     tab = next;
+    labelSearch();
     for (const btn of tabButtons) {
       const id = btn.dataset.tab as EmotePopupTab | undefined;
       const on = id === next;
@@ -243,10 +255,91 @@ export function bindEmotePopup(opts: {
     close();
   };
 
+  const paintGifs = (items: RecentGif[], channel: string, token: number): void => {
+    if (!items.length) {
+      paint([]);
+      return;
+    }
+    const grid = document.createElement("div");
+    grid.className = "emotepopup-grid emotepopup-gif-grid";
+    const send = document.createElement("button");
+    send.type = "button";
+    send.className = "btn btn-primary emotepopup-gif-send";
+    send.textContent = t("emotes.gifs.send", { channel });
+    send.disabled = true;
+    let selected: RecentGif | undefined;
+    for (const item of items) {
+      if (!isAllowedEmoteCdnUrl(item.url)) {
+        continue;
+      }
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "emotepopup-item emotepopup-gif-item";
+      tile.setAttribute("aria-pressed", "false");
+      tile.title = item.title || "GIF";
+      const img = document.createElement("img");
+      img.src = item.url;
+      img.alt = tile.title;
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.draggable = false;
+      tile.append(img);
+      tile.addEventListener("click", () => {
+        if (sendingGif) return;
+        grid.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+        tile.setAttribute("aria-pressed", "true");
+        selected = item;
+        send.disabled = false;
+      });
+      grid.append(tile);
+    }
+    if (!grid.childElementCount) {
+      paint([]);
+      return;
+    }
+    send.addEventListener("click", () => {
+      if (!selected || sendingGif || token !== seq) {
+        return;
+      }
+      if (activeChannel()?.trim() !== channel) {
+        void reload();
+        return;
+      }
+      const { messageId, gifId } = selected;
+      sendingGif = true;
+      send.disabled = true;
+      send.textContent = t("emotes.gifs.sending");
+      void invoke<string>("chat_send_gif", { channel, messageId, gifId }).then(
+        () => {
+          if (token === seq) close();
+          opts.onGifSent(channel);
+        },
+        opts.onGifError,
+      ).finally(() => {
+        sendingGif = false;
+        send.disabled = false;
+        send.textContent = t("emotes.gifs.send", { channel });
+      });
+    });
+    view.replaceChildren(grid, send);
+  };
+
   const reload = async (): Promise<void> => {
     const token = ++seq;
     const query = search.value.trim();
     const channel = activeChannel()?.trim() || "";
+    if (tab === "gifs") {
+      view.replaceChildren();
+      try {
+        const items = channel ? await invoke<RecentGif[]>("chat_recent_gifs", { channel, query }) : [];
+        if (token === seq && (activeChannel()?.trim() || "") === channel) {
+          paintGifs(items, channel, token);
+        }
+      } catch (error) {
+        if (token === seq) opts.onGifError(error);
+      }
+      return;
+    }
     try {
       const items = await invoke<EmotePopupItem[]>("chat_emote_popup_list", {
         channel,
@@ -304,6 +397,7 @@ export function bindEmotePopup(opts: {
   });
 
   const relabel = (): void => {
+    labelSearch();
     if (modal.hidden) {
       return;
     }

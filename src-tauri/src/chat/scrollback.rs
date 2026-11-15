@@ -193,6 +193,10 @@ impl Scrollback {
         self.items.iter().cloned().collect()
     }
 
+    pub fn events(&self) -> impl DoubleEndedIterator<Item = &ChatEvent> {
+        self.items.iter()
+    }
+
     /// Stock SearchPopup predicates (AND). Empty query: full snapshot capped.
     /// Chronological order; prefer newest when capped. `channel`/`room_id` for `in:`/`is:shared`.
     pub fn search_hits(&self, query: &str, channel: &str, room_id: Option<&str>) -> Vec<SearchHit> {

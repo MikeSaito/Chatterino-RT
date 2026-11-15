@@ -24,6 +24,7 @@ pub mod emote_popup;
 pub mod emotes;
 pub mod eventapi;
 pub mod fetch;
+pub mod gif_send;
 pub mod ffz_badges;
 pub mod ffz_channel;
 pub mod filter_lang;

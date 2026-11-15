@@ -1830,6 +1830,8 @@ async function boot(): Promise<void> {
     modal: emotepopupModal,
     anchor: emoteOpen,
     activeChannel: () => ipc.active(),
+    onGifSent: (channel) => toast.push({ kind: "success", text: t("emotes.gifs.sent", { channel }) }),
+    onGifError: (error) => toast.push({ kind: "danger", text: formatError(error) }),
     insertEmote: (code, url) => {
       if (url) {
         composerSprites.remember(code, url);

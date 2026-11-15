@@ -62,6 +62,13 @@ impl Hub {
         self.buffers.contains_key(channel)
     }
 
+    pub fn channel_events(&self, channel: &str) -> impl DoubleEndedIterator<Item = &ChatEvent> {
+        self.buffers
+            .get(channel)
+            .into_iter()
+            .flat_map(|buf| buf.scrollback.events())
+    }
+
     pub fn channels(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.buffers.keys().cloned().collect();
         keys.sort();

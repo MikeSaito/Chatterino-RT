@@ -22,6 +22,7 @@ const fixtureWindow = window as Window & {
   __fixture?: {
     ready: () => boolean;
     chatGifs: () => Promise<void>;
+    gifPicker: () => Promise<void>;
     smoke: () => Promise<string[]>;
     viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
@@ -56,6 +57,8 @@ function message(channel: string, i: number): ChatEvent {
 }
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
+const recentGif = { messageId: "gif-source", gifId: "FixtureGif", title: "Fixture animation", url: "https://media2.giphy.com/media/FixtureGif/giphy.gif" };
+const pendingGifSends: { args: Record<string, unknown>; resolve: (id: string) => void; reject: (error: unknown) => void }[] = [];
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
@@ -89,6 +92,8 @@ mockIPC(async (cmd, args) => {
   }
   if (cmd === "chat_snapshot") return { channelId: a.channel, seq: sequences.get(String(a.channel)) ?? 1, dropped: 0, events: history.get(String(a.channel)) ?? [] };
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
+  if (cmd === "chat_recent_gifs") return a.channel === "alpha" && recentGif.title.toLowerCase().includes(String(a.query).toLowerCase()) ? [recentGif] : [];
+  if (cmd === "chat_send_gif") return new Promise<string>((resolve, reject) => pendingGifSends.push({ args: a, resolve, reject }));
   if (cmd === "chat_viewer_role") return { isMod: false, isBroadcaster: false };
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
@@ -252,6 +257,35 @@ fixtureWindow.__fixture = {
       gifResponse = undefined;
       host.isTauri = wasTauri;
     }
+  },
+  async gifPicker() {
+    await switchTo("alpha");
+    type("Text to keep");
+    selectReply();
+    document.querySelector<HTMLButtonElement>("#emote-open")!.click();
+    document.querySelector<HTMLButtonElement>('[data-tab="gifs"]')!.click();
+    const tile = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-item");
+    const send = () => document.querySelector<HTMLButtonElement>(".emotepopup-gif-send")!;
+    const modal = document.querySelector<HTMLElement>("#emotepopup-modal")!;
+    await until(() => Boolean(tile()));
+    check(send().disabled, "GIF send requires a selection");
+    tile()!.click();
+    check(tile()!.getAttribute("aria-pressed") === "true" && !send().disabled, "select a GIF");
+    check(pendingGifSends.length === 0, "selecting a GIF does not send it");
+    send().click();
+    send().click();
+    await until(() => pendingGifSends.length === 1);
+    const first = pendingGifSends[0];
+    check(first.args.channel === "alpha" && first.args.messageId === recentGif.messageId && first.args.gifId === recentGif.gifId, "send selected GIF to the current channel");
+    check(send().disabled && !modal.hidden, "wait for Twitch confirmation before closing the picker");
+    first.reject({ code: "error.gif.wait", params: { seconds: "7" } });
+    await until(() => !send().disabled);
+    check(!modal.hidden && tile()!.getAttribute("aria-pressed") === "true", "a rejected GIF stays selected");
+    send().click();
+    await until(() => pendingGifSends.length === 2);
+    pendingGifSends[1].resolve("gif-receipt");
+    await until(() => modal.hidden === true);
+    check(input().value === "Text to keep" && !document.querySelector<HTMLElement>("#reply-bar")!.hidden, "GIF send preserves the text draft and reply");
   },
   async appearance(theme, layout, language = "en") {
     settings.knobs["appearance.theme"] = theme;
