@@ -59,19 +59,18 @@ pub fn parse_line(raw: &str, now_ms: u64) -> ParsedLine {
     let command = parts.next().unwrap_or("");
     let params_raw = parts.next().unwrap_or("");
     let (params, trailing) = split_params(params_raw);
+    // A single-word final IRC parameter may omit the leading colon.
+    let message = trailing.as_deref().or_else(|| match params.as_slice() {
+        [_, body] => Some(body.as_str()),
+        _ => None,
+    });
 
     match command {
         "PING" => ParsedLine::Ping(trailing.unwrap_or_default()),
         "PONG" => ParsedLine::Pong,
         "001" => ParsedLine::Ready,
-        "PRIVMSG" => parse_privmsg(
-            &tags,
-            prefix.as_deref(),
-            &params,
-            trailing.as_deref(),
-            now_ms,
-        ),
-        "WHISPER" => parse_whisper(&tags, prefix.as_deref(), trailing.as_deref(), now_ms),
+        "PRIVMSG" => parse_privmsg(&tags, prefix.as_deref(), &params, message, now_ms),
+        "WHISPER" => parse_whisper(&tags, prefix.as_deref(), message, now_ms),
         "CLEARCHAT" => parse_clearchat(&tags, &params, trailing.as_deref(), now_ms),
         "CLEARMSG" => parse_clearmsg(&tags, &params, now_ms),
         "USERNOTICE" => parse_usernotice(&tags, &params, trailing.as_deref(), now_ms),

@@ -475,6 +475,22 @@ mod tests {
     }
 
     #[test]
+    fn build_history_events_preserves_unprefixed_privmsg_body() {
+        let shared = Shared::new();
+        let lines = vec![
+            privmsg_line("command", "!settings").replace(" :!settings", " !settings"),
+            privmsg_line("emote", "Kappa")
+                .replace("emotes=;", "emotes=25:0-4;")
+                .replace(" :Kappa", " Kappa"),
+        ];
+        let events = build_history_events(&shared, "xqc", &lines);
+        assert!(matches!(&events[..], [
+            ChatEvent::Privmsg { text: command, .. },
+            ChatEvent::Privmsg { text: emote, emote_spans, .. },
+        ] if command == "!settings" && emote == "Kappa" && emote_spans.len() == 1));
+    }
+
+    #[test]
     fn build_history_events_skips_other_channel() {
         let shared = Shared::new();
         let lines = vec![privmsg_line("abc", "hello").replace("#xqc", "#other")];
