@@ -32,6 +32,16 @@ assert(
   !isAllowedEmoteCdnUrl("https://static-cdn.jtvnw.net/jtv_user_pictures/x.png"),
   "profile pic denied",
 );
+assert(
+  isAllowedEmoteCdnUrl(
+    "https://static-cdn.jtvnw.net/twitch-video-assets/fixture/landscape/thumb/thumb-0000000000-480x272.jpg",
+  ),
+  "twitch video assets thumbnail",
+);
+assert(
+  !isAllowedEmoteCdnUrl("https://static-cdn.jtvnw.net/twitch-video-assets/fixture/landscape/other.jpg"),
+  "non-thumbnail clip asset denied",
+);
 assert(!isAllowedEmoteCdnUrl("https://evil.example/emote/x.png"), "foreign host");
 assert(!isAllowedEmoteCdnUrl("http://cdn.betterttv.net/emote/abc/1x"), "http denied");
 const { csp, devCsp } = JSON.parse(

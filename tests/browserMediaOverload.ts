@@ -39,7 +39,7 @@ export async function checkMediaOverload(ring: MessageRing, send: (event: ChatEv
     ring.goToBottom();
     send(event);
     await until(() => historyRows(ring).some((slot) => slot.msgId === event.id));
-    const clipInfo = { clipId: "recovery-clip", url: "https://clips.twitch.tv/Fixture", title: "Fixture clip", host: "clips.twitch.tv", thumbnailUrl: `${base}/recovery-thumb/1x.gif`, durationSec: 10, viewCount: 1, creatorName: "Viewer", broadcasterName: "Channel", gameName: null, createdAt: null };
+    const clipInfo = { clipId: "recovery-clip", url: "https://clips.twitch.tv/Fixture", title: "Fixture clip", host: "clips.twitch.tv", thumbnailUrl: "https://static-cdn.jtvnw.net/twitch-video-assets/fixture/landscape/thumb/thumb-0000000000-480x272.jpg", durationSec: 10, viewCount: 1, creatorName: "Viewer", broadcasterName: "Channel", gameName: null, createdAt: null };
     ring.applyLinkEnrichment(event.id, {
       body: event.text, links: [], hosts: [], spans: event.emoteSpans, mentions: [],
       clip: clipInfo,

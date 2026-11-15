@@ -73,7 +73,13 @@ export function isAllowedEmoteCdnUrl(raw: string): boolean {
     );
   }
   if (host === "static-cdn.jtvnw.net") {
-    return path.startsWith("/badges/") || path.startsWith("/emoticons/");
+    return (
+      path.startsWith("/badges/") ||
+      path.startsWith("/emoticons/") ||
+      (path.startsWith("/twitch-video-assets/") &&
+        path.includes("/thumb/") &&
+        /\.(?:jpe?g|png|webp)$/i.test(path))
+    );
   }
   if (host === "d3aqoihi2n8ty8.cloudfront.net") {
     return path.startsWith("/actions/");
