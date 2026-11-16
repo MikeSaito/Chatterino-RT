@@ -330,6 +330,24 @@ mod tests {
     }
 
     #[test]
+    fn search_and_history_merge_keep_the_configured_window() {
+        for limit in [1_000, 10_000] {
+            let mut history = Scrollback::with_limit(limit);
+            for index in 1..limit as u64 {
+                history.push(notice_ts(&format!("row-{index}"), index), no_stack());
+            }
+            assert_eq!(history.prepend_front(&[notice_ts("oldest", 0)]), 1);
+            let tail = notice_ts("search-target", limit as u64);
+            assert_eq!(history.fill_in_missing(&[tail.clone(), tail]), 1);
+            let snapshot = history.snapshot();
+            assert_eq!(snapshot.len(), limit);
+            assert_eq!(snapshot.first().unwrap().id(), "row-1");
+            assert_eq!(snapshot.last().unwrap().id(), "search-target");
+            assert_eq!(history.search_ids("search-target"), ["search-target"]);
+        }
+    }
+
+    #[test]
     fn set_limit_trims_oldest() {
         let mut q = Scrollback::with_limit(5);
         for i in 0..5 {
