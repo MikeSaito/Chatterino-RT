@@ -7,11 +7,20 @@ export type SearchEngine = {
   name: string;
 };
 
+const defaultSearchEngine: SearchEngine = {
+  url: "https://duckduckgo.com/?q=",
+  name: "DuckDuckGo",
+};
+
+export function resolveWebSearchEngine(url: string, name: string): SearchEngine {
+  return url.trim() ? { url: url.trim(), name: name.trim() } : defaultSearchEngine;
+}
+
 /** Preset → URL/name as stock GeneralPage. */
 export function presetToEngine(preset: string): SearchEngine | null {
   switch (preset.trim()) {
     case "DuckDuckGo":
-      return { url: "https://duckduckgo.com/?q=", name: "DuckDuckGo" };
+      return defaultSearchEngine;
     case "Bing":
       return { url: "https://www.bing.com/search?q=", name: "Bing" };
     case "Google":

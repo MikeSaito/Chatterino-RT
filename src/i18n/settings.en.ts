@@ -261,6 +261,7 @@ export const settingsEn = {
   "settings.knob.search-incognito": "Search in incognito/private mode",
   "settings.knob.search-name": "Search engine name",
   "settings.knob.search-preset": "Search engine preset",
+  "settings.knob.search-preset.opt.x": "Default or custom URL",
   "settings.knob.search-preset.opt.bing": "Bing",
   "settings.knob.search-preset.opt.duckduckgo": "DuckDuckGo",
   "settings.knob.search-preset.opt.google": "Google",

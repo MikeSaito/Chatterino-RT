@@ -366,6 +366,7 @@ const SIMILARITY_CHECK: SelectOption[] = [
 ];
 
 const SEARCH_PRESET: SelectOption[] = [
+  opt("Default or custom URL", ""),
   opt("DuckDuckGo", "DuckDuckGo"),
   opt("Bing", "Bing"),
   opt("Google", "Google"),

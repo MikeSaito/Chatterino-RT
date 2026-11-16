@@ -77,6 +77,7 @@ import {
 import { mentionInsertText } from "./shell/mentionFormat";
 import {
   buildWebSearchUrl,
+  resolveWebSearchEngine,
   webSearchMenuLabel,
 } from "./shell/webSearch";
 import {
@@ -1259,8 +1260,12 @@ async function boot(): Promise<void> {
       openLinksIncognito = data.knobs["misc.openLinksIncognito"] === true;
       searchIncognito = data.knobs["behaviour.searchIncognito"] === true;
       searchEnabled = data.knobs["behaviour.searchEnabled"] === true;
-      searchEngineUrl = String(data.knobs["behaviour.searchEngineUrl"] ?? "");
-      searchEngineName = String(data.knobs["behaviour.searchEngineName"] ?? "");
+      const searchEngine = resolveWebSearchEngine(
+        String(data.knobs["behaviour.searchEngineUrl"] ?? ""),
+        String(data.knobs["behaviour.searchEngineName"] ?? ""),
+      );
+      searchEngineUrl = searchEngine.url;
+      searchEngineName = searchEngine.name;
       headerKnobs = parseHeaderKnobs(data.knobs);
       thumbnailSizeStream = parseThumbnailSizeStream(
         data.knobs["appearance.thumbnailSizeStream"],

@@ -2,6 +2,7 @@ import {
   buildWebSearchUrl,
   isAllowedHttpUrl,
   presetToEngine,
+  resolveWebSearchEngine,
   webSearchMenuLabel,
 } from "../src/shell/webSearch.ts";
 
@@ -16,6 +17,12 @@ assert(presetToEngine("Bing")?.name === "Bing", "bing");
 assert(presetToEngine("Google")?.url.includes("google") === true, "google");
 assert(presetToEngine("") === null, "empty preset");
 assert(presetToEngine("Yahoo") === null, "unknown");
+assert(resolveWebSearchEngine(" ", "").name === "DuckDuckGo", "default engine");
+assert(
+  resolveWebSearchEngine(" https://example.com/?q= ", " Example ").url ===
+    "https://example.com/?q=",
+  "saved custom engine takes precedence",
+);
 
 const url = buildWebSearchUrl(
   "https://duckduckgo.com/?q=",

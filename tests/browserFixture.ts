@@ -56,6 +56,7 @@ function message(channel: string, i: number): ChatEvent {
 }
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
+let openedLink: unknown;
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
@@ -92,6 +93,7 @@ mockIPC(async (cmd, args) => {
   }
   if (cmd === "chat_snapshot") return { channelId: a.channel, seq: sequences.get(String(a.channel)) ?? 1, dropped: 0, events: history.get(String(a.channel)) ?? [] };
   if (cmd === "chat_send") return new Promise<SendResult>((resolve, reject) => pendingSends.push({ channel: String(a.channel), text: String(a.text), replyToId: a.replyToId as string | null, resolve, reject }));
+  if (cmd === "open_chat_link") { openedLink = a.url; return null; }
   if (cmd === "chat_viewer_role") return { isMod: false, isBroadcaster: false };
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
@@ -125,10 +127,42 @@ async function switchTo(channel: string) {
 }
 function type(text: string) { input().value = text; input().dispatchEvent(new Event("input", { bubbles: true })); }
 function submit() { document.querySelector<HTMLFormElement>("#composer")!.requestSubmit(); }
-function selectReply() {
+function openMessageMenu() {
   const ctx: SlotContext = { msgId: "alpha-4", channel: "alpha", login: "viewer4", authorLogin: "viewer4", nick: "Viewer4", text: "Reply target", fullText: "Viewer4: Reply target", clientX: 100, clientY: 100, disabled: false, replyToId: "", linkUrl: "", imageUrl: "", imageKind: "", imageProvider: "", inReplyThread: false, shiftOnly: false };
   (fixtureWindow.__crt!.ring as unknown as { onContext: (ctx: SlotContext) => void }).onContext(ctx);
+}
+function selectReply() {
+  openMessageMenu();
   document.querySelector<HTMLButtonElement>('#chat-context [data-action="reply"]')!.click();
+}
+async function checkSearchSetting() {
+  const button = document.querySelector<HTMLButtonElement>('#chat-context [data-action="web-search"]')!;
+  openMessageMenu();
+  check(button.hidden, "web search is hidden by default");
+
+  const preview = (knobs: typeof settings.knobs) =>
+    emit(SETTINGS_PREVIEW_EVENT, { ...settings, knobs: { ...settings.knobs, ...knobs } });
+  try {
+    await preview({ "behaviour.searchEnabled": true });
+    openMessageMenu();
+    check(!button.hidden && button.textContent?.includes("DuckDuckGo"), "enabling web search provides a default engine");
+    button.click();
+    await until(() => openedLink === "https://duckduckgo.com/?q=Reply%20target");
+
+    await preview({
+      "behaviour.searchEnabled": true,
+      "behaviour.searchEngineUrl": "https://example.com/search?q=",
+      "behaviour.searchEngineName": "Example",
+    });
+    openMessageMenu();
+    check(!button.hidden && button.textContent?.includes("Example"), "custom search engine overrides the default");
+    button.click();
+    await until(() => openedLink === "https://example.com/search?q=Reply%20target");
+  } finally {
+    await emit(SETTINGS_PREVIEW_EVENT, settings);
+  }
+  openMessageMenu();
+  check(button.hidden, "restoring settings hides web search again");
 }
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
@@ -295,6 +329,8 @@ fixtureWindow.__fixture = {
     check(!document.querySelector("#pinned-message-host, #poll-panel-host, #chat-context-pin"), "removed Twitch controls are absent");
     check(document.querySelector("#usercard-pin") && document.querySelector("#replythread-pin"), "local popup pinning is still available");
     await switchTo("alpha");
+    await checkSearchSetting();
+    checks.push("context-menu search follows the default and custom engine settings");
     type("alpha original");
     selectReply();
     const ring = fixtureWindow.__crt!.ring;

@@ -264,6 +264,7 @@ export const settingsRu: Record<SettingsMessageKey, string> = {
   "settings.knob.search-incognito": "Искать в режиме инкогнито / приватном",
   "settings.knob.search-name": "Название поисковой системы",
   "settings.knob.search-preset": "Предустановка поисковой системы",
+  "settings.knob.search-preset.opt.x": "По умолчанию или свой URL",
   "settings.knob.search-preset.opt.bing": "Bing",
   "settings.knob.search-preset.opt.duckduckgo": "DuckDuckGo",
   "settings.knob.search-preset.opt.google": "Google",
