@@ -1715,6 +1715,9 @@ export function mountSettingsPanel(opts: {
   };
 
   const closePanel = (restore: boolean): void => {
+    if (restore && saving) {
+      return;
+    }
     window.clearTimeout(previewTimer);
     resetHotkeyFilter?.();
     aboutGen += 1;
@@ -1803,22 +1806,30 @@ export function mountSettingsPanel(opts: {
     okBtn.disabled = true;
     cancelBtn.disabled = true;
     statusEl.textContent = "";
+    window.clearTimeout(previewTimer);
     const draft = readDraft();
     draft.knobs = migrateStaleFalseDefaults(draft.knobs).knobs;
+    let previous = baseline;
     try {
       const live = await invoke<AppSettings>("settings_get");
+      previous = live;
       const split = live.knobs["appearance.playerChatSplit"];
       if (typeof split === "number" && Number.isFinite(split)) {
         draft.knobs["appearance.playerChatSplit"] = split;
+      }
+      if (draft.fontScale === baseline.fontScale) {
+        draft.fontScale = live.fontScale;
       }
     } catch {
       /* keep draft */
     }
     const filtersDraft = filtersFromSettings(draft);
     let saved: AppSettings | undefined;
+    let filtered = false;
     try {
       saved = await invoke<AppSettings>("settings_set", { settings: draft });
       const filters = await invoke<Filters>("filters_set", { filters: filtersDraft });
+      filtered = true;
       baseline = {
         ...emptySettings(),
         ...saved,
@@ -1830,23 +1841,23 @@ export function mountSettingsPanel(opts: {
       await emitSettingsSaved(baseline);
       closePanel(false);
     } catch (err) {
-      if (saved) {
+      if (saved && !filtered) {
         try {
           const rolled = await invoke<AppSettings>("settings_set", {
-            settings: baseline,
+            settings: previous,
           });
-          baseline = {
-            ...emptySettings(),
-            ...rolled,
-            knobs: { ...defaultKnobs(), ...(rolled.knobs ?? {}) },
-            enableSelfHighlight: baselineFilters.enableSelfHighlight,
-          };
-          paintDraft(baseline);
-          void emitSettingsPreview(baseline);
+          baseline = mergeLoadedSettings(rolled, baselineFilters);
         } catch (rollErr) {
-          statusEl.textContent = `${formatError(err)}; rollback: ${formatError(rollErr)}`;
+          const current = await invoke<AppSettings>("settings_get").catch(() => null);
+          baseline = mergeLoadedSettings(current ?? saved, baselineFilters);
+          await emitSettingsSaved(baseline).catch(() => undefined);
+          statusEl.textContent = t("settings.status.rollbackFailed", {
+            error: formatError(err),
+            rollback: formatError(rollErr),
+          });
           return;
         }
+        await emitSettingsSaved(baseline).catch(() => undefined);
       }
       statusEl.textContent = formatError(err);
     } finally {
@@ -1939,46 +1950,14 @@ export function mountSettingsPanel(opts: {
 
   return {
     reload: loadPanel,
-    bumpZoom: (() => {
-      let chain: Promise<void> = Promise.resolve();
-      return (dir: 1 | -1 | 0): Promise<void> => {
-        chain = chain
-          .catch(() => undefined)
-          .then(async () => {
-            const base = lastSettings ?? emptySettings();
-            const next: AppSettings = {
-              ...base,
-              fontScale: stepZoom(base.fontScale, dir),
-              knobs: { ...defaultKnobs(), ...base.knobs },
-              hotkeys: normalizeHotkeyRows(base.hotkeys ?? []).map((r) => ({
-                action: r.action,
-                keybinding: r.keybinding,
-                name: r.name,
-              })),
-            };
-            try {
-              const saved = await invoke<AppSettings>("settings_set", {
-                settings: next,
-              });
-              const merged: AppSettings = {
-                ...emptySettings(),
-                ...saved,
-                knobs: { ...defaultKnobs(), ...(saved.knobs ?? {}) },
-                hotkeys: normalizeHotkeyRows(saved.hotkeys ?? []).map((r) => ({
-                  action: r.action,
-                  keybinding: r.keybinding,
-                  name: r.name,
-                })),
-              };
-              baseline = merged;
-              paintDraft(merged);
-              applyDraft(merged);
-            } catch {
-              applyDraft(next);
-            }
-          });
-        return chain;
-      };
-    })(),
+    async bumpZoom(dir) {
+      if (!loadReady || saving) {
+        return;
+      }
+      window.clearTimeout(previewTimer);
+      const draft = readDraft();
+      draft.fontScale = stepZoom(draft.fontScale, dir);
+      paintDraft(draft);
+    },
   };
 }

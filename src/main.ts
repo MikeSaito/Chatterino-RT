@@ -1162,6 +1162,9 @@ async function boot(): Promise<void> {
   const settingsCtl = bindSettingsBridge({
     ring,
     openBtn: null,
+    onSaveError: (error) => {
+      toast.push({ kind: "danger", text: t("settings.status.saveFailed", { reason: formatError(error) }) });
+    },
     onOpen: () => {
       hideContextMenu();
     },

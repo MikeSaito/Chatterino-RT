@@ -7,14 +7,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, mkdtempSync } from 
 import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { connect, freePort, sleep } from "./cdp.mjs";
+import { checkSettings } from "./settings.mjs";
 const args=process.argv.slice(2), option=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
 const profile=option("--profile")??"smoke";
-assert.ok(["smoke","soak"].includes(profile));
+assert.ok(["smoke","soak","settings"].includes(profile));
 const exe=resolve(option("--exe")??"src-tauri/target/release/tauri-app.exe");
 assert.ok(existsSync(exe),"Build the validation app first, or supply --exe");
 const output=resolve(option("--output")??`artifacts/desktop-${profile}-${Date.now()}.json`);
 mkdirSync(resolve("artifacts"),{recursive:true});
 const data=mkdtempSync(resolve("artifacts/validation-webview-"));
+const config=join(data,"config");
 const port=await freePort();
 const report={profile,exe,passed:false,build:option("--build")??createHash("sha256").update(readFileSync(exe)).digest("hex"),runs:[],error:null};
 let processHandle,cdp;
@@ -36,7 +38,7 @@ if(updateInstaller) {
 }
 const invoke=(command,args={})=>cdp.evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)})`);
 async function launch() {
- processHandle=spawn(exe,[],{windowsHide:true,stdio:"ignore",env:{...process.env,...(updateEndpoint?{CHATTERINO_RT_UPDATER_ENDPOINT:updateEndpoint}:{}),WEBVIEW2_USER_DATA_FOLDER:data,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1 --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`}});
+ processHandle=spawn(exe,[],{windowsHide:true,stdio:"ignore",env:{...process.env,...(updateEndpoint?{CHATTERINO_RT_UPDATER_ENDPOINT:updateEndpoint}:{}),...(profile==="settings"?{CRT_VALIDATION_CONFIG_DIR:config}:{}),WEBVIEW2_USER_DATA_FOLDER:data,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1 --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`}});
  let spawnError;processHandle.on("error",e=>{spawnError=e;});
  for(let i=0;i<120;i++) {
   if(spawnError)throw spawnError;
@@ -89,6 +91,11 @@ async function load(rate,seconds,scrolling) {
 }
 try {
  await launch();await joinChannel();
+ if (profile === "settings") {
+  report.settings = await checkSettings({ main: () => cdp, port, config, invoke, restart: async () => {
+   await quit();await launch();await joinChannel();
+  }});
+ } else {
  const settings=await invoke("settings_get");settings.timestampFormat="hh:mm:ss";await invoke("settings_set",{settings});
  await cdp.evaluate("(()=>{const input=document.querySelector('#composer-input');input.value='validation draft Привет';input.dispatchEvent(new Event('input',{bubbles:true}));window.dispatchEvent(new Event('blur'));return true;})()");
  await quit();await launch();await joinChannel();
@@ -124,6 +131,7 @@ try {
   assert.ok((await invoke("session_get")).open.includes("validation"),"channels lost during installed update");
   report.update.passed=true;
  }
- report.passed=true;console.log(`Native ${profile} checks passed: ${report.runs.map(r=>r.scenario).join(', ')}`);
+ }
+ report.passed=true;console.log(`Native ${profile} checks passed`);
 }catch(error){report.error=String(error);process.exitCode=1;console.error(error);}
 finally{await quit();if(updateServer)await new Promise(resolve=>updateServer.close(resolve));writeFileSync(output,JSON.stringify(report,null,2)+"\n");console.log(`Report: ${output}`);}

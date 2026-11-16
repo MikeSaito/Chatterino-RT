@@ -287,8 +287,12 @@ pub struct SettingsInner {
 
 pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    super::logging::init_default_base(shared, &dir);
+    init_at(&dir, shared)
+}
+
+pub(crate) fn init_at(dir: &Path, shared: &Shared) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    super::logging::init_default_base(shared, dir);
     let path = dir.join(SETTINGS_FILE);
     let data = load_file(&path);
     let mut inner = shared.settings.lock().map_err(|e| e.to_string())?;
@@ -475,6 +479,13 @@ pub fn replace(shared: &Shared, incoming: AppSettings) -> Result<AppSettings, Ap
             "config directory is not initialized",
         ));
     }
+    // The emote picker owns favourites and can change them while Settings is open.
+    clean
+        .favourite_emotes
+        .clone_from(&inner.data.favourite_emotes);
+    clean
+        .favourite_emojis
+        .clone_from(&inner.data.favourite_emojis);
     let prev_autorun = super::autorun::is_registered();
     if let Err(e) = super::autorun::apply_knob_to_registry(&clean.knobs) {
         return Err(ApiError::internal(&e));
@@ -994,6 +1005,12 @@ mod tests {
             inner.path = std::env::temp_dir()
                 .join(format!("webtv-settings-test-{}.json", std::process::id()));
         }
+        mutate_favourites(&shared, |emotes, emojis| {
+            emotes.push("FixtureEmote".into());
+            emojis.push("smile".into());
+            Ok(())
+        })
+        .unwrap();
         let saved = replace(
             &shared,
             AppSettings {
@@ -1008,6 +1025,8 @@ mod tests {
         assert_eq!(saved.font_scale, 1.25);
         assert!(!saved.show_timestamps);
         assert!(saved.hide_moderated);
+        assert_eq!(saved.favourite_emotes, ["FixtureEmote"]);
+        assert_eq!(saved.favourite_emojis, ["smile"]);
         let snap = snapshot(&shared).unwrap();
         assert_eq!(snap, saved);
         let _ = fs::remove_file(&shared.settings.lock().unwrap().path);

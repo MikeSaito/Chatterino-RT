@@ -460,6 +460,8 @@ export const ru: Record<MessageKey, string> = {
     "Приватный режим недоступен для браузера по умолчанию.",
   "settings.status.pickCacheFailed": "Не удалось выбрать каталог кэша.",
   "settings.status.saveCacheFailed": "Не удалось сохранить путь кэша.",
+  "settings.status.saveFailed": "Не удалось сохранить настройки: {reason}",
+  "settings.status.rollbackFailed": "Настройки сохранены частично. {error}. Не удалось восстановить прежние настройки: {rollback}",
   "settings.status.resetCacheFailed": "Не удалось сбросить путь кэша.",
   "settings.status.clearCacheFailed": "Не удалось очистить кэш.",
   "settings.status.uploaderCopied":

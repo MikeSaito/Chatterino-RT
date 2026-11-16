@@ -43,6 +43,7 @@ export function bindSettingsBridge(opts: {
   openBtn: HTMLButtonElement | null;
   onDisplay?: (data: AppSettings) => void;
   onOpen?: () => void;
+  onSaveError: (error: unknown) => void;
 }): {
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
   patchKnobs: (patch: Record<string, boolean | string | number>) => Promise<void>;
@@ -69,8 +70,8 @@ export function bindSettingsBridge(opts: {
           const merged = rematchSettings(saved);
           baseline = merged;
           apply(merged);
-        } catch {
-          apply(next);
+        } catch (error) {
+          opts.onSaveError(error);
         }
       });
     return chain;
@@ -109,31 +110,21 @@ export function bindSettingsBridge(opts: {
 
   openBtn?.addEventListener("click", () => {
     opts.onOpen?.();
-    baseline = applied;
     void requestOpenSettingsWindow();
   });
 
   const prepareOpen = (): void => {
     opts.onOpen?.();
-    baseline = applied;
   };
 
   let zoomPersistTimer: ReturnType<typeof setTimeout> | null = null;
   let zoomPersistResolve: (() => void) | null = null;
+  let zoomRevision = 0;
 
   const bumpZoom = (dir: 1 | -1 | 0): Promise<void> => {
-    const next: AppSettings = {
-      ...applied,
-      fontScale: stepZoom(applied.fontScale, dir),
-      knobs: { ...defaultKnobs(), ...applied.knobs },
-      hotkeys: normalizeHotkeyRows(applied.hotkeys ?? []).map((r) => ({
-        action: r.action,
-        keybinding: r.keybinding,
-        name: r.name,
-      })),
-    };
-    applied = next;
-    applySettingsDisplay(ring, next, onDisplay);
+    const revision = ++zoomRevision;
+    const fontScale = stepZoom(applied.fontScale, dir);
+    apply({ ...applied, fontScale });
     if (zoomPersistTimer !== null) {
       clearTimeout(zoomPersistTimer);
       zoomPersistTimer = null;
@@ -145,18 +136,20 @@ export function bindSettingsBridge(opts: {
         zoomPersistTimer = null;
         const done = zoomPersistResolve;
         zoomPersistResolve = null;
-        const toSave: AppSettings = {
-          ...baseline,
-          fontScale: applied.fontScale,
-          knobs: { ...defaultKnobs(), ...baseline.knobs },
-          hotkeys: normalizeHotkeyRows(baseline.hotkeys ?? []).map((r) => ({
-            action: r.action,
-            keybinding: r.keybinding,
-            name: r.name,
-          })),
-        };
-        void persist(toSave).finally(() => {
-          done?.();
+        chain = chain.catch(() => undefined).then(async () => {
+          try {
+            const saved = await invoke<AppSettings>("settings_set", {
+              settings: { ...baseline, fontScale },
+            });
+            baseline = rematchSettings(saved);
+          } catch (error) {
+            opts.onSaveError(error);
+          } finally {
+            if (revision === zoomRevision) {
+              apply({ ...applied, fontScale: baseline.fontScale });
+            }
+            done?.();
+          }
         });
       }, 400);
     });
@@ -187,18 +180,15 @@ export function bindSettingsBridge(opts: {
             settings: next,
           });
           baseline = rematchSettings(saved);
-          applied = {
-            ...applied,
-            knobs: { ...applied.knobs, ...patch },
-          };
-          onDisplay?.(applied);
-        } catch {
-          applied = {
-            ...applied,
-            knobs: { ...applied.knobs, ...patch },
-          };
-          onDisplay?.(applied);
+        } catch (error) {
+          opts.onSaveError(error);
         }
+        const restored = { ...applied.knobs };
+        for (const key of Object.keys(patch)) {
+          restored[key] = baseline.knobs[key] ?? null;
+        }
+        applied = { ...applied, knobs: restored };
+        onDisplay?.(applied);
       });
     return chain;
   };

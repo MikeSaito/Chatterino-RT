@@ -4,11 +4,12 @@ export async function freePort() {
  const server=createServer(); await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
  const port=server.address().port; await new Promise(resolve=>server.close(resolve)); return port;
 }
-export async function connect(port) {
+export async function connect(port, pageName = "main") {
  const response=await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(5000)});
  const targets=await response.json();
- const page=targets.find(t=>t.type==="page" && (t.url==="https://tauri.localhost/" || t.url==="https://tauri.localhost/index.html"));
- if(!page) throw new Error("Application main WebView not ready");
+ const urls=pageName==="settings" ? ["https://tauri.localhost/settings.html"] : ["https://tauri.localhost/","https://tauri.localhost/index.html"];
+ const page=targets.find(t=>t.type==="page" && urls.includes(t.url));
+ if(!page) throw new Error(`Application ${pageName} WebView not ready`);
  const socket=new WebSocket(page.webSocketDebuggerUrl); let id=0; const pending=new Map(); const errors=[];
  socket.onmessage=event=>{const value=JSON.parse(event.data);if(value.id) {const entry=pending.get(value.id);if(!entry)return;pending.delete(value.id);clearTimeout(entry.timer);value.error?entry.reject(new Error(JSON.stringify(value.error))):entry.resolve(value.result);}else if(value.method==="Runtime.exceptionThrown")errors.push(value.params.exceptionDetails.exception?.description ?? value.params.exceptionDetails.text);};
  const fail=()=>{for(const entry of pending.values()){clearTimeout(entry.timer);entry.reject(new Error("Application WebView disconnected"));}pending.clear();};

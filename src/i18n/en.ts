@@ -454,6 +454,8 @@ export const en = {
     "Private browsing is not available for the default browser.",
   "settings.status.pickCacheFailed": "Could not select cache directory.",
   "settings.status.saveCacheFailed": "Could not save cache path.",
+  "settings.status.saveFailed": "Could not save settings: {reason}",
+  "settings.status.rollbackFailed": "Settings were saved only in part. {error}. Could not restore previous settings: {rollback}",
   "settings.status.resetCacheFailed": "Could not reset cache path.",
   "settings.status.clearCacheFailed": "Could not clear cache.",
   "settings.status.uploaderCopied":

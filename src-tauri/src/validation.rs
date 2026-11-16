@@ -5,6 +5,7 @@ use crate::chat::{
     types::{ChatEvent, EmoteSpan},
 };
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -71,19 +72,28 @@ pub fn setup(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     if app.config().identifier != "com.mike.webtv-chats.validation" {
         return Err("validation requires its isolated app identifier".into());
     }
-    chat::filters::init(app, shared)?;
-    chat::session::init(app, shared)?;
-    chat::settings::init(app, shared)?;
+    let dir = match std::env::var_os("CRT_VALIDATION_CONFIG_DIR") {
+        Some(value) => PathBuf::from(value),
+        None => app.path().app_config_dir().map_err(|e| e.to_string())?,
+    };
+    if !dir.is_absolute() {
+        return Err("validation requires an absolute config path".into());
+    }
+    chat::filters::init_at(&dir, shared)?;
+    chat::session::init_at(&dir, shared)?;
+    chat::settings::init_at(&dir, shared)?;
     {
         let mut settings = shared.settings.lock().map_err(|_| "settings lock")?;
         settings
             .data
             .knobs
-            .insert("appearance.uiLayout".into(), serde_json::json!("Classic"));
+            .entry("appearance.uiLayout".into())
+            .or_insert_with(|| serde_json::json!("Classic"));
         settings
             .data
             .knobs
-            .insert("emotes.animateEmotes".into(), serde_json::json!(true));
+            .entry("emotes.animateEmotes".into())
+            .or_insert_with(|| serde_json::json!(true));
     }
     chat::user_data::init(shared)?;
     shared.auth.lock().map_err(|_| "auth lock")?.current_login = Some("validation".into());

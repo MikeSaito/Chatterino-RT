@@ -30,7 +30,11 @@ pub struct SessionInner {
 
 pub fn init(app: &AppHandle, shared: &Shared) -> Result<(), String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    init_at(&dir, shared)
+}
+
+pub(crate) fn init_at(dir: &Path, shared: &Shared) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(SESSION_FILE);
     let data = load_file(&path);
     let mut inner = shared.session.lock().map_err(|e| e.to_string())?;
