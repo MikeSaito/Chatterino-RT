@@ -61,6 +61,9 @@ mockWindows("main");
 mockConvertFileSrc("windows");
 const { emptySettings } = await import("../src/shell/settings/settingsApply");
 const settings = emptySettings();
+if (new URLSearchParams(location.search).get("history") === "10000") {
+  settings.knobs["misc.scrollbackSplitLimit"] = 10_000;
+}
 settings.knobs["appearance.uiLayout"] = "Classic";
 settings.knobs["appearance.uiLanguage"] = "en";
 settings.knobs["misc.showMessageLength"] = true;

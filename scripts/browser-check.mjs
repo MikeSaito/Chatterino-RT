@@ -9,6 +9,7 @@ import { waitForBrowserReady } from "./browserReadiness.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const uiOnly = process.argv.includes("--ui-only");
+const largeHistory = process.argv.includes("--large-history");
 const browser = process.env.CRT_BROWSER_PATH ?? [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -78,8 +79,9 @@ try {
   await command("Runtime.enable"); await command("Page.enable");
   await command("Emulation.setFocusEmulationEnabled", { enabled: true });
   await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-  await command("Page.navigate", { url: "http://localhost:1420/tests/browser.html" });
+  await command("Page.navigate", { url: `http://localhost:1420/tests/browser.html${largeHistory ? "?history=10000" : ""}` });
   await ready();
+  assert.equal(await evaluate("window.__crt.ring.poolSize"), largeHistory ? 10_000 : 1_000);
   const smoke = await evaluate("window.__fixture.smoke()");
   console.log("UI checks:", smoke.join("; "));
   const saved = await evaluate("JSON.parse(localStorage.getItem('crt-workspace-v1'))");
