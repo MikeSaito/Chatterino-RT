@@ -20,6 +20,7 @@ import {
   BitmapFontManager,
   BitmapText,
   Cache,
+  CanvasPool,
   FederatedPointerEvent,
   Graphics,
   Rectangle,
@@ -1991,10 +1992,9 @@ export class MessageRing {
         // White atlas so style.fill / nick tint work (Pixi tint-only when fill is white).
         fill: "#ffffff",
       },
-      chars: [
-        ["\u0020", "\u007e"],
-        ["\u0400", "\u04FF"],
-      ],
+      // DynamicBitmapFont adds glyphs on demand, retaining kerning without
+      // calculating every ASCII/Cyrillic pair before any messages arrive.
+      chars: ["M "],
     });
     this.atlasDesignSize = atlasSize;
     this.reinstallNickFont();
@@ -2011,10 +2011,7 @@ export class MessageRing {
         fontWeight: qtWeightToPixi(this.nickBoldScale),
         fill: "#ffffff",
       },
-      chars: [
-        ["\u0020", "\u007e"],
-        ["\u0400", "\u04FF"],
-      ],
+      chars: ["M "],
     });
     this.nickAtlasDesignSize = atlasSize;
     if (this.ready) {
@@ -5568,6 +5565,8 @@ function replaceBitmapFont(
 ): void {
   if (Cache.has(`${name}-bitmap`)) {
     BitmapFont.uninstall(name);
+    // Освободить холсты старого шрифта вместе с их нативными кэшами измерений.
+    CanvasPool.clear();
   }
   BitmapFont.install(options);
 }

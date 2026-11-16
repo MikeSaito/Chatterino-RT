@@ -108,6 +108,8 @@ type WrapCtx = {
   maskMentions: readonly WrapRange[];
   /** Готовые строки: hug только если оба non-ZW на одной линии. */
   lines?: readonly WrapLine[];
+  /** One lazy iterator, owned only by this layout operation. */
+  graphemes?: GraphemeCursor;
 };
 
 type WrapBudget = {
@@ -119,6 +121,13 @@ const WRAP_MAX_LINES = 48;
 
 type GraphemeSegmenter = {
   segment: (input: string) => Iterable<{ segment: string }>;
+};
+
+type GraphemeCursor = {
+  text: string;
+  limit: number;
+  end: number;
+  iterator: Iterator<{ segment: string }>;
 };
 
 const graphemeSegmenter: GraphemeSegmenter | null = (() => {
@@ -645,7 +654,7 @@ function maskSlice(
         i += 1;
         continue;
       }
-      const next = nextUnit(text, i, end);
+      const next = nextUnit(text, i, end, ctx);
       kept.push(text.slice(i, next));
       i = next;
       continue;
@@ -670,7 +679,7 @@ function maskSlice(
       i += 1;
       continue;
     }
-    const next = nextUnit(text, i, end);
+    const next = nextUnit(text, i, end, ctx);
     kept.push(text.slice(i, next));
     i = next;
   }
@@ -772,7 +781,7 @@ function advanceUnit(
   if (span) {
     return { next: Math.min(limit, span.end), width: 0 };
   }
-  const next = nextUnit(text, i, limit);
+  const next = nextUnit(text, i, limit, ctx);
   return {
     next,
     width: Math.max(0, ctx.measureAdvance(text.slice(i, next))),
@@ -797,11 +806,42 @@ function emoteAt(
   return undefined;
 }
 
-function nextUnit(text: string, i: number, limit: number): number {
+function graphemeCursor(
+  segmenter: GraphemeSegmenter,
+  text: string,
+  i: number,
+  limit: number,
+): GraphemeCursor {
+  return {
+    text,
+    limit,
+    end: i,
+    iterator: segmenter.segment(text.slice(i, limit))[Symbol.iterator](),
+  };
+}
+
+function nextUnit(text: string, i: number, limit: number, ctx: WrapCtx): number {
   if (graphemeSegmenter) {
-    const slice = text.slice(i, limit);
-    for (const part of graphemeSegmenter.segment(slice)) {
-      return i + part.segment.length;
+    let cursor = ctx.graphemes;
+    if (!cursor || cursor.text !== text || cursor.limit !== limit || i < cursor.end) {
+      cursor = ctx.graphemes = graphemeCursor(graphemeSegmenter, text, i, limit);
+    }
+    // Emotes/mentions may skip text. Reuse only a confirmed grapheme boundary.
+    // Starting inside a cluster needs fresh suffix context (e.g. RI flag pairs),
+    // and a changed limit may cut a surrogate pair or a multi-code-point cluster.
+    for (;;) {
+      const start: number = cursor.end;
+      const part = cursor.iterator.next();
+      if (part.done) {
+        break;
+      }
+      cursor.end += part.value.segment.length;
+      if (start === i) {
+        return cursor.end;
+      }
+      if (cursor.end > i) {
+        cursor = ctx.graphemes = graphemeCursor(graphemeSegmenter, text, i, limit);
+      }
     }
   }
   return Math.min(limit, nextUtf16(text, i));
