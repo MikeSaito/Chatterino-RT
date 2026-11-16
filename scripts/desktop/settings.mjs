@@ -68,11 +68,12 @@ export async function checkSettings({ main, port, config, invoke, restart }) {
     }
     await ready();
   };
-  const chooseZoom = () => settings.evaluate(`(() => {
-    const select = ${zoom};
-    select.value = ${JSON.stringify(String(changedScale))};
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+  const changeInput = (id, value) => settings.evaluate(`(() => {
+    const input = document.getElementById(${JSON.stringify(id)});
+    input.value = ${JSON.stringify(value)};
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
+  const chooseZoom = () => changeInput("settings-knob-zoom", String(changedScale));
   const assertFailedSave = async (filename) => blockWrite(config, filename, async () => {
     await settings.evaluate(`${save}.click()`);
     await waitFor(() => settings.evaluate(`Boolean(${status}) && !${save}.disabled`), `missing save error for ${filename}`);
@@ -84,6 +85,9 @@ export async function checkSettings({ main, port, config, invoke, restart }) {
     await open();
     await chooseZoom();
     await assertScale(changedScale);
+    await invoke("open_settings_window");
+    await sleep(200);
+    assert.equal(await settings.evaluate(`Number(${zoom}.value)`), changedScale, "focusing the open window discarded the draft");
     await invoke("chat_toggle_favourite_emote", { code: "FixtureEmote", isEmoji: false, add: true });
     await settings.evaluate(zoomIn);
     await waitFor(async () => await readScale() > changedScale, "settings zoom shortcut did not preview");
@@ -100,11 +104,13 @@ export async function checkSettings({ main, port, config, invoke, restart }) {
     await assertScale(original.fontScale);
     await settings.evaluate("document.querySelector('#settings-knob-emotes-animate').click()");
     await waitFor(() => main().evaluate("window.__crt.ring.animateEmotes === false"), "animation setting did not reach chat");
-    await settings.evaluate(`(() => {
-      const input = document.querySelector('#settings-knob-scrollback-split');
-      input.value = '10000';
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`);
+    await settings.evaluate("document.querySelector('#settings-knob-hide-moderated').click()");
+    await waitFor(() => main().evaluate("window.__crt.ring.hideModerated === true"), "moderation setting did not reach chat");
+    await changeInput("settings-knob-theme", "Light");
+    await waitFor(() => main().evaluate("document.documentElement.dataset.theme === 'Light'"), "theme preview did not reach chat");
+    await changeInput("settings-knob-ui-language", "ru");
+    await waitFor(() => main().evaluate("document.documentElement.lang === 'ru'"), "language preview did not reach chat");
+    await changeInput("settings-knob-scrollback-split", "10000");
     await settings.evaluate(`${save}.click()`);
     await waitFor(async () => (await invoke("settings_get")).fontScale === changedScale, "confirmed zoom was not saved");
     await hidden();
@@ -119,6 +125,9 @@ export async function checkSettings({ main, port, config, invoke, restart }) {
   assert.equal(saved.fontScale, changedScale);
   assert.deepEqual(saved.favouriteEmotes, ["FixtureEmote"], "saving settings lost an emote favourite");
   assert.equal(saved.knobs["emotes.animateEmotes"], false, "animation setting did not survive restart");
+  assert.equal(saved.hideModerated, true, "moderation setting did not survive restart");
+  assert.equal(await main().evaluate("document.documentElement.dataset.theme"), "Light");
+  assert.equal(await main().evaluate("document.documentElement.lang"), "ru");
   assert.equal(await main().evaluate("window.__crt.ring.poolSize"), 10_000, "history limit did not take effect after restart");
   await assertScale(changedScale);
   await blockWrite(config, "settings", async () => {
@@ -128,5 +137,5 @@ export async function checkSettings({ main, port, config, invoke, restart }) {
     assert.equal((await invoke("settings_get")).fontScale, changedScale);
   });
   assert.deepEqual(main().errors, []);
-  return ["preview", "cancel", "settings write failure", "filters write failure", "restart", "favourites", "emote animation", "history limit", "quick zoom write failure"];
+  return ["preview", "refocus", "cancel", "settings write failure", "filters write failure", "restart", "favourites", "emote animation", "moderation visibility", "theme", "language", "history limit", "quick zoom write failure"];
 }

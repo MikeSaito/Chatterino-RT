@@ -2247,17 +2247,16 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), ApiError> {
         return Err(ApiError::internal("settings window unavailable"));
     };
     if window.is_visible().unwrap_or(false) {
-        window
+        return window
             .set_focus()
-            .map_err(|e| ApiError::internal(&e.to_string()))?;
-    } else {
-        window
-            .show()
-            .map_err(|e| ApiError::internal(&e.to_string()))?;
-        window
-            .set_focus()
-            .map_err(|e| ApiError::internal(&e.to_string()))?;
+            .map_err(|e| ApiError::internal(&e.to_string()));
     }
+    window
+        .show()
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+    window
+        .set_focus()
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
     app.emit("settings-opened", ())
         .map_err(|e| ApiError::internal(&e.to_string()))?;
     Ok(())
