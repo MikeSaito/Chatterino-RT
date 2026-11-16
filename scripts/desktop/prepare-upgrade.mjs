@@ -9,12 +9,13 @@ function run(args,options={}){const r=spawnSync(process.execPath,[cli,...args],{
 if(!existsSync(key))run(["signer","generate","--ci","--password","","--write-keys",key],{stdio:"pipe"});
 const publicKey=readFileSync(`${key}.pub`,"utf8").trim();
 const base=JSON.parse(readFileSync("src-tauri/tauri.validation.conf.json","utf8"));
-for(const version of ["1.1.6","1.1.7"]) {
+const candidate=JSON.parse(readFileSync("src-tauri/tauri.conf.json","utf8")).version;
+for(const version of ["1.1.7",candidate]) {
  const config={...base,version,plugins:{...base.plugins,updater:{...base.plugins.updater,pubkey:publicKey}}};
  const configFile=join(output,`config-${version}.json`);writeFileSync(configFile,JSON.stringify(config,null,2));
  run(["build","--features","validation","--config",configFile,"--debug"],{stdio:"inherit"});
  const installer=join(output,`validation-${version}.exe`);
  copyFileSync(resolve(`src-tauri/target/debug/bundle/nsis/Chatterino RT Validation_${version}_x64-setup.exe`),installer);
- if(version==="1.1.7")run(["signer","sign","--private-key-path",key,"--password","","--app-version",version,installer],{stdio:"pipe"});
+ if(version===candidate)run(["signer","sign","--private-key-path",key,"--password","","--app-version",version,installer],{stdio:"pipe"});
 }
 console.log(`Validation upgrade packages prepared in ${output}`);

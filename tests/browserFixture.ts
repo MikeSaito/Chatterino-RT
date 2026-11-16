@@ -96,8 +96,8 @@ mockIPC(async (cmd, args) => {
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
   if (cmd === "cache_info") return { path: "", isCustom: false };
-  if (cmd === "updater_status") return { ready: false, currentVersion: "1.1.7", reason: "fixture" };
-  if (cmd === "about_info") return { version: "1.1.7", settingsDirectory: "fixture" };
+  if (cmd === "updater_status") return { ready: false, currentVersion: "2.0.0", reason: "fixture" };
+  if (cmd === "about_info") return { version: "2.0.0", settingsDirectory: "fixture" };
   if (cmd.startsWith("plugin:window|")) {
     if (cmd.endsWith("inner_size")) return { width: innerWidth * devicePixelRatio, height: innerHeight * devicePixelRatio };
     if (cmd.endsWith("scale_factor")) return devicePixelRatio;

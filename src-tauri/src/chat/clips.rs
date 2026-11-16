@@ -424,9 +424,9 @@ mod tests {
             );
         }
         assert!(allowed_clip_thumbnail_url("https://evil.example/x.jpg").is_none());
-        assert!(
-            allowed_clip_thumbnail_url("https://clips-media-assets.twitch.tv.evil.example/x.jpg")
-                .is_none()
-        );
+        assert!(allowed_clip_thumbnail_url(
+            "https://clips-media-assets.twitch.tv.evil.example/x.jpg"
+        )
+        .is_none());
     }
 }
