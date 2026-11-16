@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0
+
+- Updated chat themes, channel tabs, message actions, and the Settings preview.
+- Reduced memory use and rendering work when scrolling long or media-heavy chat histories.
+- Fixed missing one-word messages and clip thumbnails. Incoming Twitch GIFs play inline.
+- Fixed Settings preview, save, and cancel. Context-menu search uses DuckDuckGo unless you configure another engine.
+- Moved AutoMod to Twitch EventSub and fixed moderation reconnects. Sign in again if the app prompts for additional permissions.
+- Removed unsupported Twitch message pins, polls, predictions, and GIF sending controls.
+
 ## 1.1.7
 
 - Refresh the Dark and Light palettes, channel tabs, header, composer, reply preview, empty state, and send-status cards.
