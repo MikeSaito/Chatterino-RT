@@ -14,6 +14,26 @@ async function fetchRetry(url, options={}) {
  }
  throw last;
 }
+
+async function fetchRelease(repo, tag, headers, publicCheck) {
+  const endpoint = `https://api.github.com/repos/${repo}/releases`;
+  const response = await fetchRetry(`${endpoint}/tags/${tag}`, { headers });
+  if (response.ok) return response.json();
+
+  // The tag endpoint returns 404 for drafts even with repository access.
+  if (response.status === 404 && !publicCheck && headers.Authorization) {
+    for (let page = 1; ; page++) {
+      const list = await fetchRetry(`${endpoint}?per_page=100&page=${page}`, { headers });
+      if (!list.ok) throw new Error(`GitHub release list failed: ${list.status}`);
+      const releases = await list.json();
+      const draft = releases.find(release => release.draft && release.tag_name === tag);
+      if (draft) return draft;
+      if (!list.headers.get("link")?.includes('rel="next"')) break;
+    }
+  }
+  throw new Error(`GitHub release lookup failed: ${response.status}`);
+}
+
 const args = process.argv.slice(2);
 const argument = name => { const i=args.indexOf(name); return i<0 ? undefined : args[i+1]; };
 const tag = argument("--tag");
@@ -26,9 +46,7 @@ const report = { tag, repository:repo, public:publicCheck, passed:false, files:[
 try {
  const headers = { Accept:"application/vnd.github+json", "X-GitHub-Api-Version":"2022-11-28" };
  if (!publicCheck && process.env.GITHUB_TOKEN) headers.Authorization=`Bearer ${process.env.GITHUB_TOKEN}`;
- const response = await fetchRetry(`https://api.github.com/repos/${repo}/releases/tags/${tag}`,{headers});
- if (!response.ok) throw new Error(`GitHub release lookup failed: ${response.status}`);
- const release = await response.json();
+ const release = await fetchRelease(repo, tag, headers, publicCheck);
  assert.equal(release.tag_name,tag);
  if(publicCheck) assert.equal(release.draft,false,"release is still a draft");
  writeFileSync(join(directory,"release.json"),JSON.stringify(release,null,2)+"\n");
