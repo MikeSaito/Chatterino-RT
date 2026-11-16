@@ -2241,10 +2241,31 @@ pub async fn fetch_emote_cdn(url: String) -> Result<CdnImageBytes, ApiError> {
     })
 }
 
+#[derive(Default)]
+pub struct SettingsWindowGate(tokio::sync::Mutex<()>);
+
 #[tauri::command]
-pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), ApiError> {
-    let Some(window) = app.get_webview_window("settings") else {
-        return Err(ApiError::internal("settings window unavailable"));
+pub async fn open_settings_window(
+    app: tauri::AppHandle,
+    gate: tauri::State<'_, SettingsWindowGate>,
+) -> Result<(), ApiError> {
+    // Creation must run outside the UI thread on Windows. Serialize callers
+    // so concurrent opens share the same window instead of racing its label.
+    let _opening = gate.0.lock().await;
+    let window = match app.get_webview_window("settings") {
+        Some(window) => window,
+        None => {
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "settings")
+                .ok_or_else(|| ApiError::internal("settings window config unavailable"))?;
+            tauri::WebviewWindowBuilder::from_config(&app, config)
+                .and_then(|builder| builder.build())
+                .map_err(|error| ApiError::internal(&error.to_string()))?
+        }
     };
     if window.is_visible().unwrap_or(false) {
         return window

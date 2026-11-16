@@ -68,6 +68,7 @@ pub fn run() {
         .plugin(security::freeze_app_prototype())
         .plugin(tauri_plugin_process::init())
         .manage(shared.clone())
+        .manage(chat::commands::SettingsWindowGate::default())
         .manage(PendingUpdate(Mutex::new(None)))
         .manage(UpdaterGate::default())
         .setup(move |app| {

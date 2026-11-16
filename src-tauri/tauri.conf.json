@@ -47,6 +47,7 @@
       },
       {
         "label": "settings",
+        "create": false,
         "title": "Chatterino Settings",
         "url": "settings.html",
         "width": 920,
