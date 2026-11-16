@@ -13,6 +13,9 @@
   min-height: 100vh;
   max-height: 100vh;
   overflow: hidden;
+  background: var(--c-window-bg);
+  color: var(--c-window-text);
+  font-family: "Segoe UI", system-ui, sans-serif;
 }
 
 #settings-root #settings-dialog-head,
@@ -23,29 +26,64 @@
 #settings-root #settings-body {
   flex: 1 1 auto;
   min-height: 0;
+  grid-template-columns: 168px minmax(0, 1fr);
 }
 
-#settings-root #settings-tabs {
-  padding: var(--space-3) 0;
+#settings-root #settings-dialog-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 8px 20px;
 }
 
-#settings-root .settings-tab {
-  padding: var(--space-2) var(--space-4);
+.settings-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#settings-root #settings-title {
   font-size: var(--font-md);
 }
 
+#settings-root #settings-tabs {
+  padding: 20px 10px;
+  gap: 3px;
+}
+
+#settings-root .settings-tab {
+  min-height: 36px;
+  padding: 6px 9px;
+  border-radius: 6px;
+}
+
+#settings-root .settings-tab.is-active .settings-tab-icon {
+  color: var(--c-window-text);
+}
+
+#settings-root .settings-tab-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 #settings-root #settings-pages {
-  padding: 20px 24px 32px;
+  padding: 24px 24px 32px;
 }
 
 #settings-root .settings-page-title {
-  font-size: 20px;
-  margin-bottom: var(--space-1);
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--c-window-text);
 }
 
 #settings-root .settings-section {
   font-size: var(--font-md);
-  margin-top: var(--space-2);
+  margin: 0;
+  padding: 0 0 4px;
+  border: 0;
+  color: var(--c-window-text);
 }
 
 #settings-root .settings-block {
@@ -55,6 +93,139 @@
 #settings-root .settings-row {
   grid-template-columns: minmax(160px, 240px) minmax(160px, 320px);
   gap: var(--space-4);
+}
+
+#settings-root .settings-row[hidden] {
+  display: none;
+}
+
+.settings-general-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.settings-general-intro {
+  margin: -9px 0 0;
+  color: var(--c-muted);
+}
+
+#settings-root:has(#settings-search-wrap.has-query) .settings-general-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#settings-root:has(#settings-search-wrap.has-query) .settings-chat-preview {
+  display: none;
+}
+
+#settings-root .settings-general-layout .settings-row,
+#settings-root .settings-general-layout .settings-switch {
+  min-height: 48px;
+  padding: 7px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface-1);
+}
+
+#settings-root .settings-general-layout .settings-row {
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 42%);
+  gap: 8px;
+}
+
+.settings-general-layout .settings-row > :is(input, select) {
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-general-layout .settings-switch {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+}
+
+#settings-root .switch {
+  width: 40px;
+  height: 20px;
+}
+
+#settings-root .switch-knob {
+  top: 2px;
+  left: 2px;
+}
+
+#settings-root .switch[aria-checked="true"] .switch-knob {
+  transform: translateX(20px);
+}
+
+.settings-chat-preview {
+  --preview-blue: #075b9a;
+  --preview-green: #236333;
+  --preview-violet: #6e3ba1;
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+
+#settings-root:is([data-theme="Dark"], [data-theme="Black"]) .settings-chat-preview {
+  --preview-blue: #8ac5f4;
+  --preview-green: #9bd3a4;
+  --preview-violet: #d4b4f3;
+}
+
+.settings-chat-preview h4 {
+  margin: 0 0 9px;
+  font-size: var(--font-md);
+}
+
+.settings-preview-card {
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-split-bg);
+}
+
+.settings-preview-channel {
+  display: block;
+  padding: 10px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.settings-preview-messages {
+  padding: 4px 0;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--preview-font-family, "Segoe UI"), sans-serif;
+  font-size: var(--preview-font-size, 10px);
+  font-weight: var(--preview-font-weight, 400);
+  line-height: 1.47;
+}
+
+.settings-preview-messages > div {
+  padding: 4px 10px;
+  overflow-wrap: anywhere;
+}
+
+.preview-nick-blue { color: var(--preview-blue); }
+.preview-nick-green { color: var(--preview-green); }
+.preview-nick-violet { color: var(--preview-violet); }
+
+.settings-chat-preview.alternate-messages .settings-preview-messages > div:nth-child(even) {
+  background: var(--c-surface-1);
+}
+
+.settings-chat-preview.hide-timestamps time {
+  display: none;
+}
+
+.settings-preview-messages time,
+.settings-chat-preview p {
+  color: var(--c-muted);
+}
+
+.settings-chat-preview p {
+  margin: 8px 0 0;
+  font-size: var(--font-xs);
 }
 
 #settings-root .editable-table-toolbar .btn-ghost {
@@ -79,11 +250,26 @@
 }
 
 #settings-root #settings-search-wrap {
-  max-width: 100%;
+  max-width: 252px;
 }
 
 #settings-root #settings-ok,
 #settings-root #settings-cancel {
   min-width: 96px;
   padding: 0.5em 1em;
+}
+
+@media (max-width: 770px) {
+  #settings-root #settings-body {
+    grid-template-columns: 132px minmax(0, 1fr);
+  }
+
+  .settings-general-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-chat-preview {
+    position: static;
+    grid-row: 1;
+  }
 }

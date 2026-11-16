@@ -49,6 +49,7 @@
     "test:hardware-suite": "node scripts/desktop/collect-suite.mjs"
   },
   "dependencies": {
+    "@fluentui/tokens": "1.0.0-alpha.24",
     "@msgpack/msgpack": "^3.1.3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-process": "^2.4.0",

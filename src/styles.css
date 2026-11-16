@@ -2,27 +2,30 @@
   font-family: Inter, Segoe UI, Arial, sans-serif;
   color: var(--c-window-text, #efeff1);
   background: var(--c-window-bg, #0f0f0f);
-  --c-window-bg: #0b101a;
-  --c-window-text: #edf1fa;
-  --c-split-bg: #0e1420;
-  --c-border: #303c51;
-  --c-muted: #adb8cb;
-  --c-input-bg: #182233;
-  --c-input-text: #edf1fa;
-  --c-header-bg: #121a29;
-  --c-header-border: #303c51;
-  --c-header-text: #edf1fa;
-  --c-scroll-thumb: #56647b;
-  --c-surface-1: #151e2e;
-  --c-surface-2: #1c2739;
-  --c-surface-3: #263247;
-  --c-accent: #b29aff;
-  --c-accent-hover: #c5b4ff;
-  --c-accent-text: #171024;
+  --c-window-bg: #1f1f1f;
+  --c-window-text: #ffffff;
+  --c-split-bg: #1f1f1f;
+  --c-border: #525252;
+  --c-muted: #adadad;
+  --c-input-bg: #292929;
+  --c-input-text: #ffffff;
+  --c-header-bg: #292929;
+  --c-header-border: #525252;
+  --c-header-text: #ffffff;
+  --c-scroll-thumb: #666666;
+  --c-surface-1: #292929;
+  --c-surface-2: #141414;
+  --c-surface-3: #292929;
+  --c-accent: #479ef5;
+  --c-accent-hover: #62abf5;
+  --c-accent-text: #141414;
+  --c-primary: #115ea3;
+  --c-primary-hover: #0f6cbd;
+  --c-primary-text: #ffffff;
   --c-success: #5ed6a2;
   --c-danger: #ff838d;
   --c-warning: #f0be6d;
-  --c-focus-ring: #b29aff;
+  --c-focus-ring: #ffffff;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -142,6 +145,13 @@ body,
 #app {
   margin: 0;
   height: 100%;
+}
+
+body:has(> #app) {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
 }
 
 #app {
@@ -330,7 +340,7 @@ body,
   max-width: 200px;
   text-align: left;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   padding: 0 7px 0 8px;
   font: inherit;
@@ -418,7 +428,7 @@ body,
   gap: 0;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -457,8 +467,8 @@ body,
 
 .channel-row:hover { background: var(--c-surface-2); }
 .channel-row:has(.channel-item.is-active) {
-  background: color-mix(in srgb, var(--c-accent) 12%, var(--c-surface-1));
-  border-color: color-mix(in srgb, var(--c-accent) 32%, var(--c-border));
+  background: var(--c-surface-1);
+  border-color: var(--c-border);
 }
 .channel-item:focus-visible,
 .channel-leave:focus-visible { outline-offset: -2px; }
@@ -1922,9 +1932,9 @@ button:disabled {
 #replythread-send,
 #notes-ok,
 #settings-ok {
-  color: var(--c-accent-text);
-  background: var(--c-accent);
-  border-color: var(--c-accent);
+  color: var(--c-primary-text);
+  background: var(--c-primary);
+  border-color: var(--c-primary);
 }
 
 .btn-primary:hover:not(:disabled),
@@ -1936,8 +1946,8 @@ button:disabled {
 #replythread-send:hover:not(:disabled),
 #notes-ok:hover:not(:disabled),
 #settings-ok:hover:not(:disabled) {
-  background: var(--c-accent-hover);
-  border-color: var(--c-accent-hover);
+  background: var(--c-primary-hover);
+  border-color: var(--c-primary-hover);
   filter: none;
 }
 
@@ -2974,7 +2984,8 @@ button:disabled {
   flex-direction: column;
   gap: var(--space-2);
   padding: 10px 12px 12px;
-  background: var(--c-split-bg);
+  background: var(--c-window-bg);
+  border-top: 1px solid var(--c-border);
   flex-shrink: 0;
 }
 
@@ -3126,14 +3137,13 @@ button:disabled {
   padding: 8px;
   background: var(--c-input-bg);
   border: 1px solid var(--c-border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-1);
+  border-radius: var(--radius-md);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 #composer-inner:focus-within {
-  border-color: var(--c-focus-ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-focus-ring) 16%, transparent);
+  border-bottom-color: var(--c-accent);
+  box-shadow: inset 0 -1px 0 var(--c-accent);
 }
 
 #composer-inner.is-overflow {
@@ -3260,15 +3270,15 @@ button:disabled {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  color: var(--c-accent-text);
-  background: var(--c-accent);
-  border-color: var(--c-accent);
+  color: var(--c-primary-text);
+  background: var(--c-primary);
+  border-color: var(--c-primary);
 }
 
 .btn-primary.btn-icon:hover:not(:disabled),
 #composer-send.btn-icon:hover:not(:disabled) {
-  background: var(--c-accent-hover);
-  border-color: var(--c-accent-hover);
+  background: var(--c-primary-hover);
+  border-color: var(--c-primary-hover);
 }
 
 #composer-input {

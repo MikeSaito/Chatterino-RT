@@ -1,5 +1,4 @@
-/** Built-in Chatterino-like themes (values from stock theme JSON; not copied assets). */
-
+import { webDarkTheme, webLightTheme } from "@fluentui/tokens";
 import { hexToPixi } from "./themeContrast.ts";
 
 export type ThemePresetName = "White" | "Light" | "Dark" | "Black";
@@ -22,6 +21,9 @@ export type ThemeCssTokens = {
   accent: string;
   accentHover: string;
   accentText: string;
+  primary: string;
+  primaryHover: string;
+  primaryText: string;
   success: string;
   danger: string;
   warning: string;
@@ -78,104 +80,69 @@ function buildTokens(css: CssOnly): ThemeTokens {
   };
 }
 
+export function isDarkTheme(preset: ThemePresetName): boolean {
+  return preset === "Dark" || preset === "Black";
+}
+
+function fluentTokens(preset: ThemePresetName): ThemeTokens {
+  const dark = isDarkTheme(preset);
+  const palette = dark ? webDarkTheme : webLightTheme;
+  const surface1 = palette.colorNeutralBackground1;
+  const surface2 = palette.colorNeutralBackground3;
+  const windowBg = palette.colorNeutralBackground2;
+  const text = palette.colorNeutralForeground1;
+  const border = palette.colorNeutralStroke2;
+  const tokens: CssOnly = {
+    windowBg,
+    windowText: text,
+    splitBg: windowBg,
+    border,
+    muted: palette.colorNeutralForeground3,
+    inputBg: surface1,
+    inputText: text,
+    headerBg: surface1,
+    headerBorder: border,
+    headerText: text,
+    scrollThumb: palette.colorNeutralStroke1,
+    surface1,
+    surface2,
+    surface3: palette.colorNeutralBackground3Hover,
+    accent: palette.colorBrandForeground1,
+    accentHover: palette.colorBrandForegroundLinkHover,
+    accentText: dark ? surface2 : palette.colorNeutralForegroundOnBrand,
+    primary: palette.colorBrandBackground,
+    primaryHover: palette.colorBrandBackgroundHover,
+    primaryText: palette.colorNeutralForegroundOnBrand,
+    success: dark ? "#5ed6a2" : "#2e8b3a",
+    danger: dark ? "#ff838d" : "#c93a3a",
+    warning: dark ? "#f0be6d" : "#a87022",
+    focusRing: palette.colorStrokeFocus2,
+    hoverAlpha: dark ? 0.35 : 0.45,
+  };
+
+  if (preset === "Black") {
+    return buildTokens({
+      ...tokens,
+      windowBg: "#000000",
+      splitBg: "#050505",
+      headerBg: "#101010",
+      inputBg: "#141414",
+      surface1: "#121212",
+      surface2: "#1a1a1a",
+      surface3: "#242424",
+    });
+  }
+  if (preset === "White") {
+    return buildTokens({ ...tokens, windowBg: surface1, splitBg: surface1, surface1: surface2 });
+  }
+  return buildTokens(tokens);
+}
+
 const BUILTIN: Record<ThemePresetName, ThemeTokens> = {
-  Dark: buildTokens({
-    windowBg: "#0b101a",
-    windowText: "#edf1fa",
-    splitBg: "#0e1420",
-    border: "#303c51",
-    muted: "#adb8cb",
-    inputBg: "#182233",
-    inputText: "#edf1fa",
-    headerBg: "#121a29",
-    headerBorder: "#303c51",
-    headerText: "#edf1fa",
-    scrollThumb: "#56647b",
-    surface1: "#151e2e",
-    surface2: "#1c2739",
-    surface3: "#263247",
-    accent: "#b29aff",
-    accentHover: "#c5b4ff",
-    accentText: "#171024",
-    success: "#5ed6a2",
-    danger: "#ff838d",
-    warning: "#f0be6d",
-    focusRing: "#b29aff",
-    hoverAlpha: 0.35,
-  }),
-  Black: buildTokens({
-    windowBg: "#000000",
-    windowText: "#efeff1",
-    splitBg: "#050505",
-    border: "#1a1a1a",
-    muted: "#8a8a8a",
-    inputBg: "#0a0a0a",
-    inputText: "#efeff1",
-    headerBg: "#080808",
-    headerBorder: "#1a1a1a",
-    headerText: "#efeff1",
-    scrollThumb: "#3a3a3a",
-    surface1: "#0a0a0a",
-    surface2: "#121212",
-    surface3: "#1a1a1a",
-    accent: "#9147ff",
-    accentHover: "#772ce8",
-    accentText: "#ffffff",
-    success: "#3cba54",
-    danger: "#e05555",
-    warning: "#efad4e",
-    focusRing: "#9147ff",
-    hoverAlpha: 0.35,
-  }),
-  Light: buildTokens({
-    windowBg: "#f4f5fa",
-    windowText: "#1a1a1a",
-    splitBg: "#f9faff",
-    border: "#d1d8e6",
-    muted: "#59657b",
-    inputBg: "#ffffff",
-    inputText: "#1a1a1a",
-    headerBg: "#ffffff",
-    headerBorder: "#d1d8e6",
-    headerText: "#1a1a1a",
-    scrollThumb: "#8d9ab1",
-    surface1: "#ffffff",
-    surface2: "#eef0f8",
-    surface3: "#e4e8f2",
-    accent: "#7040cf",
-    accentHover: "#5c2db7",
-    accentText: "#ffffff",
-    success: "#2e8b3a",
-    danger: "#c93a3a",
-    /** Darkened for WCAG AA UI 3:1 on light surfaces (was #c98a2e). */
-    warning: "#a87022",
-    focusRing: "#7040cf",
-    hoverAlpha: 0.45,
-  }),
-  White: buildTokens({
-    windowBg: "#ffffff",
-    windowText: "#1a1a1a",
-    splitBg: "#ffffff",
-    border: "#e0e0e0",
-    muted: "#5a5a5a",
-    inputBg: "#f8f8f8",
-    inputText: "#1a1a1a",
-    headerBg: "#ffffff",
-    headerBorder: "#e0e0e0",
-    headerText: "#1a1a1a",
-    scrollThumb: "#c0c0c0",
-    surface1: "#ffffff",
-    surface2: "#f8f8f8",
-    surface3: "#f0f0f0",
-    accent: "#9147ff",
-    accentHover: "#772ce8",
-    accentText: "#ffffff",
-    success: "#2e8b3a",
-    danger: "#c93a3a",
-    warning: "#a87022",
-    focusRing: "#9147ff",
-    hoverAlpha: 0.5,
-  }),
+  Dark: fluentTokens("Dark"),
+  Black: fluentTokens("Black"),
+  Light: fluentTokens("Light"),
+  White: fluentTokens("White"),
 };
 
 const PRESET_SET = new Set<string>(["White", "Light", "Dark", "Black"]);
@@ -248,6 +215,9 @@ export function applyThemeCss(tokens: ThemeTokens, root: HTMLElement = document.
   root.style.setProperty("--c-accent", tokens.accent);
   root.style.setProperty("--c-accent-hover", tokens.accentHover);
   root.style.setProperty("--c-accent-text", tokens.accentText);
+  root.style.setProperty("--c-primary", tokens.primary);
+  root.style.setProperty("--c-primary-hover", tokens.primaryHover);
+  root.style.setProperty("--c-primary-text", tokens.primaryText);
   root.style.setProperty("--c-success", tokens.success);
   root.style.setProperty("--c-danger", tokens.danger);
   root.style.setProperty("--c-warning", tokens.warning);
@@ -255,10 +225,14 @@ export function applyThemeCss(tokens: ThemeTokens, root: HTMLElement = document.
 }
 
 /** Apply CSS vars and return tokens for the resolved preset. */
-export function applyResolvedTheme(preset: ThemePresetName): ThemeTokens {
+export function applyResolvedTheme(
+  preset: ThemePresetName,
+  root: HTMLElement = document.documentElement,
+): ThemeTokens {
   const tokens = themeTokens(preset);
-  applyThemeCss(tokens);
-  document.documentElement.dataset.theme = preset;
+  applyThemeCss(tokens, root);
+  root.style.colorScheme = isDarkTheme(preset) ? "dark" : "light";
+  root.dataset.theme = preset;
   return tokens;
 }
 

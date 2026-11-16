@@ -18,7 +18,10 @@
       aria-labelledby="settings-title"
     >
       <header id="settings-dialog-head">
-        <h2 id="settings-title" data-i18n="settings.title">Chatterino Settings</h2>
+        <div class="settings-brand">
+          <img src="/logo-128.png" width="22" height="22" alt="" />
+          <h2 id="settings-title" data-i18n="settings.title">Chatterino Settings</h2>
+        </div>
         <div id="settings-search-wrap">
           <span id="settings-search-icon" class="settings-search-icon" aria-hidden="true"></span>
           <label class="sr-only" for="settings-search" data-i18n="settings.search.label">Find in settings</label>
@@ -54,6 +57,21 @@
           <button type="button" id="settings-cancel" class="btn" data-i18n="settings.cancel">Cancel</button>
         </div>
       </footer>
+      <template id="settings-preview-template">
+        <aside class="settings-chat-preview" aria-labelledby="settings-preview-title">
+          <h4 id="settings-preview-title" data-i18n="settings.preview.title">Chat preview</h4>
+          <div class="settings-preview-card">
+            <strong class="settings-preview-channel" data-i18n="settings.preview.channel">Evening stream</strong>
+            <div class="settings-preview-messages">
+              <div><time datetime="21:04">21:04</time> <b class="preview-nick-blue">Лена</b> <span data-i18n="settings.preview.first">Good evening! How is the sound?</span></div>
+              <div><time datetime="21:05">21:05</time> <b class="preview-nick-green">Саша</b> <span data-i18n="settings.preview.second">Sounds great.</span></div>
+              <div><time datetime="21:06">21:06</time> <b class="preview-nick-violet">Миша</b> <span data-i18n="settings.preview.third">Made it in time. What are we playing today?</span></div>
+              <div><time datetime="21:07">21:07</time> <b class="preview-nick-blue">Лена</b> <span data-i18n="settings.preview.fourth">Let's pick up where we left off.</span></div>
+            </div>
+          </div>
+          <p data-i18n="settings.preview.hint">See how your changes look in chat.</p>
+        </aside>
+      </template>
     </div>
   </body>
 </html>

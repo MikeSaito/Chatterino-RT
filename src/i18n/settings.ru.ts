@@ -1,6 +1,14 @@
 import type { SettingsMessageKey } from "./settings.en";
 
 export const settingsRu: Record<SettingsMessageKey, string> = {
+  "settings.preview.title": "Предпросмотр чата",
+  "settings.preview.intro": "Настройте оформление окна и читаемость чата.",
+  "settings.preview.channel": "Вечерний эфир",
+  "settings.preview.first": "Добрый вечер! Как звук?",
+  "settings.preview.second": "Слышно отлично.",
+  "settings.preview.third": "Успел к началу. Во что сегодня играем?",
+  "settings.preview.fourth": "Продолжаем со вчерашнего места.",
+  "settings.preview.hint": "Изменения сразу видны на примере.",
   "settings.knob.7tv-activity": "Отправлять активность в 7TV",
   "settings.knob.7tv-channel": "Показывать канальные эмодзи 7TV",
   "settings.knob.7tv-global": "Показывать глобальные эмодзи 7TV",

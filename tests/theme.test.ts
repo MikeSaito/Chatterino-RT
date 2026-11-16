@@ -54,8 +54,10 @@ const dark = themeTokens("Dark");
 const light = themeTokens("Light");
 assert(dark.pixi.body !== light.pixi.body, "Dark body ≠ Light body");
 assert(dark.pixi.canvasBg !== light.pixi.canvasBg, "Dark canvas ≠ Light");
-assert(light.pixi.body === 0x1a1a1a, "Light body dark");
-assert(dark.pixi.body === 0xedf1fa, "Dark body light");
+assert(light.pixi.body === 0x242424, "Fluent Light body");
+assert(dark.pixi.body === 0xffffff, "Fluent Dark body");
+assert(themeTokens("White").pixi.canvasBg === 0xffffff, "White canvas");
+assert(themeTokens("Black").pixi.canvasBg === 0x050505, "Black canvas");
 
 const argb = parseArgb("#99191919");
 assert(Math.abs(argb.alpha - 0x99 / 255) < 1e-6, "ARGB alpha");
@@ -95,6 +97,9 @@ assert(rgb.alpha === 1 && rgb.color === 0xffffff, "RGB parse");
     ["--c-accent", light.accent],
     ["--c-accent-hover", light.accentHover],
     ["--c-accent-text", light.accentText],
+    ["--c-primary", light.primary],
+    ["--c-primary-hover", light.primaryHover],
+    ["--c-primary-text", light.primaryText],
     ["--c-success", light.success],
     ["--c-danger", light.danger],
     ["--c-warning", light.warning],

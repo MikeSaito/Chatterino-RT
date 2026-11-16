@@ -32,7 +32,7 @@ import {
   validateImportJson,
 } from "../imageUploaderSharex";
 import { iconEl, setButtonIcon } from "../icons";
-import { applyLocale, getLocale, localeFromSettings, t } from "../../i18n";
+import { applyDomI18n, applyLocale, getLocale, localeFromSettings, t } from "../../i18n";
 import { formatInvokeError } from "../../i18n/formatError";
 import {
   tKnobLabel,
@@ -132,11 +132,12 @@ export function mountSettingsPanel(opts: {
   root: HTMLElement;
   ring?: MessageRing;
   onDisplay?: (data: AppSettings) => void;
+  onDraftChange?: (data: AppSettings) => void;
 }): {
   reload: () => Promise<void>;
   bumpZoom: (dir: 1 | -1 | 0) => Promise<void>;
 } {
-  const { root, ring, onDisplay } = opts;
+  const { root, ring, onDisplay, onDraftChange } = opts;
   const detached = true;
   let lastSettings: AppSettings | null = null;
   let panelLocale = getLocale();
@@ -915,6 +916,25 @@ export function mountSettingsPanel(opts: {
     title.textContent = pageTitle;
     section.append(title);
 
+    if (page.id === "general") {
+      const intro = document.createElement("p");
+      intro.className = "settings-general-intro";
+      intro.textContent = t("settings.preview.intro");
+      const layout = document.createElement("div");
+      layout.className = "settings-general-layout";
+      const controls = document.createElement("div");
+      appendSettingsSections(controls, page.sections);
+      layout.append(controls);
+      const template = root.querySelector<HTMLTemplateElement>("#settings-preview-template");
+      if (template) {
+        const preview = template.content.cloneNode(true) as DocumentFragment;
+        applyDomI18n(preview);
+        layout.append(preview);
+      }
+      section.append(intro, layout);
+      return section;
+    }
+
     if (page.kind === "about") {
       const brand = document.createElement("div");
       brand.className = "settings-about-brand";
@@ -1643,7 +1663,8 @@ export function mountSettingsPanel(opts: {
         }
         const hay = (el.dataset.search ?? el.textContent ?? "").toLowerCase();
         const textMatch = q.length === 0 || hay.includes(q);
-        const match = textMatch || pageHay.includes(q);
+        const blockHay = el.closest<HTMLElement>(".settings-block")?.dataset.search ?? "";
+        const match = textMatch || pageHay.includes(q) || blockHay.toLowerCase().includes(q);
         el.hidden = !match;
         if (match) {
           pageMatch = true;
@@ -1655,6 +1676,11 @@ export function mountSettingsPanel(opts: {
           ) {
             hits += 1;
           }
+        }
+      });
+      page.querySelectorAll<HTMLElement>(".settings-block[hidden]").forEach((block) => {
+        if (block.querySelector("[data-search]:not([hidden])")) {
+          block.hidden = false;
         }
       });
       if (q.length > 0) {
@@ -1707,6 +1733,7 @@ export function mountSettingsPanel(opts: {
     root
       .querySelector("#settings-tabs")
       ?.setAttribute("aria-label", t("settings.tabs.aria"));
+    onDraftChange?.(data);
     if (ring) {
       applySettingsDisplay(ring, data, onDisplay);
     } else {

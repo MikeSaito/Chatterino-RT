@@ -1,5 +1,13 @@
 /** Settings catalog English strings (generated from catalog labels). */
 export const settingsEn = {
+  "settings.preview.title": "Chat preview",
+  "settings.preview.intro": "Customize the interface and make chat easier to read.",
+  "settings.preview.channel": "Evening stream",
+  "settings.preview.first": "Good evening! How is the sound?",
+  "settings.preview.second": "Sounds great.",
+  "settings.preview.third": "Made it in time. What are we playing today?",
+  "settings.preview.fourth": "Let's pick up where we left off.",
+  "settings.preview.hint": "See how your changes look in chat.",
   "settings.knob.7tv-activity": "Send activity to 7TV",
   "settings.knob.7tv-channel": "Show 7TV channel emotes",
   "settings.knob.7tv-global": "Show 7TV global emotes",
