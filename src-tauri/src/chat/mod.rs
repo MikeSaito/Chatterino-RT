@@ -23,6 +23,7 @@ pub mod emoji;
 pub mod emote_popup;
 pub mod emotes;
 pub mod eventapi;
+mod eventsub;
 pub mod fetch;
 pub mod ffz_badges;
 pub mod ffz_channel;

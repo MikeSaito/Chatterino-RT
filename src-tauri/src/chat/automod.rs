@@ -5,33 +5,24 @@
 // No C++/Qt source or assets are copied.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures_util::{stream::FuturesUnordered, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::commands::ApiError;
+use super::eventsub::{self, listen_eventsub, open_eventsub, Subscription, EVENTSUB_WS};
 use super::state::{BatchSend, Shared};
 use super::types::{AutomodRange, ChatEvent, ChatPipe, ChatSendWait};
 
-const EVENTSUB_WS: &str = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
-const HELIX_EVENTSUB: &str = "https://api.twitch.tv/helix/eventsub/subscriptions";
 const HOLD_TOPIC: &str = "automod.message.hold";
 const UPDATE_TOPIC: &str = "automod.message.update";
 const HELIX_AUTOMOD_MESSAGE: &str = "https://api.twitch.tv/helix/moderation/automod/message";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 const HTTP_ATTEMPTS: u32 = 3;
-const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(8);
 const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 const WANTED_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_WS_MESSAGE: usize = 256 * 1024;
-const MAX_WS_FRAME: usize = 64 * 1024;
 
 static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static STATUS_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -146,68 +137,18 @@ async fn wait_to_retry(backoff: &mut Duration) {
     *backoff = (*backoff * 2).min(Duration::from_secs(60));
 }
 
-struct EventSubSession<S = MaybeTlsStream<tokio::net::TcpStream>> {
-    socket: WebSocketStream<S>,
-    id: String,
-    heartbeat: Duration,
-}
-
-async fn open_eventsub(url: &str) -> Option<EventSubSession> {
-    let cfg = WebSocketConfig::default()
-        .max_message_size(Some(MAX_WS_MESSAGE))
-        .max_frame_size(Some(MAX_WS_FRAME))
-        .read_buffer_size(32 * 1024);
-    tokio::time::timeout(WS_CONNECT_TIMEOUT, async {
-        let (mut socket, _) = tokio_tungstenite::connect_async_with_config(url, Some(cfg), false)
-            .await
-            .ok()?;
-        let welcome = read_eventsub(&mut socket).await?;
-        let (id, heartbeat) = parse_welcome(&welcome)?;
-        Some(EventSubSession {
-            socket,
-            id,
-            heartbeat,
-        })
-    })
-    .await
-    .ok()
-    .flatten()
-}
-
-fn parse_welcome(value: &Value) -> Option<(String, Duration)> {
-    if message_type(value) != Some("session_welcome") {
-        return None;
-    }
-    let session = value.pointer("/payload/session")?;
-    let id = session.get("id")?.as_str().filter(|id| !id.is_empty())?;
-    let seconds = session
-        .get("keepalive_timeout_seconds")
-        .and_then(Value::as_u64)
-        .filter(|n| (10..=600).contains(n))
-        .unwrap_or(30);
-    Some((id.to_string(), Duration::from_secs(seconds + 5)))
-}
-
 async fn create_subscriptions(wanted: &AutomodWanted, session_id: &str) -> Result<(), ()> {
-    let client = super::http_client::build(WS_WRITE_TIMEOUT);
-    let subscribe = |topic| {
-        let request = client
-            .post(HELIX_EVENTSUB)
-            .header("Client-Id", &wanted.client_id)
-            .bearer_auth(&wanted.token)
-            .json(&subscription_body(wanted, session_id, topic));
-        async move {
-            let response = request.send().await.map_err(|_| ())?;
-            // A conflict may belong to another socket, so it cannot confirm this subscription.
-            if response.status() == reqwest::StatusCode::ACCEPTED {
-                Ok(())
-            } else {
-                Err(())
-            }
-        }
-    };
-    tokio::try_join!(subscribe(HOLD_TOPIC), subscribe(UPDATE_TOPIC))?;
-    Ok(())
+    let hold = subscription_body(wanted, session_id, HOLD_TOPIC);
+    let update = subscription_body(wanted, session_id, UPDATE_TOPIC);
+    let (hold, update) = tokio::join!(
+        eventsub::subscribe(&wanted.client_id, &wanted.token, &hold),
+        eventsub::subscribe(&wanted.client_id, &wanted.token, &update),
+    );
+    if hold == Subscription::Ready && update == Subscription::Ready {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
 fn subscription_body(wanted: &AutomodWanted, session_id: &str, topic: &str) -> Value {
@@ -220,111 +161,6 @@ fn subscription_body(wanted: &AutomodWanted, session_id: &str, topic: &str) -> V
         },
         "transport": { "method": "websocket", "session_id": session_id },
     })
-}
-
-async fn listen_eventsub<S, F>(
-    session: &mut EventSubSession<S>,
-    open_replacement: impl Fn(String) -> F,
-    is_current: impl Fn() -> bool,
-    mut notify: impl FnMut(&Value),
-) -> Result<(), ()>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-    F: Future<Output = Option<EventSubSession<S>>>,
-{
-    let mut poll = tokio::time::interval(WANTED_POLL_INTERVAL);
-    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut deadline = tokio::time::Instant::now() + session.heartbeat;
-    let mut replacement = FuturesUnordered::new();
-    let mut old_open = true;
-
-    loop {
-        tokio::select! {
-            _ = poll.tick() => {
-                if !is_current() {
-                    return Ok(());
-                }
-            }
-            _ = tokio::time::sleep_until(deadline), if replacement.is_empty() => return Err(()),
-            next = replacement.next(), if !replacement.is_empty() => {
-                *session = next.flatten().ok_or(())?;
-                old_open = true;
-                deadline = tokio::time::Instant::now() + session.heartbeat;
-            }
-            frame = read_eventsub(&mut session.socket), if old_open => {
-                let Some(frame) = frame else {
-                    if replacement.is_empty() {
-                        return Err(());
-                    }
-                    old_open = false;
-                    continue;
-                };
-                match message_type(&frame) {
-                    Some("session_keepalive") => {
-                        deadline = tokio::time::Instant::now() + session.heartbeat;
-                    }
-                    Some("notification") => {
-                        deadline = tokio::time::Instant::now() + session.heartbeat;
-                        if !is_current() {
-                            return Ok(());
-                        }
-                        notify(&frame);
-                    }
-                    Some("session_reconnect") if replacement.is_empty() => {
-                        let url = reconnect_url(&frame).ok_or(())?;
-                        // Keep consuming the old socket until Twitch welcomes its replacement.
-                        replacement.push(open_replacement(url));
-                    }
-                    Some("revocation") => return Err(()),
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
-async fn read_eventsub<S>(socket: &mut WebSocketStream<S>) -> Option<Value>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-{
-    loop {
-        match socket.next().await?.ok()? {
-            Message::Text(text) => {
-                if let Ok(value) = serde_json::from_str(text.as_str()) {
-                    return Some(value);
-                }
-            }
-            Message::Ping(_) => {
-                // Tungstenite queues the Pong while reading.
-                tokio::time::timeout(WS_WRITE_TIMEOUT, socket.flush())
-                    .await
-                    .ok()?
-                    .ok()?;
-            }
-            Message::Close(_) => return None,
-            _ => {}
-        }
-    }
-}
-
-fn message_type(value: &Value) -> Option<&str> {
-    value.pointer("/metadata/message_type")?.as_str()
-}
-
-fn reconnect_url(value: &Value) -> Option<String> {
-    let raw = value.pointer("/payload/session/reconnect_url")?.as_str()?;
-    let url = url::Url::parse(raw).ok()?;
-    if url.scheme() == "wss"
-        && url.host_str() == Some("eventsub.wss.twitch.tv")
-        && url.port().is_none()
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.path() == "/ws"
-        && url.fragment().is_none()
-    {
-        return Some(raw.to_string());
-    }
-    None
 }
 
 struct SeenNotification {
@@ -732,8 +568,12 @@ fn unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::eventsub::{parse_welcome, read_eventsub, reconnect_url, EventSubSession};
+    use futures_util::{SinkExt, StreamExt};
     use std::cell::{Cell, RefCell};
     use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::WebSocketStream;
 
     fn wanted() -> AutomodWanted {
         AutomodWanted {
@@ -971,6 +811,29 @@ mod tests {
             },
             server,
         )
+    }
+
+    #[tokio::test]
+    async fn socket_close_and_revocation_require_fresh_subscriptions() {
+        let revocation = json!({ "metadata": { "message_type": "revocation" } });
+        for frame in [
+            Message::Close(None),
+            Message::Text(revocation.to_string().into()),
+        ] {
+            let (mut session, mut server) = socket_pair().await;
+            server.send(frame).await.unwrap();
+            let result = tokio::time::timeout(
+                Duration::from_secs(2),
+                listen_eventsub(
+                    &mut session,
+                    |_| async { panic!("only a reconnect message can transfer subscriptions") },
+                    || true,
+                    |_| panic!("revocation is not a notification"),
+                ),
+            )
+            .await;
+            assert_eq!(result.unwrap(), Err(()));
+        }
     }
 
     #[tokio::test]

@@ -5,32 +5,22 @@
 //! - Helix POST/DELETE `/moderation/suspicious_users` for `/monitor` `/restrict` / un-*
 //! - `/lowtrust [channel]` opens Twitch moderator Low Trust popout
 
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
-use url::Url;
 
 use super::commands::ApiError;
+use super::eventsub::{self, RecentNotifications, Subscription, EVENTSUB_WS};
 use super::state::{BatchSend, Shared};
 use super::types::{ChatEvent, ChatPipe, ChatSendWait};
 
 const HELIX: &str = "https://api.twitch.tv/helix";
-const EVENTSUB_WS: &str = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 const ATTEMPTS: u32 = 3;
-const RETRY_BASE: Duration = Duration::from_millis(250);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-const MAX_WS_MESSAGE: usize = 256 * 1024;
-const MAX_WS_FRAME: usize = 64 * 1024;
-/// EventSub keepalive_timeout_seconds=30 plus grace before forced reconnect.
-const KEEPALIVE_STALE: Duration = Duration::from_secs(45);
 
 const SUB_TYPES: &[&str] = &[
     "channel.suspicious_user.message",
@@ -38,7 +28,6 @@ const SUB_TYPES: &[&str] = &[
 ];
 
 const READ_SCOPE: &str = "moderator:read:suspicious_users";
-const MANAGE_SCOPE: &str = "moderator:manage:suspicious_users";
 
 static EVENT_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -107,7 +96,7 @@ pub fn start(app: AppHandle, shared: Shared) -> Result<(), String> {
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceiver<LowTrustCmd>) {
     let mut active: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
-    let mut ws_url = EVENTSUB_WS.to_string();
+    let mut seen = RecentNotifications::default();
     loop {
         if shared.low_trust_shutdown.load(Ordering::SeqCst) {
             break;
@@ -117,7 +106,6 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                 None | Some(LowTrustCmd::Shutdown) => break,
                 Some(LowTrustCmd::SetChannel(login)) => {
                     active = Some(login);
-                    ws_url = EVENTSUB_WS.to_string();
                     backoff = Duration::from_secs(1);
                 }
                 Some(LowTrustCmd::ClearChannel) | Some(LowTrustCmd::Relogin) => {}
@@ -129,33 +117,23 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                 WaitEnd::Shutdown => break,
                 WaitEnd::Changed => {
                     backoff = Duration::from_secs(1);
-                    ws_url = EVENTSUB_WS.to_string();
                 }
                 WaitEnd::Tick => continue,
             }
             continue;
         };
-        let end = connect_eventsub(&app, &shared, wanted, &mut rx, &mut active, &ws_url).await;
+        let end = connect_eventsub(&app, &shared, wanted, &mut rx, &mut active, &mut seen).await;
         match end {
             SessionEnd::Shutdown => break,
             SessionEnd::Changed => {
                 backoff = Duration::from_secs(1);
-                ws_url = EVENTSUB_WS.to_string();
             }
-            SessionEnd::AuthDenied => {
-                ws_url = EVENTSUB_WS.to_string();
-                match wait_until_change(&mut rx, &mut active).await {
-                    WaitEnd::Shutdown => break,
-                    WaitEnd::Changed => backoff = Duration::from_secs(1),
-                    WaitEnd::Tick => {}
-                }
-            }
-            SessionEnd::ReconnectTo(url) => {
-                ws_url = url;
-                backoff = Duration::from_secs(1);
-            }
+            SessionEnd::AuthDenied => match wait_until_change(&mut rx, &mut active).await {
+                WaitEnd::Shutdown => break,
+                WaitEnd::Changed => backoff = Duration::from_secs(1),
+                WaitEnd::Tick => {}
+            },
             SessionEnd::Reconnect => {
-                ws_url = EVENTSUB_WS.to_string();
                 let wait = backoff.min(RECONNECT_MAX);
                 match wait_for_change(&mut rx, &mut active, wait).await {
                     WaitEnd::Shutdown => break,
@@ -224,12 +202,13 @@ async fn scopes_ok(token: &str) -> bool {
     let Ok(v) = resp.json::<Value>().await else {
         return false;
     };
-    let scopes: HashSet<&str> = v
-        .get("scopes")
+    v.get("scopes")
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().filter_map(Value::as_str).collect::<HashSet<_>>())
-        .unwrap_or_default();
-    scopes.contains(READ_SCOPE) || scopes.contains(MANAGE_SCOPE)
+        .is_some_and(|scopes| {
+            scopes
+                .iter()
+                .any(|scope| scope.as_str() == Some(READ_SCOPE))
+        })
 }
 
 enum WaitEnd {
@@ -243,7 +222,6 @@ enum SessionEnd {
     Changed,
     AuthDenied,
     Reconnect,
-    ReconnectTo(String),
 }
 
 async fn wait_for_change(
@@ -285,175 +263,67 @@ async fn connect_eventsub(
     wanted: Wanted,
     rx: &mut mpsc::UnboundedReceiver<LowTrustCmd>,
     active: &mut Option<String>,
-    ws_url: &str,
+    seen: &mut RecentNotifications,
 ) -> SessionEnd {
-    let Ok(parsed) = Url::parse(ws_url) else {
-        return SessionEnd::Reconnect;
-    };
-    if parsed.scheme() != "wss" || parsed.host_str() != Some("eventsub.wss.twitch.tv") {
-        return SessionEnd::Reconnect;
-    }
-    let cfg = WebSocketConfig::default()
-        .max_message_size(Some(MAX_WS_MESSAGE))
-        .max_frame_size(Some(MAX_WS_FRAME))
-        .read_buffer_size(32 * 1024);
-    let Ok(Ok((ws, _))) = tokio::time::timeout(
-        Duration::from_secs(12),
-        tokio_tungstenite::connect_async_with_config(ws_url, Some(cfg), false),
-    )
-    .await
-    else {
-        return SessionEnd::Reconnect;
-    };
-    let (mut write, mut read) = ws.split();
-    let mut session_ready = false;
-    let mut last_server_msg = std::time::Instant::now();
-    loop {
-        tokio::select! {
-            cmd = rx.recv() => {
-                match apply_cmd(active, cmd) {
-                    WaitEnd::Shutdown => return SessionEnd::Shutdown,
-                    WaitEnd::Changed => return SessionEnd::Changed,
-                    WaitEnd::Tick => {}
-                }
+    let is_current = || eventsub::is_current(shared, &wanted.login, &wanted.token);
+    let connection = async {
+        let Some(mut session) = eventsub::open_eventsub(EVENTSUB_WS).await else {
+            return SessionEnd::Reconnect;
+        };
+        if !is_current() {
+            return SessionEnd::Changed;
+        }
+        let (first, second) = tokio::join!(
+            post_eventsub_subscription(&wanted, &session.id, SUB_TYPES[0]),
+            post_eventsub_subscription(&wanted, &session.id, SUB_TYPES[1]),
+        );
+        match (first, second) {
+            (Subscription::Ready, Subscription::Ready) => {}
+            (Subscription::AuthDenied, _) | (_, Subscription::AuthDenied) => {
+                return SessionEnd::AuthDenied
             }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                if last_server_msg.elapsed() >= KEEPALIVE_STALE {
-                    return SessionEnd::Reconnect;
-                }
-            }
-            msg = read.next() => {
-                let Some(msg) = msg else {
-                    return SessionEnd::Reconnect;
+            _ => return SessionEnd::Reconnect,
+        }
+        let result = eventsub::listen_eventsub(
+            &mut session,
+            |url| async move { eventsub::open_eventsub(&url).await },
+            is_current,
+            |frame| {
+                let Some((topic, event)) =
+                    seen.receive(frame, &wanted.broadcaster_id, &wanted.moderator_id, "1")
+                else {
+                    return;
                 };
-                let Ok(msg) = msg else {
-                    return SessionEnd::Reconnect;
-                };
-                last_server_msg = std::time::Instant::now();
-                match msg {
-                    Message::Text(text) => {
-                        match handle_eventsub_text(app, shared, &wanted, text.as_str(), &mut session_ready).await {
-                            EventAction::None => {}
-                            EventAction::Reconnect => return SessionEnd::Reconnect,
-                            EventAction::ReconnectTo(u) => return SessionEnd::ReconnectTo(u),
-                            EventAction::AuthDenied => return SessionEnd::AuthDenied,
-                            EventAction::Subscribed => {}
-                        }
+                let ts = frame
+                    .pointer("/metadata/message_timestamp")
+                    .and_then(Value::as_str)
+                    .map(parse_iso_ms)
+                    .unwrap_or_else(unix_ms);
+                match topic {
+                    "channel.suspicious_user.message" => {
+                        handle_suspicious_message(app, shared, &wanted, event, ts)
                     }
-                    Message::Ping(p) => {
-                        let _ = write.send(Message::Pong(p)).await;
+                    "channel.suspicious_user.update" => {
+                        handle_suspicious_update(app, shared, &wanted, event, ts)
                     }
-                    Message::Close(_) => return SessionEnd::Reconnect,
                     _ => {}
                 }
-            }
+            },
+        )
+        .await;
+        if result.is_err() {
+            SessionEnd::Reconnect
+        } else {
+            SessionEnd::Changed
         }
-    }
-}
-
-enum EventAction {
-    None,
-    Reconnect,
-    ReconnectTo(String),
-    AuthDenied,
-    Subscribed,
-}
-
-async fn handle_eventsub_text(
-    app: &AppHandle,
-    shared: &Shared,
-    wanted: &Wanted,
-    text: &str,
-    session_ready: &mut bool,
-) -> EventAction {
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
-        return EventAction::None;
     };
-    let msg_type = value
-        .pointer("/metadata/message_type")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    match msg_type {
-        "session_welcome" => {
-            let Some(session_id) = value.pointer("/payload/session/id").and_then(Value::as_str)
-            else {
-                return EventAction::Reconnect;
-            };
-            match create_subscriptions(wanted, session_id).await {
-                SubResult::Ok => {
-                    *session_ready = true;
-                    EventAction::Subscribed
-                }
-                SubResult::AuthDenied => EventAction::AuthDenied,
-                SubResult::Retry => EventAction::Reconnect,
-            }
-        }
-        "session_keepalive" => EventAction::None,
-        "session_reconnect" => {
-            let url = value
-                .pointer("/payload/session/reconnect_url")
-                .and_then(Value::as_str)
-                .and_then(clean_reconnect_url);
-            match url {
-                Some(url) => EventAction::ReconnectTo(url),
-                None => EventAction::Reconnect,
-            }
-        }
-        "notification" if *session_ready => {
-            let sub_type = value
-                .pointer("/payload/subscription/type")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let event = value.pointer("/payload/event").unwrap_or(&Value::Null);
-            let ts = value
-                .pointer("/metadata/message_timestamp")
-                .and_then(Value::as_str)
-                .map(parse_iso_ms)
-                .unwrap_or_else(unix_ms);
-            match sub_type {
-                "channel.suspicious_user.message" => {
-                    handle_suspicious_message(app, shared, wanted, event, ts);
-                }
-                "channel.suspicious_user.update" => {
-                    handle_suspicious_update(app, shared, wanted, event, ts);
-                }
-                _ => {}
-            }
-            EventAction::None
-        }
-        "revocation" => EventAction::Reconnect,
-        _ => EventAction::None,
-    }
-}
-
-enum SubResult {
-    Ok,
-    AuthDenied,
-    Retry,
-}
-
-enum SubAttempt {
-    Ok,
-    AuthDenied,
-    Retry,
-}
-
-async fn create_subscriptions(wanted: &Wanted, session_id: &str) -> SubResult {
-    let mut ok = 0u32;
-    let mut denied = 0u32;
-    for sub_type in SUB_TYPES {
-        match post_eventsub_subscription(wanted, session_id, sub_type).await {
-            SubAttempt::Ok => ok += 1,
-            SubAttempt::AuthDenied => denied += 1,
-            SubAttempt::Retry => {}
-        }
-    }
-    if ok == SUB_TYPES.len() as u32 {
-        SubResult::Ok
-    } else if denied == SUB_TYPES.len() as u32 {
-        SubResult::AuthDenied
-    } else {
-        SubResult::Retry
+    tokio::select! {
+        biased;
+        command = rx.recv() => match apply_cmd(active, command) {
+            WaitEnd::Shutdown => SessionEnd::Shutdown,
+            WaitEnd::Changed | WaitEnd::Tick => SessionEnd::Changed,
+        },
+        end = connection => end,
     }
 }
 
@@ -461,7 +331,7 @@ async fn post_eventsub_subscription(
     wanted: &Wanted,
     session_id: &str,
     sub_type: &str,
-) -> SubAttempt {
+) -> Subscription {
     let body = json!({
         "type": sub_type,
         "version": "1",
@@ -471,34 +341,7 @@ async fn post_eventsub_subscription(
         },
         "transport": { "method": "websocket", "session_id": session_id },
     });
-    let client = super::http_client::build(Duration::from_secs(12));
-    let url = format!("{HELIX}/eventsub/subscriptions");
-    let mut delay = RETRY_BASE;
-    for attempt in 0..ATTEMPTS {
-        match client
-            .post(&url)
-            .header("Client-Id", &wanted.client_id)
-            .header("Authorization", format!("Bearer {}", wanted.token))
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
-                return SubAttempt::Ok;
-            }
-            Ok(resp) if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 => {
-                return SubAttempt::AuthDenied;
-            }
-            Ok(_) | Err(_) => {}
-        }
-        if attempt + 1 < ATTEMPTS {
-            tokio::time::sleep(delay).await;
-            delay *= 2;
-        }
-    }
-    SubAttempt::Retry
+    eventsub::subscribe(&wanted.client_id, &wanted.token, &body).await
 }
 
 fn handle_suspicious_message(
@@ -735,27 +578,6 @@ fn ingest_event(app: &AppHandle, shared: &Shared, channel: &str, event: ChatEven
     for (channel_id, text) in updates {
         let _ = app.emit("chat:send-wait", ChatSendWait { channel_id, text });
     }
-}
-
-fn clean_reconnect_url(raw: &str) -> Option<String> {
-    let url = Url::parse(raw).ok()?;
-    if url.scheme() != "wss" || url.host_str() != Some("eventsub.wss.twitch.tv") {
-        return None;
-    }
-    if url.port().is_some_and(|p| p != 443) {
-        return None;
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return None;
-    }
-    if url.fragment().is_some() {
-        return None;
-    }
-    let path = url.path();
-    if path != "/ws" && path != "/ws/" {
-        return None;
-    }
-    Some(url.to_string())
 }
 
 fn parse_iso_ms(raw: &str) -> u64 {
@@ -1227,11 +1049,5 @@ mod tests {
         let d = build_header_detail(LowTrustStatus::Restricted, &event);
         assert!(d.contains("Restricted"));
         assert!(d.contains("likely ban evader"));
-    }
-
-    #[test]
-    fn reconnect_url_must_be_eventsub_wss() {
-        assert!(clean_reconnect_url("wss://eventsub.wss.twitch.tv/ws?session_id=abc").is_some());
-        assert!(clean_reconnect_url("https://eventsub.wss.twitch.tv/ws").is_none());
     }
 }

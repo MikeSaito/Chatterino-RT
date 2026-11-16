@@ -3,28 +3,19 @@
 //! Helix shared_chat session remains in `shared_chat.rs`.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
-use url::Url;
 
 use super::auth;
+use super::eventsub::{self, RecentNotifications, Subscription, EVENTSUB_WS};
 use super::state::{BatchSend, Shared};
 use super::types::{ChatEvent, ChatPipe, ChatSendWait};
 
 const HELIX: &str = "https://api.twitch.tv/helix";
-const EVENTSUB_WS: &str = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
-const ATTEMPTS: u32 = 3;
-const RETRY_BASE: Duration = Duration::from_millis(250);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-const MAX_WS_MESSAGE: usize = 256 * 1024;
-const MAX_WS_FRAME: usize = 64 * 1024;
-const KEEPALIVE_STALE: Duration = Duration::from_secs(45);
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
 
 /// Scopes required for channel.moderate (read OR manage pairs accepted by Twitch).
@@ -122,7 +113,7 @@ pub fn shutdown() {
 async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceiver<SharedBansCmd>) {
     let mut active: Option<String> = None;
     let mut backoff = Duration::from_secs(1);
-    let mut ws_url = EVENTSUB_WS.to_string();
+    let mut seen = RecentNotifications::default();
     loop {
         if SHUTDOWN.load(Ordering::SeqCst) {
             break;
@@ -132,7 +123,6 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                 None | Some(SharedBansCmd::Shutdown) => break,
                 Some(SharedBansCmd::SetChannel(login)) => {
                     active = Some(login);
-                    ws_url = EVENTSUB_WS.to_string();
                     backoff = Duration::from_secs(1);
                 }
                 Some(SharedBansCmd::ClearChannel) | Some(SharedBansCmd::Relogin) => {}
@@ -144,33 +134,23 @@ async fn run_loop(app: AppHandle, shared: Shared, mut rx: mpsc::UnboundedReceive
                 WaitEnd::Shutdown => break,
                 WaitEnd::Changed => {
                     backoff = Duration::from_secs(1);
-                    ws_url = EVENTSUB_WS.to_string();
                 }
                 WaitEnd::Tick => {}
             }
             continue;
         };
-        let end = connect_eventsub(&app, &shared, wanted, &mut rx, &mut active, &ws_url).await;
+        let end = connect_eventsub(&app, &shared, wanted, &mut rx, &mut active, &mut seen).await;
         match end {
             SessionEnd::Shutdown => break,
             SessionEnd::Changed => {
                 backoff = Duration::from_secs(1);
-                ws_url = EVENTSUB_WS.to_string();
             }
-            SessionEnd::AuthDenied => {
-                ws_url = EVENTSUB_WS.to_string();
-                match wait_until_change(&mut rx, &mut active).await {
-                    WaitEnd::Shutdown => break,
-                    WaitEnd::Changed => backoff = Duration::from_secs(1),
-                    WaitEnd::Tick => {}
-                }
-            }
-            SessionEnd::ReconnectTo(url) => {
-                ws_url = url;
-                backoff = Duration::from_secs(1);
-            }
+            SessionEnd::AuthDenied => match wait_until_change(&mut rx, &mut active).await {
+                WaitEnd::Shutdown => break,
+                WaitEnd::Changed => backoff = Duration::from_secs(1),
+                WaitEnd::Tick => {}
+            },
             SessionEnd::Reconnect => {
-                ws_url = EVENTSUB_WS.to_string();
                 let wait = backoff.min(RECONNECT_MAX);
                 match wait_for_change(&mut rx, &mut active, wait).await {
                     WaitEnd::Shutdown => break,
@@ -192,7 +172,6 @@ enum WaitEnd {
 
 enum SessionEnd {
     Reconnect,
-    ReconnectTo(String),
     AuthDenied,
     Changed,
     Shutdown,
@@ -237,157 +216,54 @@ async fn connect_eventsub(
     wanted: Wanted,
     rx: &mut mpsc::UnboundedReceiver<SharedBansCmd>,
     active: &mut Option<String>,
-    ws_url: &str,
+    seen: &mut RecentNotifications,
 ) -> SessionEnd {
-    let cfg = WebSocketConfig::default()
-        .max_message_size(Some(MAX_WS_MESSAGE))
-        .max_frame_size(Some(MAX_WS_FRAME))
-        .read_buffer_size(32 * 1024);
-    let Ok(Ok((stream, _))) = tokio::time::timeout(
-        Duration::from_secs(12),
-        tokio_tungstenite::connect_async_with_config(ws_url, Some(cfg), false),
-    )
-    .await
-    else {
-        return SessionEnd::Reconnect;
-    };
-    let (mut write, mut read) = stream.split();
-    let mut subscribed = false;
-    let mut last_server_msg = Instant::now();
-    let mut stale_tick = tokio::time::interval(Duration::from_secs(5));
-    stale_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        if SHUTDOWN.load(Ordering::SeqCst) || shared.shared_bans_shutdown.load(Ordering::SeqCst) {
-            let _ = write.send(Message::Close(None)).await;
-            return SessionEnd::Shutdown;
+    let is_current = || eventsub::is_current(shared, &wanted.login, &wanted.token);
+    let connection = async {
+        let Some(mut session) = eventsub::open_eventsub(EVENTSUB_WS).await else {
+            return SessionEnd::Reconnect;
+        };
+        if !is_current() {
+            return SessionEnd::Changed;
         }
-        tokio::select! {
-            cmd = rx.recv() => {
-                match apply_cmd(active, cmd) {
-                    WaitEnd::Shutdown => {
-                        let _ = write.send(Message::Close(None)).await;
-                        return SessionEnd::Shutdown;
-                    }
-                    WaitEnd::Changed => {
-                        let _ = write.send(Message::Close(None)).await;
-                        return SessionEnd::Changed;
-                    }
-                    WaitEnd::Tick => {}
-                }
-            }
-            _ = stale_tick.tick() => {
-                if last_server_msg.elapsed() >= KEEPALIVE_STALE {
-                    let _ = write.send(Message::Close(None)).await;
-                    return SessionEnd::Reconnect;
-                }
-            }
-            incoming = read.next() => {
-                let Some(Ok(msg)) = incoming else {
-                    return SessionEnd::Reconnect;
+        match post_subscription(&wanted, &session.id).await {
+            Subscription::Ready => {}
+            Subscription::AuthDenied => return SessionEnd::AuthDenied,
+            Subscription::Retry => return SessionEnd::Reconnect,
+        }
+        let result = eventsub::listen_eventsub(
+            &mut session,
+            |url| async move { eventsub::open_eventsub(&url).await },
+            is_current,
+            |frame| {
+                let Some((topic, event)) =
+                    seen.receive(frame, &wanted.broadcaster_id, &wanted.moderator_id, "2")
+                else {
+                    return;
                 };
-                last_server_msg = Instant::now();
-                match msg {
-                    Message::Text(text) => {
-                        match handle_eventsub_text(app, shared, &wanted, text.as_str()).await {
-                            EventAction::Ready(session_id) => {
-                                match post_subscription(&wanted, &session_id).await {
-                                    SubAttempt::Ok => subscribed = true,
-                                    SubAttempt::AuthDenied => return SessionEnd::AuthDenied,
-                                    SubAttempt::Retry => return SessionEnd::Reconnect,
-                                }
-                            }
-                            EventAction::SharedMod(action, source, moderator) => {
-                                if subscribed {
-                                    publish_shared_mod(app, shared, &wanted.login, action, source, moderator);
-                                }
-                            }
-                            EventAction::ReconnectTo(url) => return SessionEnd::ReconnectTo(url),
-                            EventAction::Reconnect => return SessionEnd::Reconnect,
-                            EventAction::None => {}
-                        }
+                if topic == "channel.moderate" {
+                    if let Some((action, source, moderator)) =
+                        parse_shared_moderation(event, &wanted.login)
+                    {
+                        publish_shared_mod(app, shared, &wanted.login, action, source, moderator);
                     }
-                    Message::Ping(p) => {
-                        if write.send(Message::Pong(p)).await.is_err() {
-                            return SessionEnd::Reconnect;
-                        }
-                    }
-                    Message::Close(_) => return SessionEnd::Reconnect,
-                    _ => {}
                 }
-            }
+            },
+        )
+        .await;
+        if result.is_err() {
+            SessionEnd::Reconnect
+        } else {
+            SessionEnd::Changed
         }
-    }
-}
-
-enum EventAction {
-    Ready(String),
-    SharedMod(SharedAction, String, String),
-    Reconnect,
-    ReconnectTo(String),
-    None,
-}
-
-enum SubAttempt {
-    Ok,
-    AuthDenied,
-    Retry,
-}
-
-async fn handle_eventsub_text(
-    _app: &AppHandle,
-    _shared: &Shared,
-    wanted: &Wanted,
-    text: &str,
-) -> EventAction {
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
-        return EventAction::None;
     };
-    let msg_type = value
-        .pointer("/metadata/message_type")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    match msg_type {
-        "session_welcome" => {
-            let session_id = value
-                .pointer("/payload/session/id")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim();
-            if session_id.is_empty() {
-                EventAction::Reconnect
-            } else {
-                EventAction::Ready(session_id.to_string())
-            }
-        }
-        "session_reconnect" => {
-            let url = value
-                .pointer("/payload/session/reconnect_url")
-                .and_then(Value::as_str)
-                .and_then(clean_reconnect_url);
-            match url {
-                Some(url) => EventAction::ReconnectTo(url),
-                None => EventAction::Reconnect,
-            }
-        }
-        "notification" => {
-            let sub_type = value
-                .pointer("/payload/subscription/type")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            if sub_type != "channel.moderate" {
-                return EventAction::None;
-            }
-            let event = value.pointer("/payload/event").unwrap_or(&Value::Null);
-            parse_shared_moderation(event, &wanted.login)
-                .map(|(action, source, moderator)| {
-                    EventAction::SharedMod(action, source, moderator)
-                })
-                .unwrap_or(EventAction::None)
-        }
-        "revocation" => EventAction::Reconnect,
-        "session_keepalive" => EventAction::None,
-        _ => EventAction::None,
+    tokio::select! {
+        biased;
+        command = rx.recv() => match apply_cmd(active, command) {
+            WaitEnd::Shutdown => SessionEnd::Shutdown,
+            WaitEnd::Changed | WaitEnd::Tick => SessionEnd::Changed,
+        },
+        end = connection => end,
     }
 }
 
@@ -748,7 +624,7 @@ fn ingest_event(app: &AppHandle, shared: &Shared, channel: &str, event: ChatEven
     }
 }
 
-async fn post_subscription(wanted: &Wanted, session_id: &str) -> SubAttempt {
+async fn post_subscription(wanted: &Wanted, session_id: &str) -> Subscription {
     let body = json!({
         "type": "channel.moderate",
         "version": "2",
@@ -758,34 +634,7 @@ async fn post_subscription(wanted: &Wanted, session_id: &str) -> SubAttempt {
         },
         "transport": { "method": "websocket", "session_id": session_id },
     });
-    let client = super::http_client::build(Duration::from_secs(12));
-    let url = format!("{HELIX}/eventsub/subscriptions");
-    let mut delay = RETRY_BASE;
-    for attempt in 0..ATTEMPTS {
-        match client
-            .post(&url)
-            .header("Client-Id", &wanted.client_id)
-            .header("Authorization", format!("Bearer {}", wanted.token))
-            .header("Accept", "application/json")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 409 => {
-                return SubAttempt::Ok;
-            }
-            Ok(resp) if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 => {
-                return SubAttempt::AuthDenied;
-            }
-            Ok(_) | Err(_) => {}
-        }
-        if attempt + 1 < ATTEMPTS {
-            tokio::time::sleep(delay).await;
-            delay *= 2;
-        }
-    }
-    SubAttempt::Retry
+    eventsub::subscribe(&wanted.client_id, &wanted.token, &body).await
 }
 
 async fn resolve_wanted(shared: &Shared, login: &str) -> Option<Wanted> {
@@ -798,7 +647,6 @@ async fn resolve_wanted(shared: &Shared, login: &str) -> Option<Wanted> {
     if client_id.trim().is_empty() || client_id == "YOUR_API_KEY_HERE" {
         return None;
     }
-    // Same Relogin gate as pins/low_trust: token-login may lack cached user_id.
     let moderator_id = auth::ensure_twitch_user_id(shared).await?;
     if !scopes_ok(&token, &client_id).await {
         return None;
@@ -844,17 +692,6 @@ async fn scopes_ok(token: &str, client_id: &str) -> bool {
             .iter()
             .any(|need| scopes.iter().any(|have| have == need))
     })
-}
-
-fn clean_reconnect_url(raw: &str) -> Option<String> {
-    let url = Url::parse(raw).ok()?;
-    if url.scheme() != "wss" {
-        return None;
-    }
-    if url.host_str() != Some("eventsub.wss.twitch.tv") {
-        return None;
-    }
-    Some(url.to_string())
 }
 
 #[cfg(test)]
