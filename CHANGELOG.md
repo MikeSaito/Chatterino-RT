@@ -8,6 +8,7 @@
 - Fixed Settings preview, save, and cancel. Context-menu search uses DuckDuckGo unless you configure another engine.
 - Moved AutoMod to Twitch EventSub and fixed moderation reconnects. Sign in again if the app prompts for additional permissions.
 - Removed unsupported Twitch message pins, polls, predictions, and GIF sending controls.
+- Updated Rustls and removed unused ZIP support from the Windows updater.
 
 ## 1.1.7
 
