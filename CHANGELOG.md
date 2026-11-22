@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0
+
+- Add a Restart stream button to reconnect the Twitch player and discard accumulated buffering. Playback restarts muted.
+- Show available updates in an in-app notification with Download and install and Later actions.
+- Display download progress, signature verification, installation, and errors while updating. Downloads without a known size show the received byte count.
+- Show a themed loading screen before chat initialization, with a retry action when startup fails.
+
 ## 2.0.0
 
 - Updated chat themes, channel tabs, message actions, and the Settings preview.

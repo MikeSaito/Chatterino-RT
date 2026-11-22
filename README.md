@@ -26,6 +26,10 @@ After install: join a channel (anonymous read works). Use **Sign in** / **Вой
 
 In-app updates use the same Releases feed (`latest.json`) after a draft release is published.
 
+Available updates appear in a notification. Choose **Download and install** to see download progress, signature verification, and installation status, or **Later** to keep using the app.
+
+In the player layout, **Restart stream** reconnects to Twitch and discards the accumulated buffer. Playback restarts muted. The delay after reconnecting depends on Twitch and the connection.
+
 ## Building
 
 Target: Windows 10/11.
