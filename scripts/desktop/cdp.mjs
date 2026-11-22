@@ -10,13 +10,30 @@ export async function connect(port, pageName = "main") {
  const urls=pageName==="settings" ? ["https://tauri.localhost/settings.html"] : ["https://tauri.localhost/","https://tauri.localhost/index.html"];
  const page=targets.find(t=>t.type==="page" && urls.includes(t.url));
  if(!page) throw new Error(`Application ${pageName} WebView not ready`);
- const socket=new WebSocket(page.webSocketDebuggerUrl); let id=0; const pending=new Map(); const errors=[];
- socket.onmessage=event=>{const value=JSON.parse(event.data);if(value.id) {const entry=pending.get(value.id);if(!entry)return;pending.delete(value.id);clearTimeout(entry.timer);value.error?entry.reject(new Error(JSON.stringify(value.error))):entry.resolve(value.result);}else if(value.method==="Runtime.exceptionThrown")errors.push(value.params.exceptionDetails.exception?.description ?? value.params.exceptionDetails.text);};
+ const socket = new WebSocket(page.webSocketDebuggerUrl);
+ let id = 0;
+ const pending = new Map();
+ const errors = [];
+ const bindings = [];
+ socket.onmessage = event => {
+  const value = JSON.parse(event.data);
+  if (value.id) {
+   const entry = pending.get(value.id);
+   if (!entry) return;
+   pending.delete(value.id);
+   clearTimeout(entry.timer);
+   value.error ? entry.reject(new Error(JSON.stringify(value.error))) : entry.resolve(value.result);
+  } else if (value.method === "Runtime.exceptionThrown") {
+   errors.push(value.params.exceptionDetails.exception?.description ?? value.params.exceptionDetails.text);
+  } else if (value.method === "Runtime.bindingCalled") {
+   bindings.push(value.params);
+  }
+ };
  const fail=()=>{for(const entry of pending.values()){clearTimeout(entry.timer);entry.reject(new Error("Application WebView disconnected"));}pending.clear();};
  socket.onclose=fail;
  await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
  const command=(method,params={})=>new Promise((resolve,reject)=>{const next=++id;const timer=setTimeout(()=>{pending.delete(next);reject(new Error(`CDP timeout: ${method}`));},15000);pending.set(next,{resolve,reject,timer});socket.send(JSON.stringify({id:next,method,params}));});
  await command("Runtime.enable");
  const evaluate=async expression=>{const result=await command("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text);return result.result.value;};
- return {command,evaluate,errors,close:()=>socket.close()};
+ return {command,evaluate,errors,bindings,close:()=>socket.close()};
 }

@@ -120,7 +120,16 @@ try {
   armed=true;
   const found=await invoke("updater_check",{beta:false});assert.equal(found.version,report.update.version);
   report.update.previousVersion=current.currentVersion;
-  try{await invoke("updater_install",{expectedVersion:found.version});}catch(error){if(!String(error).includes("disconnected") && !String(error).includes("CDP timeout"))throw error;}
+  await cdp.command("Runtime.addBinding",{name:"validationUpdateProgress"});
+  const progressCallback=await cdp.evaluate("window.__TAURI_INTERNALS__.transformCallback(({message})=>{if(message)window.validationUpdateProgress(JSON.stringify(message));})");
+  const progressEvents=cdp.bindings;
+  try{await invoke("updater_install",{expectedVersion:found.version,onEvent:`__CHANNEL__:${progressCallback}`});}catch(error){if(!String(error).includes("disconnected") && !String(error).includes("CDP timeout"))throw error;}
+  report.update.progress=progressEvents.filter(event=>event.name==="validationUpdateProgress").map(event=>JSON.parse(event.payload));
+  const phases=report.update.progress.map(event=>event.phase);
+  assert.equal(phases[0],"connecting","native updater must acknowledge the download before chunks arrive");
+  assert.ok(phases.includes("downloading") && phases.includes("verifying"),"native updater must report download and signature verification");
+  const downloaded=report.update.progress.filter(event=>event.phase==="downloading");
+  assert.ok(downloaded.every((event,index)=>event.downloaded>0 && (!index || event.downloaded>=downloaded[index-1].downloaded)),"native download byte counts must be monotonic");
   cdp.close();cdp=null;
   for(let i=0;i<120;i++) {
    const meta=spawnSync("powershell.exe",[...powershellArgs,"-File",resolve("scripts/release/metadata.ps1"),"-Path",exe],{encoding:"utf8",env:windowsPowerShellEnv(),windowsHide:true});
