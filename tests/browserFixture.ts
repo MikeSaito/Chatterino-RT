@@ -217,6 +217,16 @@ fixtureWindow.__fixture = {
       setPlayerLiveHint(true);
       await until(() => Boolean(host.querySelector("iframe")) && !button.disabled);
       const first = host.querySelector("iframe")!;
+      const column = document.querySelector<HTMLElement>("#player-column")!;
+      const videoBounds = host.getBoundingClientRect();
+      const columnBounds = column.getBoundingClientRect();
+      const buttonBounds = button.getBoundingClientRect();
+      check(Math.abs(videoBounds.height - columnBounds.height) < 1, "restart controls reserve no video height");
+      check(buttonBounds.top >= videoBounds.top && buttonBounds.right <= videoBounds.right, "restart button stays inside the video area");
+      check(Boolean(button.querySelector("svg")) && Boolean(button.getAttribute("aria-label")), "restart icon has an accessible name");
+      button.focus();
+      await sleep(150);
+      check(getComputedStyle(button).opacity === "1", "keyboard focus highlights the restart icon");
       button.click();
       button.click();
       check(button.disabled && !first.isConnected, "restart disconnects the previous frame immediately");

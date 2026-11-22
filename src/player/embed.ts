@@ -202,7 +202,10 @@ function paintOverlay(): void {
   }
   if (restart) {
     restart.disabled = !activeHost || !activeChannel || overlayMode === "loading" || liveKnown === false;
-    restart.textContent = t(overlayMode === "loading" ? "player.restarting" : "player.restart");
+    if (!restart.firstElementChild) {
+      restart.replaceChildren(iconEl("refresh", 16));
+    }
+    restart.setAttribute("aria-label", t(overlayMode === "loading" ? "player.restarting" : "player.restart"));
     restart.title = t("player.restartHint");
   }
   if (!activeHost) {

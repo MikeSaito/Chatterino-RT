@@ -2147,16 +2147,50 @@ button:disabled {
 }
 
 #player-controls {
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: flex-end;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--c-header-border);
-  background: var(--c-header-bg);
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  pointer-events: none;
 }
 
 #player-controls[hidden] {
   display: none;
+}
+
+#player-restart {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(20 20 20 / 85%);
+  color: #ffffff;
+  cursor: pointer;
+  opacity: 0.7;
+  pointer-events: auto;
+  transition: opacity var(--transition-fast);
+}
+
+#player-restart:hover {
+  background: #303030;
+}
+
+#player-restart:hover,
+#player-restart:focus {
+  opacity: 1;
+}
+
+#player-restart:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+#player-restart:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 #player-placeholder {

@@ -28,7 +28,7 @@ In-app updates use the same Releases feed (`latest.json`) after a draft release 
 
 Available updates appear in a notification. Choose **Download and install** to see download progress, signature verification, and installation status, or **Later** to keep using the app.
 
-In the player layout, **Restart stream** reconnects to Twitch and discards the accumulated buffer. Playback restarts muted. The delay after reconnecting depends on Twitch and the connection.
+In the player layout, the restart icon sits in the top-right corner of the video. It reconnects to Twitch and discards the accumulated buffer. Playback restarts muted. The delay after reconnecting depends on Twitch and the connection. Exit Twitch fullscreen to use the restart icon.
 
 ## Building
 
