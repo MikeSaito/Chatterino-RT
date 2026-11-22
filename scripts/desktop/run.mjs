@@ -60,6 +60,13 @@ async function launch() {
  const debug=await cdp.evaluate("Boolean(window.__crt)");
  if(!debug){await cdp.evaluate("localStorage.setItem('crt-debug','1');location.reload();true");cdp.close();cdp=null;await sleep(1000);for(let i=0;i<60;i++){try{cdp=await connect(port);if(await cdp.evaluate("Boolean(window.__crt?.resources)"))break;cdp.close();cdp=null;}catch{}await sleep(500);}}
  assert.ok(cdp && await cdp.evaluate("Boolean(window.__crt?.resources)"),"renderer did not initialize");
+ for(let i=0;i<120;i++) {
+  if(await cdp.evaluate("document.documentElement.dataset.startup==='ready' && document.querySelector('#startup-screen').hidden && !document.querySelector('#app').inert"))break;
+  await sleep(250);
+ }
+ assert.ok(await cdp.evaluate("document.documentElement.dataset.startup==='ready' && document.querySelector('#startup-screen').hidden && !document.querySelector('#app').inert"),"startup screen did not reveal the ready app");
+ assert.equal(await invoke("plugin:window|is_visible"),true,"the initialized window must be visible");
+ report.startup={ready:true,visible:true};
 }
 async function quit() {
  if(cdp){try{await invoke("validation_quit");}catch{}cdp.close();cdp=null;}

@@ -37,6 +37,8 @@
     "windows": [
       {
         "label": "main",
+        "visible": false,
+        "backgroundColor": "#1f1f1f",
         "title": "Chatterino RT",
         "width": 1280,
         "height": 800,
@@ -47,6 +49,7 @@
       },
       {
         "label": "settings",
+        "backgroundColor": "#1f1f1f",
         "create": false,
         "title": "Chatterino Settings",
         "url": "settings.html",

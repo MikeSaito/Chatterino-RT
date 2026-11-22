@@ -57,6 +57,55 @@
   text-rendering: optimizeLegibility;
 }
 
+#startup-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  background: var(--c-window-bg);
+  color: var(--c-window-text);
+}
+
+#startup-screen[hidden] {
+  display: none;
+}
+
+#startup-screen p {
+  margin: 0;
+  text-align: center;
+  max-width: 480px;
+  overflow-wrap: anywhere;
+}
+
+#startup-error {
+  max-height: 140px;
+  overflow: auto;
+  font-size: var(--font-sm);
+  color: var(--c-muted);
+}
+
+.startup-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--c-border);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  animation: startup-spin 900ms linear infinite;
+}
+
+[data-startup="error"] .startup-spinner {
+  display: none;
+}
+
+@keyframes startup-spin {
+  to { transform: rotate(360deg); }
+}
+
 .update-notice {
   position: fixed;
   right: 20px;

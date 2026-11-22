@@ -96,6 +96,15 @@ pub fn run() {
                 Ok(())
             }
         })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+            {
+                if let Some(window) = webview.app_handle().get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
+        })
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;

@@ -7,10 +7,17 @@
     <link rel="stylesheet" href="/src/styles.css" />
     <meta charset="utf-8" />
     <title>Chatterino RT</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <script type="module" src="/src/startup.ts" defer></script>
   </head>
   <body>
-    <div id="app" data-ui-layout="extended">
+    <section id="startup-screen" aria-label="Loading">
+      <img src="/logo-128.png" width="56" height="56" alt="" />
+      <span class="startup-spinner" aria-hidden="true"></span>
+      <p id="startup-message" role="status" aria-live="polite">Loading chat...</p>
+      <p id="startup-error" hidden></p>
+      <button type="button" id="startup-retry" class="btn" hidden>Retry</button>
+    </section>
+    <div id="app" data-ui-layout="extended" inert aria-busy="true">
       <aside id="sidebar">
         <form id="join-form">
           <label for="channel-input" data-i18n="sidebar.join.label">channel</label>

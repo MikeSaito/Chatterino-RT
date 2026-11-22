@@ -233,6 +233,17 @@ export function applyResolvedTheme(
   applyThemeCss(tokens, root);
   root.style.colorScheme = isDarkTheme(preset) ? "dark" : "light";
   root.dataset.theme = preset;
+  if (typeof document !== "undefined" && root === document.documentElement) {
+    try {
+      localStorage.setItem("crt-startup-colors", JSON.stringify({
+        background: tokens.windowBg,
+        foreground: tokens.windowText,
+        scheme: root.style.colorScheme,
+      }));
+    } catch {
+      // Theme changes still work when local storage is unavailable.
+    }
+  }
   return tokens;
 }
 

@@ -91,6 +91,8 @@ try {
   await command("Page.navigate", { url: `http://localhost:1420/tests/browser.html${largeHistory ? "?history=10000" : ""}` });
   await ready();
   assert.equal(await evaluate("window.__crt.ring.poolSize"), largeHistory ? 10_000 : 1_000);
+  await evaluate("window.__fixture.startup()");
+  console.log("UI startup: loading, error, retry, damaged appearance cache and ready state");
   const smoke = await evaluate("window.__fixture.smoke()");
   console.log("UI checks:", smoke.join("; "));
   const saved = await evaluate("JSON.parse(localStorage.getItem('crt-workspace-v1'))");

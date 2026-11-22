@@ -150,23 +150,9 @@ function stopChatIpc(): void {
   chatIpc = null;
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  void boot().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err ?? t("status.bootError"));
-    const statusText = document.querySelector<HTMLElement>("#status-text");
-    const statusLine = document.querySelector<HTMLElement>("#status");
-    if (statusText) {
-      statusText.textContent = message;
-    } else if (statusLine) {
-      statusLine.textContent = message;
-    }
-    statusLine?.classList.remove("is-connecting");
-    const spinner = document.querySelector<HTMLElement>("#status-spinner");
-    if (spinner) {
-      spinner.hidden = true;
-    }
-  });
-});
+export function startApp(): Promise<void> {
+  return boot();
+}
 
 window.addEventListener("beforeunload", () => {
   stopChatIpc();
@@ -2762,7 +2748,6 @@ async function boot(): Promise<void> {
     return;
   }
 
-  // Как Chatterino: тихая проверка при старте (no-op, пока stub-конфиг).
   void checkForUpdates({
     beta: bootKnobs["misc.betaUpdates"] === true,
     quiet: true,

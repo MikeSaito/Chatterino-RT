@@ -8,6 +8,7 @@ import type { ChatPerformance } from "../src/chat/performance";
 import type { SendResult } from "../src/shell/sendStatus";
 import { checkForUpdates, type UpdateProgress } from "../src/shell/updater";
 import { mountPlayer, setPlayerLiveHint, unmountPlayer } from "../src/player/embed";
+import { runStartup } from "../src/shell/startupScreen";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
 import { checkMediaOverload } from "./browserMediaOverload";
@@ -27,6 +28,7 @@ const fixtureWindow = window as Window & {
     smoke: () => Promise<string[]>;
     updater: () => Promise<void>;
     playerRestart: () => Promise<void>;
+    startup: () => Promise<void>;
     viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
@@ -130,8 +132,8 @@ document.documentElement.lang = html.documentElement.lang;
 document.head.innerHTML = html.head.innerHTML;
 document.body.innerHTML = html.body.innerHTML;
 localStorage.setItem("crt-debug", "1");
-await import("../src/main");
-window.dispatchEvent(new Event("DOMContentLoaded"));
+const { startApp } = await import("../src/main");
+await runStartup(startApp);
 const input = () => document.querySelector<HTMLTextAreaElement>("#composer-input")!;
 const active = () => document.querySelector<HTMLInputElement>("#channel-input")!.value;
 async function switchTo(channel: string) {
@@ -182,6 +184,28 @@ async function checkSearchSetting() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  async startup() {
+    const app = document.querySelector<HTMLElement>("#app")!;
+    const screen = document.querySelector<HTMLElement>("#startup-screen")!;
+    check(screen.hidden && !app.inert, "successful startup reveals the interactive app");
+    const saved = localStorage.getItem("crt-startup-colors");
+    try {
+      localStorage.setItem("crt-startup-colors", "invalid-json");
+      await runStartup(async () => { throw new Error("Synthetic startup failure"); });
+      check(!screen.hidden && app.inert, "startup failure keeps unfinished controls inaccessible");
+      check(!document.querySelector<HTMLButtonElement>("#startup-retry")!.hidden, "startup failure offers retry");
+      check(document.querySelector("#startup-error")!.textContent === "Synthetic startup failure", "startup error detail is visible");
+      let complete!: () => void;
+      const pending = runStartup(() => new Promise<void>((resolve) => { complete = resolve; }));
+      check(!screen.hidden && app.inert, "loading covers partially initialized UI");
+      complete();
+      await pending;
+      check(screen.hidden && !app.inert && !app.hasAttribute("aria-busy"), "successful loading restores input");
+    } finally {
+      if (saved === null) localStorage.removeItem("crt-startup-colors");
+      else localStorage.setItem("crt-startup-colors", saved);
+    }
+  },
   async playerRestart() {
     const host = document.querySelector<HTMLElement>("#player-slot")!;
     const app = document.querySelector<HTMLElement>("#app")!;
