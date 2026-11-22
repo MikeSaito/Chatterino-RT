@@ -2,7 +2,7 @@
 
 ## 2.1.0
 
-- Add a compact restart icon in the video's top-right corner to reconnect the Twitch player and discard accumulated buffering. Playback restarts muted.
+- Add a compact restart icon in the video's top-right corner to reconnect the Twitch player and discard accumulated buffering. Playback restarts muted. Exit Twitch fullscreen to use the icon.
 - Show available updates in an in-app notification with Download and install and Later actions.
 - Display download progress, signature verification, installation, and errors while updating. Downloads without a known size show the received byte count.
 - Show a themed loading screen before chat initialization, with a retry action when startup fails.

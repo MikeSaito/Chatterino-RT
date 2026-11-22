@@ -92,6 +92,19 @@ jobs:
             exit 1
           fi
 
+      - name: Read release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $pattern = '(?ms)^## ' + [regex]::Escape($version) + '\r?\n(?<notes>.*?)(?=^## |\z)'
+          $section = [regex]::Match((Get-Content -Raw CHANGELOG.md), $pattern)
+          if (!$section.Success) { throw "No changelog entry for $version" }
+          $notes = $section.Groups['notes'].Value.Trim()
+          if (!$notes) { throw "Empty changelog entry for $version" }
+          $delimiter = [guid]::NewGuid().ToString('N')
+          @("body<<$delimiter", $notes, $delimiter) >> $env:GITHUB_OUTPUT
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,13 +113,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Chatterino RT v__VERSION__"
-          releaseBody: |
-            Windows installer (NSIS). WebView2 bootstrapper is embedded for machines without the runtime.
-
-            Updater assets (`latest.json`, `.sig`) are signed for in-app updates.
-            Publish this draft so `releases/latest/download/latest.json` is reachable by clients.
-
-            See the repository README for login and validation notes.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           updaterJsonPreferNsis: true
