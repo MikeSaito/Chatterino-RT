@@ -52,6 +52,14 @@ try {
       requests.delete(value.id); clearTimeout(req.timer);
       value.error ? req.reject(new Error(JSON.stringify(value.error))) : req.resolve(value.result);
     } else if (value.method === "Runtime.exceptionThrown") failures.push(value.params.exceptionDetails.exception?.description ?? value.params.exceptionDetails.text);
+    else if (value.method === "Fetch.requestPaused") {
+      void command("Fetch.fulfillRequest", {
+        requestId: value.params.requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: "Content-Type", value: "text/html" }],
+        body: Buffer.from("<!doctype html><title>Synthetic player</title><body>Video fixture</body>").toString("base64"),
+      }).catch(() => undefined);
+    }
   };
   const command = (method, params = {}) => new Promise((resolvePromise, reject) => {
     const next = ++id;
@@ -77,6 +85,7 @@ try {
     }
   };
   await command("Runtime.enable"); await command("Page.enable");
+  await command("Fetch.enable", { patterns: [{ urlPattern: "https://player.twitch.tv/*", requestStage: "Request" }] });
   await command("Emulation.setFocusEmulationEnabled", { enabled: true });
   await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await command("Page.navigate", { url: `http://localhost:1420/tests/browser.html${largeHistory ? "?history=10000" : ""}` });
@@ -99,6 +108,8 @@ try {
   console.log("UI restart: active tab, draft, reply, scroll anchor restored");
   await evaluate("window.__fixture.updater()");
   console.log("UI updater: postpone, concurrent checks, byte progress, unknown size, install, error and late events");
+  await evaluate("window.__fixture.playerRestart()");
+  console.log("UI player restart: one frame, duplicate clicks, offline, channel change and teardown");
   const loads = [];
   for (const [rate, scrolling] of (uiOnly ? [] : [[50, false], [200, false], [200, true]])) {
     const report = await evaluate(`window.__fixture.load(${rate}, 8, ${scrolling})`);

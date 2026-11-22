@@ -195,6 +195,16 @@ function removeFrame(): void {
 }
 
 function paintOverlay(): void {
+  const controls = document.querySelector<HTMLElement>("#player-controls");
+  const restart = document.querySelector<HTMLButtonElement>("#player-restart");
+  if (controls) {
+    controls.hidden = !activeHost || liveKnown === false;
+  }
+  if (restart) {
+    restart.disabled = !activeHost || !activeChannel || overlayMode === "loading" || liveKnown === false;
+    restart.textContent = t(overlayMode === "loading" ? "player.restarting" : "player.restart");
+    restart.title = t("player.restartHint");
+  }
   if (!activeHost) {
     return;
   }
@@ -444,6 +454,10 @@ export function bindPlayerOpenTwitch(
     if (!(t instanceof Element)) {
       return;
     }
+    if (t.closest("#player-restart")) {
+      restartPlayer();
+      return;
+    }
     if (!t.closest("#player-placeholder-action")) {
       return;
     }
@@ -452,6 +466,23 @@ export function bindPlayerOpenTwitch(
     }
     handler(openTwitchChannel());
   });
+}
+
+function restartPlayer(): void {
+  if (!activeHost || !activeChannel || liveKnown === false || overlayMode === "loading") {
+    return;
+  }
+  const host = activeHost;
+  const channel = activeChannel;
+  const hint = liveKnown;
+  clearMountDebounce();
+  clearErrorRetryTimer();
+  clearReinsertTimer();
+  slotWaitCleanup?.();
+  slotWaitCleanup = null;
+  removeFrame();
+  insertEmbed = null;
+  beginMount(host, channel, hint);
 }
 
 function createPlayerFrame(): HTMLIFrameElement {
@@ -654,6 +685,7 @@ export function unmountPlayer(host: HTMLElement): void {
     destroyFrame(node);
   });
   host.replaceChildren();
+  paintOverlay();
 }
 
 function whenSlotReady(host: HTMLElement, isLive: () => boolean, run: () => void): void {

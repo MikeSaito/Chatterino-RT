@@ -7,6 +7,7 @@ import type { MessageRing, SlotContext } from "../src/chat/ring";
 import type { ChatPerformance } from "../src/chat/performance";
 import type { SendResult } from "../src/shell/sendStatus";
 import { checkForUpdates, type UpdateProgress } from "../src/shell/updater";
+import { mountPlayer, setPlayerLiveHint, unmountPlayer } from "../src/player/embed";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
 import { checkMediaOverload } from "./browserMediaOverload";
@@ -25,6 +26,7 @@ const fixtureWindow = window as Window & {
     chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
     updater: () => Promise<void>;
+    playerRestart: () => Promise<void>;
     viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
@@ -180,6 +182,37 @@ async function checkSearchSetting() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  async playerRestart() {
+    const host = document.querySelector<HTMLElement>("#player-slot")!;
+    const app = document.querySelector<HTMLElement>("#app")!;
+    const layout = app.dataset.uiLayout;
+    const button = document.querySelector<HTMLButtonElement>("#player-restart")!;
+    try {
+      app.dataset.uiLayout = "extended";
+      mountPlayer(host, "fixturealpha");
+      setPlayerLiveHint(true);
+      await until(() => Boolean(host.querySelector("iframe")) && !button.disabled);
+      const first = host.querySelector("iframe")!;
+      button.click();
+      button.click();
+      check(button.disabled && !first.isConnected, "restart disconnects the previous frame immediately");
+      await until(() => Boolean(host.querySelector("iframe")) && !button.disabled);
+      check(host.querySelectorAll("iframe").length === 1, "repeated restart clicks create one frame");
+      check(host.querySelector("iframe") !== first, "restart replaces the buffered player");
+      check(new URL(host.querySelector("iframe")!.src).searchParams.get("channel") === "fixturealpha", "restart keeps the current channel");
+
+      button.click();
+      mountPlayer(host, "fixturebeta");
+      await until(() => Boolean(host.querySelector("iframe")) && !button.disabled);
+      check(new URL(host.querySelector("iframe")!.src).searchParams.get("channel") === "fixturebeta", "channel switching cancels a pending restart");
+      setPlayerLiveHint(false);
+      check(!host.querySelector("iframe") && button.disabled, "offline channel has no restartable frame");
+    } finally {
+      unmountPlayer(host);
+      app.dataset.uiLayout = layout;
+    }
+    check(document.querySelector<HTMLElement>("#player-controls")!.hidden, "player controls disappear on teardown");
+  },
   async updater() {
     const notice = () => document.querySelector<HTMLElement>("#update-notice")!;
     const progress = () => notice().querySelector<HTMLProgressElement>("progress")!;

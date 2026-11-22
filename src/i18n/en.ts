@@ -304,6 +304,9 @@ export const en = {
   "player.error": "Could not load the player",
   "player.openTwitch": "Open on Twitch",
   "player.iframeTitle": "Twitch player",
+  "player.restart": "Restart stream",
+  "player.restartHint": "Reconnect muted to discard the accumulated buffer",
+  "player.restarting": "Reconnecting...",
 
   "status.boot": "Loading chat…",
   "status.bootError": "load error",

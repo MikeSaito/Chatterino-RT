@@ -2097,6 +2097,19 @@ button:disabled {
   overflow: hidden;
 }
 
+#player-controls {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--c-header-border);
+  background: var(--c-header-bg);
+}
+
+#player-controls[hidden] {
+  display: none;
+}
+
 #player-placeholder {
   position: absolute;
   inset: 0;

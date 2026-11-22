@@ -310,6 +310,9 @@ export const ru: Record<MessageKey, string> = {
   "player.error": "Не удалось загрузить плеер",
   "player.openTwitch": "Открыть на Twitch",
   "player.iframeTitle": "Плеер Twitch",
+  "player.restart": "Перезапустить эфир",
+  "player.restartHint": "Подключиться заново без звука, сбросив накопленный буфер",
+  "player.restarting": "Переподключение...",
 
   "status.boot": "Загрузка чата…",
   "status.bootError": "ошибка загрузки",
