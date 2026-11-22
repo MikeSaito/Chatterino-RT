@@ -6,6 +6,7 @@ import type { ChatEvent } from "../src/chat/types";
 import type { MessageRing, SlotContext } from "../src/chat/ring";
 import type { ChatPerformance } from "../src/chat/performance";
 import type { SendResult } from "../src/shell/sendStatus";
+import { checkForUpdates, type UpdateProgress } from "../src/shell/updater";
 import { SETTINGS_PREVIEW_EVENT } from "../src/shell/settings/settingsBridge";
 import { checkTextureLifecycle } from "./browserTextureLifecycle";
 import { checkMediaOverload } from "./browserMediaOverload";
@@ -23,6 +24,7 @@ const fixtureWindow = window as Window & {
     ready: () => boolean;
     chatGifs: () => Promise<void>;
     smoke: () => Promise<string[]>;
+    updater: () => Promise<void>;
     viewportRendering: () => Promise<{ history: number; top: number; bottom: number }>;
     viewportTextureSafety: () => Promise<void>;
     textureLifecycle: () => Promise<void>;
@@ -57,6 +59,10 @@ function message(channel: string, i: number): ChatEvent {
 for (const channel of ["alpha", "beta"]) history.set(channel, Array.from({ length: 200 }, (_, i) => message(channel, i)));
 const pendingSends: { channel: string; text: string; replyToId: string | null; resolve: (r: SendResult) => void; reject: (error: unknown) => void }[] = [];
 let openedLink: unknown;
+let updateAvailable = false;
+let updateChecks = 0;
+let updateChannel: Channel<UpdateProgress> | undefined;
+let finishUpdate: ((error?: string) => void) | undefined;
 let gifResponse: ((url: string) => Promise<unknown>) | undefined;
 mockWindows("main");
 mockConvertFileSrc("windows");
@@ -98,7 +104,14 @@ mockIPC(async (cmd, args) => {
   if (cmd === "chat_profile_image") return { login: a.login, url: null };
   if (cmd === "chat_blocked_users" || cmd === "chat_emote_icons" || cmd === "chat_complete" || cmd === "chat_emote_popup_list") return [];
   if (cmd === "cache_info") return { path: "", isCustom: false };
-  if (cmd === "updater_status") return { ready: false, currentVersion: "2.0.0", reason: "fixture" };
+  if (cmd === "updater_status") return { ready: updateAvailable, currentVersion: "2.0.0", reason: "fixture" };
+  if (cmd === "updater_check") { updateChecks++; return { version: "2.0.1", currentVersion: "2.0.0", body: "Synthetic update notes", date: null }; }
+  if (cmd === "updater_install") {
+    updateChannel = a.onEvent as Channel<UpdateProgress>;
+    return new Promise<void>((resolve, reject) => {
+      finishUpdate = (error) => error ? reject(error) : resolve();
+    });
+  }
   if (cmd === "about_info") return { version: "2.0.0", settingsDirectory: "fixture" };
   if (cmd.startsWith("plugin:window|")) {
     if (cmd.endsWith("inner_size")) return { width: innerWidth * devicePixelRatio, height: innerHeight * devicePixelRatio };
@@ -167,6 +180,55 @@ async function checkSearchSetting() {
 const state = () => document.querySelector<HTMLElement>("#send-status")!.dataset.state;
 
 fixtureWindow.__fixture = {
+  async updater() {
+    const notice = () => document.querySelector<HTMLElement>("#update-notice")!;
+    const progress = () => notice().querySelector<HTMLProgressElement>("progress")!;
+    const click = (action: string) => notice().querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!.click();
+    updateAvailable = true;
+    try {
+      const postponed = checkForUpdates({ beta: false, quiet: true });
+      await until(() => Boolean(notice()));
+      click("later");
+      check(await postponed === "skipped" && !notice(), "update can be postponed without blocking chat");
+
+      const downloading = checkForUpdates({ beta: false, quiet: true });
+      const count = updateChecks;
+      check(checkForUpdates({ beta: false }) === downloading, "concurrent requests share one check");
+      await until(() => Boolean(notice()));
+      click("install");
+      await until(() => Boolean(updateChannel));
+      check(notice().dataset.phase === "connecting", "download starts with immediate visible feedback");
+      check(!progress().hasAttribute("value"), "unknown download size remains indeterminate");
+      updateChannel!.onmessage({ phase: "downloading", downloaded: 1_048_576, total: 4_194_304 });
+      check(progress().value === 25, "real byte counts update the progress bar");
+      updateChannel!.onmessage({ phase: "verifying" });
+      check(notice().dataset.phase === "verifying", "signature verification has its own status");
+      updateChannel!.onmessage({ phase: "installing" });
+      check(progress().hidden, "installation does not leave a misleading download bar");
+      finishUpdate!();
+      check(await downloading === "installed", "successful install completes");
+      check(updateChecks === count + 1, "one backend check for concurrent clicks");
+      click("later");
+
+      updateChannel = undefined;
+      const failed = checkForUpdates({ beta: false, quiet: true });
+      await until(() => Boolean(notice()));
+      click("install");
+      await until(() => Boolean(updateChannel));
+      updateChannel!.onmessage({ phase: "downloading", downloaded: 1024, total: null });
+      check(!progress().hasAttribute("value"), "chunked responses show received bytes without a percentage");
+      finishUpdate!("error.updater.install");
+      check(await failed === "error", "failed download completes with an error");
+      check(notice().dataset.phase === "error", "errors from automatic checks stay visible after accepting");
+      updateChannel!.onmessage({ phase: "installing" });
+      check(notice().dataset.phase === "error", "late progress cannot replace the error");
+      click("later");
+    } finally {
+      updateAvailable = false;
+      finishUpdate?.("fixture stopped");
+      document.querySelector("#update-notice")?.remove();
+    }
+  },
   viewPool: () => checkViewPool(fixtureWindow.__crt!.ring, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   renderReuse: () => checkRenderReuse(fixtureWindow.__crt!.ring, () => fixtureWindow.__crt!.ring.applySnapshot(history.get(active())!)),
   async historyLayout() {

@@ -517,6 +517,19 @@ export const ru: Record<MessageKey, string> = {
 
   "updater.notConfigured":
     "Автообновление ещё не настроено (ключ подписи / HTTPS endpoint).",
+  "updater.title": "Обновление приложения",
+  "updater.available": "Доступна версия {version}",
+  "updater.current": "Установлена версия {version}",
+  "updater.install": "Скачать и установить",
+  "updater.later": "Позже",
+  "updater.close": "Закрыть",
+  "updater.notes": "Что нового",
+  "updater.downloadProgress": "Загрузка обновления",
+  "updater.connecting": "Подключение к серверу загрузки...",
+  "updater.downloaded": "Скачано {received} МиБ",
+  "updater.downloadedOf": "{received} из {total} МиБ ({percent}%)",
+  "updater.verifying": "Проверка подписи обновления...",
+  "updater.installing": "Установка обновления. Приложение перезапустится.",
   "updater.checking": "Проверка обновлений…",
   "updater.upToDate": "Chatterino RT {version} уже актуален.",
   "updater.availableConfirm":

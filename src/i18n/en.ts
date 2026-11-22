@@ -511,6 +511,19 @@ export const en = {
 
   "updater.notConfigured":
     "Auto-update is not configured yet (signing key / HTTPS endpoint).",
+  "updater.title": "App update",
+  "updater.available": "Version {version} is available",
+  "updater.current": "Installed version {version}",
+  "updater.install": "Download and install",
+  "updater.later": "Later",
+  "updater.close": "Close",
+  "updater.notes": "What's new",
+  "updater.downloadProgress": "Update download progress",
+  "updater.connecting": "Connecting to the download server...",
+  "updater.downloaded": "Downloaded {received} MiB",
+  "updater.downloadedOf": "{received} of {total} MiB ({percent}%)",
+  "updater.verifying": "Checking the update signature...",
+  "updater.installing": "Installing the update. The app will restart.",
   "updater.checking": "Checking for updates…",
   "updater.upToDate": "Chatterino RT {version} is up to date.",
   "updater.availableConfirm":

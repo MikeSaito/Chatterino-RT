@@ -6,8 +6,8 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
-use tauri::{AppHandle, State};
+use std::time::{Duration, Instant};
+use tauri::{ipc::JavaScriptChannelId, AppHandle, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 
@@ -42,6 +42,19 @@ pub struct UpdaterCheckResult {
     pub current_version: String,
     pub body: Option<String>,
     pub date: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "phase",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum UpdateProgress {
+    Connecting,
+    Downloading { downloaded: u64, total: Option<u64> },
+    Verifying,
+    Installing,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -249,9 +262,11 @@ pub fn updater_clear_pending(pending: State<'_, PendingUpdate>) {
 
 #[tauri::command]
 pub async fn updater_install(
+    webview: Webview,
     pending: State<'_, PendingUpdate>,
     gate: State<'_, UpdaterGate>,
     expected_version: String,
+    on_event: Option<JavaScriptChannelId>,
 ) -> Result<(), String> {
     let _busy = acquire_gate(&gate)?;
     let expected = expected_version.trim();
@@ -272,9 +287,35 @@ pub async fn updater_install(
         }
         guard.take().expect("pending checked")
     };
-    update
-        .download_and_install(|_chunk, _total| {}, || {})
+    let on_event = on_event.map(|id| id.channel_on::<_, UpdateProgress>(webview));
+    let send = |progress| {
+        if let Some(channel) = &on_event {
+            let _ = channel.send(progress);
+        }
+    };
+    send(UpdateProgress::Connecting);
+    let mut downloaded = 0u64;
+    let mut last_report = None::<Instant>;
+    let bytes = update
+        .download(
+            |chunk, total| {
+                downloaded = downloaded.saturating_add(chunk as u64);
+                let now = Instant::now();
+                if last_report
+                    .is_none_or(|last| now.duration_since(last) >= Duration::from_millis(100))
+                    || total.is_some_and(|size| downloaded >= size)
+                {
+                    last_report = Some(now);
+                    send(UpdateProgress::Downloading { downloaded, total });
+                }
+            },
+            || send(UpdateProgress::Verifying),
+        )
         .await
+        .map_err(|e| format!("error.updater.install: {e}"))?;
+    send(UpdateProgress::Installing);
+    update
+        .install(bytes)
         .map_err(|e| format!("error.updater.install: {e}"))
 }
 

@@ -97,6 +97,8 @@ try {
   assert.equal(restored.scroll.anchor?.msgId, savedAlpha.scroll.anchor?.msgId);
   assert.ok(Math.abs(restored.scroll.anchor.offsetFrac - savedAlpha.scroll.anchor.offsetFrac) < .02);
   console.log("UI restart: active tab, draft, reply, scroll anchor restored");
+  await evaluate("window.__fixture.updater()");
+  console.log("UI updater: postpone, concurrent checks, byte progress, unknown size, install, error and late events");
   const loads = [];
   for (const [rate, scrolling] of (uiOnly ? [] : [[50, false], [200, false], [200, true]])) {
     const report = await evaluate(`window.__fixture.load(${rate}, 8, ${scrolling})`);
